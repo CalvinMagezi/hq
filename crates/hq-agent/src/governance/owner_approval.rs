@@ -72,6 +72,13 @@ pub fn needs_owner(tool: &str, category: &str, args: &Value) -> bool {
     if tool == CONFIG_TOOL {
         return args.get("action").and_then(Value::as_str) != Some(CONFIG_READ_ACTION);
     }
+    if tool == hq_tools::github::coder::CODER_TOOL {
+        let action = args
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        return !hq_tools::github::coder::READ_ACTIONS.contains(&action);
+    }
     if EXPORT_TOOLS.contains(&tool) {
         return args
             .get(EXPORT_PATH_ARG)
@@ -96,7 +103,24 @@ pub fn owner_approval_prefix(scope: &str) -> String {
     format!("{KEY_PREFIX}:{scope}:")
 }
 
+/// The chat a request's key belongs to: `owner-approval:<scope>:<tool>:<digest>`.
+pub fn approval_scope(key: &str) -> Option<&str> {
+    let rest = key.strip_prefix(KEY_PREFIX)?.strip_prefix(':')?;
+    rest.rsplitn(3, ':').nth(2)
+}
+
 impl OwnerApproval {
+    /// Whether the owner has already allowed this site for this chat or for every chat. A store
+    /// that cannot be read means asking.
+    pub fn site_allowed(&self, site: &str) -> bool {
+        self.db
+            .with_conn(|c| hq_db::fetch_sites::is_allowed(c, site, &self.scope))
+            .unwrap_or_else(|e| {
+                tracing::warn!(%e, "owner approval: reading allowed sites failed");
+                false
+            })
+    }
+
     pub fn new(db: Arc<Database>, scope: impl Into<String>) -> Arc<Self> {
         Self::for_turn(db, scope, None)
     }

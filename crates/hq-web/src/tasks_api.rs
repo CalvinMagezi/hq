@@ -427,6 +427,13 @@ pub(crate) async fn create_task_handler(
             Json(out).into_response()
         }
         Ok((task, true)) => {
+            if task
+                .tags
+                .iter()
+                .any(|g| g == hq_tools::github::dispatch::DISPATCH_TAG)
+            {
+                hq_tools::github::dispatch::kick();
+            }
             notify_and_broadcast(&state, &task, "task:created", None);
             broadcast_related(&state, task.parent_task_id.iter().cloned().collect());
             Json(task_json(&task)).into_response()

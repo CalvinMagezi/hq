@@ -350,7 +350,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     )
 
     /** What HQ says an approval is about: [tool] and [args] verbatim, [loses] and [verb] (one of [LOSING_VERBS]) decided by HQ, never by the card's words. */
-    data class ApprovalFacts(val tool: String, val args: String, val loses: Boolean, val verb: String?, val threadId: String? = null)
+    data class ApprovalFacts(val tool: String, val args: String, val loses: Boolean, val verb: String?, val threadId: String? = null, val site: String? = null)
 
     /**
      * The dialog a helper's alert is about. [approveLabel] names the one answer a button may give (a plain yes, once),
@@ -451,7 +451,13 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val displayId: String?,
         val title: String?,
         val taskStatus: String?,
+        val job: EdgeJob? = null,
+        val prUrl: String? = null,
+        val notes: List<String> = emptyList(),
     )
+
+    /** What a coding job may spend and has spent, and where it runs. */
+    data class EdgeJob(val repo: String, val attempts: Int, val budgetUsd: Double, val spentUsd: Double, val model: String?)
 
     /** Whether the edge worker takes tasks, the tag that queues one, the repositories it may change, and its newest runs. */
     data class EdgeWorker(val enabled: Boolean, val tag: String, val repos: List<String>, val runs: List<EdgeRun>, val taskBudgetUsd: Double = 0.0)
@@ -478,6 +484,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
             EdgeRun(
                 r.optString("ask_id"), r.optString("thread_id"), r.optString("status"), r.optString("started_at"), r.optStringOrNull("finished_at"),
                 r.optString("task_id"), t?.optStringOrNull("display_id"), t?.optStringOrNull("title"), t?.optStringOrNull("status"),
+                r.optJSONObject("job")?.let { j -> EdgeJob(j.optString("repo"), j.optInt("attempts"), j.optDouble("budget_usd", 0.0), j.optDouble("spent_usd", 0.0), j.optStringOrNull("model")) },
+                r.optStringOrNull("pr_url"), r.optJSONArray("notes").strings(),
             )
         }
         EdgeWorker(o.optBoolean("enabled"), o.optString("tag", "edge-task"), o.optJSONArray("repos").strings(), runs, o.optDouble("task_budget_usd", 0.0))
@@ -808,7 +816,7 @@ private fun losingVerb(o: JSONObject): String? = if (o.isNull("verb")) null else
 internal fun approvalFacts(meta: JSONObject?): HqClient.ApprovalFacts? {
     val a = meta?.optJSONObject("approval") ?: return null
     val args = if (a.isNull("args")) "" else a.opt("args")?.let { if (it is String) it else it.toString() }.orEmpty()
-    return HqClient.ApprovalFacts(a.optString("tool", ""), args, a.optBoolean("loses", false), losingVerb(a), a.optString("thread_id", "").ifBlank { null })
+    return HqClient.ApprovalFacts(a.optString("tool", ""), args, a.optBoolean("loses", false), losingVerb(a), a.optString("thread_id", "").ifBlank { null }, if (a.isNull("site")) null else a.optString("site", "").ifBlank { null })
 }
 
 internal fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).map { getJSONObject(it) }

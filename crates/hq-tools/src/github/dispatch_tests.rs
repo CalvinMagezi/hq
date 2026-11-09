@@ -12,6 +12,7 @@ struct Recorder {
     models: Mutex<Vec<Option<String>>>,
     budgets: Mutex<Vec<Option<f64>>>,
     presets: Mutex<Vec<bool>>,
+    jobs: Mutex<Vec<Option<crate::ask::AskJob>>>,
 }
 
 #[async_trait::async_trait]
@@ -33,6 +34,7 @@ impl AskRunner for Recorder {
             .push(req.model.map(str::to_string));
         self.budgets.lock().unwrap().push(req.budget_usd);
         self.presets.lock().unwrap().push(req.worker_preset);
+        self.jobs.lock().unwrap().push(req.job.cloned());
         Ok(format!("turn-{}", req.ask_id))
     }
 
@@ -49,6 +51,7 @@ fn chat(db: &Arc<Database>) -> (RunnerCell, Arc<Recorder>) {
         models: Mutex::new(Vec::new()),
         budgets: Mutex::new(Vec::new()),
         presets: Mutex::new(Vec::new()),
+        jobs: Mutex::new(Vec::new()),
     });
     let cell: RunnerCell = Arc::new(OnceLock::new());
     let as_dyn: Arc<dyn AskRunner> = recorder.clone();
@@ -597,6 +600,189 @@ async fn every_task_runs_under_the_configured_budget() {
         [true],
         "every queued task runs as the worker"
     );
+}
+
+fn declared(name: &str) -> hq_core::config::BackendsConfig {
+    hq_core::config::BackendsConfig {
+        primary: name.into(),
+        backends: vec![hq_core::config::BackendEntry {
+            name: name.into(),
+            kind: hq_core::config::BackendKind::GithubCopilotCli,
+            endpoint: None,
+            credential_env: None,
+            model: None,
+            effort: None,
+            wire: Default::default(),
+            enabled: true,
+            unix_socket: None,
+            prompted_tools: false,
+        }],
+        ..Default::default()
+    }
+}
+
+fn job_row<'a>(id: &'a str, budget_usd: f64, model: Option<&'a str>) -> coder_jobs::NewJob<'a> {
+    coder_jobs::NewJob {
+        task_id: id,
+        repo: "o/r",
+        budget_usd,
+        credit_cap: None,
+        model,
+        origin_thread: None,
+    }
+}
+
+#[tokio::test]
+async fn a_job_runs_on_its_own_budget_and_model_and_carries_what_it_spent() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    db.with_conn(|c| {
+        coder_jobs::ensure(c, &job_row("tk-a", 2.0, Some("copilot")))?;
+        coder_jobs::add_spend(c, "tk-a", 0.5)
+    })
+    .unwrap();
+    let mut config = on();
+    config.backends = declared("copilot");
+    dispatch(db.clone(), &config, cell).await.unwrap();
+    assert_eq!(*recorder.budgets.lock().unwrap(), [Some(2.0)]);
+    assert_eq!(
+        *recorder.models.lock().unwrap(),
+        [Some("copilot".to_string())]
+    );
+    let job = recorder.jobs.lock().unwrap()[0].clone().unwrap();
+    assert_eq!((job.spent_usd, job.budget_usd), (0.5, 2.0));
+    let row = db
+        .with_conn(|c| coder_jobs::get(c, "tk-a"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.attempts, 1);
+}
+
+#[tokio::test]
+async fn a_job_with_no_money_left_is_parked_without_a_turn() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    db.with_conn(|c| {
+        coder_jobs::ensure(c, &job_row("tk-a", 0.1, None))?;
+        coder_jobs::add_spend(c, "tk-a", 0.1)
+    })
+    .unwrap();
+    dispatch(db.clone(), &on(), cell).await.unwrap();
+    assert!(recorder.questions.lock().unwrap().is_empty());
+    let parked = task(&db, "tk-a");
+    assert_eq!(parked.status, t::STATUS_BLOCKED);
+    assert!(parked.blocked_reason.unwrap().contains("budget"));
+}
+
+#[tokio::test]
+async fn a_job_stopped_by_its_limit_is_parked_at_once_with_the_reason() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, _) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    claim(&db, "tk-a");
+    db.with_conn(|c| coder_jobs::set_stop_reason(c, "tk-a", coder_jobs::STOP_BUDGET))
+        .unwrap();
+    settle_all(&db, "the reply ended");
+    assert_eq!(
+        dispatch(db.clone(), &on(), cell).await.unwrap(),
+        Outcome::Idle,
+        "no wait for the lease"
+    );
+    let parked = task(&db, "tk-a");
+    assert_eq!(parked.status, t::STATUS_BLOCKED);
+    assert!(parked.blocked_reason.unwrap().contains("budget"));
+}
+
+fn job_of(db: &Database, id: &str) -> coder_jobs::Job {
+    db.with_conn(|c| coder_jobs::get(c, id)).unwrap().unwrap()
+}
+
+#[tokio::test]
+async fn a_run_killed_by_a_restart_goes_again_at_once_with_no_wait_for_its_lease() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    claim(&db, "tk-a");
+    settle_all(&db, asks::RESTART_REASON);
+
+    let outcome = dispatch(db.clone(), &on(), cell).await.unwrap();
+
+    assert!(matches!(outcome, Outcome::Started { .. }), "{outcome:?}");
+    assert_eq!(recorder.questions.lock().unwrap().len(), 2);
+    assert_eq!(job_of(&db, "tk-a").attempts, 2);
+    assert!(
+        !task(&db, "tk-a").tags.iter().any(|g| g == PARKED_TAG),
+        "the owner is not needed"
+    );
+}
+
+#[tokio::test]
+async fn a_run_cut_off_before_claiming_also_goes_again() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    settle_all(&db, asks::RESTART_REASON);
+    dispatch(db.clone(), &on(), cell).await.unwrap();
+    assert_eq!(recorder.questions.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn a_provider_error_waits_longer_each_time() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    claim(&db, "tk-a");
+    settle_all(&db, asks::INCOMPLETE_REASON);
+
+    assert_eq!(
+        dispatch(db.clone(), &on(), cell).await.unwrap(),
+        Outcome::Idle,
+        "it waits before trying again"
+    );
+    assert_eq!(recorder.questions.lock().unwrap().len(), 1);
+    assert_eq!(task(&db, "tk-a").status, t::STATUS_TO_DO);
+    assert!(!job_of(&db, "tk-a").is_due(chrono::Utc::now()));
+}
+
+#[tokio::test]
+async fn a_job_cut_off_too_often_is_parked_for_the_owner() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, _) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    for _ in 0..MAX_ATTEMPTS {
+        dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+        settle_all(&db, asks::RESTART_REASON);
+    }
+    dispatch(db.clone(), &on(), cell).await.unwrap();
+    let parked = task(&db, "tk-a");
+    assert_eq!(parked.status, t::STATUS_BLOCKED);
+    assert!(parked.blocked_reason.unwrap().contains("cut off"));
+}
+
+#[tokio::test]
+async fn a_run_the_owner_stopped_is_not_tried_again() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    settle_all(&db, "The reply was stopped in the chat before it finished.");
+    dispatch(db.clone(), &on(), cell).await.unwrap();
+    assert_eq!(recorder.questions.lock().unwrap().len(), 1);
+    assert_eq!(task(&db, "tk-a").status, t::STATUS_BLOCKED);
 }
 
 #[tokio::test]

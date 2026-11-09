@@ -901,6 +901,12 @@ impl ChatTurn {
             session.is_live_user_turn = ask.is_live_user_turn();
             // The asker is not the owner typing, so the exchange must not feed skill self-edits.
             session.background_review = false;
+            if let Some(job) = &ask.job {
+                let budget = ask::job_budget(&self.db, job);
+                // A credit limit needs the counter read after every Copilot step.
+                session.copilot_step_credits |= budget.has_credit_ceiling();
+                session.job_budget = Some(budget);
+            }
         }
         session
     }
@@ -995,6 +1001,9 @@ impl ChatTurn {
         // Before the thread is freed below, so an ask never reads as pending on an idle thread.
         if let Some(turn) = &self.ask {
             ask::settle_finished(&self.db, &turn.ask_id, saved.as_ref(), failure);
+            if turn.job.is_some() {
+                hq_tools::github::dispatch::kick();
+            }
         }
         // A turn that never streamed (timeout, buffered failure) still needs its text shown.
         if !content.is_empty() && !streamed {

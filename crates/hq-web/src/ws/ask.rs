@@ -6,21 +6,20 @@ use super::{ChatTurn, ChatTurnSlot, SharedRecord, TurnRecord, spawn_supervised, 
 use crate::WsState;
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
+use hq_agent::session::job_budget::{JobBudget, JobLedger, JobStop};
 use hq_core::types::PermissionPreset;
 use hq_db::ask_requests as asks;
-use hq_tools::ask::{AskMode, AskRunner, AskScope, AskStart};
+use hq_tools::ask::{AskJob, AskMode, AskRunner, AskScope, AskStart};
 use serde_json::json;
 use std::sync::{Arc, Weak};
 
 pub(super) const STOPPED_REASON: &str = "The reply was stopped in the chat before it finished.";
-pub(super) const PANIC_REASON: &str =
-    "The reply stopped unexpectedly. What was written before that is in the chat.";
+pub(super) use asks::PANIC_REASON;
 const NO_ANSWER: &str = "No reply text was saved: HQ wrote none, or the chat was deleted or archived while it ran. Open the chat, if it still exists, to see what happened.";
 pub(super) const MCP_EDIT_REASON: &str =
     "A question an MCP client asked cannot be edited or regenerated.";
 const BUSY: &str =
     "a reply is still running in that thread. Wait for it, or pass a different thread_id";
-const INCOMPLETE: &str = "HQ could not finish the reply. Open the chat to see how far it got.";
 /// An ask's reply gets this long, far less than a chat turn, so a handful of asks cannot hold turns open for hours.
 pub(super) const ASK_TURN_TIMEOUT_SECS: u64 = 30 * 60;
 
@@ -47,6 +46,50 @@ pub(super) struct AskTurn {
     pub(super) untrusted: bool,
     pub(super) model: Option<String>,
     pub(super) worker_preset: bool,
+    pub(super) job: Option<AskJob>,
+}
+
+/// Writes a coding job's spending to the database as it happens.
+struct JobBook {
+    db: hq_db::Database,
+    task_id: String,
+}
+
+impl JobLedger for JobBook {
+    fn add_spend(&self, usd: f64) {
+        if let Err(e) = self
+            .db
+            .with_conn(|c| hq_db::coder_jobs::add_spend(c, &self.task_id, usd))
+        {
+            tracing::warn!(task = %self.task_id, "could not record a coding job's spend: {e}");
+        }
+    }
+
+    fn stopped(&self, why: JobStop) {
+        let reason = match why {
+            JobStop::Budget => hq_db::coder_jobs::STOP_BUDGET,
+            JobStop::Credits => hq_db::coder_jobs::STOP_CREDITS,
+        };
+        if let Err(e) = self
+            .db
+            .with_conn(|c| hq_db::coder_jobs::set_stop_reason(c, &self.task_id, reason))
+        {
+            tracing::warn!(task = %self.task_id, "could not record why a coding job stopped: {e}");
+        }
+    }
+}
+
+/// The shared limit for a job's turn and its children.
+pub(super) fn job_budget(db: &hq_db::Database, job: &AskJob) -> Arc<JobBudget> {
+    let book = JobBook {
+        db: db.clone(),
+        task_id: job.task_id.clone(),
+    };
+    Arc::new(JobBudget::new(
+        job.spent_usd,
+        job.credit_ceiling,
+        Arc::new(book),
+    ))
 }
 
 impl AskTurn {
@@ -89,7 +132,7 @@ impl AskTurn {
         };
         scoped
             .into_iter()
-            .chain(["config_manage".to_string()])
+            .chain(["config_manage".to_string(), "hq_coder".to_string()])
             .collect()
     }
 }
@@ -97,7 +140,7 @@ impl AskTurn {
 /// What the caller is told when a run did not complete. The run's own text can carry provider error bodies, so it is logged and not passed on.
 pub(super) fn failure_reason(text: &str) -> String {
     tracing::warn!(detail = %text.trim().chars().take(500).collect::<String>(), "an hq_ask reply did not complete");
-    INCOMPLETE.to_string()
+    asks::INCOMPLETE_REASON.to_string()
 }
 
 pub(super) fn settle_failed(db: &hq_db::Database, ask_id: &str, reason: &str) {
@@ -138,17 +181,22 @@ pub(super) fn settle_finished(
 
 /// Posts the question as a user message and starts HQ's reply. Any error means
 /// nothing was posted and no reply runs.
-/// A reply's own cap, which can only be lower than the owner's.
+/// A reply's own cap, which can only be lower than the owner's. A coding job's limit was checked
+/// against the owner's ceiling when the job was made, so it stands as it is.
 fn with_budget(
     config: Arc<hq_core::config::HqConfig>,
     budget_usd: Option<f64>,
+    job: Option<&AskJob>,
 ) -> Arc<hq_core::config::HqConfig> {
-    let Some(budget) = budget_usd else {
-        return config;
-    };
-    let mut lowered = (*config).clone();
-    lowered.budget.session_cap_usd = lowered.budget.session_cap_usd.min(budget);
-    Arc::new(lowered)
+    let mut changed = (*config).clone();
+    match (job, budget_usd) {
+        (Some(job), _) => changed.budget.session_cap_usd = job.budget_usd,
+        (None, Some(budget)) => {
+            changed.budget.session_cap_usd = changed.budget.session_cap_usd.min(budget);
+        }
+        (None, None) => return config,
+    }
+    Arc::new(changed)
 }
 
 async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<String> {
@@ -161,7 +209,7 @@ async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<Stri
         .map(Arc::new)
         .or_else(|| state.hq_config.clone())
         .ok_or_else(|| anyhow!("HQ's config could not be read"))?;
-    let config = with_budget(config, req.budget_usd);
+    let config = with_budget(config, req.budget_usd, req.job);
     let history = thread_history(&state.db, req.thread_id, &config.context_fold);
     let meta = json!({"source": {
         "kind": "mcp",
@@ -196,6 +244,7 @@ async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<Stri
             untrusted: req.untrusted,
             model: req.model.map(str::to_string),
             worker_preset: req.worker_preset,
+            job: req.job.cloned(),
         }),
         spoken: None,
         offer: None,
@@ -298,6 +347,12 @@ impl AskRunner for WebAskRunner {
             None => false,
         }
     }
+
+    async fn stop(&self, thread_id: &str) {
+        if let Some(state) = self.state.upgrade() {
+            super::stop_chat_turn(&state, thread_id).await;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -356,6 +411,7 @@ mod tests {
                 untrusted: false,
                 model: None,
                 worker_preset: false,
+                job: None,
             }),
             spoken: None,
             offer: None,
@@ -383,6 +439,7 @@ mod tests {
             untrusted: false,
             model: None,
             worker_preset: false,
+            job: None,
         };
         let denied = turn(AskScope::Connector, AskMode::ReadOnly).denied_tool_prefixes();
         let blocks = |tool: &str| denied.iter().any(|p| tool.starts_with(p.as_str()));
@@ -410,7 +467,7 @@ mod tests {
         ] {
             assert_eq!(
                 turn(scope, mode).denied_tool_prefixes(),
-                vec!["config_manage".to_string()]
+                vec!["config_manage".to_string(), "hq_coder".to_string()]
             );
         }
     }
@@ -424,6 +481,7 @@ mod tests {
             untrusted,
             model: None,
             worker_preset: false,
+            job: None,
         };
         assert_eq!(
             turn(true).untrusted_source().as_deref(),
@@ -446,6 +504,7 @@ mod tests {
             untrusted: false,
             model: None,
             worker_preset: false,
+            job: None,
         };
         assert_eq!(
             read_only.permission_preset(),
@@ -604,6 +663,7 @@ mod tests {
                 model: None,
                 budget_usd: None,
                 worker_preset: false,
+                job: None,
                 caller: "claude-code",
             })
             .await
@@ -677,6 +737,7 @@ mod tests {
                 model: None,
                 budget_usd: None,
                 worker_preset: false,
+                job: None,
                 caller: "c",
             })
             .await

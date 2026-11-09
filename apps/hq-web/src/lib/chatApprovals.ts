@@ -17,11 +17,3 @@ export function splitSaid(description: string): { said: string | null; rest: str
   const [first, ...more] = text.split('\n')
   return { said: first.trim(), rest: more.join('\n').trim() }
 }
-
-export type ApprovalView = 'pending' | 'answered_here' | 'answered_elsewhere'
-
-/** Where an item stands for this chat: waiting, answered from this chat, or answered from the Inbox or another device. */
-export function approvalView(item: Pick<NotificationItem, 'id' | 'state'>, answeredHere: ReadonlySet<string>): ApprovalView {
-  if (item.state === 'pending') return 'pending'
-  return answeredHere.has(item.id) ? 'answered_here' : 'answered_elsewhere'
-}

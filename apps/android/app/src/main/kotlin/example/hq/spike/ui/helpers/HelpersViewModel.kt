@@ -74,6 +74,9 @@ data class HelpersUi(
     val open: HelperOpen? = null,
     val start: StartForm? = null,
     val githubOpen: Boolean = false,
+    /** The ask id of the coding job whose page is open. */
+    val openJob: String? = null,
+    val jobNote: String = "",
     val github: HqClient.GithubLink? = null,
     val githubError: String? = null,
     val taskBudgetUsd: Double = 0.0,
@@ -145,6 +148,10 @@ class HelpersActions(
     val onGithubJob: (String) -> Unit = {},
     val onGithubStart: () -> Unit = {},
     val onGithubTurnOn: () -> Unit = {},
+    val onJobClose: () -> Unit = {},
+    val onJobNote: (String) -> Unit = {},
+    val onJobControl: (String) -> Unit = {},
+    val onJobChat: () -> Unit = {},
 )
 
 class HelpersViewModel(app: Application) : AndroidViewModel(app) {
@@ -205,7 +212,33 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         onGithubJob = { j -> _state.update { it.copy(githubJob = j, githubStarted = false, githubError = null) } },
         onGithubStart = ::startGithubJob,
         onGithubTurnOn = ::turnOnHq,
+        onJobClose = { _state.update { it.copy(openJob = null, jobNote = "") } },
+        onJobNote = { n -> _state.update { it.copy(jobNote = n) } },
+        onJobControl = ::controlJob,
+        onJobChat = ::openJobChat,
     )
+
+    private fun openRun() = _state.value.let { s -> s.edgeRuns.firstOrNull { it.askId == s.openJob } }
+
+    private fun openJobChat() {
+        val thread = openRun()?.threadId ?: return
+        _state.update { it.copy(openJob = null, jobNote = "", followed = thread) }
+    }
+
+    /** One of the owner's controls on a job, by the action names of `POST /api/coder/{action}`. */
+    private fun controlJob(action: String) {
+        val run = openRun() ?: return
+        val body = org.json.JSONObject().put("task", run.taskId).put("text", _state.value.jobNote.trim())
+        viewModelScope.launch {
+            try {
+                client.postJson("/api/coder/$action", body)
+                _state.update { it.copy(jobNote = "", githubError = null) }
+                refresh()
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(githubError = w().s(R.string.github_failed)) }
+            }
+        }
+    }
 
     private fun startGithubJob() {
         val s = _state.value
@@ -322,10 +355,9 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun open(id: String) {
-        // A run of the edge worker has no terminal to show: its work is a chat, so that chat opens.
+        // A run of HQ's own worker has no terminal to show: it opens its job page.
         if (id.startsWith(HelperWords.EDGE_PREFIX)) {
-            val thread = _state.value.edgeRuns.firstOrNull { HelperWords.EDGE_PREFIX + it.askId == id }?.threadId
-            if (thread.isNullOrBlank()) say(HelperWords.followFailed(w(), null)) else _state.update { it.copy(followed = thread) }
+            _state.update { it.copy(openJob = id.removePrefix(HelperWords.EDGE_PREFIX)) }
             return
         }
         val card = _state.value.cards.firstOrNull { it.id == id } ?: return

@@ -102,7 +102,7 @@ fn no_tool_can_start_or_finish_a_connection() {
 
 #[test]
 fn reading_without_gh_finds_the_repository_and_the_least_permission() {
-    use crate::github::{path_repo, run_list_path, step_for_path};
+    use crate::github::{path_repo, rest_path, step_for_path};
     assert_eq!(
         path_repo("repos/o/r/actions/runs?per_page=5").as_deref(),
         Some("o/r")
@@ -112,12 +112,8 @@ fn reading_without_gh_finds_the_repository_and_the_least_permission() {
     assert_eq!(step_for_path("repos/o/r/actions/jobs/7/logs"), Step::ReadCi);
     assert_eq!(step_for_path("repos/o/r/contents/a.py"), Step::Fetch);
     assert_eq!(
-        run_list_path(&json!({"action": "run_list", "repo": "o/r", "limit": 5})).as_deref(),
+        rest_path(&json!({"action": "run_list", "repo": "o/r", "limit": 5})).as_deref(),
         Some("repos/o/r/actions/runs?per_page=5")
-    );
-    assert_eq!(
-        run_list_path(&json!({"action": "pr_list", "repo": "o/r"})),
-        None
     );
 }
 

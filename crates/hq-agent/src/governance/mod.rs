@@ -41,11 +41,12 @@ mod tainted_calls;
 mod trackers;
 
 use governed_tool::GovernedTool;
-pub use owner_approval::{OwnerApproval, needs_owner, owner_approval_prefix};
+pub use owner_approval::{OwnerApproval, approval_scope, needs_owner, owner_approval_prefix};
 pub use paths::system_temp_paths;
 use paths::{expand_with_canonical_forms, sensitive_denied_paths};
 pub use secrets::{SecretTier, always_denied_roots, classify_path};
 pub use taint::{TaintTracker, is_untrusted_source};
+pub use tainted_calls::fetch_site;
 pub use trackers::{DenialTracker, RepeatCallTracker};
 
 // ─── Security floor ─────────────────────────────────────────────

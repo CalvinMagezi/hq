@@ -2,7 +2,7 @@
 //! writes it with the item; the notifications API reads it to quote the call verbatim.
 
 use anyhow::Result;
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use crate::Database;
 
@@ -22,6 +22,51 @@ pub fn record(db: &Database, item_id: &str, tool: &str, args: &serde_json::Value
             params![item_id, tool, args],
         )?;
         Ok(())
+    })
+}
+
+/// The tool, arguments and key of the approval behind `item_id`.
+pub fn call_of(
+    db: &Database,
+    item_id: &str,
+) -> Result<Option<(String, serde_json::Value, String)>> {
+    db.with_conn(|c| {
+        let row: Option<(String, String, Option<String>)> = c
+            .query_row(
+                "SELECT o.tool, o.args, v.dedup_key FROM owner_approvals o
+                 JOIN value_items v ON v.id = o.item_id WHERE o.item_id = ?1",
+                params![item_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        Ok(row.and_then(|(tool, args, key)| Some((tool, serde_json::from_str(&args).ok()?, key?))))
+    })
+}
+
+/// Requests still waiting whose key starts with `prefix`, for one tool: their item ids and calls.
+pub fn waiting_calls(
+    db: &Database,
+    prefix: &str,
+    tool: &str,
+) -> Result<Vec<(String, serde_json::Value)>> {
+    db.with_conn(|c| {
+        let mut stmt = c.prepare(
+            "SELECT o.item_id, o.args FROM owner_approvals o
+             JOIN value_items v ON v.id = o.item_id
+             WHERE o.tool = ?1 AND substr(v.dedup_key, 1, length(?2)) = ?2
+               AND v.state IN ('pending','routed','delivered')",
+        )?;
+        let rows = stmt.query_map(params![tool, prefix], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut calls = Vec::new();
+        for row in rows {
+            let (id, args) = row?;
+            if let Ok(args) = serde_json::from_str(&args) {
+                calls.push((id, args));
+            }
+        }
+        Ok(calls)
     })
 }
 
