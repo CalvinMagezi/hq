@@ -318,7 +318,7 @@ Tasks have no CLI command: they are MCP tools (`task_list`, `task_create` and fr
 | Command | Description |
 |---------|-------------|
 | `hq config [key] [value]` | Show or edit configuration |
-| `hq mcp [install\|status\|remove\|doctor] [path] [--target <client>] [--global] [--scope full\|tasks] [--url <https-url>]` | Install/manage the MCP server config for Claude, Cursor, VS Code, Copilot, OpenCode and Antigravity |
+| `hq mcp [status\|install\|remove\|doctor] [path] [--target <client>] [--global] [--scope full\|tasks] [--url <https-url>]` | Show (the default), install or remove the MCP server config for Claude, Cursor, VS Code, Copilot, OpenCode and Antigravity. A change leaves the previous file beside it as `<file>.hq-backup` |
 
 ### Daemon
 
