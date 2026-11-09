@@ -40,14 +40,20 @@ pub(crate) fn load_config(site: &str) -> HqConfig {
     })
 }
 
-/// Session settings for a relay turn, and the repo root it runs in.
+/// The per-turn cap for someone other than the owner, who is not the one paying.
+pub(crate) fn guest_cap(config: &HqConfig) -> Option<f64> {
+    Some(config.budget.session_cap_usd)
+}
+
+/// Session settings for a relay turn, and the repo root it runs in. Someone chatting has no
+/// per-turn cap; an unattended turn does, and a guest's caller puts it back with [`guest_cap`].
 pub(crate) fn relay_session(
     config: &HqConfig,
     live_user: bool,
 ) -> (hq_agent::session::SessionConfig, PathBuf) {
     let session = hq_agent::session::SessionConfig {
         model: hq_core::config::resolve_session_model(config),
-        max_budget_usd: Some(config.budget.session_cap_usd),
+        max_budget_usd: (!live_user).then_some(config.budget.session_cap_usd),
         is_live_user_turn: live_user,
         ..hq_agent::session::SessionConfig::default()
     };
@@ -422,5 +428,19 @@ mod fold_tests {
         let mut off = config.clone();
         off.context_fold.enabled = false;
         assert!(fold_blocks(Some(&db), &off, "telegram", "42").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn only_an_unattended_turn_or_a_guest_has_a_per_turn_cap() {
+        let config = HqConfig::default();
+        let cap = Some(config.budget.session_cap_usd);
+        assert_eq!(relay_session(&config, true).0.max_budget_usd, None);
+        assert_eq!(relay_session(&config, false).0.max_budget_usd, cap);
+        assert_eq!(guest_cap(&config), cap);
     }
 }

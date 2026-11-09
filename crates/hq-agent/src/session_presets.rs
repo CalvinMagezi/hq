@@ -37,12 +37,12 @@ pub fn terminal_code_harness_instructions(cwd: &Path) -> String {
     )
 }
 
-/// Session config for web chat turns: same model, unbounded turns and budget cap as a
-/// Telegram relay turn, so the web UI drives the same harness.
+/// Session config for web chat turns: the same model and unbounded turns as a Telegram relay
+/// turn. The owner typing is not capped per turn; their own spending limits still apply.
 pub fn chat_session_config(config: &hq_core::config::HqConfig) -> SessionConfig {
     SessionConfig {
         model: hq_core::config::resolve_session_model(config),
-        max_budget_usd: Some(config.budget.session_cap_usd),
+        max_budget_usd: None,
         is_live_user_turn: true,
         copilot_step_credits: config.copilot_usage.per_step,
         mode: SessionMode::Normal,
@@ -150,5 +150,16 @@ mod role_tests {
         assert!(text.contains("Never give one a coding task"));
         assert!(text.contains("`purpose: monitor`") && text.contains("`purpose: review`"));
         assert!(text.contains("gets no HQ token"));
+    }
+}
+
+#[cfg(test)]
+mod chat_budget_tests {
+    use super::*;
+
+    #[test]
+    fn the_owners_chat_has_no_per_turn_cap() {
+        let config = hq_core::config::HqConfig::default();
+        assert_eq!(chat_session_config(&config).max_budget_usd, None);
     }
 }
