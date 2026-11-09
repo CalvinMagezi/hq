@@ -6,13 +6,14 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 
 pub const PHASE_QUEUED: &str = "queued";
 pub const PHASE_WORKING: &str = "working";
+pub const PHASE_DONE: &str = "done";
 pub const STOP_BUDGET: &str = "budget";
 pub const STOP_CREDITS: &str = "credits";
 
 const COLUMNS: &str = "task_id, repo, budget_usd, credit_cap, credit_start, model, phase, attempts, \
      spent_usd, stop_reason, origin_thread, next_check_at";
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Job {
     pub task_id: String,
     pub repo: String,
@@ -137,6 +138,51 @@ pub fn requeue(conn: &Connection, task_id: &str, wait_secs: i64) -> Result<()> {
         params![PHASE_QUEUED, at, Utc::now().to_rfc3339(), task_id],
     )?;
     Ok(())
+}
+
+/// The owner sent the job back in: its tries and last stop are forgotten, and a new limit, when
+/// given, replaces the old one.
+pub fn reset(
+    conn: &Connection,
+    task_id: &str,
+    budget_usd: Option<f64>,
+    credit_cap: Option<f64>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE coder_jobs SET attempts = 0, stop_reason = NULL, next_check_at = NULL, phase = ?1,
+           budget_usd = COALESCE(?2, budget_usd), credit_cap = COALESCE(?3, credit_cap),
+           updated_at = ?4 WHERE task_id = ?5",
+        params![
+            PHASE_QUEUED,
+            budget_usd,
+            credit_cap,
+            Utc::now().to_rfc3339(),
+            task_id
+        ],
+    )?;
+    Ok(())
+}
+
+/// Newest first.
+pub fn recent(conn: &Connection, limit: usize) -> Result<Vec<Job>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM coder_jobs ORDER BY updated_at DESC LIMIT ?1"
+    ))?;
+    let rows = stmt.query_map(params![limit as i64], Job::from_row)?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Jobs still marked as working that a chat is waiting to hear about.
+pub fn working_with_origin(conn: &Connection) -> Result<Vec<Job>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM coder_jobs WHERE phase = ?1 AND origin_thread IS NOT NULL"
+    ))?;
+    let rows = stmt.query_map(params![PHASE_WORKING], Job::from_row)?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+pub fn finish(conn: &Connection, task_id: &str) -> Result<()> {
+    touch(conn, task_id, "phase = ?1", &PHASE_DONE)
 }
 
 pub fn begin_attempt(conn: &Connection, task_id: &str) -> Result<()> {

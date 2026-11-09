@@ -72,6 +72,13 @@ pub fn needs_owner(tool: &str, category: &str, args: &Value) -> bool {
     if tool == CONFIG_TOOL {
         return args.get("action").and_then(Value::as_str) != Some(CONFIG_READ_ACTION);
     }
+    if tool == hq_tools::github::coder::CODER_TOOL {
+        let action = args
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        return !hq_tools::github::coder::READ_ACTIONS.contains(&action);
+    }
     if EXPORT_TOOLS.contains(&tool) {
         return args
             .get(EXPORT_PATH_ARG)

@@ -137,6 +137,7 @@ pub fn default_profile_for_agent(name: &str) -> Option<AgentProfile> {
             deny_tools: vec![
                 "skill_manage".into(),
                 "github_write".into(),
+                "hq_coder".into(),
                 "bash".into(),
                 "shell_exec".into(),
                 "write".into(),

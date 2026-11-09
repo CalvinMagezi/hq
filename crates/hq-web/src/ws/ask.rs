@@ -132,7 +132,7 @@ impl AskTurn {
         };
         scoped
             .into_iter()
-            .chain(["config_manage".to_string()])
+            .chain(["config_manage".to_string(), "hq_coder".to_string()])
             .collect()
     }
 }
@@ -345,6 +345,12 @@ impl AskRunner for WebAskRunner {
         match self.state.upgrade() {
             Some(state) => state.active_chat_turns.read().await.contains_key(thread_id),
             None => false,
+        }
+    }
+
+    async fn stop(&self, thread_id: &str) {
+        if let Some(state) = self.state.upgrade() {
+            super::stop_chat_turn(&state, thread_id).await;
         }
     }
 }

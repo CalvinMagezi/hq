@@ -18,6 +18,7 @@ use crate::registry::HqTool;
 
 pub mod app;
 mod changes;
+pub mod coder;
 pub mod dispatch;
 pub mod repos;
 mod tarball;

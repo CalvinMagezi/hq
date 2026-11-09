@@ -82,6 +82,7 @@ pub const WORKER_TOOLS: &[&str] = &[
     "github_clone",
     "github_read",
     "github_write",
+    "coder_context",
     "spawn_subagents",
     "subagent_run_status",
     "subagent_run_result",

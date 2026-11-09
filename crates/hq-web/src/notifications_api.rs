@@ -345,6 +345,31 @@ fn note_site_answer(
     Ok(())
 }
 
+/// The owner allowing HQ Coder's first task from the Inbox. Only this route, which needs the
+/// owner's sign-in, can give that yes; no tool can.
+fn note_first_task_answer(
+    db: &hq_db::Database,
+    val_id: &str,
+    engagement: &str,
+) -> anyhow::Result<()> {
+    use hq_tools::github::dispatch::{FIRST_TASK_KEY, kick};
+    if engagement != ENGAGEMENT_APPROVED {
+        return Ok(());
+    }
+    let key: Option<String> = db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT dedup_key FROM value_items WHERE id = ?1",
+            [val_id],
+            |r| r.get(0),
+        )?)
+    })?;
+    if key.as_deref() == Some(FIRST_TASK_KEY) {
+        hq_tools::github::app::AppClient::standard()?.confirm_first_task()?;
+        kick();
+    }
+    Ok(())
+}
+
 /// Maps a client action to the value item's engagement.
 pub(crate) fn action_outcome(action: &str) -> Option<&'static str> {
     match action {
@@ -505,6 +530,9 @@ pub(crate) async fn notification_action_handler(
     let whole_site = body.action == ALLOW_SITE_ACTION;
     if let Err(e) = note_site_answer(&state.db, val_id, engagement, whole_site) {
         warn!(id = %id, error = %e, "recording a site's approval failed");
+    }
+    if let Err(e) = note_first_task_answer(&state.db, val_id, engagement) {
+        warn!(id = %id, error = %e, "recording the first coding task's yes failed");
     }
     info!(id = %id, action = %body.action, new_state = engagement, "notification action executed");
     state.broadcast(

@@ -41,6 +41,8 @@ const ASK_MODE: &str = "full";
 const QUEUE_DEPTH: usize = 100;
 /// Where the owner's inbox items about the worker come from.
 const INBOX_SOURCE: &str = "edge-worker-dispatch";
+/// The Inbox item that asks for the first task's yes; allowing it gives that yes.
+pub const FIRST_TASK_KEY: &str = "edge-worker-dispatch-first-task";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -56,14 +58,77 @@ pub enum Outcome {
     AwaitingConfirmation(String),
 }
 
-/// One tick, against the App on this device.
+/// One tick, against the App on this device. A tick already running covers this one.
 pub async fn dispatch(
     db: Arc<Database>,
     config: &HqConfig,
     runner: crate::ask::RunnerCell,
 ) -> Result<Outcome> {
+    let Ok(_only_one) = TICK.try_lock() else {
+        return Ok(Outcome::Idle);
+    };
     let app = AppClient::standard()?;
+    report_finished(&db);
     dispatch_with(db, config, runner, &app).await
+}
+
+static TICK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static KICK: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Asks for a tick now instead of at the next two-minute one.
+pub fn kick() {
+    KICK.notify_one();
+}
+
+/// Runs a tick whenever [`kick`] is called, so a started or finished job does not wait.
+pub fn spawn_kick_listener(db: Arc<Database>) {
+    tokio::spawn(async move {
+        loop {
+            KICK.notified().await;
+            let Ok(config) = HqConfig::load() else {
+                continue;
+            };
+            let runner = crate::ask::shared_runner_cell();
+            if let Err(e) = dispatch(db.clone(), &config, runner).await {
+                tracing::warn!(error = %e, "edge-worker-dispatch: a kicked tick failed");
+            }
+        }
+    });
+}
+
+/// The reply working a task right now, if any.
+pub(super) fn running_thread(db: &Database, task_id: &str) -> Result<Option<String>> {
+    let prefix = format!("{CALLER}:{task_id}:");
+    db.with_conn(|c| super::coder::pending_thread(c, &prefix, ASK_SCOPE))
+}
+
+/// Tells the chat that started a job how it ended.
+fn report_finished(db: &Database) {
+    if let Err(e) = db.with_conn(report_finished_in) {
+        tracing::warn!(error = %e, "edge-worker-dispatch: telling a chat how a job ended failed");
+    }
+}
+
+fn report_finished_in(conn: &rusqlite::Connection) -> Result<()> {
+    for job in coder_jobs::working_with_origin(conn)? {
+        let Some(task) = t::get_task(conn, &job.task_id)? else {
+            continue;
+        };
+        let words = match task.status.as_str() {
+            t::STATUS_READY_FOR_REVIEW => format!("{} is ready for you to review.", task.title),
+            t::STATUS_BLOCKED => format!(
+                "{} stopped: {}.",
+                task.title,
+                task.blocked_reason.as_deref().unwrap_or("no reason given")
+            ),
+            _ => continue,
+        };
+        coder_jobs::finish(conn, &job.task_id)?;
+        if let Some(thread) = &job.origin_thread {
+            hq_db::chat::add_message(conn, thread, "assistant", &words)?;
+        }
+    }
+    Ok(())
 }
 
 /// The repositories the worker may take tasks for. With an App: those the person picked and
@@ -395,7 +460,7 @@ fn names_a_repo(task: &t::Task, repos: &[String]) -> bool {
 
 /// The allowed repository the task's title or description names as a whole word, so `o/r` is not
 /// found inside `o/r2` or `xo/r`.
-fn named_repo<'a>(task: &t::Task, repos: &'a [String]) -> Option<&'a str> {
+pub(super) fn named_repo<'a>(task: &t::Task, repos: &'a [String]) -> Option<&'a str> {
     let text = format!("{}\n{}", task.title, task.description).to_ascii_lowercase();
     let words: Vec<&str> = text
         .split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | ':')))
@@ -482,6 +547,24 @@ pub struct Run {
     pub task_id: String,
     /// Absent when the task has since been deleted.
     pub task: Option<RunTask>,
+    pub job: Option<coder_jobs::Job>,
+    /// The pull request the worker named on its task, once it has one.
+    pub pr_url: Option<String>,
+    /// The newest notes on the task, oldest first.
+    pub notes: Vec<String>,
+}
+
+/// Asks read per run shown: retries leave several for one task.
+const RUNS_PER_TASK: usize = 5;
+/// Notes a run's card shows.
+const RUN_NOTES: usize = 5;
+const PR_URL_MARK: &str = "https://github.com/";
+
+/// The first pull request link in `text`.
+fn pr_url_in(text: &str) -> Option<String> {
+    text.split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | '<' | '>' | ','))
+        .find(|word| word.starts_with(PR_URL_MARK) && word.contains("/pull/"))
+        .map(|word| word.trim_end_matches('.').to_string())
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -494,16 +577,25 @@ pub struct RunTask {
 /// The worker's newest runs, newest first.
 pub fn recent_runs(conn: &rusqlite::Connection, limit: usize) -> Result<Vec<Run>> {
     let prefix = format!("{CALLER}:");
-    let asks = asks::recent_by_external_prefix(conn, ASK_SCOPE, &prefix, limit)?;
-    let mut runs = Vec::with_capacity(asks.len());
+    let asks = asks::recent_by_external_prefix(conn, ASK_SCOPE, &prefix, limit * RUNS_PER_TASK)?;
+    let mut runs: Vec<Run> = Vec::with_capacity(limit);
     for ask in asks {
-        // The key is `edge-worker:<task id>:<updated_at>`; a task id holds no colon.
+        // The key is `edge-worker:<task id>:<updated_at>:a<attempt>`; a task id holds no colon.
         let key = ask.external_id.unwrap_or_default();
         let task_id = key
             .strip_prefix(&prefix)
             .and_then(|rest| rest.split(':').next())
             .unwrap_or_default()
             .to_string();
+        // Newest first, so the first ask seen for a task is its current attempt.
+        if runs.len() == limit || runs.iter().any(|r| r.task_id == task_id) {
+            continue;
+        }
+        let comments = t::list_comments(conn, &task_id).unwrap_or_default();
+        let pr_url = comments.iter().rev().find_map(|c| pr_url_in(&c.body));
+        let skip = comments.len().saturating_sub(RUN_NOTES);
+        let notes = comments.into_iter().skip(skip).map(|c| c.body).collect();
+        let job = coder_jobs::get(conn, &task_id)?;
         let task = t::get_task(conn, &task_id)?.map(|t| RunTask {
             display_id: t.display_id,
             title: t.title,
@@ -517,6 +609,9 @@ pub fn recent_runs(conn: &rusqlite::Connection, limit: usize) -> Result<Vec<Run>
             finished_at: ask.answered_at,
             task_id,
             task,
+            job,
+            pr_url,
+            notes,
         });
     }
     Ok(runs)
@@ -524,7 +619,7 @@ pub fn recent_runs(conn: &rusqlite::Connection, limit: usize) -> Result<Vec<Run>
 
 /// Whether `model` names an enabled backend, or the model one declares, so a typo stops dispatch
 /// instead of failing every task it starts. Without a `backends:` chain the router resolves it.
-fn model_is_declared(config: &HqConfig, model: &str) -> bool {
+pub(super) fn model_is_declared(config: &HqConfig, model: &str) -> bool {
     let backends = &config.backends;
     if !backends.is_configured() {
         return true;
@@ -543,11 +638,11 @@ fn ask_for_first_confirmation(db: &Database, task: &t::Task, budget_usd: f64) {
         "HQ Coder is ready for its first task",
         format!(
             "{} is waiting. HQ will spend up to ${budget_usd:.2} of model credits on it and open a \
-             pull request. Start it from Code from this phone.",
+             pull request. Allow it to start.",
             task.title
         ),
     )
-    .with_dedup_key(format!("{INBOX_SOURCE}-first-task"));
+    .with_dedup_key(FIRST_TASK_KEY);
     if let Err(e) = hq_db::value_items::emit(db, &item) {
         tracing::warn!(error = %e, "edge-worker-dispatch: inbox item failed");
     }
@@ -569,7 +664,7 @@ fn warn_misconfigured(db: &Database, model: &str) {
     }
 }
 
-fn park(db: &Database, task: &t::Task, reason: &str) -> Result<()> {
+pub(super) fn park(db: &Database, task: &t::Task, reason: &str) -> Result<()> {
     db.with_conn(|c| park_in(c, task, reason))?;
     notify(db, task, reason);
     Ok(())

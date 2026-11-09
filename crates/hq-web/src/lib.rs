@@ -11,6 +11,7 @@ mod budgets_api;
 mod capabilities_api;
 mod chat_apps;
 mod chat_uploads;
+mod coder_api;
 mod copilot_usage_api;
 mod device_auth;
 mod devices_door;
@@ -277,6 +278,10 @@ pub fn install_ask_runner(state: &Arc<WsState>) {
             "failed hq_ask questions whose reply died with the last process"
         );
     }
+    hq_tools::github::dispatch::spawn_kick_listener(Arc::new(state.db.clone()));
+    if failed > 0 {
+        hq_tools::github::dispatch::kick();
+    }
     if !hq_tools::ask::install_runner(Arc::new(ws::WebAskRunner::new(state))) {
         tracing::warn!("an hq_ask runner was already installed; keeping it");
     }
@@ -449,6 +454,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/threads/{thread_id}/stop",
             axum::routing::post(threads_api::stop_thread_handler),
+        )
+        .route(
+            "/api/coder/{action}",
+            axum::routing::post(coder_api::control_handler),
         )
         .route("/api/fetch-sites", get(fetch_sites_api::list_handler))
         .route(

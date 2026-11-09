@@ -149,6 +149,9 @@ pub trait AskRunner: Send + Sync {
 
     /// Whether a reply is running in the thread.
     async fn turn_active(&self, thread_id: &str) -> bool;
+
+    /// Ends the reply running in a thread, if there is one.
+    async fn stop(&self, _thread_id: &str) {}
 }
 
 /// Filled once by hq-web; the tools are built before the web server exists.
