@@ -585,6 +585,10 @@ impl AppClient {
     /// which anyone could have written. Records it, and clears it when there is none.
     pub async fn refresh_installation(&self) -> Result<AppRecord> {
         let (status, value) = self.as_app(Method::GET, "app/installations", None).await?;
+        // GitHub answers a deleted App's own endpoints with 404, not 401.
+        if status == 404 {
+            self.refused_key(&self.connected()?, &value)?;
+        }
         if status != 200 {
             bail!("GitHub would not list the App's installations ({status})");
         }

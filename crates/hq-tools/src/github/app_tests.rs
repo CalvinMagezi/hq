@@ -350,6 +350,26 @@ async fn a_deleted_app_says_reconnect_and_stops_asking() {
 }
 
 #[tokio::test]
+async fn a_deleted_app_answering_404_says_reconnect_and_stops_asking() {
+    let mut start = record();
+    start.installation_id = None;
+    let f = fixture(Some(start)).await;
+    Mock::given(method("GET"))
+        .and(path("/app/installations"))
+        .respond_with(
+            ResponseTemplate::new(404).set_body_json(json!({"message": "Integration not found"})),
+        )
+        .expect(1)
+        .mount(&f.server)
+        .await;
+    let first = f.app.refresh_installation().await.unwrap_err();
+    assert_eq!(refused(&first), Some(&TokenRefused::Reconnect));
+    let second = f.app.token(REPO, Step::Fetch).await.unwrap_err();
+    assert_eq!(refused(&second), Some(&TokenRefused::Reconnect));
+    assert_eq!(standing(f.app.store().load().as_ref()), Standing::Reconnect);
+}
+
+#[tokio::test]
 async fn a_wrong_clock_is_not_a_deleted_app() {
     let f = fixture(Some(record())).await;
     Mock::given(method("POST"))
