@@ -12,7 +12,7 @@ then adds a short summary and proposed tags.
 | Risk | What stops it |
 |------|---------------|
 | The page tries to instruct the model | One model call with no tools. The reply must parse as JSON with two fields. |
-| The reply chooses where it is written | The server picks the path and fixed frontmatter keys (`source_url`, `proposed_tags`). |
+| The reply chooses where it is written | The server picks the folder and fixed frontmatter keys (`source_url`, `proposed_tags`, `title`). A title can only rename a note whose name came from its address, in the same folder, reduced to letters, digits, spaces, hyphens and apostrophes. |
 | The summary beacons out when rendered | URLs are removed and Markdown is escaped. Tags must be plain slugs, three at most. |
 | A private link reaches a third party | `web_fetch_direct` never uses the render fallback. Credentials in a URL are refused. |
 | The fetch reaches the local network | The SSRF checks of `web_fetch` apply, redirects included. |
