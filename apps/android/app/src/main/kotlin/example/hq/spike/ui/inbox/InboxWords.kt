@@ -45,6 +45,8 @@ data class InboxCard(
     /** For an approval: the tool and its arguments, exactly as HQ sent them. */
     val tool: String? = null,
     val toolArgs: String? = null,
+    /** The whole site a fetch request can be allowed for. */
+    val site: String? = null,
     /** For an approval from a voice turn: what the owner said, taken off the front of the description. */
     val quote: String? = null,
     /** The chat an approval came from, so Keep going can answer in it. */
@@ -79,7 +81,7 @@ object InboxWords {
                 val (quote, rest) = splitQuote(item.description)
                 val full = Plain.strip(rest.trim())
                 val body = if (full.length > APPROVAL_BODY) full.take(APPROVAL_BODY).trimEnd() + "…" else full
-                InboxCard(item.id, CardKind.Approval, Plain.strip(item.title.trim()), body, whereOf(item, null), item.createdAt, CardIcon.Info, null, full.length <= APPROVAL_BODY, "Allow", item.link, askedBy(item, null), item.state, fullBody = full, loses = item.approval?.loses == true, verb = item.approval?.verb, tool = item.approval?.tool?.ifBlank { null }, toolArgs = item.approval?.args?.ifBlank { null }, quote = quote, threadId = item.approval?.threadId)
+                InboxCard(item.id, CardKind.Approval, Plain.strip(item.title.trim()), body, whereOf(item, null), item.createdAt, CardIcon.Info, null, full.length <= APPROVAL_BODY, "Allow", item.link, askedBy(item, null), item.state, fullBody = full, loses = item.approval?.loses == true, verb = item.approval?.verb, tool = item.approval?.tool?.ifBlank { null }, toolArgs = item.approval?.args?.ifBlank { null }, site = item.approval?.site, quote = quote, threadId = item.approval?.threadId)
             }
             else -> InboxCard(item.id, CardKind.Update, Plain.strip(item.title.trim()), Plain.strip(item.description.trim()), whereOf(item, null), item.createdAt, updateIcon(item), null, false, "", item.link, askedBy(item, null), item.state)
         }

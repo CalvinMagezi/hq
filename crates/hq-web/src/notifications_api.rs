@@ -66,6 +66,7 @@ fn approval_from_row(row: &rusqlite::Row) -> rusqlite::Result<Option<serde_json:
         .and_then(|a| serde_json::from_str(&a).ok())
         .unwrap_or_default();
     let verb = hq_core::losing::tool_verb(&tool, &args);
+    let site = hq_agent::governance::fetch_site(&tool, &args);
     let thread_id = row
         .get::<_, Option<String>>(18)?
         .as_deref()
@@ -77,6 +78,7 @@ fn approval_from_row(row: &rusqlite::Row) -> rusqlite::Result<Option<serde_json:
         "loses": verb.is_some(),
         "verb": verb,
         "thread_id": thread_id,
+        "site": site,
     })))
 }
 
@@ -303,10 +305,75 @@ pub(crate) fn aggregate_notifications(
     })
 }
 
+const ALLOW_SITE_ACTION: &str = "approve_site";
+const ENGAGEMENT_APPROVED: &str = "approved";
+
+/// What the owner's answer to a fetch request means for its site. When the site is now allowed
+/// throughout the chat, the requests waiting on it are answered too, so they stop piling up.
+fn note_site_answer(
+    db: &hq_db::Database,
+    val_id: &str,
+    engagement: &str,
+    whole_site: bool,
+) -> anyhow::Result<()> {
+    use hq_agent::governance::{approval_scope, fetch_site, owner_approval_prefix};
+    use hq_db::{fetch_sites, owner_approvals};
+    let Some((tool, args, key)) = owner_approvals::call_of(db, val_id)? else {
+        return Ok(());
+    };
+    let (Some(site), Some(scope)) = (fetch_site(&tool, &args), approval_scope(&key)) else {
+        return Ok(());
+    };
+    if engagement != ENGAGEMENT_APPROVED {
+        return db.with_conn(|c| fetch_sites::forget_in_chat(c, &site, scope));
+    }
+    let allowed = db.with_conn(|c| {
+        if whole_site {
+            fetch_sites::allow_whole_site(c, &site, scope)?;
+            return Ok(true);
+        }
+        fetch_sites::record_approval(c, &site, scope)
+    })?;
+    if !allowed {
+        return Ok(());
+    }
+    for (id, call) in owner_approvals::waiting_calls(db, &owner_approval_prefix(scope), &tool)? {
+        if fetch_site(&tool, &call).as_deref() == Some(site.as_str()) {
+            record_action(db, &id, ENGAGEMENT_APPROVED)?;
+        }
+    }
+    Ok(())
+}
+
+/// The owner allowing HQ Coder's first task from the Inbox. Only this route, which needs the
+/// owner's sign-in, can give that yes; no tool can.
+fn note_first_task_answer(
+    db: &hq_db::Database,
+    val_id: &str,
+    engagement: &str,
+) -> anyhow::Result<()> {
+    use hq_tools::github::dispatch::{FIRST_TASK_KEY, kick};
+    if engagement != ENGAGEMENT_APPROVED {
+        return Ok(());
+    }
+    let key: Option<String> = db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT dedup_key FROM value_items WHERE id = ?1",
+            [val_id],
+            |r| r.get(0),
+        )?)
+    })?;
+    if key.as_deref() == Some(FIRST_TASK_KEY) {
+        hq_tools::github::app::AppClient::standard()?.confirm_first_task()?;
+        kick();
+    }
+    Ok(())
+}
+
 /// Maps a client action to the value item's engagement.
 pub(crate) fn action_outcome(action: &str) -> Option<&'static str> {
     match action {
-        "approve" | "engage" => Some("approved"),
+        "approve" | "engage" | ALLOW_SITE_ACTION => Some("approved"),
         "dismiss" | "reject" => Some("dismissed"),
         _ => None,
     }
@@ -320,7 +387,7 @@ fn refuse_unanswered_dialog(
     val_id: &str,
     action: &str,
 ) -> Result<(), ApiError> {
-    if !matches!(action, "approve" | "engage" | "reject") {
+    if !matches!(action, "approve" | "engage" | "reject" | ALLOW_SITE_ACTION) {
         return Ok(());
     }
     let open = hq_db::dialog_alerts::get(db, val_id)
@@ -449,7 +516,10 @@ pub(crate) async fn notification_action_handler(
         return e.into_response();
     }
     use hq_db::value_items::Answered;
-    match record_action(&state.db, val_id, engagement) {
+    let answer = record_action(&state.db, val_id, engagement);
+    // A repeat of an answer already given must not count as another approval.
+    let first_answer = matches!(answer, Ok(Answered::Recorded));
+    match answer {
         Err(e) => {
             warn!(id = %id, action = %body.action, error = %e, "notification action failed");
             return ApiError::internal(e).into_response();
@@ -459,6 +529,15 @@ pub(crate) async fn notification_action_handler(
             return ApiError::Conflict(settled_message(s)).into_response();
         }
         Ok(Answered::Recorded | Answered::AlreadySo) => {}
+    }
+    if first_answer {
+        let whole_site = body.action == ALLOW_SITE_ACTION;
+        if let Err(e) = note_site_answer(&state.db, val_id, engagement, whole_site) {
+            warn!(id = %id, error = %e, "recording a site's approval failed");
+        }
+        if let Err(e) = note_first_task_answer(&state.db, val_id, engagement) {
+            warn!(id = %id, error = %e, "recording the first coding task's yes failed");
+        }
     }
     info!(id = %id, action = %body.action, new_state = engagement, "notification action executed");
     state.broadcast(
@@ -808,6 +887,68 @@ mod tests {
         assert_eq!(dialog["loses"], true);
         assert_eq!(dialog["verb"], "delete");
         assert!(items[0].metadata.approval.is_none());
+    }
+
+    fn fetch_request(db: &hq_db::Database, chat: &str, url: &str, digest: &str) -> String {
+        let item = hq_core::types::ValueItem::new(
+            "owner-approval",
+            hq_core::types::ValueKind::ActionNeeded,
+            "HQ wants to run web_fetch",
+            "b",
+        )
+        .with_dedup_key(format!("owner-approval:{chat}:web_fetch:{digest}"));
+        hq_db::owner_approvals::record(db, &item.id, "web_fetch", &serde_json::json!({"url": url}))
+            .unwrap();
+        hq_db::value_items::insert(db, &item).unwrap();
+        item.id
+    }
+
+    fn still_waiting(db: &hq_db::Database, id: &str) -> bool {
+        scan_value_items(db, Some("pending"))
+            .unwrap()
+            .iter()
+            .any(|i| i.id == format!("val_{id}"))
+    }
+
+    #[test]
+    fn allowing_a_site_answers_only_that_sites_short_requests_in_that_chat() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let chat = "web:t1";
+        let asked = fetch_request(&db, chat, "https://a.example/one", "d1");
+        let same = fetch_request(&db, chat, "https://www.a.example/two", "d2");
+        let other = fetch_request(&db, chat, "https://b.example/", "d3");
+        let long = format!("https://a.example/x?d={}", "a".repeat(250));
+        let long = fetch_request(&db, chat, &long, "d4");
+        let elsewhere = fetch_request(&db, "web:t2", "https://a.example/three", "d5");
+
+        record_action(&db, &asked, ENGAGEMENT_APPROVED).unwrap();
+        note_site_answer(&db, &asked, ENGAGEMENT_APPROVED, true).unwrap();
+
+        assert!(!still_waiting(&db, &same), "the same site clears");
+        assert!(still_waiting(&db, &other), "another site still asks");
+        assert!(still_waiting(&db, &long), "a long address still asks");
+        assert!(still_waiting(&db, &elsewhere), "another chat still asks");
+    }
+
+    #[test]
+    fn a_plain_approval_widens_to_the_site_only_on_the_third() {
+        let db = hq_db::Database::open_memory().unwrap();
+        for n in 1..=2 {
+            let id = fetch_request(
+                &db,
+                "web:t1",
+                &format!("https://a.example/{n}"),
+                &format!("d{n}"),
+            );
+            record_action(&db, &id, ENGAGEMENT_APPROVED).unwrap();
+            note_site_answer(&db, &id, ENGAGEMENT_APPROVED, false).unwrap();
+        }
+        let waiting = fetch_request(&db, "web:t1", "https://a.example/next", "dn");
+        assert!(still_waiting(&db, &waiting));
+        let third = fetch_request(&db, "web:t1", "https://a.example/3", "d3");
+        record_action(&db, &third, ENGAGEMENT_APPROVED).unwrap();
+        note_site_answer(&db, &third, ENGAGEMENT_APPROVED, false).unwrap();
+        assert!(!still_waiting(&db, &waiting));
     }
 
     /// Only HQ's own sign-in item is shown as a new sign-in; an item from another source with the

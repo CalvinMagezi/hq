@@ -91,13 +91,19 @@ impl SessionBuilder {
                 soul_with_user.push_str(&note);
             }
 
-            if let Some(block) = &inputs.capability_block {
+            // A coding worker needs neither: it works from its task, and a smaller prompt caches better.
+            let is_worker = self.worker_checkouts.is_some();
+            if let Some(block) = inputs.capability_block.as_ref().filter(|_| !is_worker) {
                 soul_with_user.push_str("\n\n");
                 soul_with_user.push_str(block);
             }
 
             // Dynamic memory from MemoryQuerier (merged with static MEMORY.md)
-            let memory_text = build_memory_context(&inputs.shared_db, &sys_ctx.memory);
+            let memory_text = if is_worker {
+                Default::default()
+            } else {
+                build_memory_context(&inputs.shared_db, &sys_ctx.memory)
+            };
 
             // Cross-session thread continuity
             let thread = if self.enable_thread_continuity {

@@ -125,6 +125,17 @@ pub struct AskStart<'a> {
     /// The reply is the unattended coding worker: fewer tools, and confined sub-agents. It can
     /// only take power away.
     pub worker_preset: bool,
+    /// Set only by the dispatcher, through [`create_worker_ask_tool`]; no tool argument reaches it.
+    pub job: Option<&'a AskJob>,
+}
+
+/// The limits of the coding job a reply works on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AskJob {
+    pub task_id: String,
+    pub budget_usd: f64,
+    pub spent_usd: f64,
+    pub credit_ceiling: Option<f64>,
 }
 
 /// Implemented by hq-web, which owns the chat turns.
@@ -138,6 +149,9 @@ pub trait AskRunner: Send + Sync {
 
     /// Whether a reply is running in the thread.
     async fn turn_active(&self, thread_id: &str) -> bool;
+
+    /// Ends the reply running in a thread, if there is one.
+    async fn stop(&self, _thread_id: &str) {}
 }
 
 /// Filled once by hq-web; the tools are built before the web server exists.
@@ -454,6 +468,7 @@ pub struct HqAskTool {
     runner: RunnerCell,
     limiter: RateLimiter,
     family_guest: Option<FamilyGuestContext>,
+    job: Option<AskJob>,
 }
 
 #[async_trait]
@@ -604,6 +619,7 @@ impl HqAskTool {
                 model: req.model.as_deref(),
                 budget_usd: req.budget_usd,
                 worker_preset: req.worker_preset,
+                job: self.job.as_ref(),
             })
             .await;
         match started {
@@ -688,6 +704,7 @@ pub fn create_ask_tools_with(
             runner: runner.clone(),
             limiter: RateLimiter::new(ASKS_PER_WINDOW, RATE_WINDOW),
             family_guest: family_guest.clone(),
+            job: None,
         }),
         Box::new(HqAskResultTool {
             db,
@@ -695,6 +712,22 @@ pub fn create_ask_tools_with(
             family_guest,
         }),
     ]
+}
+
+/// `hq_ask` for one coding job. Only the dispatcher makes this, so a caller of the registered tool
+/// cannot name a job.
+pub(crate) fn create_worker_ask_tool(
+    db: Arc<Database>,
+    runner: RunnerCell,
+    job: AskJob,
+) -> Box<dyn HqTool> {
+    Box::new(HqAskTool {
+        db,
+        runner,
+        limiter: RateLimiter::new(ASKS_PER_WINDOW, RATE_WINDOW),
+        family_guest: None,
+        job: Some(job),
+    })
 }
 
 #[cfg(test)]

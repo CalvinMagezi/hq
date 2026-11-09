@@ -26,6 +26,8 @@ export interface ApprovalQuote {
   verb: string | null
   /** The web chat that asked; null for another chat app or a chat not saved yet. */
   thread_id?: string | null
+  /** The whole site a fetch request can be allowed for. */
+  site?: string | null
 }
 
 /** A blocked agent's dialog as the server read it (`metadata.dialog`). */
@@ -82,6 +84,15 @@ export function executeNotificationAction(
   action: 'approve' | 'reject' | 'dismiss' | string
 ): Promise<{ success: boolean; new_state: string; message: string }> {
   return hqJson(`/api/notifications/${encodeURIComponent(id)}/action`, 'POST', { action })
+}
+
+/** Sites that stopped asking because the owner allowed them in several chats. */
+export async function fetchTrustedSites(): Promise<string[]> {
+  return (await hqJson<{ sites: string[] }>('/api/fetch-sites')).sites
+}
+
+export function forgetTrustedSite(site: string): Promise<unknown> {
+  return hqJson(`/api/fetch-sites/${encodeURIComponent(site)}`, 'DELETE')
 }
 
 export function markAllNotificationsRead(): Promise<{ ok: boolean }> {

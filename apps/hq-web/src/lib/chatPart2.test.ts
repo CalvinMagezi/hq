@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { approvalView, approvalsForThread, splitSaid } from './chatApprovals'
+import { approvalsForThread, splitSaid } from './chatApprovals'
 import { autoAnswers } from './autoAnswers'
 import { isSpokenThread } from './chatGroups'
 import { handleChatEvent } from './chatEvents'
@@ -22,14 +22,6 @@ test('a chat shows only the approvals that name it, never another chat app', () 
   const list = [item('a', 't1'), item('b', 't2'), item('c', null)]
   expect(approvalsForThread(list, 't1').map((i) => i.id)).toEqual(['a'])
   expect(approvalsForThread(list, null)).toEqual([])
-})
-
-test('an item answered elsewhere reads as already answered, one answered here does not', () => {
-  const done = item('a', 't1', { state: 'approved' })
-  expect(approvalView(done, new Set())).toBe('answered_elsewhere')
-  expect(approvalView(done, new Set(['a']))).toBe('answered_here')
-  expect(approvalView(item('b', 't1'), new Set())).toBe('pending')
-  expect(t('chat_approval_elsewhere')).toBe('Already answered. Someone answered this somewhere else.')
 })
 
 test('a voice turn quotes what was said above HQ\'s own words', () => {

@@ -183,7 +183,10 @@ private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions
 @Composable
 private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit, modifier: Modifier = Modifier, onDetailsPage: Boolean = false) {
     val sending = answer == Answer.Sending
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    val wholeSite = card.site?.takeIf { card.canAllow || onDetailsPage }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    wholeSite?.let { site -> example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.approval_allow_site, site), Modifier.fillMaxWidth(), enabled = !sending && !offline) { actions.onAllowSite(card) } }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         if (card.kind == CardKind.SignIn) {
             // It was me answers it; Sign it out asks first, then signs the device out, which answers it too.
             example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.it_was_me), Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
@@ -202,6 +205,7 @@ private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, action
         } else {
             PrimaryButton(card.allowLabel.ifBlank { "Take a look" }, Modifier.weight(1f)) { onTakeLook(card) }
         }
+    }
     }
 }
 

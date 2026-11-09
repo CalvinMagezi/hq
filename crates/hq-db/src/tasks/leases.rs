@@ -192,6 +192,19 @@ pub fn expire_stale_leases(conn: &Connection, ttl_secs: i64) -> Result<usize> {
     Ok(closed)
 }
 
+/// Ends the leases a run left on a task when that run is known to be dead.
+pub fn end_live_leases(conn: &Connection, task_id: &str) -> Result<usize> {
+    let closed = conn.execute(
+        "UPDATE task_work_sessions SET ended_at = datetime('now'), end_reason = ?1 \
+         WHERE ended_at IS NULL AND task_id = ?2",
+        params![END_EXPIRED, task_id],
+    )?;
+    if closed > 0 {
+        changed_outside_tx(conn);
+    }
+    Ok(closed)
+}
+
 fn live_on_task(conn: &Connection, task_id: &str) -> Result<Vec<WorkSession>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {LEASE_COLS} FROM task_work_sessions \

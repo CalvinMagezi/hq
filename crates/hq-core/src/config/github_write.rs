@@ -23,6 +23,13 @@ pub struct GithubWriteConfig {
     /// parked. It can only lower `budget.session_cap_usd`.
     #[serde(default = "default_task_budget_usd")]
     pub task_budget_usd: f64,
+    /// The most a budget set from a chat may be. Only the owner can change this.
+    #[serde(default = "default_task_budget_max_usd")]
+    pub task_budget_max_usd: f64,
+}
+
+fn default_task_budget_max_usd() -> f64 {
+    5.0
 }
 
 fn default_dispatch_tasks() -> bool {
@@ -40,6 +47,7 @@ impl Default for GithubWriteConfig {
             dispatch_tasks: default_dispatch_tasks(),
             dispatch_model: None,
             task_budget_usd: default_task_budget_usd(),
+            task_budget_max_usd: default_task_budget_max_usd(),
         }
     }
 }

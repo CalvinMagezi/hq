@@ -3692,4 +3692,21 @@
     <string name="github_turn_on">Turn HQ on</string>
     <string name="github_budget_each">Each task may spend up to %1$s of model credits, and nothing merges until you do.</string>
     <string name="github_no_picked">Allow a repository above to give HQ a job.</string>
+    <string name="approval_allow_site">Allow all of %1$s</string>
+    <string name="sites_trusted_title">Sites HQ reads without asking</string>
+    <string name="sites_trusted_body">You allowed these in three or more chats. Removing one makes HQ ask again.</string>
+    <string name="sites_trusted_remove">Remove</string>
+    <plurals name="chat_approval_summary">
+        <item quantity="one">%1$s request answered</item>
+        <item quantity="other">%1$s requests answered</item>
+    </plurals>
+    <string name="coder_open_pr">Open the pull request</string>
+    <string name="coder_open_chat">Open the chat</string>
+    <string name="coder_note_hint">A note for HQ</string>
+    <string name="coder_send_note">Send the note</string>
+    <string name="coder_stop">Stop</string>
+    <string name="coder_retry">Try again</string>
+    <string name="coder_send_back">Send back with this note</string>
+    <string name="coder_job_spend">%1$s of %2$s</string>
+    <string name="coder_job_try">try %1$s</string>
 </resources>

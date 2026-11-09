@@ -12,7 +12,37 @@ export interface EdgeRun {
   finished_at: string | null
   task_id: string | null
   task: { display_id: string; title: string; status: string } | null
+  job?: EdgeJob | null
+  pr_url?: string | null
+  notes?: string[]
 }
+
+export interface EdgeJob {
+  repo: string
+  attempts: number
+  budget_usd: number
+  spent_usd: number
+  model: string | null
+}
+
+export type JobControl = 'steer' | 'stop' | 'retry' | 'feedback'
+
+const money = (usd: number) => `$${usd.toFixed(2)}`
+const FIRST_TRY = 1
+
+/** "o/r · $0.02 of $0.50 · copilot · try 2": what a coding job is on and has used. */
+export function jobLine(job: EdgeJob): string {
+  return [
+    job.repo,
+    t('coder_job_spend', { spent: money(job.spent_usd), budget: money(job.budget_usd) }),
+    job.model,
+    job.attempts > FIRST_TRY ? t('coder_job_try', { n: job.attempts }) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+export const controlJob = (action: JobControl, task: string, text: string) => hqJson(`/api/coder/${action}`, 'POST', { task, text })
 
 export interface EdgeWorkerReport {
   enabled: boolean
