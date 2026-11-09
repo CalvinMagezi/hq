@@ -195,7 +195,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         onStartSubmit = ::submitStart,
         onDismissLine = { _state.update { it.copy(line = null) } },
         onGithubOpen = { _state.update { it.copy(githubOpen = true, githubError = null) }; refreshGithub() },
-        onGithubClose = { _state.update { it.copy(githubOpen = false) } },
+        onGithubClose = { _state.update { it.copy(githubOpen = false, githubStarted = false) } },
         onGithubRefresh = ::refreshGithub,
         onGithubConnect = { githubCall { openGithub(client.postJson("/api/github/connect").optString("url")) } },
         onGithubInstall = { _state.value.github?.installUrl?.let(::openGithub) },
@@ -212,14 +212,22 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         val link = s.github ?: return
         val repo = HelperWords.chosenRepo(s.githubRepo, link.repos.filter { it.picked }.map { it.repo }) ?: return
         val job = s.githubJob.trim()
-        if (job.isEmpty()) return
+        if (job.isEmpty() || startingJob) return
+        startingJob = true
         githubCall {
-            // Pressing Start with the budget in view is the owner's yes to the first task.
-            if (!link.firstTaskConfirmed) client.postJson("/api/github/first-task")
-            client.createTask(HelperWords.githubTask(repo, job))
-            _state.update { it.copy(githubJob = "", githubStarted = true) }
+            try {
+                // Pressing Start with the budget in view is the owner's yes to the first task.
+                if (!link.firstTaskConfirmed) client.postJson("/api/github/first-task")
+                client.createTask(HelperWords.githubTask(repo, job))
+                _state.update { it.copy(githubJob = "", githubStarted = true) }
+            } finally {
+                startingJob = false
+            }
         }
     }
+
+    /** A second tap while the first is on its way would queue, and pay for, the job twice. */
+    private var startingJob = false
 
     private fun turnOnHq() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {

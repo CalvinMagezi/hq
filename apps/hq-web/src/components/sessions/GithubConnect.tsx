@@ -38,6 +38,7 @@ function JobForm({ link, run }: { link: GithubLink; run: GithubRun }) {
   const [chosen, setChosen] = useState('')
   const [job, setJob] = useState('')
   const [started, setStarted] = useState(false)
+  const [starting, setStarting] = useState(false)
   const [budget, setBudget] = useState(0)
 
   useEffect(() => {
@@ -47,13 +48,16 @@ function JobForm({ link, run }: { link: GithubLink; run: GithubRun }) {
   if (picked.length === 0) return link.repos.length > 0 ? <p className="a-body-sm">{t('github_no_picked')}</p> : null
 
   const repo = picked.includes(chosen) ? chosen : picked.length === 1 ? picked[0] : ''
-  const start = () =>
-    run(async () => {
+  const start = async () => {
+    setStarting(true)
+    await run(async () => {
       if (!link.first_task_confirmed) await githubApi.firstTask()
       await createTaskClient(githubTask(repo, job))
       setJob('')
       setStarted(true)
     })
+    setStarting(false)
+  }
 
   return (
     <>
@@ -78,7 +82,7 @@ function JobForm({ link, run }: { link: GithubLink; run: GithubRun }) {
         }}
       />
       <p className="a-body-sm">{t('github_budget_each', { budget: `$${budget.toFixed(BUDGET_DECIMALS)}` })}</p>
-      <button type="button" className="a-btn secondary compact" disabled={!repo || !job.trim()} onClick={start}>
+      <button type="button" className="a-btn secondary compact" disabled={starting || !repo || !job.trim()} onClick={start}>
         {t('github_start')}
       </button>
       {started && <p className="a-body-sm">{t('github_started')}</p>}
