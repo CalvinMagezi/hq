@@ -21,7 +21,7 @@ search and edit tools in `libhq.so`, so the worker costs no new binary. The mode
 | S1 | `github_clone` without git or gh: the default branch's tarball, unpacked as untrusted input, with a base record beside the checkout | `crates/hq-tools/src/github/tarball.rs` |
 | S6 | `grep` without ripgrep | `crates/hq-agent/src/coding/search_fallback.rs` |
 | S2 | `github_write`: the checkout's changes as an `hq/` branch and a pull request | `crates/hq-tools/src/github/write.rs`, `changes.rs` |
-| S3 | A worker preset (file and search tools, `github_clone`, `github_write`, no shell) and a first live run against a small repository with fast CI | preset done (`WORKER_TOOLS` in `crates/hq-agent/src/builder.rs`; the worker's own turn has no file tools either, and its coding child gets file tools and no shell). The live runs in `mobile-helpers.md` came before it; one run under the preset is still to do |
+| S3 | A worker preset (file and search tools, `github_clone`, `github_write`, no shell) and a first live run against a small repository with fast CI | preset done (`WORKER_TOOLS` in `crates/hq-agent/src/builder.rs`; the worker's own turn has no file tools either, and its coding child gets file tools and no shell). Live run on a phone: `mobile-helpers.md` |
 
 ## `github_write`: what it may do
 

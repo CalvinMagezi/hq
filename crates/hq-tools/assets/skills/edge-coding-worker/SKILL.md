@@ -10,7 +10,7 @@ provenance:
 
 You drive, a sub-agent edits, CI tests, and a person merges. Never merge yourself.
 
-1. **Claim the task** (`task_claim`) and read it. Done means CI passes and the task's own criteria hold. If the task names worker models, use them in that order; otherwise leave `model` unset.
+1. **Claim the task** (`task_claim`, with `actor: "HQ"`) and read it. Done means CI passes and the task's own criteria hold. If the task names worker models, use them in that order; otherwise leave `model` unset.
 2. **Fetch a clean copy.** Call `github_clone` with the `repo` and `refresh: true`, so earlier work is never carried into this task. Note the returned `path`. If a later step says the checkout is missing, fetch it again the same way.
 3. **Edit through a sub-agent.** Call `spawn_subagents` with one child:
    - `agent_type`: `coder`, and `model`: the task's first worker model, when it names one.

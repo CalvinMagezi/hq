@@ -194,8 +194,12 @@ Learned from the run: deleting an App leaves its past pull requests shown as `gh
 Disconnect's advice to delete the App has that cost; a person who wants the history can keep the App
 and delete only its key.
 
-Not run on a phone, because the model key had expired by then: `allowed_paths` on the coding child,
-the per-task budget ending a turn, and a task under the worker preset. All three have unit tests.
+A later run, with a fresh capped key, covered the worker preset and the budget on the A32. A job
+typed into the sheet was taken 73 seconds after Start and opened a pull request by the App's bot,
+changing only the README, in 97 seconds of model time for $0.0157 (24 model calls). No shell tool
+ran, and no `ghs_` token or plain model key was on disk afterwards. With `task_budget_usd` set to
+$0.003, the turn stopped at $0.0039: the check runs between model calls, so a task can overrun by
+one call. A job started on a dead key was parked with no retry.
 
 After that run the sheet gained the job form, so nobody has to write a tagged task by hand; pressing
 Start, with the budget shown, replaces the separate "Allow the first task" button.
