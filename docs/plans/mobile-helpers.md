@@ -1,7 +1,8 @@
 # Mobile helpers: coding with HQ when the phone is the only computer
 
 Status: plan. The coding engine is built (the edge coding worker); this plan makes it a standard
-part of HQ, switched on and safe by default, and replaces the token setup with a GitHub sign-in.
+part of HQ, switched on and safe by default, and replaces the token setup with a one-tap GitHub
+connection that puts no third party, the HQ project included, between a person and their code.
 
 ## The problem
 
@@ -28,103 +29,103 @@ connecting is the consent. The owner never edits a config file or makes a token.
 Three things change from today:
 
 1. `github_write` stops being off until `repos` is listed. The allowlist becomes the repositories
-   the owner picked on GitHub when they installed HQ's GitHub App. `github_write.repos` stays as an
-   optional narrowing for people who want it in config.
+   the owner picked on GitHub when they installed their App (below). `github_write.repos` stays as
+   an optional narrowing for people who want it in config.
 2. `github_write.dispatch_tasks` defaults to `true`, so a task tagged `edge-task` is worked
    without a second switch. Who may tag a task is already restricted (`refuse_queue_write`).
-3. Connecting GitHub is a sign-in through GitHub's own pages, described next. The pasted
+3. Connecting GitHub is one tap on GitHub's own pages, described next. The pasted
    `HQ_GITHUB_WRITE_TOKEN` keeps working for people who prefer it.
 
-## Connecting GitHub without making a token
+## Connecting GitHub: each person makes their own App, in one tap
 
-### What we use: a GitHub App and the device flow
+### The constraint
 
-GitHub Apps can sign a person in with the
-[device flow](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app):
-HQ asks GitHub for a short code, the person opens `github.com/login/device`, enters it and presses
-Authorize. HQ polls and gets a user access token. The device flow needs only the App's client ID,
-which is public, and a token from it is
-[refreshed without a client secret](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens).
-So nothing secret ships in the binary, no HQ server sits in the middle, and the phone talks to
-GitHub directly. `gh auth login` works the same way.
+No account other than the person's own may hold a way into their repositories. A shared App owned
+by the project fails this: whoever controls the owning account can generate a private key at any
+time and mint tokens for every repository every user picked, with no user asked. One stolen
+password would reach everyone. That is not a risk the project takes on, whatever account it lives
+under.
 
-A user token from a GitHub App can only do what all three of these allow at once:
+### What we use: the GitHub App manifest flow
 
-- the permissions the App declares (below);
-- what the person can do themselves;
-- the repositories the App is installed on, which the person chooses on GitHub's install page
-  ("Only select repositories").
+GitHub lets a page
+[register an App from a manifest](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest):
+HQ sends the browser to GitHub with the App's whole definition filled in, the person presses
+"Create GitHub App", and GitHub sends the browser back to HQ with a one-time code. HQ trades the
+code (within the hour, once) for the new App's id and private key. The App belongs to the person's
+own account. The HQ project never sees it, holds nothing and runs nothing.
 
-That last point is what makes it "request and accept": the repository list is chosen and shown on
-GitHub, and removing a repository there takes effect at once, whatever HQ thinks.
+Then HQ opens the App's install page, the person picks repositories ("Only select repositories")
+and presses Install.
 
-Access tokens last eight hours and refresh tokens six months; a refresh replaces both. A stolen
-token is short-lived, and a person who stops using HQ is disconnected on their own after six
-months.
+From then on HQ signs in as the person's App with its private key and
+[mints an installation token](https://docs.github.com/en/rest/apps/apps) when it needs one. That
+token lasts an hour, and HQ asks for the least it needs each time: the one repository of the task
+and only the permissions of that step. Nothing expires that a person has to renew, so background
+work overnight or over a holiday needs no new sign-in.
 
 ### What the person sees on the phone
 
-1. **Helpers, Code from this phone, Connect GitHub.** HQ shows an eight-character code with Copy
-   and an "Open GitHub" button (a Custom Tab on `github.com/login/device`, already signed in for
-   most people). They paste the code and press Authorize.
-2. **Pick repositories.** Back in the app, HQ opens the App's install page. The person picks
-   repositories and presses Install. On return HQ lists the installations the token can see
-   (`GET /user/installations`, then each installation's repositories) and shows the list.
-3. **Done.** The sheet shows each repository with one line about its CI (below) and a "Start a
-   task" button.
+1. **Helpers, Code from this phone, Connect GitHub.** A Custom Tab opens GitHub's "Create GitHub
+   App" page, already filled in with the name, the permissions and no webhook. They press Create.
+2. **Pick repositories.** GitHub sends them back to HQ (on the phone, HQ's own server on
+   `127.0.0.1`, which the browser on the same phone reaches), and HQ opens the install page at
+   once. They pick repositories and press Install.
+3. **Done.** HQ lists the installed repositories with one line each about CI and branch
+   protection (below), and a "Start a task" button.
 
-Two confirmations on GitHub, nothing typed but a pasted code, no token in the clipboard. The same
-flow serves `hq github connect` on a computer and Settings in the web app, so there is one way to
-connect in every edition.
+Two taps on GitHub, nothing to type or copy, no code to read off a screen. On a computer,
+`hq github connect` does the same with the local browser. On a server with no browser, it prints
+the link; the redirect to the server's loopback then fails in the person's browser, and they paste
+the address it shows (it carries the code) back into the terminal.
 
-### Why not the alternatives
+### The App's definition
 
-| Option | Why not the default |
-|---|---|
-| Fine-grained token by hand (today) | Too many technical steps, and people get it wrong in the unsafe direction (a classic token with every scope). |
-| A fine-grained token from a [template URL](https://github.blog/changelog/2025-08-26-template-urls-for-fine-grained-pats-and-updated-permissions-ui/) | GitHub can prefill the name, expiry and permissions, but the person still picks repositories and copies a long-lived secret. Kept as the fallback for organisations that forbid Apps. |
-| An OAuth App | Its `repo` scope reaches every private repository the person has. No per-repository limit. |
-| The OAuth web flow with a redirect | Needs a client secret, so an HQ server holding it. A server we don't need is one more thing to secure. |
-| Each person makes their own App (manifest flow) | Two extra steps and a private key on the phone. Worth it only for a self-hosted fork; see "Self-hosting". |
+What the manifest asks for, and so all an App made this way can ever do:
 
-### The App HQ registers
-
-The project registers one public GitHub App (working name "HQ Coder") once, the way it registers
-the Android app id and the release signing key. Its settings:
-
-- **Device flow** enabled. **User token expiration** on.
-- **No webhook**, no callback URL, no setup URL. **No private key generated**: HQ never acts as the
-  App itself (installation tokens need the key), only as the person. This is a practice, not a
-  guarantee: whoever controls the owning account can generate a key at any time, and with it act
-  on every installation (see Risks).
+- **Name** `HQ Coder (<login>)` with a short suffix if taken. **No webhook**, no callback, private
+  to the person's account (not installable by others).
 - **Repository permissions:** Contents read and write, Pull requests read and write, Actions read
   (CI runs and logs), Checks read, Commit statuses read, Metadata read (always present).
 - **Not granted:** Workflows (so GitHub itself refuses a push that changes
   `.github/workflows/`, on top of `github_write`'s own refusal), Administration, Secrets,
   Environments, Deployments, Issues and every organisation and account permission.
 
-Its client ID is the default of a new `github.app_client_id` key. A self-hosted fork points that at
-its own App.
+### Why not the alternatives
+
+| Option | Why not |
+|---|---|
+| One App owned by the project, with the device flow | The owning account can mint tokens for every user's repositories. Ruled out. |
+| An OAuth App | No central key, but its `repo` scope reaches every private repository the person has, and its tokens do not expire. |
+| A fine-grained token by hand (today) | Too many technical steps, a long-lived secret in the clipboard, and people get it wrong in the unsafe direction. |
+| A fine-grained token from a [template URL](https://github.blog/changelog/2025-08-26-template-urls-for-fine-grained-pats-and-updated-permissions-ui/) | GitHub prefills the permissions, but the person still picks repositories and copies a token that lasts up to a year. Kept as the fallback for organisations that forbid Apps. |
+
+### Who the work is credited to
+
+Pull requests are opened by `HQ Coder (<login>)[bot]`, so anyone reading the repository can see
+which changes HQ proposed and that the person merged them. Commits carry the person's name and
+GitHub no-reply address as author, so merged work counts on their profile. Check during G2 how
+GitHub credits a squash merge of a bot's pull request.
 
 ## Secure by default
 
-What stops this being dangerous while it is on for everyone:
-
 | Control | Default | Why |
 |---|---|---|
-| Who can connect | The owner only: the phone app, `hq github connect`, owner Settings in the web app. Not a tool, not an MCP route. | A model that could start a device flow could ask the owner to "just enter this code" and take their GitHub. |
+| Who holds a way in | Only the person's own App. The HQ project holds no App, key or token | One compromised account cannot reach other people's code. |
+| Who can connect | The owner only: the phone app, `hq github connect`, owner Settings in the web app. Not a tool, not an MCP route. A `state` value ties the returning code to the flow HQ started | A model or a link must not be able to attach an App HQ did not create. |
 | Which repositories | Only those the App is installed on, narrowed by `github_write.repos` if set | The person chose them on GitHub; HQ cannot widen them. |
+| What a token can do | One repository, the permissions of the step, one hour | A token seen in a log or a crash is nearly worthless. |
 | What it may push | `hq/` branches and pull requests only; no force, merge or deletion; no `.github/` changes; secret scan of every changed file (all existing `github_write` guards) | Nothing reaches the default branch without the person merging it. |
-| Where the token lives | `<hq dir>/github/auth.json`, mode 0600, beside the existing base records that `governance::secrets` denies to every file tool. On Android that is the app's private storage. | The refresh token rotates every eight hours, so it must be a file `hq` can rewrite. A sealed environment variable cannot be rewritten that way. |
-| Where the token goes | `api.github.com` and the tarball host only. Never in the environment, so bash and child processes never see it. | Same rule `github_write` has today. |
-| Repositories whose CI holds secrets | Flagged at connect and left unpicked until the owner confirms that repository | A pull request from an `hq/` branch in the same repository runs Actions with its secrets before anyone reviews it. The App cannot list secrets, but it can read workflow files (Contents read), so any workflow that names `secrets.` other than `GITHUB_TOKEN` is flagged. |
-| Spend | A per-task model budget, shown before a task starts. The task is parked when it runs out | On sponsored credits, one runaway task should not empty the key. |
-| Who can queue work | Unchanged: the owner, the owner's MCP clients and HQ's chat. Handoff, task keys and connector grants cannot tag `edge-task` (`refuse_queue_write`) | `dispatch_tasks` being on makes this the gate that matters. |
+| Where the key lives | `<hq dir>/github/app.pem` and `app.json`, mode 0600, beside the base records that `governance::secrets` denies to every file tool. Outside the vault, so `hq backup` does not carry it, and Android cloud backup and device transfer take nothing from there (`data_extraction_rules.xml`) | The private key is the one long-lived credential, so it stays on the device that made it. |
+| Where tokens go | `api.github.com` and the tarball host only. Never in the environment, so bash and child processes never see one | Same rule `github_write` has today. |
+| Repositories whose CI or previews hold secrets | Flagged at connect and left unpicked until the owner confirms that repository | A pull request from an `hq/` branch runs Actions with the repository's secrets, and Vercel, Netlify or Cloudflare Pages build it with preview variables, before anyone reviews it. The App cannot list secrets, but it can read workflow and preview config files (Contents read). |
+| Spend | The first task after connecting asks for confirmation; every task has a model budget, shown before it starts, and is parked when it runs out | `dispatch_tasks` is on by default, and credits may be a sponsor's. |
+| Who can queue work | Unchanged: the owner, the owner's MCP clients and HQ's chat. Handoff, task keys and connector grants cannot tag `edge-task` (`refuse_queue_write`) | With dispatch on, this is the gate that matters. |
 | Untrusted input | The worker's turn starts under the untrusted policy (no secret reads, no network from bash) and has no shell (existing) | It reads repository text, issues and CI logs. |
-| Disconnect | Settings, GitHub, Disconnect: deletes the tokens on the device and opens the App's installation page to remove repositories or uninstall | Revoking a token through GitHub's API needs the client secret we do not hold. Uninstalling the App cuts access at once, and an unused refresh token dies in six months anyway. |
+| Disconnect | Settings, GitHub, Disconnect: deletes the key and record on the device and opens the App's settings page, where deleting the App (or its key) cuts access at once | The person, not HQ, is the authority on their App. |
 
-Organisation repositories need an organisation owner to approve the install. That is GitHub's
-rule, and the sheet says so instead of failing quietly.
+Organisation repositories need an App created under that organisation, by one of its owners.
+That is GitHub's rule, and the sheet says so instead of failing quietly.
 
 ## Where it shows up
 
@@ -134,29 +135,22 @@ rule, and the sheet says so instead of failing quietly.
 - **Tasks quick-add:** "Let HQ code" appears once GitHub is connected (today it waits for config).
 - **The card says what it is.** HQ changes your repository on a branch, GitHub tests it, you
   review and merge. Nothing runs on the phone, a live preview needs the repository to deploy
-  previews (Cloudflare Pages, Vercel and Netlify do this per pull request on free tiers), and it
-  cannot change workflow files.
+  previews, and it cannot change workflow files.
 
 ## Steps
 
 | Step | What | Where |
 |---|---|---|
-| G1 | Device flow, token store and refresh, `hq github connect | status | disconnect` | `crates/hq-tools/src/github/auth.rs` (new), `crates/hq-cli/src/commands/github.rs` (new) |
-| G2 | `github_write` and `github_clone` take the connected token first and `HQ_GITHUB_WRITE_TOKEN` second; the allowlist is the installations, narrowed by `github_write.repos` | `crates/hq-tools/src/github/write.rs`, `crates/hq-core/src/config/github_write.rs` |
-| G3 | Owner-only REST routes for the flow (start, poll, installations, disconnect) and the CI-secrets check | `crates/hq-web/src/github_connect_api.rs` (new) |
+| G1 | The manifest flow (manifest page, `state`, return route, code exchange), key store, App JWT and scoped installation tokens; `hq github connect | status | disconnect` | `crates/hq-tools/src/github/app.rs` (new), `crates/hq-cli/src/commands/github.rs` (new) |
+| G2 | `github_write` and `github_clone` take an installation token first and `HQ_GITHUB_WRITE_TOKEN` second; the allowlist is the installation, narrowed by `github_write.repos`; commit authorship | `crates/hq-tools/src/github/write.rs`, `crates/hq-core/src/config/github_write.rs` |
+| G3 | Owner-only REST routes for the flow and the repository list with its CI, preview and branch protection checks | `crates/hq-web/src/github_connect_api.rs` (new) |
 | G4 | Phone: Connect GitHub on Helpers and in Settings, the repository list, "Code from this phone" | `apps/android/.../ui/helpers/`, `ui/settings/` |
 | G5 | Web: the same in Settings and Helpers | `apps/hq-web/src/routes/helpers.tsx`, settings |
-| G6 | Flip the defaults (`dispatch_tasks: true`, worker armed without `repos`), the per-task budget, and the worker preset of edge-worker step S3 | config, `edge-worker-dispatch` |
+| G6 | Flip the defaults (`dispatch_tasks: true`, worker armed without `repos`), the first-task confirmation, the per-task budget, and the worker preset of edge-worker step S3 | config, `edge-worker-dispatch` |
 | G7 | First live run on a small Django or React Native repository with fast CI, on a mid-range phone on mobile data: megabytes per task, model cost per merged pull request, time to green | measurements in `docs/plans/` |
 
-G1 and G2 need the App registered (a one-time task for the project owner, done in GitHub's
-settings). G1 to G3 can be built and tested against a test App before that.
-
-## Self-hosting
-
-Anyone running a fork registers their own App with the settings above and sets
-`github.app_client_id`. A later step can do that from a manifest link (`hq github app create`), so
-it takes one confirmation too.
+Nothing here needs the project to register anything with GitHub, so every step can be built and
+tested against a test account.
 
 ## Other ways to give a phone-only person helpers
 
@@ -191,32 +185,23 @@ the phone as always (`docs/security/ADOPTION_DATA.md`); a sponsor gets no view i
 
 ## Risks
 
-- **A portfolio of work the person did not write.** Every pull request needs their review, and the
-  card says so. Reading and correcting the diff is the practice; merging blind is not.
+- **The key on the phone can write to more than `hq/` branches.** The `hq/`-only rule is HQ's, not
+  GitHub's. Someone who takes the private key from the device can push to any branch of the
+  installed repositories until the person deletes the key or the App, unless branch protection or
+  a ruleset stops it. On GitHub Free those exist for public repositories only, so a free private
+  repository has no server-side backstop. This is the same reach today's fine-grained token has.
+  The repository list says so per repository and links to branch protection where it is
+  available. Android's app sandbox and the file's mode are what guard the key; a rooted or
+  compromised phone defeats both.
+- **A planted instruction becomes a bad pull request.** The worker reads issues, CI logs and
+  repository text, any of which can carry instructions. Nothing merges without the person, but the
+  people this is for are the likeliest to merge without reading. The card and the pull request
+  body ask for review, and CI and preview secrets are flagged (above).
+- **A portfolio of work the person did not write.** Every pull request needs their review.
+  Reading and correcting the diff is the practice; merging blind is not.
 - **CI as the only test runner.** A repository with slow or no CI is a poor fit. The repository
   list says so for each one, and offers a task to add CI that the person merges by hand.
-- **The project owns an App many people trust.** This is the largest new risk. Whoever controls
-  the owning account can generate a private key and mint installation tokens that write to every
-  repository every user picked, with no user involved; GitHub only asks installers to approve a
-  change of permissions, not a new key. So: the App lives in an organisation, not a personal
-  account, with hardware-key two-factor for every owner and App manager; key creation is watched
-  in the organisation's audit log and raises an alert; and the App's settings are on
-  `docs/security/RELEASE_CHECKLIST.md`. Users who do not accept that trust use their own App
-  (`github.app_client_id`) or a fine-grained token.
-- **The token can write to more than `hq/` branches.** The `hq/`-only rule is HQ's, not GitHub's.
-  A token taken from the device can push to any branch of a picked repository, including the
-  default one, unless branch protection or a ruleset stops it. On GitHub Free those exist for
-  public repositories only, so a free private repository has no server-side backstop. The
-  repository list says so per repository and links to the branch protection page where it is
-  available. The token file sits outside the vault, so `hq backup` does not carry it and Android
-  cloud backup and device transfer do not either (`data_extraction_rules.xml`).
-- **Preview deployments run the worker's branch.** A repository wired to Vercel, Netlify or
-  Cloudflare Pages builds every `hq/` branch with the preview environment's variables, the same
-  exposure as CI secrets. The connect check flags it alongside workflow secrets.
-- **Spend with no one watching.** `dispatch_tasks` on by default means a tagged task starts on its
-  own. The first task after connecting asks for confirmation, and every task has its budget.
-- **Device-code phishing.** Anyone can send a person a GitHub device code and ask them to approve
-  it. The approval page names "HQ Coder"; the phone only shows a code it asked for itself, and
-  copy in the app says never to enter a code someone sent you.
+- **One App per person to look after.** If they delete it on GitHub, HQ sees the next token request
+  fail and says "reconnect GitHub", never retries in a loop.
 - **Sideloading.** The app installs outside the Play Store; Google's developer verification reaches
   Uganda in 2027 (`docs/HQ_MOBILE.md`), and the app id must be registered before then.
