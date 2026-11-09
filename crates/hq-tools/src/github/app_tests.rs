@@ -61,6 +61,10 @@ fn the_manifest_asks_for_exactly_the_planned_permissions_and_no_webhook() {
         json!({"contents": "write", "pull_requests": "write", "actions": "read",
                "checks": "read", "statuses": "read", "metadata": "read"})
     );
+    assert!(
+        made["url"].as_str().unwrap().starts_with("https://"),
+        "GitHub refuses a blank url"
+    );
     assert_eq!(made["public"], false);
     assert_eq!(made["default_events"], json!([]));
     assert!(made.get("hook_attributes").is_none());
