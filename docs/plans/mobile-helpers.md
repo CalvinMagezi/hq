@@ -199,7 +199,9 @@ typed into the sheet was taken 73 seconds after Start and opened a pull request 
 changing only the README, in 97 seconds of model time for $0.0157 (24 model calls). No shell tool
 ran, and no `ghs_` token or plain model key was on disk afterwards. With `task_budget_usd` set to
 $0.003, the turn stopped at $0.0039: the check runs between model calls, so a task can overrun by
-one call. A job started on a dead key was parked with no retry.
+one call. That task was parked when its lease ran out, 17 minutes later, with the general reason
+"stopped without handing the task over" (`TECHDEBT.md`). A job started on a dead key was parked
+with no retry.
 
 After that run the sheet gained the job form, so nobody has to write a tagged task by hand; pressing
 Start, with the budget shown, replaces the separate "Allow the first task" button.
