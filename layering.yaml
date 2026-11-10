@@ -1,20 +1,29 @@
 # What may depend on what in this workspace.
 #
-# `cargo test -p hq-core --test layering` reads this file, every Cargo.toml and every source file
-# under crates/, and fails when they disagree. The design, and the order the debt below is paid
-# in, is docs/plans/modular-hq.md.
+# `cargo test -p hq-core --test layering` reads this file, asks cargo for the workspace's crates
+# and their dependencies, reads every file under `src/` of the crates below the app tier, and
+# fails when they disagree. The design, and the order the debt below is paid in, is
+# docs/plans/modular-hq.md.
 #
 # The rules:
-#   1. A crate depends only on crates in a tier above its own in this file, or on crates listed
-#      before it in its own tier. The base (contract and kernel) never depends on a module.
-#   2. A module crate depends on another module crate only when `module_edges` says so.
-#   3. Code outside a module does not name the module's files, wherever they live (`in_crate`).
-#      The app tier is exempt: it is where modules are put together.
+#   1. In the contract and kernel tiers, a crate depends only on crates in a tier above its own
+#      in this file or listed before it in its own tier. The base (contract and kernel) never
+#      depends on a module.
+#   2. A module crate depends on the base, and on another module crate only when `module_edges`
+#      says so.
+#   3. Code outside a module does not name the module's files, wherever they live (`in_crate`),
+#      and base code does not name a module crate unless it belongs to a module that may
+#      (`module_uses`). The app tier is exempt: it is where modules are put together.
 #
 # `debt` lists where today's code breaks a rule. An entry may be removed and a number may fall,
-# in the same change that fixes the code. Nothing is added and no number rises: invert the
-# dependency instead (a trait or a registration in the lower crate). Changing a tier or adding
-# an edge is a design change and should say why.
+# in the same change that fixes the code. Never add an entry or raise a number to make the test
+# pass: invert the dependency instead (a trait or a registration in the lower crate). Changing a
+# tier or adding an edge is a design change and should say why.
+#
+# The source check reads paths as written. It does not see a name used after it was imported, a
+# rename with `as`, a file mounted with `#[path]` or a `tests/` folder, and it counts unit tests
+# under `src/`. A module is ready to be left out of a build when the build without it compiles,
+# not when its numbers here reach zero.
 
 tiers:
   # What every other crate agrees on: types, config, the caller markers (hq-core) and the tool
@@ -73,8 +82,6 @@ in_crate:
       - src/a2a.rs
       - src/harness_usage.rs
       - src/harness_usage_collect.rs
-      - src/harness_chunk.rs
-      - src/external_runner.rs
     hq-web:
       - src/sessions_api.rs
       - src/session_driver.rs
@@ -83,7 +90,10 @@ in_crate:
       - src/dialog_answer.rs
       - src/session_folders_api.rs
   # HQ Coder: HQ's own agent doing GitHub work. Reading and cloning a repository
-  # (github/mod.rs, tarball.rs) stays in the base because task verification uses it.
+  # (github/mod.rs, tarball.rs) stays in the base because task verification uses it. Those
+  # read tools take their token from the App client in app.rs, which is most of what
+  # `hq-tools -> coder` counts in github/mod.rs: either the token client moves to the base or
+  # the read tools reach it through a contract.
   coder:
     hq-tools:
       - src/github/app.rs
@@ -113,12 +123,20 @@ in_crate:
       - src/oauth
       - src/tls
 
+# Module crates a module's own files may name.
+module_uses:
+  helpers: [hq-host, hq-gate]
+  # Only its end-to-end test (src/tls/tests), through dev-dependencies.
+  connector: [hq-bridge, hq-edge]
+
 debt:
   # Base crates that link a module crate today.
   cargo_edges:
-    # The host client and the gate transport are linked through the session tools. Goes when
-    # the helpers module leaves hq-tools.
+    # The host client, for the session tools and for the hardened git the base git tool runs
+    # (coding/git.rs). Goes when the client half of hq-host is a kernel crate of its own.
     - hq-tools -> hq-host
+    # The gate transport of the host client. Goes when the session tools sit behind a feature
+    # and the dependency is optional.
     - hq-tools -> hq-gate
     # Note export (Typst and its fonts). Goes when export sits behind a cargo feature.
     - hq-tools -> hq-export
@@ -128,23 +146,37 @@ debt:
     - hq-tools -> hq-convert
     - hq-web -> hq-convert
 
-  # Lines outside a module that name its files, by where they are written.
+  # Places outside a module that name it, by where they are written.
   refs:
-    # Tool assembly (builder/tools.rs) and the guard lists that import module symbols
-    # (governance/). Goes when tools register through modules and governance reads a
-    # base-owned table.
-    hq-agent -> helpers: 14
-    hq-agent -> coder: 8
-    # Task tools calling the session access checks and the approval text for two helper tools.
-    hq-tools -> helpers: 7
-    # Task tools calling the coder queue's write guards.
-    hq-tools -> coder: 9
-    # Task tests that build the verification fake.
-    hq-tools -> verify: 4
-    # The chat socket, inbox and task routes calling into module code directly. Each goes when
-    # the web kernel offers a hook for it (task changed, inbox answer, after reply, MCP caller).
-    hq-web -> helpers: 5
-    hq-web -> coder: 7
-    hq-web -> connector: 6
+    # Tool assembly (builder/tools.rs), the guard lists that import module symbols
+    # (governance/) and the sub-agent service. Goes when tools register through one list and
+    # governance takes its constants from the contract.
+    hq-agent -> helpers: 13
+    hq-agent -> coder: 9
+    # The default tool registry building the session, host and team-messaging tools. Goes when
+    # the registry builder leaves hq-mcp.
+    hq-mcp -> helpers: 3
+    # Task tools calling the session access checks, approval text for two helper tools, and
+    # the crate root's re-exports.
+    hq-tools -> helpers: 8
+    # Task tools calling the coder queue's write guards, and the GitHub read tools taking
+    # their token from the App client.
+    hq-tools -> coder: 24
+    # The handover check and the GitHub reader that task tools take from verification, and
+    # the task tests that build its fake.
+    hq-tools -> verify: 21
+    # The router mounting module routes, and the chat socket, inbox and task routes calling
+    # into module code. Goes when module routes are merged from a list and the web kernel
+    # offers a hook for each call (task changed, inbox answer, after reply).
+    hq-web -> helpers: 29
+    hq-web -> coder: 14
+    hq-web -> verify: 16
+    hq-web -> connector: 11
     # The Workbench resolving a note through HQ Coder's helper.
     helpers -> coder: 1
+    # Base files that name a module crate directly. These go with the crate edges above.
+    hq-tools -> hq-host: 2
+    hq-tools -> hq-convert: 24
+    hq-tools -> hq-export: 2
+    hq-web -> hq-convert: 3
+    hq-web -> hq-export: 7

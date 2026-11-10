@@ -31,8 +31,6 @@ test-util = ["dep:tracing-subscriber"]
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
 tempfile = "3"
-# The layering guard (tests/layering.rs) reads every Cargo.toml in the workspace.
-toml = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
