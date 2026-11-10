@@ -417,7 +417,14 @@ class ShellActivity : ComponentActivity() {
             val replying = chatState.live != null
             LaunchedEffect(replying) {
                 if (fixture != null) return@LaunchedEffect
-                if (replying) while (true) { delay(CHAT_NEEDS_POLL_MS); inbox.refreshNow() } else inbox.refreshNow()
+                if (!replying) {
+                    inbox.refreshNow()
+                    return@LaunchedEffect
+                }
+                while (true) {
+                    delay(CHAT_NEEDS_POLL_MS)
+                    inbox.refreshNow()
+                }
             }
             val savedAt = remember(status) { StartRules.lastAnswer(this@ShellActivity).takeIf { it > 0 } }
             val uiScope = androidx.compose.runtime.rememberCoroutineScope()
