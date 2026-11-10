@@ -1,0 +1,148 @@
+# What may depend on what in this workspace.
+#
+# `cargo test -p hq-core --test layering` reads this file, every Cargo.toml and every source file
+# under crates/, and fails when they disagree. The design, and the order the debt below is paid
+# in, is docs/plans/modular-hq.md.
+#
+# The rules:
+#   1. A crate depends only on crates in a tier above its own in this file, or on crates listed
+#      before it in its own tier. The base (contract and kernel) never depends on a module.
+#   2. A module crate depends on another module crate only when `module_edges` says so.
+#   3. Code outside a module does not name the module's files, wherever they live (`in_crate`).
+#      The app tier is exempt: it is where modules are put together.
+#
+# `debt` lists where today's code breaks a rule. An entry may be removed and a number may fall,
+# in the same change that fixes the code. Nothing is added and no number rises: invert the
+# dependency instead (a trait or a registration in the lower crate). Changing a tier or adding
+# an edge is a design change and should say why.
+
+tiers:
+  # Types, config and the rules every other crate relies on. Depends on no HQ crate.
+  contract:
+    - hq-core
+  # What every build of hq links: storage, models, the agent loop and its guards, the base
+  # tools, the gateway, the scheduler, the web server, signed updates and restore.
+  kernel:
+    - hq-vault
+    - hq-db
+    - hq-llm
+    - hq-memory
+    - hq-update
+    - hq-backup
+    - hq-tools
+    - hq-agent
+    - hq-mcp
+    - hq-daemon
+    - hq-web
+  # What a build may leave out.
+  module:
+    - hq-sandbox
+    - hq-host
+    - hq-gate
+    - hq-net
+    - hq-tunnel
+    - hq-convert
+    - hq-export
+    - hq-bridge
+    - hq-edge
+    - hq-relay
+  # Where the pieces are put together. May depend on anything below.
+  app:
+    - hq-cli
+    - hq-desktop
+
+module_edges:
+  hq-host: [hq-sandbox]
+  hq-tunnel: [hq-net]
+  hq-export: [hq-convert]
+  hq-bridge: [hq-gate]
+  hq-edge: [hq-bridge]
+  hq-relay: [hq-convert]
+
+# Modules that still live inside kernel crates. Each will become its own crate or sit behind a
+# cargo feature; until then these paths are its walls.
+in_crate:
+  # Sessions of other coding agents (Claude Code, Codex and the rest): the host client, the
+  # session tools and supervisor messaging. The host server itself is hq-host.
+  helpers:
+    hq-tools:
+      - src/harness_session
+      - src/agent_host
+      - src/a2a.rs
+      - src/harness_usage.rs
+      - src/harness_usage_collect.rs
+      - src/harness_chunk.rs
+      - src/external_runner.rs
+    hq-web:
+      - src/sessions_api.rs
+      - src/session_driver.rs
+      - src/session_driver
+      - src/workbench_api.rs
+      - src/dialog_answer.rs
+      - src/session_folders_api.rs
+  # HQ Coder: HQ's own agent doing GitHub work. Reading and cloning a repository
+  # (github/mod.rs, tarball.rs) stays in the base because task verification uses it.
+  coder:
+    hq-tools:
+      - src/github/app.rs
+      - src/github/app_tests.rs
+      - src/github/coder.rs
+      - src/github/dispatch.rs
+      - src/github/dispatch_tests.rs
+      - src/github/write.rs
+      - src/github/write_tests.rs
+      - src/github/repos.rs
+      - src/github/repos_tests.rs
+      - src/github/changes.rs
+    hq-web:
+      - src/coder_api.rs
+      - src/github_connect_api.rs
+      - src/github_connect_api_tests.rs
+      - src/edge_worker_api.rs
+  # Task verification. The guard on completing a task stays with tasks in hq-db.
+  verify:
+    hq-tools:
+      - src/tasks/verify
+    hq-web:
+      - src/verification_api.rs
+  # The claude.ai connector: OAuth and its TLS door.
+  connector:
+    hq-web:
+      - src/oauth
+      - src/tls
+
+debt:
+  # Base crates that link a module crate today.
+  cargo_edges:
+    # The host client and the gate transport are linked through the session tools. Goes when
+    # the helpers module leaves hq-tools.
+    - hq-tools -> hq-host
+    - hq-tools -> hq-gate
+    # Note export (Typst and its fonts). Goes when export sits behind a cargo feature.
+    - hq-tools -> hq-export
+    - hq-web -> hq-export
+    # Document import, also used for chat attachments. Goes when the base has its own
+    # attachment reader and import sits behind a feature.
+    - hq-tools -> hq-convert
+    - hq-web -> hq-convert
+
+  # Lines outside a module that name its files, by where they are written.
+  refs:
+    # Tool assembly (builder/tools.rs) and the guard lists that import module symbols
+    # (governance/). Goes when tools register through modules and governance reads a
+    # base-owned table.
+    hq-agent -> helpers: 14
+    hq-agent -> coder: 8
+    # Task tools calling the session access checks and the approval text for two helper tools.
+    hq-tools -> helpers: 7
+    # Task tools calling the coder queue's write guards.
+    hq-tools -> coder: 9
+    # Task tests that build the verification fake.
+    hq-tools -> verify: 4
+    # The chat socket, inbox and task routes calling into module code directly. Each goes when
+    # the web kernel offers a hook for it (task changed, inbox answer, after reply, MCP caller).
+    hq-web -> helpers: 5
+    hq-web -> coder: 7
+    hq-web -> connector: 6
+    # The Workbench resolving a note through HQ Coder's helper.
+    helpers -> coder: 1
