@@ -100,6 +100,23 @@ jobs:
           bash scripts/check-android-alignment.sh "$bin" "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objdump"
           ls -l "$bin"
 
+      - name: Record the size of the phone build
+        # Nothing recorded the size of hq on a phone, so no change could be judged by it
+        # (docs/plans/modular-hq.md, step A3). This only reports: a ceiling comes once the owner
+        # has set one.
+        run: |
+          bin="target/$HQ_TARGET/release-small/hq"
+          bytes=$(stat -c %s "$bin")
+          crates=$(cargo tree -p hq-cli --features tunnel,bridge -e normal --prefix none --target "$HQ_TARGET" --locked \
+            | sed -E 's/ \((\*|proc-macro)\)//g; s/ \(\/.*\)$//' | sort -u | wc -l)
+          {
+            echo "### Phone build size"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| hq (release-small, $HQ_TARGET) | $bytes bytes ($((bytes / 1048576)) MiB) |"
+            echo "| crate versions linked | $crates |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Package
         id: package
         run: |
