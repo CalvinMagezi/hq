@@ -431,10 +431,18 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             HomeRow(SettingsPage.KeepRunning, "battery", c.getString(R.string.settings_page_keep_running), PhoneWords.keepSummary(Words.of(ctx()), keepFacts(), Instant.now()), warn = keepFacts().let { PhoneWords.keepRunning(Words.of(ctx()), it, Instant.now()).checked.any { r -> !r.ok } }),
             HomeRow(SettingsPage.Notifications, "notifications", c.getString(R.string.row_notifications), if (!allowed) c.getString(R.string.assist_mic_off) else homeNotifLine(listOf(R.string.notify_home_needs_on to on(AlertPoster.NEEDS), R.string.notify_home_updates_on to on(AlertPoster.UPDATES), R.string.notify_home_app_updates_on to on(AlertPoster.APP_UPDATES))), warn = !allowed || !on(AlertPoster.NEEDS) || !on(AlertPoster.UPDATES) || !on(AlertPoster.APP_UPDATES)),
             assistantRow(c),
+            calendarRow(c),
             speech.takeIf { it >= 0 }?.let { HomeRow(SettingsPage.Speech, "speech", c.getString(R.string.speech_title), c.getString(R.string.speech_home_status, example.hq.spike.download.DownloadRules.sizeMb(it))) },
             HomeRow(SettingsPage.CaptureWidgets, "capture", c.getString(R.string.settings_page_capture), PhoneWords.captureSummary(Words.of(c), captureFacts())),
             HomeRow(SettingsPage.StoredKeys, "key", FirstRunWords.KEYS_TITLE, c.getString(R.string.settings_stored_keys_status)),
         )
+    }
+
+    private fun calendarRow(c: Context): HomeRow {
+        val allowed = example.hq.spike.calendar.AndroidCalendarStore.hasPermission(c)
+        val chosen = example.hq.spike.calendar.CalendarPrefs(c).get()
+        val status = c.getString(if (!allowed) R.string.cal_status_no_access else if (chosen == null) R.string.cal_status_none else R.string.cal_chosen)
+        return HomeRow(SettingsPage.Calendar, "calendar", c.getString(R.string.cal_row_title), status, warn = !allowed || chosen == null)
     }
 
     private fun assistantRow(c: Context): HomeRow {

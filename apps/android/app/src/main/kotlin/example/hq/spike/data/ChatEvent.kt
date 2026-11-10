@@ -19,6 +19,9 @@ sealed interface ChatEvent {
     /** HQ's answer to `resume`: while [running] the reply so far, else the id of the thread's last saved message. */
     data class ReplySoFar(val threadId: String?, val running: Boolean, val content: String, val messageId: String?) : ChatEvent
 
+    /** HQ asks the phone to do something on the device and report back; [payload] is the action's own fields. */
+    data class DeviceAction(val actionId: String, val threadId: String?, val name: String, val version: Int, val payload: JSONObject, val expiresAt: String?) : ChatEvent
+
     companion object {
         /** Reads one frame. Frames this app does not use (credits, other tabs' bookkeeping) give null. */
         fun parse(frame: String): ChatEvent? {
@@ -37,8 +40,16 @@ sealed interface ChatEvent {
                 "thread_title" -> thread?.let { Titled(it, o.optString("title")) }
                 "stream_lag" -> Lagged(o.optInt("skipped"))
                 "reply_so_far" -> ReplySoFar(thread, o.optBoolean("running", false), o.optString("content"), o.optStringOrNull("message_id"))
+                "device_action" -> deviceAction(o)
                 else -> null
             }
+        }
+
+        /** One `device_action` frame, or the same shape from the pending list; null when it has no id or payload. */
+        fun deviceAction(o: JSONObject): DeviceAction? {
+            val id = o.optString("action_id").takeIf { it.isNotEmpty() } ?: return null
+            val payload = o.optJSONObject("payload") ?: return null
+            return DeviceAction(id, o.optStringOrNull("thread_id"), o.optString("name"), o.optInt("v", 0), payload, o.optStringOrNull("expires_at"))
         }
     }
 }

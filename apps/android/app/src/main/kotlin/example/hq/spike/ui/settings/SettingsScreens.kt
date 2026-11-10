@@ -110,6 +110,7 @@ private fun icon(key: String): ImageVector = when (key) {
     "capture" -> HqIcons.Plus
     "key" -> HqIcons.Key
     "assistant" -> HqIcons.Mic
+    "calendar" -> HqIcons.Clock
     "chat" -> HqIcons.Chat
     "phone" -> HqIcons.Phone
     "shield" -> HqIcons.Shield
@@ -149,6 +150,7 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.Update -> stringResource(R.string.upd_page_title)
     SettingsPage.Speech -> stringResource(R.string.speech_title)
     SettingsPage.Assistant -> stringResource(R.string.assist_row_title)
+    SettingsPage.Calendar -> stringResource(R.string.cal_row_title)
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -188,6 +190,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Update -> UpdatePage(ui, actions)
                 SettingsPage.Speech -> SpeechPage(ui, actions)
                 SettingsPage.Assistant -> AssistantPage(ui, actions)
+                SettingsPage.Calendar -> CalendarPage()
                 SettingsPage.Noticed -> NoticedPage(Counters.get(androidx.compose.ui.platform.LocalContext.current))
                 SettingsPage.Origins -> ReadOnlyList(ui, stringResource(R.string.settings_none_origins)) { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
                 SettingsPage.ConnectedTools -> ReadOnlyList(ui, stringResource(R.string.settings_none_tools)) { Facts(SettingsWords.toolRows(example.hq.spike.ui.shell.rememberWords(), ui.snap.settings)) }

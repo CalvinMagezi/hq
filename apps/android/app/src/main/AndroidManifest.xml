@@ -7,6 +7,9 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+  <!-- HQ saves an event straight into the calendar the owner picked in Settings. It never opens the Calendar app's own form. -->
+  <uses-permission android:name="android.permission.READ_CALENDAR"/>
+  <uses-permission android:name="android.permission.WRITE_CALENDAR"/>
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
   <!-- Lets the in-app updater hand a verified APK to Android's installer; the owner still confirms each install. -->
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
