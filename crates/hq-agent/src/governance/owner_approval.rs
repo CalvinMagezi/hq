@@ -85,7 +85,10 @@ pub fn needs_owner(tool: &str, category: &str, args: &Value) -> bool {
             .and_then(Value::as_str)
             .is_some_and(|o| !o.trim().is_empty());
     }
-    OWNER_CONFIRM_TOOLS.contains(&tool) || category == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY
+    if category == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY {
+        return hq_tools::remote_mcp::asks_owner(tool, args);
+    }
+    OWNER_CONFIRM_TOOLS.contains(&tool)
 }
 
 /// Where a session asks the owner. Set only on sessions the owner drives from a chat; every

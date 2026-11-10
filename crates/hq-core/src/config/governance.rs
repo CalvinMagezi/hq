@@ -27,6 +27,22 @@ pub struct GovernanceConfig {
     /// the vault and tasks (`hq_agent::governance::needs_owner`). Unset means on.
     #[serde(default)]
     pub ask_owner: Option<bool>,
+    /// Which remote MCP tools wait for the owner: `writes` (default) lets a tool its server
+    /// marks `readOnlyHint: true` run, `all` asks for every one. Env:
+    /// `HQ_GOVERNANCE__REMOTE_MCP_ASK`.
+    #[serde(default)]
+    pub remote_mcp_ask: RemoteMcpAsk,
+}
+
+/// Which calls to a remote MCP server ask the owner first.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteMcpAsk {
+    /// A tool the server marks read-only runs; any other tool, or one with no usable mark, asks.
+    #[default]
+    Writes,
+    /// Every remote tool asks, as before the read-only mark was honoured.
+    All,
 }
 
 impl GovernanceConfig {
@@ -98,5 +114,29 @@ mod orchestrator_flag_tests {
         assert!(!parsed.orchestrator_role);
         let on: GovernanceConfig = serde_yaml::from_str("orchestrator_role: true\n").unwrap();
         assert!(on.orchestrator_role);
+    }
+}
+
+#[cfg(test)]
+mod remote_mcp_ask_tests {
+    use super::{GovernanceConfig, RemoteMcpAsk};
+
+    #[test]
+    fn remote_mcp_ask_defaults_to_writes() {
+        assert_eq!(
+            GovernanceConfig::default().remote_mcp_ask,
+            RemoteMcpAsk::Writes
+        );
+        let parsed: GovernanceConfig = serde_yaml::from_str("background_review: true\n").unwrap();
+        assert_eq!(parsed.remote_mcp_ask, RemoteMcpAsk::Writes);
+    }
+
+    #[test]
+    fn remote_mcp_ask_reads_both_values() {
+        let all: GovernanceConfig = serde_yaml::from_str("remote_mcp_ask: all\n").unwrap();
+        assert_eq!(all.remote_mcp_ask, RemoteMcpAsk::All);
+        let writes: GovernanceConfig = serde_yaml::from_str("remote_mcp_ask: writes\n").unwrap();
+        assert_eq!(writes.remote_mcp_ask, RemoteMcpAsk::Writes);
+        assert!(serde_yaml::from_str::<GovernanceConfig>("remote_mcp_ask: some\n").is_err());
     }
 }

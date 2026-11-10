@@ -611,10 +611,13 @@ pub fn needs_owner_confirmation(registry: &ToolRegistry, tool: &str, args: &Valu
             })
             .any(in_system_folder);
     }
-    CONNECTOR_CONFIRM_TOOLS.contains(&tool)
-        || registry
-            .get(tool)
-            .is_some_and(|t| t.category() == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY)
+    if CONNECTOR_CONFIRM_TOOLS.contains(&tool) {
+        return true;
+    }
+    let is_remote = registry
+        .get(tool)
+        .is_some_and(|t| t.category() == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY);
+    is_remote && hq_tools::remote_mcp::asks_owner(tool, args)
 }
 
 /// Whether `path` is, or is inside, one of [`SYSTEM_VAULT_FOLDERS`], however it is spelled
@@ -1044,6 +1047,50 @@ mod tests {
             args["path"], "Notes/a.md",
             "ordinary arguments are untouched"
         );
+    }
+
+    /// The connector and the owner's chat both ask `hq_tools::remote_mcp::asks_owner`; the same
+    /// table is asserted for the chat in `hq-agent`'s `remote_reads_run_and_remote_writes_ask`.
+    #[test]
+    fn connector_and_agent_agree_on_remote_tool_marks() {
+        use hq_core::config::RemoteMcpAsk;
+        use hq_tools::remote_mcp::{create_remote_mcp_tools, record_tool_list};
+        let server = hq_core::config::RemoteMcpServer {
+            name: "gatewaypolicy".into(),
+            url: "https://example.invalid/mcp".into(),
+            api_key: None,
+            live_user_turn_only: false,
+        };
+        let mut registry = ToolRegistry::new();
+        for tool in create_remote_mcp_tools(&[server], None, RemoteMcpAsk::Writes) {
+            registry.register(tool);
+        }
+        record_tool_list(
+            "gatewaypolicy",
+            json!([
+                {"name": "get", "annotations": {"readOnlyHint": true}},
+                {"name": "put", "annotations": {"readOnlyHint": false}},
+                {"name": "bare"}
+            ])
+            .as_array()
+            .unwrap(),
+        );
+        for (tool, asks) in [("get", false), ("put", true), ("bare", true), ("new", true)] {
+            let args = json!({ "tool": tool });
+            let gateway = needs_owner_confirmation(&registry, "gatewaypolicy_call", &args);
+            assert_eq!(gateway, asks, "gateway, {tool}");
+            let shared = hq_tools::remote_mcp::asks_owner("gatewaypolicy_call", &args);
+            assert_eq!(
+                shared, gateway,
+                "gateway and shared seam disagree on {tool}"
+            );
+        }
+        // Listing the server's tools is read-only and never asks.
+        assert!(!needs_owner_confirmation(
+            &registry,
+            "gatewaypolicy_discover",
+            &json!({})
+        ));
     }
 
     #[test]

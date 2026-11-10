@@ -128,7 +128,10 @@ pub fn create_default_registry(
         db.clone(),
     ));
     if let Some(remotes) = &remotes {
-        tools.extend(remote_mcp::create_remote_mcp_tools(remotes, None));
+        let ask = config
+            .map(|c| c.governance.remote_mcp_ask)
+            .unwrap_or_default();
+        tools.extend(remote_mcp::create_remote_mcp_tools(remotes, None, ask));
     }
 
     let mut registry = ToolRegistry::new();

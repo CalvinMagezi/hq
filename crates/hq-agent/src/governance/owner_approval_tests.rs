@@ -252,3 +252,30 @@ async fn a_handoff_approval_shows_the_task_text_and_lapses_when_it_changes() {
         "an approval of the old text does not cover the new one"
     );
 }
+
+// A remote tool its server marked read-only runs; everything else keeps asking.
+#[test]
+fn remote_reads_run_and_remote_writes_ask() {
+    use hq_tools::remote_mcp::{REMOTE_MCP_CATEGORY, record_tool_list};
+    record_tool_list(
+        "agentpolicy",
+        json!([
+            {"name": "get", "annotations": {"readOnlyHint": true}},
+            {"name": "put", "annotations": {"readOnlyHint": false}},
+            {"name": "bare"}
+        ])
+        .as_array()
+        .unwrap(),
+    );
+    let asks = |tool: &str| {
+        needs_owner(
+            "agentpolicy_call",
+            REMOTE_MCP_CATEGORY,
+            &json!({"tool": tool}),
+        )
+    };
+    assert!(!asks("get"));
+    assert!(asks("put"));
+    assert!(asks("bare"));
+    assert!(asks("unlisted"));
+}

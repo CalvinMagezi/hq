@@ -6,12 +6,13 @@
 //! handshake is sent, so the server must accept bare `tools/list` and
 //! `tools/call` calls.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, RwLock};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use hq_core::config::RemoteMcpServer;
+use hq_core::config::{RemoteMcpAsk, RemoteMcpServer};
 use serde_json::{Value, json};
 
 use crate::registry::HqTool;
@@ -104,6 +105,68 @@ impl RemoteMcpClient {
 
 /// Shared by every remote server's tools so one tool-policy entry covers them all.
 pub const REMOTE_MCP_CATEGORY: &str = "remote_mcp";
+
+/// The suffix of the tool that calls a server's tools; the rest of its name is the server.
+const CALL_TOOL_SUFFIX: &str = "_call";
+/// The suffix of the tool that only lists a server's tools.
+const DISCOVER_TOOL_SUFFIX: &str = "_discover";
+
+/// Tools each server marked `annotations.readOnlyHint: true` in its last `tools/list`, by server
+/// name. Only a literal `true` is stored, so a tool with no mark, a `false` or a non-boolean is
+/// never in the set and is treated as a write.
+static READ_ONLY_TOOLS: LazyLock<RwLock<HashMap<String, HashSet<String>>>> =
+    LazyLock::new(Default::default);
+
+/// Whether every remote tool asks (`remote_mcp_ask: all`). Set where the tools are built, so the
+/// agent and the connector gateway read the same answer.
+static ASK_FOR_ALL: AtomicBool = AtomicBool::new(false);
+
+/// Keep which of `server`'s `tools` are marked read-only, replacing what an earlier listing said.
+pub fn record_tool_list(server: &str, tools: &[Value]) {
+    let read_only: HashSet<String> = tools
+        .iter()
+        .filter(|t| t["annotations"]["readOnlyHint"] == Value::Bool(true))
+        .filter_map(|t| t["name"].as_str().map(str::to_string))
+        .collect();
+    match READ_ONLY_TOOLS.write() {
+        Ok(mut all) => {
+            all.insert(server.to_string(), read_only);
+        }
+        Err(e) => tracing::warn!(error = %e, "remote_mcp: read-only marks not stored"),
+    }
+}
+
+/// Whether a call to the gateway tool `gateway_tool` (`<server>_call`) with `args` waits for the
+/// owner under `mode`. A tool is spared only when its server said so in a listing we have seen.
+pub fn call_asks_owner(mode: RemoteMcpAsk, gateway_tool: &str, args: &Value) -> bool {
+    if mode == RemoteMcpAsk::All {
+        return true;
+    }
+    // Listing changes nothing, and it is what refreshes the read-only marks.
+    if gateway_tool.ends_with(DISCOVER_TOOL_SUFFIX) {
+        return false;
+    }
+    let Some(server) = gateway_tool.strip_suffix(CALL_TOOL_SUFFIX) else {
+        return true;
+    };
+    let Some(tool) = args.get("tool").and_then(Value::as_str) else {
+        return true;
+    };
+    let Ok(all) = READ_ONLY_TOOLS.read() else {
+        return true;
+    };
+    !all.get(server).is_some_and(|set| set.contains(tool))
+}
+
+/// [`call_asks_owner`] under the mode the tools were built with.
+pub fn asks_owner(gateway_tool: &str, args: &Value) -> bool {
+    let mode = if ASK_FOR_ALL.load(Ordering::Relaxed) {
+        RemoteMcpAsk::All
+    } else {
+        RemoteMcpAsk::Writes
+    };
+    call_asks_owner(mode, gateway_tool, args)
+}
 
 const BEHAVIORAL_PROMPT: &str = "Authentication for this remote MCP server is already configured; call its discover/call tools directly instead of looking for credentials. If a call fails, the error text says why. Actions on a remote server can have real effects: confirm mutating calls with the user unless they already asked for that exact action.";
 
@@ -245,6 +308,7 @@ impl HqTool for RemoteMcpTool {
 
         let result = self.client.rpc("tools/list", json!({})).await?;
         let tools = result["tools"].as_array().cloned().unwrap_or_default();
+        record_tool_list(&self.client.server.name, &tools);
         let Some(q) = args
             .get("query")
             .and_then(|v| v.as_str())
@@ -268,7 +332,9 @@ impl HqTool for RemoteMcpTool {
 pub fn create_remote_mcp_tools(
     servers: &[RemoteMcpServer],
     family_guest: Option<crate::family_guest::FamilyGuestContext>,
+    ask: RemoteMcpAsk,
 ) -> Vec<Box<dyn HqTool>> {
+    ASK_FOR_ALL.store(ask == RemoteMcpAsk::All, Ordering::Relaxed);
     let mut tools: Vec<Box<dyn HqTool>> = Vec::new();
     if servers.is_empty() {
         return tools;
@@ -321,7 +387,7 @@ mod tests {
             api_key: None,
             live_user_turn_only: true,
         }];
-        let tools = create_remote_mcp_tools(&servers, None);
+        let tools = create_remote_mcp_tools(&servers, None, RemoteMcpAsk::Writes);
         let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         assert_eq!(names, ["diagrams_discover", "diagrams_call"]);
         assert!(tools.iter().all(|t| t.category() == REMOTE_MCP_CATEGORY));
@@ -410,7 +476,7 @@ mod tests {
             owner_name: "Owner".into(),
             allowed_harnesses: Vec::new(),
         };
-        let tools = create_remote_mcp_tools(&servers, Some(guest));
+        let tools = create_remote_mcp_tools(&servers, Some(guest), RemoteMcpAsk::Writes);
         let call_tool = tools.into_iter().find(|t| t.name() == "acme_call").unwrap();
         let res = call_tool
             .execute(json!({ "tool": "invoice_create", "args": { "amount": 100 } }))
@@ -418,5 +484,113 @@ mod tests {
             .unwrap();
         assert_eq!(res["status"], "confirmation_requested");
         assert!(res["message"].as_str().unwrap().contains("Carol"));
+    }
+
+    fn listing(server: &str, tools: Value) {
+        record_tool_list(server, tools.as_array().unwrap());
+    }
+
+    #[test]
+    fn only_a_literal_true_mark_spares_a_tool() {
+        listing(
+            "marks",
+            json!([
+                {"name": "get", "annotations": {"readOnlyHint": true}},
+                {"name": "put", "annotations": {"readOnlyHint": false}},
+                {"name": "bare"},
+                {"name": "noann", "annotations": {}},
+                {"name": "text", "annotations": {"readOnlyHint": "true"}},
+                {"name": "num", "annotations": {"readOnlyHint": 1}},
+            ]),
+        );
+        let asks = |tool: &str| {
+            call_asks_owner(RemoteMcpAsk::Writes, "marks_call", &json!({"tool": tool}))
+        };
+        assert!(!asks("get"));
+        for tool in ["put", "bare", "noann", "text", "num", "never_listed"] {
+            assert!(asks(tool), "{tool} must ask");
+        }
+    }
+
+    #[test]
+    fn all_asks_even_for_a_read_only_tool() {
+        listing(
+            "strict",
+            json!([{"name": "get", "annotations": {"readOnlyHint": true}}]),
+        );
+        let args = json!({"tool": "get"});
+        assert!(!call_asks_owner(RemoteMcpAsk::Writes, "strict_call", &args));
+        assert!(call_asks_owner(RemoteMcpAsk::All, "strict_call", &args));
+    }
+
+    #[test]
+    fn a_server_never_listed_or_a_malformed_call_asks() {
+        let args = json!({"tool": "get"});
+        assert!(call_asks_owner(
+            RemoteMcpAsk::Writes,
+            "unlisted_call",
+            &args
+        ));
+        listing(
+            "known",
+            json!([{"name": "get", "annotations": {"readOnlyHint": true}}]),
+        );
+        assert!(call_asks_owner(
+            RemoteMcpAsk::Writes,
+            "known_call",
+            &json!({})
+        ));
+        assert!(call_asks_owner(
+            RemoteMcpAsk::Writes,
+            "known_call",
+            &json!({"tool": 5})
+        ));
+        assert!(call_asks_owner(RemoteMcpAsk::Writes, "known", &args));
+    }
+
+    #[test]
+    fn a_new_listing_replaces_the_old_marks() {
+        listing(
+            "fresh",
+            json!([{"name": "get", "annotations": {"readOnlyHint": true}}]),
+        );
+        listing(
+            "fresh",
+            json!([{"name": "get", "annotations": {"readOnlyHint": false}}]),
+        );
+        let args = json!({"tool": "get"});
+        assert!(call_asks_owner(RemoteMcpAsk::Writes, "fresh_call", &args));
+    }
+
+    #[tokio::test]
+    async fn discover_records_the_marks() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        let reply = json!({"jsonrpc": "2.0", "id": 1, "result": {"tools": [
+            {"name": "read_it", "annotations": {"readOnlyHint": true}},
+            {"name": "change_it"}
+        ]}});
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(reply))
+            .mount(&server)
+            .await;
+        let servers = vec![RemoteMcpServer {
+            name: "listed".into(),
+            url: server.uri(),
+            api_key: None,
+            live_user_turn_only: false,
+        }];
+        let tools = create_remote_mcp_tools(&servers, None, RemoteMcpAsk::Writes);
+        let discover = tools
+            .iter()
+            .find(|t| t.name() == "listed_discover")
+            .unwrap();
+        // Filtered to nothing, the marks are still kept from the full listing.
+        discover.execute(json!({"query": "zzz"})).await.unwrap();
+        let read = json!({"tool": "read_it"});
+        let change = json!({"tool": "change_it"});
+        assert!(!asks_owner("listed_call", &read));
+        assert!(asks_owner("listed_call", &change));
     }
 }

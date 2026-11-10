@@ -193,6 +193,7 @@ impl SessionBuilder {
             self.identity
                 .as_ref()
                 .and_then(hq_tools::family_guest::FamilyGuestContext::from_identity),
+            self.config.governance.remote_mcp_ask,
         ));
 
         // Model control (Copilot catalog, primary switch) is for the owner only.
