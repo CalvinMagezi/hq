@@ -676,18 +676,22 @@ fn attest_caller(args: &mut Value, caller_session: Option<&str>) {
     }
 }
 
-/// Tools learn which key a call came in on only from these arguments: any value
-/// the caller sent is dropped, and they are set here for the handoff and tasks scopes and for
-/// a connector grant.
+/// Tools learn who is calling only from the runtime's `_hq_*` arguments: any the caller sent
+/// are dropped here, and the scope markers are set for the handoff and tasks scopes and for a
+/// connector grant.
 fn mark_scope(args: &mut Value, allowed: Option<&[&str]>, connector: Option<&str>) {
     let Some(obj) = args.as_object_mut() else {
         return;
     };
-    obj.remove(hq_core::caller::HANDOFF_SCOPE_ARG);
-    obj.remove(hq_core::caller::TASKS_SCOPE_ARG);
-    obj.remove(hq_core::caller::CONNECTOR_ARG);
-    // Native agent sessions set these themselves; a caller here never may.
-    obj.retain(|key, _| !key.starts_with(hq_core::caller::NATIVE_ARG_PREFIX));
+    // Everything under the runtime prefix is the runtime's to set, so a caller's copy of any of
+    // it is dropped: the scope and connector markers set below, the session marker
+    // `attest_caller` sets next, a native session's markers, and any marker added later. The
+    // one that stays only ever narrows what a call may do, and the transport may already have
+    // set it from the session header.
+    obj.retain(|key, _| {
+        !key.starts_with(hq_core::caller::RUNTIME_ARG_PREFIX)
+            || key == hq_core::caller::SPAWNED_SESSION_ARG
+    });
     if let Some(label) = connector {
         obj.insert(hq_core::caller::CONNECTOR_ARG.into(), json!(label));
     }
@@ -1025,6 +1029,32 @@ mod tests {
             args["path"], "Notes/a.md",
             "ordinary arguments are untouched"
         );
+    }
+
+    #[test]
+    fn a_caller_keeps_no_runtime_marker_it_sent_whether_known_today_or_added_later() {
+        use hq_core::caller::{GATEWAY_MARKERS, NATIVE_MARKERS, SPAWNED_SESSION_ARG};
+        let mut args = json!({"path": "Notes/a.md", "_hq_added_next_year": "forged"});
+        for marker in GATEWAY_MARKERS.iter().chain(NATIVE_MARKERS) {
+            args[*marker] = json!("forged");
+        }
+        mark_scope(&mut args, None, None);
+        attest_caller(&mut args, None);
+        let left: Vec<&String> = args.as_object().unwrap().keys().collect();
+        assert_eq!(
+            left,
+            ["_hq_spawned_session", "path"],
+            "only the marker that can only restrict, and the caller's own arguments, remain"
+        );
+        assert_eq!(SPAWNED_SESSION_ARG, "_hq_spawned_session");
+
+        // What the gateway verified is set after the caller's copies are gone.
+        let mut verified = json!({hq_core::caller::CALLER_SESSION_ARG: "hs-victim"});
+        mark_scope(&mut verified, Some(TASKS_ALLOWLIST), Some("Claude"));
+        attest_caller(&mut verified, Some("hs-real"));
+        assert_eq!(verified[hq_core::caller::CALLER_SESSION_ARG], "hs-real");
+        assert_eq!(verified[hq_core::caller::CONNECTOR_ARG], "Claude");
+        assert_eq!(verified[hq_core::caller::TASKS_SCOPE_ARG], true);
     }
 
     #[test]

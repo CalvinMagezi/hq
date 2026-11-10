@@ -1,12 +1,15 @@
 //! How a tool learns who is calling it.
 //!
 //! A model chooses the arguments of a tool call, so nothing it sends can say who the caller is.
-//! The runtime says it instead, in reserved arguments only it may set. The MCP gateway removes
-//! each marker it owns from what a caller sent and sets it again from what it verified (the key
-//! the call arrived on, a connector grant, a session's token), and drops everything under
-//! [`NATIVE_ARG_PREFIX`]. A native agent session drops every key under [`RUNTIME_ARG_PREFIX`] the
-//! model sent and then adds the `_hq_native_*` markers for itself. A tool that reads one of these
-//! is reading the runtime, never the caller.
+//! The runtime says it instead, in reserved arguments only it may set. The MCP gateway and a
+//! native agent session both drop every key under [`RUNTIME_ARG_PREFIX`] that a caller or a
+//! model sent, then add their own: the gateway from what it verified (the key the call arrived
+//! on, a connector grant, a session's token), the session the `_hq_native_*` markers for itself.
+//! The gateway keeps one caller-sent key, [`SPAWNED_SESSION_ARG`], because it can only take
+//! reach away. A tool that reads one of these is reading the runtime, never the caller.
+//!
+//! A new marker belongs in [`GATEWAY_MARKERS`] or [`NATIVE_MARKERS`] and under the prefix. The
+//! tests here and in the gateway then cover it without another line.
 //!
 //! The names and their readers live in the base because everything that writes on someone's
 //! behalf depends on them: tasks, vault review, provenance, `hq_ask`, the gateway and the
@@ -56,6 +59,17 @@ pub const NATIVE_AGENT_ARG: &str = "_hq_native_agent";
 pub const NATIVE_LEASES_ARG: &str = "_hq_native_leases";
 /// Everything a native session sets starts with this; the gateway drops all of it from callers.
 pub const NATIVE_ARG_PREFIX: &str = "_hq_native_";
+
+/// Every marker the MCP gateway sets.
+pub const GATEWAY_MARKERS: &[&str] = &[
+    HANDOFF_SCOPE_ARG,
+    TASKS_SCOPE_ARG,
+    CONNECTOR_ARG,
+    SPAWNED_SESSION_ARG,
+    CALLER_SESSION_ARG,
+];
+/// Every marker a native agent session sets.
+pub const NATIVE_MARKERS: &[&str] = &[NATIVE_SESSION_ARG, NATIVE_AGENT_ARG, NATIVE_LEASES_ARG];
 
 /// The connector grant's label, when the call came in on one.
 pub fn connector_label(args: &Value) -> Option<&str> {
@@ -136,34 +150,53 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// Every argument the runtime sets, by who sets it.
-    const GATEWAY_ARGS: &[&str] = &[
-        HANDOFF_SCOPE_ARG,
-        TASKS_SCOPE_ARG,
-        CONNECTOR_ARG,
-        SPAWNED_SESSION_ARG,
-        CALLER_SESSION_ARG,
-    ];
-    const NATIVE_ARGS: &[&str] = &[NATIVE_SESSION_ARG, NATIVE_AGENT_ARG, NATIVE_LEASES_ARG];
-
-    /// A native session clears a model's forgeries with one prefix test, and approvals are
-    /// matched on arguments with that prefix left out. Both hold only while every marker is
-    /// under the prefix, so a marker added outside it fails here and not in production.
+    /// The gateway and a native session clear forgeries with one prefix test, and approvals
+    /// are matched on arguments with that prefix left out. All three hold only while every
+    /// marker is under the prefix, so a marker added outside it fails here and not in
+    /// production.
     #[test]
     fn every_marker_is_under_the_runtime_prefix() {
-        for arg in GATEWAY_ARGS.iter().chain(NATIVE_ARGS) {
+        for arg in GATEWAY_MARKERS.iter().chain(NATIVE_MARKERS) {
             assert!(arg.starts_with(RUNTIME_ARG_PREFIX), "{arg}");
         }
+    }
+
+    /// The lists above are what the tests iterate, so a marker left out of them is a marker no
+    /// test covers. This reads the file and fails when a `_hq_` constant is in neither list.
+    #[test]
+    fn every_marker_constant_is_in_a_list() {
+        let source = include_str!("caller.rs");
+        let listed: Vec<&str> = GATEWAY_MARKERS
+            .iter()
+            .chain(NATIVE_MARKERS)
+            .copied()
+            .collect();
+        let mut found = 0;
+        for line in source.lines() {
+            let Some(rest) = line.strip_prefix("pub const ") else {
+                continue;
+            };
+            let Some((_, value)) = rest.split_once("= \"_hq_") else {
+                continue;
+            };
+            let value = format!("_hq_{}", value.trim_end_matches("\";"));
+            if value == NATIVE_ARG_PREFIX {
+                continue;
+            }
+            assert!(listed.contains(&value.as_str()), "{value} is in no list");
+            found += 1;
+        }
+        assert_eq!(found, listed.len(), "the scan and the lists disagree");
     }
 
     /// The gateway drops a caller's native markers by prefix, and nothing it sets itself may be
     /// caught by that.
     #[test]
     fn native_markers_share_a_prefix_no_gateway_marker_has() {
-        for arg in NATIVE_ARGS {
+        for arg in NATIVE_MARKERS {
             assert!(arg.starts_with(NATIVE_ARG_PREFIX), "{arg}");
         }
-        for arg in GATEWAY_ARGS {
+        for arg in GATEWAY_MARKERS {
             assert!(!arg.starts_with(NATIVE_ARG_PREFIX), "{arg}");
         }
     }
