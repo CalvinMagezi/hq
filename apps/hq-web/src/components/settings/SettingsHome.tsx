@@ -12,7 +12,7 @@ const ROW_ICONS: Record<string, LucideIcon> = {
   keys: KeyRound,
   messaging: MessageSquare,
   devices: Smartphone,
-  code: Code,
+  github: Code,
   spending: Gauge,
   safety: ShieldCheck,
   folders: Folder,

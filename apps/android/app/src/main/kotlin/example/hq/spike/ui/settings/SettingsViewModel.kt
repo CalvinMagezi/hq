@@ -145,8 +145,10 @@ class SettingsActions(
     val onTab: (SettingsWords.SafetyTab) -> Unit = {},
     val onForgetSite: (String) -> Unit = {},
     val onPhoneRow: (String) -> Unit = {},
-    /** Set by the shell: opens HQ Coder on the Helpers page. */
+    /** Set by the shell: opens the GitHub connection over the place that is showing. */
     var onCodeFromPhone: () -> Unit = {},
+    /** Set by the shell: opens Tasks or Helpers, by the row's key. */
+    var onWork: (String) -> Unit = {},
     val onCopyDiagnostics: () -> Unit = {},
     val onDismissLine: () -> Unit = {},
     val onMode: (Boolean) -> Unit = {},
@@ -346,14 +348,14 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun refreshNow() {
         if (frozen) return
         val local = listOf("settings" to "/api/settings", "chatApps" to "/api/chat-apps", "devices" to "/api/auth/devices", "budgets" to "/api/budgets", "health" to "/health", "vault" to "/api/vault-status", TRUSTED_SITES to "/api/fetch-sites")
-        val remote = listOf("providers" to "/api/usage/providers", "copilot" to "/api/copilot-usage", "forecast" to "/api/usage/forecast")
+        val remote = listOf("providers" to "/api/usage/providers", "copilot" to "/api/copilot-usage", "forecast" to "/api/usage/forecast", "github" to "/api/github")
         coroutineScope {
             val slow = remote.map { (key, path) -> async { key to get(path) } }
             val fast = local.map { (key, path) -> async { key to get(path) } }.awaitAll().toMap()
             if (frozen) return@coroutineScope
             val server = async { serverReport() }
             val before = _state.value.snap
-            publish(fast, mapOf("providers" to Got(before.providers, before.providers != null), "copilot" to Got(before.copilot, before.copilot != null), "forecast" to Got(before.forecast, before.forecast != null)))
+            publish(fast, mapOf("providers" to Got(before.providers, before.providers != null), "copilot" to Got(before.copilot, before.copilot != null), "forecast" to Got(before.forecast, before.forecast != null), "github" to Got(before.github, before.github != null)))
             val late = slow.awaitAll().toMap()
             serverBackup = server.await()
             if (frozen) return@coroutineScope
@@ -373,7 +375,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val before = _state.value.snap
         val kept = mapOf(
             "settings" to before.settings, "chatApps" to before.chatApps, "devices" to before.devices, "budgets" to before.budgets, "health" to before.health,
-            "providers" to before.providers, "copilot" to before.copilot, "forecast" to before.forecast, "vault" to before.vault,
+            "providers" to before.providers, "copilot" to before.copilot, "forecast" to before.forecast, "vault" to before.vault, "github" to before.github,
         )
         // A route HQ did not answer at all keeps its last values; an error answer is still shown as one.
         val silent = got.filterValues { it.body == null && !it.answered }.keys.filter { kept[it] != null }
@@ -382,7 +384,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val snap = SettingsSnapshot(
             body("settings"), body("chatApps"), body("devices"), body("budgets"), body("health"),
             unavailable = got.filterValues { it.body == null && it.answered }.keys,
-            providers = body("providers"), copilot = body("copilot"), forecast = body("forecast"), vault = body("vault"),
+            providers = body("providers"), copilot = body("copilot"), forecast = body("forecast"), vault = body("vault"), github = body("github"),
         )
         val now = Instant.now()
         val sites = got[TRUSTED_SITES]?.body?.optJSONArray("sites")?.let { a -> (0 until a.length()).map(a::getString) }
@@ -796,6 +798,11 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         if (key == HQ_CODER_ROW) {
             _state.update { it.copy(open = false) }
             actions.onCodeFromPhone()
+            return
+        }
+        if (key == WORK_TASKS_ROW || key == WORK_HELPERS_ROW) {
+            _state.update { it.copy(open = false) }
+            actions.onWork(key)
             return
         }
         val c = ctx()

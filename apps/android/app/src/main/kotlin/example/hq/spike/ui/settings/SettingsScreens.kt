@@ -115,6 +115,8 @@ private fun icon(key: String): ImageVector = when (key) {
     "shield" -> HqIcons.Shield
     "gauge" -> HqIcons.Gauge
     HQ_CODER_ROW -> HqIcons.Code
+    WORK_TASKS_ROW -> HqIcons.Tasks
+    WORK_HELPERS_ROW -> HqIcons.Helpers
     else -> HqIcons.Archive
 }
 

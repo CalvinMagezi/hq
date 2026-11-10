@@ -3773,5 +3773,10 @@
     <string name="topic_upkeep_about">A full disk, a machine that stopped answering, a spending limit</string>
     <string name="topic_email_about">Mail HQ sorted for you</string>
     <string name="chat_needs_ok_title">HQ needs your OK</string>
-    <string name="chat_needs_ok_open">Open in Inbox</string>
+    <string name="row_github">GitHub</string>
+    <string name="trail_github_off">Not connected</string>
+    <string name="trail_github_install">Pick repositories to finish</string>
+    <string name="trail_github_reconnect">Needs reconnecting</string>
+    <string name="trail_work_tasks">What HQ is tracking and doing</string>
+    <string name="trail_work_helpers">The agents HQ runs, and starting one</string>
 </resources>

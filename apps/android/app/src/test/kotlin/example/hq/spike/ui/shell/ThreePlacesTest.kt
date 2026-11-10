@@ -30,4 +30,10 @@ class ThreePlacesTest {
         assertEquals(listOf("a"), needsOfChat(needs, "th-1").map { it.id })
         assertTrue(needsOfChat(needs, null).isEmpty())
     }
+
+    @Test fun aSilencedRequestIsListedButLeftOffTheBadge() {
+        val ui = example.hq.spike.ui.inbox.InboxUi(needs = listOf(card("a", CardKind.Approval, null), card("b", CardKind.HelperAsks, null).copy(silenced = true)))
+        assertEquals(2, ui.shownNeeds.size)
+        assertEquals(1, ui.badge)
+    }
 }

@@ -168,7 +168,8 @@ class ShellActivity : ComponentActivity() {
     private fun rereadNotifications() {
         notifFacts = NotifAccess.read(this)
         inbox.actions.onServerOpen = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Notifications) }
-        settings.actions.onCodeFromPhone = { requested = Place.Helpers; helpers.actions.onGithubOpen() }
+        settings.actions.onCodeFromPhone = { helpers.actions.onGithubOpen() }
+        settings.actions.onWork = { key -> requested = if (key == example.hq.spike.ui.settings.WORK_TASKS_ROW) Place.Tasks else Place.Helpers }
         inbox.refreshBanner()
     }
 
@@ -456,7 +457,7 @@ class ShellActivity : ComponentActivity() {
                             onNotNow = settings.actions.onUpdateNotNow,
                         )
                     },
-                    startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
+                    startAt = start, inboxBadge = if (badge > 0) badge else inboxState.badge, status = shown,
                     onSearch = { openSearch(example.hq.spike.ui.search.SearchStart()) }, onOpenSearch = ::openSearch, onSettings = settings.actions.onOpen, updateDot = settingsState.updateDot,
                     subline = { place -> if (place == Place.Tasks && tasksState.tab == TaskTab.All) TaskFilterWords.bar(tasksState.scoped.count { TasksLogic.open(it) }) else null },
                     topActions = { place ->

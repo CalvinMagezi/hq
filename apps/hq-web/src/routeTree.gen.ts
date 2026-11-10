@@ -34,6 +34,7 @@ import { Route as SettingsSpendingRouteImport } from './routes/settings/spending
 import { Route as SettingsSafetyRouteImport } from './routes/settings/safety'
 import { Route as SettingsMessagingRouteImport } from './routes/settings/messaging'
 import { Route as SettingsKeysRouteImport } from './routes/settings/keys'
+import { Route as SettingsGithubRouteImport } from './routes/settings/github'
 import { Route as SettingsFoldersRouteImport } from './routes/settings/folders'
 import { Route as SettingsDevicesRouteImport } from './routes/settings/devices'
 import { Route as SettingsDataRouteImport } from './routes/settings/data'
@@ -171,6 +172,11 @@ const SettingsKeysRoute = SettingsKeysRouteImport.update({
   path: '/keys',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsGithubRoute = SettingsGithubRouteImport.update({
+  id: '/github',
+  path: '/github',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsFoldersRoute = SettingsFoldersRouteImport.update({
   id: '/folders',
   path: '/folders',
@@ -252,6 +258,7 @@ export interface FileRoutesByFullPath {
   '/settings/data': typeof SettingsDataRoute
   '/settings/devices': typeof SettingsDevicesRoute
   '/settings/folders': typeof SettingsFoldersRoute
+  '/settings/github': typeof SettingsGithubRoute
   '/settings/keys': typeof SettingsKeysRoute
   '/settings/messaging': typeof SettingsMessagingRoute
   '/settings/safety': typeof SettingsSafetyRoute
@@ -288,6 +295,7 @@ export interface FileRoutesByTo {
   '/settings/data': typeof SettingsDataRoute
   '/settings/devices': typeof SettingsDevicesRoute
   '/settings/folders': typeof SettingsFoldersRoute
+  '/settings/github': typeof SettingsGithubRoute
   '/settings/keys': typeof SettingsKeysRoute
   '/settings/messaging': typeof SettingsMessagingRoute
   '/settings/safety': typeof SettingsSafetyRoute
@@ -327,6 +335,7 @@ export interface FileRoutesById {
   '/settings/data': typeof SettingsDataRoute
   '/settings/devices': typeof SettingsDevicesRoute
   '/settings/folders': typeof SettingsFoldersRoute
+  '/settings/github': typeof SettingsGithubRoute
   '/settings/keys': typeof SettingsKeysRoute
   '/settings/messaging': typeof SettingsMessagingRoute
   '/settings/safety': typeof SettingsSafetyRoute
@@ -367,6 +376,7 @@ export interface FileRouteTypes {
     | '/settings/data'
     | '/settings/devices'
     | '/settings/folders'
+    | '/settings/github'
     | '/settings/keys'
     | '/settings/messaging'
     | '/settings/safety'
@@ -403,6 +413,7 @@ export interface FileRouteTypes {
     | '/settings/data'
     | '/settings/devices'
     | '/settings/folders'
+    | '/settings/github'
     | '/settings/keys'
     | '/settings/messaging'
     | '/settings/safety'
@@ -441,6 +452,7 @@ export interface FileRouteTypes {
     | '/settings/data'
     | '/settings/devices'
     | '/settings/folders'
+    | '/settings/github'
     | '/settings/keys'
     | '/settings/messaging'
     | '/settings/safety'
@@ -649,6 +661,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsKeysRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/github': {
+      id: '/settings/github'
+      path: '/github'
+      fullPath: '/settings/github'
+      preLoaderRoute: typeof SettingsGithubRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/folders': {
       id: '/settings/folders'
       path: '/folders'
@@ -782,6 +801,7 @@ interface SettingsRouteChildren {
   SettingsDataRoute: typeof SettingsDataRoute
   SettingsDevicesRoute: typeof SettingsDevicesRoute
   SettingsFoldersRoute: typeof SettingsFoldersRoute
+  SettingsGithubRoute: typeof SettingsGithubRoute
   SettingsKeysRoute: typeof SettingsKeysRoute
   SettingsMessagingRoute: typeof SettingsMessagingRoute
   SettingsSafetyRoute: typeof SettingsSafetyRoute
@@ -797,6 +817,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsDataRoute: SettingsDataRoute,
   SettingsDevicesRoute: SettingsDevicesRoute,
   SettingsFoldersRoute: SettingsFoldersRoute,
+  SettingsGithubRoute: SettingsGithubRoute,
   SettingsKeysRoute: SettingsKeysRoute,
   SettingsMessagingRoute: SettingsMessagingRoute,
   SettingsSafetyRoute: SettingsSafetyRoute,

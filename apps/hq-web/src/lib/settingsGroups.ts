@@ -10,6 +10,7 @@ export type SettingsPath =
   | '/settings/keys'
   | '/settings/messaging'
   | '/settings/devices'
+  | '/settings/github'
   | '/settings/spending'
   | '/settings/safety'
   | '/settings/folders'
@@ -56,7 +57,7 @@ export function settingsGroups({ lite, hub }: WhereHqRuns): SettingsGroupDef[] {
         { id: 'keys', label: 'row_ai_keys', path: '/settings/keys' },
         { id: 'messaging', label: 'row_messaging', path: '/settings/messaging' },
         { id: 'devices', label: 'row_other_devices', path: '/settings/devices' },
-        { id: 'code', label: 'github_title', path: '/helpers' },
+        { id: 'github', label: 'row_github', path: '/settings/github' },
       ],
     },
     {
@@ -164,6 +165,21 @@ export function formatSize(bytes: number): string {
   if (bytes >= 10 * MB) return `${Math.round(bytes / MB)} MB`
   if (bytes >= MB / 10) return `${(bytes / MB).toFixed(1)} MB`
   return `${Math.round(bytes / 1024)} KB`
+}
+
+/** The GitHub row's words: who it is connected to, or the step that is left. Null until HQ has answered. */
+export interface GithubTrail {
+  key: StringKey
+  owner?: string
+  needsLook: boolean
+}
+
+export function githubTrail(link: { standing: string; owner: string | null } | null | undefined): GithubTrail | null {
+  if (!link) return null
+  if (link.standing === 'connected') return { key: 'github_connected_as', owner: link.owner ?? '', needsLook: false }
+  if (link.standing === 'needs_install') return { key: 'trail_github_install', needsLook: true }
+  if (link.standing === 'reconnect') return { key: 'trail_github_reconnect', needsLook: true }
+  return { key: 'trail_github_off', needsLook: false }
 }
 
 /** The Notifications row's words: the two switches only while this browser really receives them. */

@@ -75,6 +75,7 @@ export const SETTINGS_SECTIONS = [
   'version',
   'data',
   'devices',
+  'github',
   'keys',
   'messaging',
   'safety',

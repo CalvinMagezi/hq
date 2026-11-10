@@ -10,6 +10,7 @@ import {
   ageWords,
   backupNeedsLook,
   formatSize,
+  githubTrail,
   hashRedirect,
   liteNotice,
   pickCard,
@@ -31,7 +32,7 @@ describe('the four groups (check 1)', () => {
     const rows = settingsGroups(HERE).flatMap((g) => g.rows.map((r) => t(r.label)))
     expect(rows).toEqual([
       'Notifications', 'Time zone', 'Install and version', 'Data used', 'Sign out this browser',
-      'AI service and keys', 'Messaging apps', 'Other devices', 'HQ Coder',
+      'AI service and keys', 'Messaging apps', 'Other devices', 'GitHub',
       'Spending limits', 'Safety and limits', 'Folders helpers may use',
       'Tasks', 'Helpers',
       'Backup and about',
@@ -178,5 +179,21 @@ describe('rows say what this browser really does', () => {
     expect([inInboxTab(ask, 'pending'), inInboxTab(ask, 'all'), inInboxTab(ask, 'resolved')]).toEqual([true, false, false])
     expect([inInboxTab(news, 'pending'), inInboxTab(news, 'all')]).toEqual([false, true])
     expect(inInboxTab(done, 'resolved')).toBe(true)
+  })
+})
+
+describe('the GitHub row says where the connection stands', () => {
+  test('connected names the owner; a step that is left shows amber', () => {
+    expect(githubTrail(null)).toBeNull()
+    expect(githubTrail({ standing: 'connected', owner: 'octo' })).toEqual({ key: 'github_connected_as', owner: 'octo', needsLook: false })
+    expect(githubTrail({ standing: 'not_connected', owner: null })).toEqual({ key: 'trail_github_off', needsLook: false })
+    expect(githubTrail({ standing: 'needs_install', owner: 'octo' })?.needsLook).toBe(true)
+    expect(githubTrail({ standing: 'reconnect', owner: 'octo' })?.needsLook).toBe(true)
+  })
+
+  test('the row opens its own Settings page, not Helpers', () => {
+    const row = settingsGroups(HERE).flatMap((g) => g.rows).find((r) => r.id === 'github')
+    expect(row?.path).toBe('/settings/github')
+    expect(settingsGroups({ lite: true, hub: false }).flatMap((g) => g.rows).some((r) => r.id === 'github')).toBe(false)
   })
 })

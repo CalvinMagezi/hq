@@ -2082,4 +2082,10 @@ export const en = {
   topic_tips_about: "Weekly digests and things you have not tried",
   topic_upkeep_about: "A full disk, a machine that stopped answering, a spending limit",
   topic_email_about: "Mail HQ sorted for you",
+  row_github: "GitHub",
+  trail_github_off: "Not connected",
+  trail_github_install: "Pick repositories to finish",
+  trail_github_reconnect: "Needs reconnecting",
+  trail_work_tasks: "What HQ is tracking and doing",
+  trail_work_helpers: "The agents HQ runs, and starting one",
 } as const
