@@ -94,6 +94,19 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   when an agent blocks. A coding agent's trust dialog defaults to "No, exit", so
   blocked launches are reported, never auto-answered. Setup, security model and
   pairing a machine: `docs/AGENT_HOST.md`, `docs/JOIN_A_MACHINE.md`.
+- **Three places.** The web app, the desktop window and the phone show Notes, Chat and Inbox.
+  Tasks and Helpers are where HQ and its agents work: they keep their pages and addresses and
+  open from an Inbox item, a chat card, search or Settings, never from the bar
+  (`BAR_PLACES` in `apps/hq-web/src/lib/routes.ts`, `Place.bar` in the Android shell). Do not
+  add a place to the bar for something only agents use. Plan: `docs/plans/three-places.md`.
+- **The owner hears from HQ, not from helpers.** A helper a chat drives wakes that chat when
+  it blocks; the owner's inbox gets an item only if the prompt outlives
+  `agent_host.driver_grace_minutes` or nobody drives the session
+  (`session_supervisor/alerts.rs`, `raise_unanswered`). The owner can silence a topic
+  (helpers, tasks, tips, upkeep, email) or pause them all (`hq_db::inbox_prefs`,
+  `/api/notifications/silences`): silenced items still land in the inbox, with no push, no
+  phone notice and no badge count. A source nobody listed is HQ's own topic, which can never
+  be silenced, so a new kind of approval is never hidden by accident.
 - **No job queue**: the filesystem job queue (`_jobs/`) is retired. All work
   dispatches through sub-agents.
 - **Chat relays are chat only.** Telegram and Discord carry conversations, never

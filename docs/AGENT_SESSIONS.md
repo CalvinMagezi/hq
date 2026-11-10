@@ -89,6 +89,14 @@ app, and list every agent on a machine with `hq host status`.
   full-screen view in place (Copilot) scrolls nothing off, so for it only the screen changes.
 - **A blocked agent alerts once.** The supervisor (every minute) raises an action-needed
   item when a session blocks, and again only if it blocks in a new state.
+- **A session a chat drives asks HQ first.** When the chat has Drive on, the block wakes the
+  chat and nothing goes to the owner's inbox: HQ answers the prompt, or asks the owner for
+  approval in its own name. If the prompt is still there after
+  `agent_host.driver_grace_minutes` (default 5, 0 tells the owner at once), or the chat let go
+  of the session, the owner gets the item after all. A chat that only watches tells the owner
+  at once.
+- **An answered prompt leaves the inbox.** When a session is no longer blocked, or ends, its
+  waiting "needs an answer" items are retired, however the prompt was cleared.
 - **A finished agent alerts once.** When the host reports `done` (the agent finished a turn and
   is waiting), the supervisor posts the last screen to the relay, so the operator hears about
   completion without the session having to exit. `idle` (nothing new happened) does not alert.

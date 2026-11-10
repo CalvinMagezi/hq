@@ -44,6 +44,8 @@ import example.hq.spike.ui.settings.SettingsViewModel
 import example.hq.spike.ui.settings.settingsFixture
 import example.hq.spike.ui.inbox.InboxCard
 import example.hq.spike.ui.inbox.AllowedPage
+import example.hq.spike.ui.inbox.ChatNeeds
+import example.hq.spike.ui.inbox.needsOfChat
 import example.hq.spike.ui.inbox.InboxDetails
 import example.hq.spike.ui.inbox.InboxScreen
 import example.hq.spike.ui.inbox.SignOutAsk
@@ -410,6 +412,13 @@ class ShellActivity : ComponentActivity() {
                 if (stopped != null && StartRules.autoOpenOk(StartRules.lastAutoOpen(this@ShellActivity), now)) { StartRules.markAutoOpen(this@ShellActivity, now); connectionOpen = true }
             }
             LaunchedEffect(chatState.failed, connectionOpen) { if (chatState.failed || connectionOpen) services.refreshAi() }
+            // A reply in progress may stop to ask for the owner's OK: the inbox is read every few seconds while one runs,
+            // and once more when it ends, so the request shows in the chat and in the Inbox without waiting for the poll.
+            val replying = chatState.live != null
+            LaunchedEffect(replying) {
+                if (fixture != null) return@LaunchedEffect
+                if (replying) while (true) { delay(CHAT_NEEDS_POLL_MS); inbox.refreshNow() } else inbox.refreshNow()
+            }
             val savedAt = remember(status) { StartRules.lastAnswer(this@ShellActivity).takeIf { it > 0 } }
             val uiScope = androidx.compose.runtime.rememberCoroutineScope()
             val atTop: (Place) -> Unit = { place ->
@@ -453,7 +462,7 @@ class ShellActivity : ComponentActivity() {
                     overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); SettingsHost(settingsState, settings.actions); SearchHost(searchState, shown); if (tasksState.away.open) AwayHost(tasksState); web?.let { page -> WebHostScreen(page, onClose = { web = null }, onStartHq = ::tryStartAgain, onNotes = { web = null; requested = Place.Notes }) } },
                 ) { place ->
                     when (place) {
-                        Place.Chat -> ChatScreen(chatState, chat.actions, status = shown, onStartHq = ::tryStartAgain, onAiKeys = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Keys) })
+                        Place.Chat -> ChatScreen(chatState, chat.actions, status = shown, onStartHq = ::tryStartAgain, onAiKeys = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Keys) }, needs = { ChatNeeds(needsOfChat(inboxState.shownNeeds, chatState.threadId), inboxState, inbox.actions) })
                         Place.Notes -> NotesPlace(notesState)
                         Place.Inbox -> InboxPlace(inboxState)
                         Place.Tasks -> TasksPlace(tasksState)
@@ -610,6 +619,8 @@ class ShellActivity : ComponentActivity() {
     companion object {
         /** The running notice sets this to "connection" so a tap on a stopped HQ opens the sheet. */
         const val EXTRA_SHEET = "sheet"
+        /** How often the inbox is read while a reply runs, so a request it stops for shows in the chat. */
+        const val CHAT_NEEDS_POLL_MS = 4_000L
         const val STATE_WEB = "web"
         const val MODE_FILE_MAX = 64L
         const val TAIL_BYTES = 16_384L

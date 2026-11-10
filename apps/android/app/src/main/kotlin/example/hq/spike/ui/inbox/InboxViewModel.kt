@@ -109,6 +109,11 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Reads the inbox now rather than at the next poll: a chat that waits for an answer shows its request at once. */
+    suspend fun refreshNow() {
+        if (!frozen) refresh()
+    }
+
     fun freeze(fixed: InboxUi) {
         frozen = true
         _state.value = fixed

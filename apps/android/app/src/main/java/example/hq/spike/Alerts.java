@@ -235,6 +235,8 @@ final class Alerts {
         Map<String, JSONObject> out = new LinkedHashMap<>();
         for (int i = 0; i < arr.length(); i++) {
             JSONObject o = arr.getJSONObject(i);
+            // A topic the owner silenced waits in the Inbox without a notification.
+            if (o.optBoolean("silenced", false)) continue;
             String id = prefix + o.getString("id");
             o.put("id", id);
             out.put(id, o);

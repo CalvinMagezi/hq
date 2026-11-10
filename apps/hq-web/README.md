@@ -50,4 +50,4 @@ bun run build        # dist/client: point hq at it with web_static_dir, or copy 
 | Chat | `/api/threads`, `/api/threads/{id}/messages`, `/api/threads/{id}/archive` |
 | Vault | `/api/tree?recursive=true`, `/api/note` (GET, PUT), `/api/note/create`, `/api/pinned`, `/api/pin`, `/api/vault-signals`, `/api/vault/folders`, `/api/search`, `/api/vault-asset`, `/api/vault-status` |
 | Tasks | `/api/spaces`, `/api/folders`, `/api/initiatives`, `/api/tasks`, `/api/tasks/{id}` (PATCH, DELETE), `/api/tasks/{id}/comments` |
-| Inbox | `/api/notifications`, `/api/notifications/{id}/action`, `/api/notifications/mark-all-read` |
+| Inbox | `/api/notifications`, `/api/notifications/{id}/action`, `/api/notifications/{id}/read`, `/api/notifications/read-all`, `/api/notifications/archive-all`, `/api/notifications/clear-done`, `/api/notifications/restore`, `/api/notifications/silences` |

@@ -157,6 +157,23 @@ fun SignOutAsk(ui: InboxUi, actions: InboxActions) {
     example.hq.spike.ui.shell.ConfirmDialog(example.hq.spike.ui.shell.ConfirmCopy.signOutDevice(context, name), { actions.onAskSignOut(null) }, actions.onSignOutConfirm, busy = ui.signingOut, error = ui.signOutError)
 }
 
+/**
+ * The requests a chat is waiting on, shown in that chat above the composer with the same card and the same buttons as the
+ * Inbox, so the owner answers where they asked. Answering here answers the Inbox item.
+ */
+@Composable
+fun ChatNeeds(cards: List<InboxCard>, ui: InboxUi, actions: InboxActions) {
+    if (cards.isEmpty()) return
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.chat_needs_ok_title), style = SmallText, color = Mts.InkMuted)
+        for (card in cards) NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook = { actions.onDetails(it) })
+    }
+}
+
+/** The requests in [needs] that came from the chat [threadId]; none while the chat has no id yet. */
+fun needsOfChat(needs: List<InboxCard>, threadId: String?): List<InboxCard> =
+    if (threadId == null) emptyList() else needs.filter { it.kind == CardKind.Approval && it.threadId == threadId }
+
 @Composable
 private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit) {
     val shape = RoundedCornerShape(16.dp)
