@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 
+import { scrollNote, traceScroller } from './scrollDebug'
+
 // Within this many pixels of the end still counts as "at the bottom" (momentum scrolling overshoots).
 const AT_BOTTOM_SLACK_PX = 80
 // A wheel, finger or key moved the list this recently, so a move up is the reader's own.
@@ -48,6 +50,7 @@ export function useStickToBottom(
       stickRef.current = true
       setAtBottom(true)
       setHasUnseen(false)
+      scrollNote(`scrollToBottom smooth=${smooth}`)
       el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
     },
     [scrollRef],
@@ -80,6 +83,7 @@ export function useStickToBottom(
       if (near) stickRef.current = true
       else if (el.scrollTop < lastTop) {
         const readerMoved = dragging || performance.now() - movedAt < INTENT_MS
+        scrollNote(`up by ${Math.round(lastTop - el.scrollTop)} reader=${readerMoved} follow=${stickRef.current}`)
         if (letsGo(near, el.scrollTop, lastTop, readerMoved)) stickRef.current = false
         // A jump up nobody asked for, while following, would strand the view until the next resize.
         else if (stickRef.current) el.scrollTop = el.scrollHeight
@@ -112,9 +116,13 @@ export function useStickToBottom(
       if (stickRef.current) el.scrollTop = el.scrollHeight
     })
     observer.observe(content)
+    const stopTrace = traceScroller(el, content)
     // The keyboard opening on a phone shrinks the scroller itself.
     observer.observe(el)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      stopTrace()
+    }
   }, [scrollRef, contentRef])
 
   useLayoutEffect(() => {
