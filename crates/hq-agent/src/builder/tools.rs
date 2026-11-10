@@ -152,15 +152,6 @@ impl SessionBuilder {
         // Vault + memory tools — direct vault access without subagent overhead
         let mut tools =
             hq_tools::vault::create_vault_tools(vault_path.to_path_buf(), shared_db.clone());
-        // Restricted audiences (FR-072) only see vault context labelled for them.
-        if let (Some(id), Ok(vault)) = (
-            self.identity.as_ref(),
-            hq_vault::VaultClient::new(vault_path.to_path_buf()),
-        ) {
-            tools =
-                hq_tools::vault::scope_vault_tools(tools, std::sync::Arc::new(vault), &id.scope);
-        }
-
         // Mailbox messaging (relay and local agent mailboxes).
         tools.extend(hq_tools::agent_comm::create_agent_comm_tools(
             vault_path.to_path_buf(),
@@ -249,6 +240,17 @@ impl SessionBuilder {
                 vault_path.to_path_buf(),
                 db.clone(),
             ));
+        }
+
+        // Restricted audiences (FR-072) only see vault context labelled for them. This runs over
+        // the whole catalog, after the shortcut and export tools are added: a tool that reads
+        // notes and is added after this point is a tool the audience reads unfiltered.
+        if let (Some(id), Ok(vault)) = (
+            self.identity.as_ref(),
+            hq_vault::VaultClient::new(vault_path.to_path_buf()),
+        ) {
+            tools =
+                hq_tools::vault::scope_vault_tools(tools, std::sync::Arc::new(vault), &id.scope);
         }
         tools
     }

@@ -26,7 +26,8 @@ const PATH_WRITE_TOOLS: &[&str] = &[
     "vault_delete",
 ];
 
-/// Wraps every vault or memory tool when the audience is restricted. Tools
+/// Wraps every vault or memory tool (by name or by the `vault` category) when the audience is
+/// restricted. Tools
 /// this file does not know how to filter (graph, tags, reorg, reindex) are
 /// refused outright rather than allowed to leak through aggregate results.
 struct ScopedVaultTool {
@@ -46,7 +47,13 @@ pub fn scope_vault_tools(
     tools
         .into_iter()
         .map(|inner| -> Box<dyn HqTool> {
-            if inner.name().starts_with("vault_") || inner.name().starts_with("memory_") {
+            // By name or by category: `context_packet`, `note_review`, `note_provenance` and the
+            // `vault_find` shortcut read notes and are not all named `vault_*`. One this file
+            // does not know how to filter is refused below, which is the safe default.
+            if inner.name().starts_with("vault_")
+                || inner.name().starts_with("memory_")
+                || inner.category() == "vault"
+            {
                 Box::new(ScopedVaultTool {
                     inner,
                     vault: vault.clone(),
