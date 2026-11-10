@@ -51,7 +51,7 @@ No cloud backend. No vendor lock-in. One binary of about 58 MB.
 ```
 You (PWA / Discord / Telegram / Terminal)
      |
-     +-- HQ Control Center PWA  --> Tailscale-secured, installable on any device
+     +-- HQ web app (PWA)       --> Tailscale-secured, installable on any device
      +-- Discord Relay          --> the HQ agent; !cancel to interrupt
      +-- Telegram Relay         --> the HQ agent, photos, documents; !cancel to interrupt
      +-- Terminal Chat          --> Streaming REPL
@@ -129,11 +129,13 @@ launchd service; it is macOS only and not needed on Linux.
 With Homebrew: `brew install CalvinMagezi/tap/agent-hq` (binary only).
 
 
-`curl -fsSL https://agent-hq.online/install.sh | bash` (or `npx agent-hq-cli`, which needs Node 18.17+) downloads the latest stable release, verifies its minisign
+`curl -fsSL https://agent-hq.online/install.sh | bash` (or `npx agent-hq-cli`, which needs Node 18.17+) downloads the current stable release, verifies its minisign
 signature and checksum, and installs `hq` into `~/.local/bin` and the web UI into
 `~/.local/share/agent-hq/web` (`hq start all` then serves it at http://localhost:5678). Prebuilt binaries
 exist for Linux x86_64, Linux aarch64 and macOS (Apple Silicon and Intel). Other
 platforms build from source with `cargo`.
+
+`stable` follows `main`: a build is promoted once it has been out 24 hours with CI and the release checks green ([`auto-promote.yml`](.github/workflows/auto-promote.yml)), so stable is at most about a day and a half behind. For the newest build, add `--channel main` to the install script (`bash -s -- --channel main`). After installing, `hq --version` shows what you got; `hq update --check` shows whether a newer one is out.
 
 **Docker:** `docker run -d -p 127.0.0.1:5678:5678 -v hq-data:/data ghcr.io/calvinmagezi/hq` runs HQ with its web UI and prints a web token on first start. A Compose example and the details are in [docs/DOCKER.md](docs/DOCKER.md).
 
@@ -508,7 +510,7 @@ against this machine's vault. Clients that speak HTTP (Claude Code) can use the 
 
 ## PWA Dashboard
 
-The HQ Control Center is a React PWA (TanStack Start + Vite) that connects to the Rust backend via WebSocket. It provides:
+The HQ web app is a React PWA (TanStack Start + Vite) that connects to the Rust backend via WebSocket. It provides:
 
 - Real-time agent streaming
 - Vault search and browsing
