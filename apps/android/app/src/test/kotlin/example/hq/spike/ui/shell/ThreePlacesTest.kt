@@ -36,4 +36,9 @@ class ThreePlacesTest {
         assertEquals(2, ui.shownNeeds.size)
         assertEquals(1, ui.badge)
     }
+
+    @Test fun silencedItemsAreToldApartSoTheyAreRememberedWithoutANotice() {
+        val items = linkedMapOf("a" to org.json.JSONObject("""{"silenced":true}"""), "b" to org.json.JSONObject("""{"silenced":false}"""), "c" to org.json.JSONObject("{}"))
+        assertEquals(listOf("a"), example.hq.spike.AlertsSilenced.ids(items))
+    }
 }

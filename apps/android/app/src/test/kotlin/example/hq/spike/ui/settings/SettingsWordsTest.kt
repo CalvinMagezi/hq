@@ -347,4 +347,15 @@ class SettingsWordsTest {
         // An HQ that has not answered, or has no HQ Coder, keeps the line that says what it is.
         assertEquals("HQ changes your code on GitHub. You review and merge.", row(null).status)
     }
+
+    @Test fun aSilenceRowSaysOnSilencedOrUntilWhen() {
+        val s = SettingsWords.silences(JSONObject("""{"pause":{"topic":"all","silenced":true,"until":"2026-10-21T16:30:00+00:00"},
+            "topics":[{"topic":"helpers","silenced":false,"until":null},{"topic":"tasks","silenced":true,"until":null},{"topic":"tips","silenced":true,"until":"2026-10-21T16:30:00+00:00"}]}"""))
+        assertEquals(listOf("helpers", "tasks", "tips"), s.topics.map { it.topic })
+        assertEquals("On", SettingsWords.silenceLine(testWords(), s.topics[0], ZoneOffset.UTC))
+        assertEquals("Silenced", SettingsWords.silenceLine(testWords(), s.topics[1], ZoneOffset.UTC))
+        assertEquals("Silenced until Wed 4:30 PM", SettingsWords.silenceLine(testWords(), s.topics[2], ZoneOffset.UTC))
+        assertEquals("Paused until Wed 4:30 PM", SettingsWords.pauseLine(testWords(), s.pause, ZoneOffset.UTC))
+        assertNull(SettingsWords.pauseLine(testWords(), s.topics[0], ZoneOffset.UTC))
+    }
 }

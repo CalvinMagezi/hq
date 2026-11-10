@@ -47,6 +47,9 @@ data class HomeGroup(val title: String, val rows: List<HomeRow>, val note: Strin
 /** A line on a read-only page: a title with its value, and a sentence that says what it means. */
 data class FactRow(val title: String, val value: String, val text: String? = null, val good: Boolean = false, val opens: SettingsPage? = null)
 
+typealias SilenceRow = SettingsWords.SilenceRow
+typealias Silences = SettingsWords.Silences
+
 /** The words of the Settings board, built from what the server sent. Pure, so each line can be tested from a real response. */
 object SettingsWords {
     private fun notAnswered(w: Words) = w.s(R.string.settings_no_answer_yet)
@@ -626,4 +629,33 @@ object SettingsWords {
     }
 
     private fun numOrNull(o: JSONObject?, name: String): Double? = o?.takeIf { it.has(name) && !it.isNull(name) }?.optDouble(name)?.takeIf { it.isFinite() }
+
+    data class SilenceRow(val topic: String, val silenced: Boolean, val until: Instant?)
+    data class Silences(val pause: SilenceRow, val topics: List<SilenceRow>)
+
+    private val SILENCE_TIME_FORMAT: java.time.format.DateTimeFormatter
+        get() = java.time.format.DateTimeFormatter.ofPattern("EEE h:mm a", java.util.Locale.getDefault())
+
+    fun silences(o: JSONObject): Silences {
+        fun row(obj: JSONObject?) = SilenceRow(
+            topic = obj?.optString("topic").orEmpty(),
+            silenced = obj?.optBoolean("silenced", false) == true,
+            until = time(obj, "until"),
+        )
+        val pause = row(o.optJSONObject("pause"))
+        val topics = o.arr("topics").items().map(::row)
+        return Silences(pause, topics)
+    }
+
+    fun silenceLine(w: Words, row: SilenceRow, zone: ZoneId = ZoneId.systemDefault()): String {
+        if (!row.silenced) return w.s(R.string.silence_on)
+        val until = row.until ?: return w.s(R.string.silence_off)
+        return w.s(R.string.silence_off_until, until.atZone(zone).format(SILENCE_TIME_FORMAT))
+    }
+
+    fun pauseLine(w: Words, pause: SilenceRow, zone: ZoneId = ZoneId.systemDefault()): String? {
+        if (!pause.silenced) return null
+        val until = pause.until ?: return w.s(R.string.silence_paused)
+        return w.s(R.string.silence_paused_until, until.atZone(zone).format(SILENCE_TIME_FORMAT))
+    }
 }

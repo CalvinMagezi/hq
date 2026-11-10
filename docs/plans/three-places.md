@@ -37,7 +37,7 @@ interrupted only when a decision is theirs.
 - Phone: `Place.bar` in `ui/shell/HqShell.kt`.
 - Tasks and Helpers keep every address and link (`/tasks/...`, `/helpers/...`,
   `hq://tasks`, `hq://helpers`). They open from an Inbox item, a chat card, search, a
-  notification, and on the web from Settings, "What HQ is working on".
+  notification, and from Settings, "What HQ is working on".
 
 ### Who is told when a helper stops at a prompt
 
@@ -79,13 +79,34 @@ to the dialog, so it stayed in Needs you after the prompt was long gone.
 - **The badge** counts the Inbox's requests. It used to add the helpers at a prompt on top,
   which showed one question twice.
 
+### Where the doors are
+
+Taking two places off the bar moved what lived on them.
+
+- **Tasks and Helpers.** Settings has a group, "What HQ is working on", with a row for each, on
+  the web and on the phone. On those pages no bar item is lit and Back goes to Chat.
+- **Connecting GitHub.** It was a card on the Helpers page. It is now a Settings row, "GitHub",
+  under Your accounts. The row says who it is connected to or the step that is left, in amber
+  when it needs a look. On the web it opens `/settings/github`; on the phone it opens the
+  sheet over the place that is showing, and coming back from GitHub's page keeps that place.
+  The Helpers page still shows the card.
+- **Silence on the phone.** Settings, Notifications has the same pause and topic switches as
+  the web. The phone's badge leaves a silenced request out, and a topic turned back on does
+  not post notices for what arrived while it was silenced.
+
+### What silence covers
+
+A helper's question and a task that needs the owner are topics (helpers, tasks), so silencing
+them, or pausing everything, holds their notifications too. That is the point of the switch,
+and the request still waits in the Inbox. What HQ asks for itself (an approval of a tool call,
+a new sign-in, an update, a connector request) has no topic and always gets through.
+
 ### What phase 1 did not do
 
-- The phone's Inbox has no Mark all as read, Clear this list or Silence controls yet. It
-  honours a silence set on the web (no notice is posted for a silenced item).
+- The phone's Inbox has no read state, Mark all as read or Clear this list yet.
 - A question from a server HQ still opens that HQ's own web app from the phone's notice. The
   phone's Inbox lists only the HQ it runs.
-- The phone's Settings has no "What HQ is working on" group.
+- "Start a helper" is on the Helpers page only (phase 3 moves it into Chat).
 
 ## Phase 2: tasks that agents own (proposal)
 

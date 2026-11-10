@@ -617,6 +617,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 
     suspend fun deleteAt(path: String) { send(authed(path).delete().build()) { } }
 
+    suspend fun deleteJson(path: String): JSONObject = send(authed(path).delete().build()) { if (it.isBlank()) JSONObject() else JSONObject(it) }
+
     data class TrashedNote(val trashPath: String, val originalPath: String, val trashedOn: String, val daysLeft: Int)
 
     suspend fun deleteNote(path: String): String =

@@ -235,7 +235,8 @@ class ShellActivity : ComponentActivity() {
             return
         }
         closePages()
-        requested = link.place
+        // Coming back from GitHub opens its sheet over the place the owner left, since Helpers is no longer where it lives.
+        if (!link.github) requested = link.place
         applyLink(link)
     }
 
@@ -335,7 +336,7 @@ class ShellActivity : ComponentActivity() {
         if (intent.getBooleanExtra(AlertPoster.EXTRA_NOTICE_TAP, false)) example.hq.spike.measure.Counters.get(this).bump(example.hq.spike.measure.Counter.NoticeTapped)
     }
 
-    private fun placeOf(intent: Intent): Place? = linkOf(intent)?.place
+    private fun placeOf(intent: Intent): Place? = linkOf(intent)?.takeUnless { it.github }?.place
 
     /** The design-check extras (place, badge, fixture, balance) work only in a debuggable build: the shell is the launcher, so any app can start it with extras. */
     private fun debuggable(): Boolean = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0

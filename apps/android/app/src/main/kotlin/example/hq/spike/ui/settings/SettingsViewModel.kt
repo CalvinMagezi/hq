@@ -128,6 +128,8 @@ data class SettingsUi(
     val stale: Boolean = false,
     /** Save a copy now: idle, running, done or failed. */
     val copy: BackupCopy.State = BackupCopy.State.Idle,
+    val silences: Silences? = null,
+    val silenceBusy: Boolean = false,
 ) {
     val page: SettingsPage get() = stack.lastOrNull() ?: SettingsPage.Home
 
@@ -158,6 +160,9 @@ class SettingsActions(
     val onRestartConfirm: () -> Unit = {},
     val onFix: (PhoneFix) -> Unit = {},
     val onChannel: (String) -> Unit = {},
+    val onSilenceTopic: (String, Boolean) -> Unit = { _, _ -> },
+    val onPause: (Int) -> Unit = {},
+    val onResume: () -> Unit = {},
     val onDetails: (Boolean) -> Unit = {},
     val onUpgraderNoteSeen: () -> Unit = {},
     val onServerConnect: (String, String) -> Unit = { _, _ -> },
@@ -220,10 +225,16 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     val actions = SettingsActions(
         onOpen = ::open,
         onBack = { _state.update { if (it.busyBehind()) it else if (it.stack.isEmpty()) it.copy(open = false) else it.copy(stack = it.stack.dropLast(1)) } },
-        onPage = { p -> _state.update { it.copy(stack = it.stack + p) } },
+        onPage = { p ->
+            _state.update { it.copy(stack = it.stack + p) }
+            if (p == SettingsPage.Notifications) loadSilences()
+        },
         onTab = { t -> _state.update { it.copy(safetyTab = t) } },
         onForgetSite = ::forgetSite,
         onPhoneRow = ::phoneRow,
+        onSilenceTopic = ::silenceTopic,
+        onPause = ::pause,
+        onResume = ::resume,
         onCopyDiagnostics = ::copyDiagnostics,
         onDismissLine = { _state.update { it.copy(line = null) } },
         onMode = { toActive -> _state.update { if (it.restarting || toActive == (it.mode == "active")) it else it.copy(askMode = toActive) } },
@@ -360,6 +371,26 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             serverBackup = server.await()
             if (frozen) return@coroutineScope
             publish(fast, late)
+        }
+    }
+
+    private fun loadSilences() = changeSilences(quiet = true) { client.json(SILENCES_PATH) }
+
+    private fun silenceTopic(topic: String, silence: Boolean) = changeSilences {
+        if (silence) client.postJson(SILENCES_PATH, JSONObject().put("topic", topic)) else client.deleteJson("$SILENCES_PATH/$topic")
+    }
+
+    private fun pause(minutes: Int) = changeSilences { client.postJson(SILENCES_PATH, JSONObject().put("topic", SILENCE_ALL).put("minutes", minutes)) }
+
+    private fun resume() = changeSilences { client.deleteJson("$SILENCES_PATH/$SILENCE_ALL") }
+
+    /** Every silence call answers with the whole list, which replaces what is shown. A first read that fails ([quiet]) leaves the section out: an older HQ has no such route. */
+    private fun changeSilences(quiet: Boolean = false, call: suspend () -> JSONObject) {
+        if (frozen) return
+        _state.update { it.copy(silenceBusy = true) }
+        viewModelScope.launch {
+            val now = try { SettingsWords.silences(call()) } catch (e: HqUnavailable) { null }
+            _state.update { it.copy(silenceBusy = false, silences = now ?: it.silences, line = if (now == null && !quiet) ctx().getString(R.string.inbox_fail_no_reply) else it.line) }
         }
     }
 
@@ -883,6 +914,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
+        const val SILENCES_PATH = "/api/notifications/silences"
+        const val SILENCE_ALL = "all"
         const val MODE_MAX = 64L
         private const val GOT_IT = "backup-got-it"
         const val EXIT_SCAN = 10

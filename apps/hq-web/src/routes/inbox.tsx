@@ -1,6 +1,7 @@
 import { answerErrorLine } from '~/lib/inboxCard'
 import { createFileRoute, useNavigate, useParams, useRouter } from '@tanstack/react-router'
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useHQStore } from '~/store/hqStore'
 import {
   fetchNotificationsClient,
@@ -56,14 +57,18 @@ function NotificationsPage() {
   const updateNotificationState = useHQStore((s) => s.updateNotificationState)
   const markRead = useHQStore((s) => s.markNotificationRead)
 
+  // Reloads overlap (an event during a tab switch): only the newest answer is shown.
+  const loadSeq = useRef(0)
   const loadData = useCallback(async () => {
+    const seq = ++loadSeq.current
     setIsRefreshing(true)
     try {
-      const res = await fetchNotificationsClient({
-        state: activeTab === 'resolved' ? 'resolved' : 'pending',
-      })
+      const done = activeTab === 'resolved'
+      const res = await fetchNotificationsClient({ state: done ? 'resolved' : 'pending' })
+      if (seq !== loadSeq.current) return
       setNotifications(res.notifications)
-      setNotificationCounts(res.unread_count, res.pending_approvals_count)
+      // The Done list has nothing pending in it, so its counts would zero the badge.
+      if (!done) setNotificationCounts(res.unread_count, res.pending_approvals_count)
       setCheckedAt(new Date())
     } catch (e) {
       console.error('Failed to load notifications:', e)
@@ -166,11 +171,15 @@ function NotificationsPage() {
       .then(loadData)
       .then(() => toastNotice(t('inbox_done_cleared')))
       .catch(failed)
+  // Settings keeps its own copy of the silences; a change made here makes it read again.
+  const queryClient = useQueryClient()
+  const forgetSilences = () => queryClient.invalidateQueries({ queryKey: ['inbox-silences'] })
   // Silencing is about what interrupts: the items stay listed. Undo turns the topic back on.
   const handleSilence = (topic: SilenceTopic) =>
     silenceTopic(topic)
       .then(loadData)
-      .then(() => toastUndo(t('silence_done'), () => unsilenceTopic(topic).then(loadData), t('silence_undone')))
+      .then(() => toastUndo(t('silence_done'), () => unsilenceTopic(topic).then(loadData).then(forgetSilences), t('silence_undone')))
+      .then(forgetSilences)
       .catch(failed)
 
   const items = useMemo(() => {

@@ -622,7 +622,7 @@ const MIN_ID_PREFIX_LEN: usize = 4;
 pub fn restore_dismissed(db: &Database, id: &str, window_secs: i64) -> Result<bool> {
     db.with_conn(|c| {
         let n = c.execute(
-            "UPDATE value_items SET state='delivered', engagement=NULL, engaged_at=NULL \
+            "UPDATE value_items SET state='delivered', engagement=NULL, engaged_at=NULL, cleared_at=NULL \
              WHERE id = ?1 AND state = 'dismissed' AND kind NOT IN ('action_needed', 'proposal') \
                AND julianday(engaged_at) >= julianday('now', ?2)",
             params![id, format!("-{window_secs} seconds")],

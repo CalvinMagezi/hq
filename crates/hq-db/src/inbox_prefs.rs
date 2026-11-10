@@ -313,5 +313,18 @@ mod tests {
             "dismissed",
             "cleared rows keep their state"
         );
+
+        // Undo after the Done list was cleared brings the update back where it can be seen.
+        assert!(crate::value_items::restore_dismissed(&db, &update, 60).unwrap());
+        let hidden: i64 = db
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM value_items WHERE id = ?1 AND cleared_at IS NOT NULL",
+                    [&update],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(hidden, 0, "a restored update is listed again");
     }
 }
