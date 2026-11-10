@@ -5,7 +5,7 @@ use super::*;
 /// forwards the tool's real answer instead of re-deriving one.
 struct ExplicitDestructiveHqTool;
 #[async_trait::async_trait]
-impl hq_tools::HqTool for ExplicitDestructiveHqTool {
+impl hq_contract::HqTool for ExplicitDestructiveHqTool {
     fn name(&self) -> &str {
         "explicit_destructive_hq_tool"
     }

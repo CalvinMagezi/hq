@@ -1,9 +1,9 @@
-//! Tool definitions and registry for Agent-HQ.
+//! HQ's tools, and the domain code behind them.
 //!
-//! Provides the `HqTool` trait, a `ToolRegistry`, and built-in tool
-//! implementations for vault operations, skills, agents, Google Workspace,
-//! image generation, TTS, DrawIt diagrams, benchmarking, webmail, planning,
-//! browser automation, and workflow orchestration.
+//! Each module holds the tools for one area (the vault, tasks, skills, the web, GitHub,
+//! coding-agent sessions and so on) together with the logic those tools share with the web
+//! server, the CLI and the daemon. The trait and registry they are written against live in
+//! `hq-contract` and are re-exported from [`registry`].
 
 pub mod a2a;
 pub mod agent_comm;

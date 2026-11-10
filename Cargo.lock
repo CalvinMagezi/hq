@@ -3352,6 +3352,7 @@ dependencies = [
  "dirs",
  "futures",
  "glob",
+ "hq-contract",
  "hq-core",
  "hq-db",
  "hq-llm",
@@ -3479,6 +3480,18 @@ dependencies = [
  "windows-sys 0.61.2",
  "wiremock",
  "zeroize",
+]
+
+[[package]]
+name = "hq-contract"
+version = "0.9.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "hq-core",
+ "serde",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -3814,6 +3827,7 @@ dependencies = [
  "futures",
  "gray_matter",
  "hex",
+ "hq-contract",
  "hq-convert",
  "hq-core",
  "hq-db",

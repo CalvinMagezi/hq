@@ -792,7 +792,7 @@ impl AgentService {
     }
 
     /// `load_skill` for a child, logged under the child's run id when telemetry is on.
-    fn load_skill_tool(&self, child_run_id: &str) -> Box<dyn hq_tools::HqTool> {
+    fn load_skill_tool(&self, child_run_id: &str) -> Box<dyn hq_contract::HqTool> {
         let skills_dir = hq_core::skills_dir(&self.vault_path);
         match &self.db {
             Some(db) => Box::new(hq_tools::skills::LoadSkillTool::with_telemetry(

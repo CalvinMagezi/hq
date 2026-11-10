@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 hq-core = { workspace = true }
+hq-contract = { workspace = true }
 hq-vault = { workspace = true }
 hq-db = { workspace = true }
 hq-llm = { workspace = true }

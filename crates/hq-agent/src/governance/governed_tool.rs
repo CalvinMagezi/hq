@@ -493,7 +493,7 @@ impl AgentTool for GovernedTool {
         self.allow_defer && self.inner.should_defer()
     }
 
-    fn tool_policy(&self) -> hq_tools::registry::ToolPolicy {
+    fn tool_policy(&self) -> hq_contract::ToolPolicy {
         self.inner.tool_policy()
     }
 

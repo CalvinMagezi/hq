@@ -53,7 +53,7 @@ pub trait AgentTool: Send + Sync {
     }
 
     /// Excluded from any session not directly driven by a live user turn —
-    /// see `hq_tools::registry::HqTool::requires_live_user_turn` for the
+    /// see `hq_contract::HqTool::requires_live_user_turn` for the
     /// full rationale; this mirrors it on the native `AgentTool` side so
     /// `hq_agent::governance::ToolGuardian::build_registry` can enforce it
     /// regardless of which trait a tool was originally written against.
@@ -79,8 +79,8 @@ pub trait AgentTool: Send + Sync {
     /// Defaults to `Standard` so all existing core tools remain visible in
     /// Standard and Full sessions. Override to `Weak` for tools that should
     /// appear even in lightweight relay sessions.
-    fn tool_policy(&self) -> hq_tools::registry::ToolPolicy {
-        hq_tools::registry::ToolPolicy::Standard
+    fn tool_policy(&self) -> hq_contract::ToolPolicy {
+        hq_contract::ToolPolicy::Standard
     }
 
     /// Guidance on *how* to use this tool well, injected into the system
@@ -250,7 +250,7 @@ impl ToolRegistry {
         for (name, note) in notes {
             out.push_str(&format!(
                 "- **{name}**: {}\n",
-                hq_tools::registry::truncate_note(note, max_chars_per_note)
+                hq_contract::truncate_note(note, max_chars_per_note)
             ));
         }
         out
@@ -275,7 +275,7 @@ impl ToolRegistry {
                 current = Some(tool.category());
                 out.push_str(&format!("\n**{}**\n", tool.category()));
             }
-            let hint = hq_tools::registry::derive_search_hint(tool.search_hint());
+            let hint = hq_contract::derive_search_hint(tool.search_hint());
             out.push_str(&format!("- `{}` — {hint}\n", tool.name()));
         }
         out

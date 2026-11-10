@@ -8,6 +8,7 @@ members = [
     "crates/hq-tunnel",
     "crates/hq-edge",
     "crates/hq-core",
+    "crates/hq-contract",
     "crates/hq-vault",
     "crates/hq-db",
     "crates/hq-llm",
@@ -147,6 +148,7 @@ semver = "1"
 
 # Workspace crates (internal)
 hq-core = { path = "crates/hq-core" }
+hq-contract = { path = "crates/hq-contract" }
 hq-vault = { path = "crates/hq-vault" }
 hq-db = { path = "crates/hq-db" }
 hq-llm = { path = "crates/hq-llm" }

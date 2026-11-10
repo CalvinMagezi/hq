@@ -47,11 +47,11 @@ pub enum SessionProfile {
 }
 
 impl SessionProfile {
-    pub(crate) fn max_policy(&self) -> hq_tools::registry::ToolPolicy {
+    pub(crate) fn max_policy(&self) -> hq_contract::ToolPolicy {
         match self {
-            SessionProfile::Weak => hq_tools::registry::ToolPolicy::Weak,
-            SessionProfile::Standard => hq_tools::registry::ToolPolicy::Standard,
-            SessionProfile::Full => hq_tools::registry::ToolPolicy::Full,
+            SessionProfile::Weak => hq_contract::ToolPolicy::Weak,
+            SessionProfile::Standard => hq_contract::ToolPolicy::Standard,
+            SessionProfile::Full => hq_contract::ToolPolicy::Full,
         }
     }
 }
@@ -117,10 +117,10 @@ const CAPABILITY_FLOOR: &[&str] = &["bash", "read_file", "write_file", "edit_fil
 
 // --- HqTool -> AgentTool adapter ------------------------------------------
 
-/// Wraps an `hq_tools::HqTool` to implement `AgentTool`, bridging the
+/// Wraps an `hq_contract::HqTool` to implement `AgentTool`, bridging the
 /// MCP tool interface with the agent session's tool interface.
 pub(crate) struct HqToolAdapter {
-    pub(crate) inner: Box<dyn hq_tools::HqTool>,
+    pub(crate) inner: Box<dyn hq_contract::HqTool>,
 }
 
 #[async_trait::async_trait]
@@ -141,7 +141,7 @@ impl AgentTool for HqToolAdapter {
         self.inner.is_read_only()
     }
     fn is_destructive(&self) -> bool {
-        // hq_tools::HqTool now has its own is_destructive() (default
+        // hq_contract::HqTool now has its own is_destructive() (default
         // !is_read_only(), the same proxy this adapter used to apply here
         // directly) — forward the tool's real answer instead of
         // re-deriving one, so a tool that overrides it (e.g. the crypto
@@ -156,7 +156,7 @@ impl AgentTool for HqToolAdapter {
         _id: &str,
         args: serde_json::Value,
     ) -> Result<hq_core::types::ToolResult> {
-        let value = hq_tools::registry::validate_and_execute(self.inner.as_ref(), args).await?;
+        let value = hq_contract::validate_and_execute(self.inner.as_ref(), args).await?;
         let text = match &value {
             serde_json::Value::String(s) => s.clone(),
             other => serde_json::to_string_pretty(other).unwrap_or_default(),
@@ -171,7 +171,7 @@ impl AgentTool for HqToolAdapter {
         })
     }
 
-    fn tool_policy(&self) -> hq_tools::registry::ToolPolicy {
+    fn tool_policy(&self) -> hq_contract::ToolPolicy {
         self.inner.tool_policy()
     }
 

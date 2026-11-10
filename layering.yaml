@@ -17,9 +17,11 @@
 # an edge is a design change and should say why.
 
 tiers:
-  # Types, config and the rules every other crate relies on. Depends on no HQ crate.
+  # What every other crate agrees on: types, config, the caller markers (hq-core) and the tool
+  # trait and registry (hq-contract). hq-core depends on no HQ crate, hq-contract on hq-core.
   contract:
     - hq-core
+    - hq-contract
   # What every build of hq links: storage, models, the agent loop and its guards, the base
   # tools, the gateway, the scheduler, the web server, signed updates and restore.
   kernel:

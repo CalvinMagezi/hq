@@ -41,7 +41,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 
 ## Architecture
 
-- **Language**: Rust (edition 2024, Cargo workspace of 24 crates)
+- **Language**: Rust (edition 2024, Cargo workspace of 25 crates)
 - **Binary**: `hq`, built from `crates/hq-cli`. `scripts/install-hq.sh` installs it
   to `~/bin/hq`; servers use `/usr/local/bin/hq`.
 - **Config**: `~/.hq/config.yaml` (override with `HQ_CONFIG_PATH`); any key can
@@ -357,7 +357,8 @@ a document.
 
 | Crate | Purpose |
 |-------|---------|
-| `hq-core` | Types, config, errors, token counters and truncation (`tokens`, `text`), microcompact |
+| `hq-core` | Types, config, errors, token counters and truncation (`tokens`, `text`), microcompact, the caller markers (`caller`) |
+| `hq-contract` | The tool contract every tool and every caller shares: `HqTool`, `ToolPolicy`, `ToolRegistry`. Depends on `hq-core` only, and `layering.yaml` keeps it that way |
 | `hq-vault` | Vault I/O, notes, query builder |
 | `hq-db` | SQLite pool, FTS5, embeddings, graph links |
 | `hq-llm` | LLM provider trait, OpenRouter, Ollama, backend chains |

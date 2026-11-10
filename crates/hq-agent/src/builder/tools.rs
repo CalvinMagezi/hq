@@ -108,7 +108,7 @@ impl SessionBuilder {
             // harnesses over MCP (hq_tools::coding::BatchEditTool), not to
             // hq's own session. Shares this session's state_cache/history so
             // read-before-write tracking and rollback stay consistent with
-            // edit_file. hq_tools::HqTool -> AgentTool via HqToolAdapter, the
+            // edit_file. hq_contract::HqTool -> AgentTool via HqToolAdapter, the
             // same wrapper used for every other hq-tools-sourced tool below.
             Box::new(HqToolAdapter {
                 inner: Box::new(hq_tools::coding::BatchEditTool::new(
@@ -148,7 +148,7 @@ impl SessionBuilder {
         &self,
         vault_path: &Path,
         shared_db: Option<Arc<hq_db::Database>>,
-    ) -> Vec<Box<dyn hq_tools::HqTool>> {
+    ) -> Vec<Box<dyn hq_contract::HqTool>> {
         // Vault + memory tools — direct vault access without subagent overhead
         let mut tools =
             hq_tools::vault::create_vault_tools(vault_path.to_path_buf(), shared_db.clone());
@@ -268,8 +268,8 @@ impl SessionBuilder {
         &self,
         vault_path: &Path,
         db: &Arc<hq_db::Database>,
-    ) -> Vec<Box<dyn hq_tools::HqTool>> {
-        let mut tools: Vec<Box<dyn hq_tools::HqTool>> = Vec::new();
+    ) -> Vec<Box<dyn hq_contract::HqTool>> {
+        let mut tools: Vec<Box<dyn hq_contract::HqTool>> = Vec::new();
 
         // Fold blocks and spill notes name these tools. They read every thread, so only the
         // owner's own sessions get them, never a family guest or a restricted audience.
@@ -373,7 +373,7 @@ impl SessionBuilder {
         session_id: &str,
     ) -> Vec<Box<dyn AgentTool>> {
         let skills_dir = hq_core::skills_dir(vault_path);
-        let load: Box<dyn hq_tools::HqTool> = match shared_db {
+        let load: Box<dyn hq_contract::HqTool> = match shared_db {
             Some(db) => Box::new(hq_tools::skills::LoadSkillTool::with_telemetry(
                 skills_dir.clone(),
                 db,
