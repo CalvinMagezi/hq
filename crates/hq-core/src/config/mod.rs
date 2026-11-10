@@ -597,6 +597,30 @@ const OLD_AGENT_HOST_HEADING: &str = "herdr:";
 /// forwards). They are valid keys, not typos.
 const SECTIONS_READ_BY_OTHER_COMMANDS: &[&str] = &["edge"];
 
+/// `written` (the typed config, as YAML) plus the sections of `path` that other commands own.
+/// `HqConfig` has no field for them, so writing only the typed struct would delete them: saving a
+/// budget from the web app on a machine that also runs a forwarder would lose its `edge:` section.
+fn with_sections_of_other_commands(
+    written: serde_yaml::Value,
+    path: &std::path::Path,
+) -> anyhow::Result<serde_yaml::Value> {
+    let serde_yaml::Value::Mapping(mut written) = written else {
+        anyhow::bail!("the typed config did not serialize to a mapping");
+    };
+    let existing = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_yaml::from_str::<serde_yaml::Value>(&text).ok());
+    if let Some(serde_yaml::Value::Mapping(existing)) = existing {
+        for name in SECTIONS_READ_BY_OTHER_COMMANDS {
+            let key = serde_yaml::Value::from(*name);
+            if let (Some(section), false) = (existing.get(&key), written.contains_key(&key)) {
+                written.insert(key, section.clone());
+            }
+        }
+    }
+    Ok(serde_yaml::Value::Mapping(written))
+}
+
 /// The top-level keys of a config.yaml that no `HqConfig` field and no other command claims.
 /// Compares against `HqConfig::default()`'s own serialized field set rather than a hand-maintained
 /// list, so it can't drift from the struct.
@@ -812,8 +836,8 @@ impl HqConfig {
         if let Some(parent) = config_path.parent() {
             crate::fs_private::create_private_dir_all(parent)?;
         }
-        let yaml = serde_yaml::to_string(&updated)?;
-        crate::fs_private::write_private(config_path, yaml)?;
+        let yaml = with_sections_of_other_commands(serde_yaml::to_value(&updated)?, config_path)?;
+        crate::fs_private::write_private(config_path, serde_yaml::to_string(&yaml)?)?;
         Ok(updated)
     }
 

@@ -381,6 +381,34 @@ fn saved_config_and_its_new_directory_are_owner_only() {
     );
 }
 
+/// A section another command reads from the file (`edge:`, owned by `hq-edge`) has no field in
+/// `HqConfig`, so saving the typed struct used to delete it.
+#[test]
+fn saving_config_keeps_the_sections_other_commands_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.yaml");
+    std::fs::write(
+        &path,
+        "default_model: before\nedge:\n  listen: \"0.0.0.0:8443\"\n  allowlist: edge-devices.txt\n",
+    )
+    .unwrap();
+
+    super::HqConfig::save_patch_to_path(&path, |c| c.default_model = "after".into()).unwrap();
+
+    let saved: serde_yaml::Value =
+        serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved["default_model"], "after");
+    assert_eq!(saved["edge"]["listen"], "0.0.0.0:8443");
+    assert_eq!(saved["edge"]["allowlist"], "edge-devices.txt");
+
+    // A file with no such section does not grow one, and a second save changes nothing else.
+    let plain = dir.path().join("plain.yaml");
+    super::HqConfig::save_patch_to_path(&plain, |c| c.default_model = "m".into()).unwrap();
+    let saved: serde_yaml::Value =
+        serde_yaml::from_str(&std::fs::read_to_string(&plain).unwrap()).unwrap();
+    assert!(saved.get("edge").is_none());
+}
+
 #[test]
 fn debug_output_of_config_types_never_contains_a_secret() {
     use super::HqConfig;
