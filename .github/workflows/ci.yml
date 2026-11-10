@@ -330,6 +330,8 @@ jobs:
         run: bash scripts/check-release-keys.sh
       - name: Android stable seq floor (fake gh)
         run: bash scripts/release/android-seq-test.sh
+      - name: Stable auto-promote picks only soaked, newer main releases
+        run: bash scripts/release/pick-promotable-test.sh
 
   # The private denylist is a repository secret, which fork pull requests never
   # receive, so it only runs on pushes to main. Pull requests get the baseline above.

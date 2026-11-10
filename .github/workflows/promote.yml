@@ -119,7 +119,7 @@ jobs:
           if gh release view channel-stable --json assets --jq '.assets[].name' | grep -qx android-channel.json; then
             gh release download channel-stable --dir promote-android/current --pattern android-channel.json --pattern android-channel.json.minisig
             minisign -V -p release/minisign.pub -m promote-android/current/android-channel.json -x promote-android/current/android-channel.json.minisig -q
-            cur_seq=$(jq -r .seq promote-android/current/android-channel.json)
+            cur_seq=$(jq -r '.seq // 0' promote-android/current/android-channel.json)
             withdrawn=$(jq -c '.withdrawn // []' promote-android/current/android-channel.json)
           fi
           bash scripts/release/android-seq.sh check --repo "$GH_REPO" --seq "$cur_seq"
