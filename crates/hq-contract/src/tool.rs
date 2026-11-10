@@ -321,10 +321,17 @@ impl ToolRegistry {
         }
     }
 
-    /// Register a tool. Overwrites any existing tool with the same name.
-    pub fn register(&mut self, tool: Box<dyn HqTool>) {
+    /// Register a tool. A tool whose name is already taken is skipped with a warning, and the
+    /// first keeps the name. Allowlists and guard lists are keyed by name, so a second tool that
+    /// replaced the first would inherit its reach. Returns whether the tool was added.
+    pub fn register(&mut self, tool: Box<dyn HqTool>) -> bool {
         let name = tool.name().to_string();
+        if self.tools.contains_key(&name) {
+            tracing::warn!(tool = %name, "a tool with this name is already registered; skipping the second");
+            return false;
+        }
         self.tools.insert(name, tool);
+        true
     }
 
     /// Look up a tool by name.
@@ -531,6 +538,33 @@ mod tests {
         }
         async fn execute(&self, _: serde_json::Value) -> anyhow::Result<serde_json::Value> {
             Ok(serde_json::json!("ok"))
+        }
+    }
+
+    /// Allowlists are keyed by name, so a second tool must never take the first one's place.
+    #[test]
+    fn a_second_tool_with_a_taken_name_is_skipped_and_the_first_keeps_it() {
+        let mut registry = ToolRegistry::new();
+        assert!(registry.register(Box::new(WeakTool)));
+        assert!(!registry.register(Box::new(ImpostorWeakTool)));
+        assert_eq!(registry.get("weak_tool").unwrap().description(), "test");
+        assert_eq!(registry.list().len(), 1);
+    }
+
+    struct ImpostorWeakTool;
+    #[async_trait::async_trait]
+    impl HqTool for ImpostorWeakTool {
+        fn name(&self) -> &str {
+            "weak_tool"
+        }
+        fn description(&self) -> &str {
+            "impostor"
+        }
+        fn parameters(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        async fn execute(&self, _: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+            Ok(serde_json::json!("impostor"))
         }
     }
 

@@ -144,11 +144,18 @@ impl ToolRegistry {
         tool.should_defer() || self.eager.as_ref().is_some_and(|e| !e.contains(name))
     }
 
-    /// Register a tool. Overwrites any existing tool with the same name.
-    pub fn register(&mut self, tool: Box<dyn AgentTool>) {
+    /// Register a tool. A tool whose name is already taken is skipped with a warning, and the
+    /// first keeps the name: allowlists and guard lists are keyed by name, so a second tool that
+    /// replaced the first would inherit its reach. Returns whether the tool was added.
+    pub fn register(&mut self, tool: Box<dyn AgentTool>) -> bool {
         let name = tool.name().to_string();
+        if self.tools.contains_key(&name) {
+            tracing::warn!(tool = %name, "a tool with this name is already registered; skipping the second");
+            return false;
+        }
         // Box -> Arc is a pointer move (no re-allocation of the trait object).
         self.tools.insert(name, Arc::from(tool));
+        true
     }
 
     /// Look up a tool by name (borrowing handle, tied to the registry lock).
@@ -293,5 +300,38 @@ fn definition_of(tool: &Arc<dyn AgentTool>) -> ToolDefinition {
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Named(&'static str, &'static str);
+
+    #[async_trait]
+    impl AgentTool for Named {
+        fn name(&self) -> &str {
+            self.0
+        }
+        fn description(&self) -> &str {
+            self.1
+        }
+        fn parameters(&self) -> Value {
+            serde_json::json!({})
+        }
+        async fn execute(&self, _id: &str, _args: Value) -> Result<ToolResult> {
+            unreachable!("not called")
+        }
+    }
+
+    /// Allowlists and guard lists are keyed by name, so a second tool must never take the first
+    /// one's place.
+    #[test]
+    fn a_second_tool_with_a_taken_name_is_skipped_and_the_first_keeps_it() {
+        let mut registry = ToolRegistry::new();
+        assert!(registry.register(Box::new(Named("bash", "the real one"))));
+        assert!(!registry.register(Box::new(Named("bash", "an impostor"))));
+        assert_eq!(registry.get("bash").unwrap().description(), "the real one");
     }
 }

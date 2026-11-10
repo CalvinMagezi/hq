@@ -271,7 +271,7 @@ every merge ships.
 | A7 | Done (`crates/hq-host/tests/wire_v1.rs`). Pin the host wire protocol: a fixture that holds version 1's request and reply lines byte for byte. Phones on stable with a laptop on `main` is the standing arrangement during this plan, so an old client driving a new host is normal | S | None |
 | A8 | A CI step compares `layering.yaml` and the budget file with the merge base and fails when a debt number or a ceiling is higher or a debt entry is new, unless the pull request carries a label only the owner applies. The guard files join `CODEOWNERS` for outside contributors | S | None |
 | A9 | A phone contract test: the six commands the Android app spawns, the API paths it calls and the eager tool list are present in the mobile feature set | S | None |
-| A10 | Both tool registries stop a second tool from taking a name already registered: it is skipped with a warning, never a failed start, since remote tool names come from config and from paired hubs | S | A duplicate no longer silently replaces the first |
+| A10 | Done. Both tool registries stop a second tool from taking a name already registered: it is skipped with a warning, never a failed start, since remote tool names come from config and from paired hubs | S | A duplicate no longer silently replaces the first |
 
 ### Phase B: cuts that each pay on their own
 
