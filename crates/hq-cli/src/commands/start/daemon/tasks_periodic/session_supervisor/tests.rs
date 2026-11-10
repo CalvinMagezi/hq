@@ -1194,6 +1194,7 @@ async fn a_sweep_records_a_silent_host_as_an_outage() {
     let sweep = Sweep {
         host_budget: HOST_SWEEP_BUDGET,
         unreachable_after: Some(Duration::ZERO),
+        driver_grace: Duration::ZERO,
     };
     supervise(&db, None, resolve, sweep).await.unwrap();
 
@@ -1489,4 +1490,181 @@ async fn a_finished_turn_posts_what_the_policy_decided_on_the_task() {
 #[test]
 fn a_session_alert_opens_the_helper_page() {
     assert_eq!(alerts::session_page("hs-1"), "/helpers/hs-1");
+}
+
+const GRACE: Duration = Duration::from_secs(300);
+
+/// A sweep that gives a driving chat `GRACE` to clear a prompt before the owner hears of it.
+async fn sweep_with_grace(db: &Database, host: &ScriptedHost) {
+    let host = host.clone();
+    let resolve: HostResolver = Arc::new(move |_| Ok(Arc::new(host.clone()) as Host));
+    let sweep = Sweep {
+        host_budget: TEST_HOST_BUDGET,
+        unreachable_after: None,
+        driver_grace: GRACE,
+    };
+    supervise(db, None, resolve, sweep).await.unwrap();
+}
+
+/// Moves every recorded block of `id` ten minutes into the past, as if the grace had run out.
+fn age_block(db: &Database, id: &str) {
+    let id = id.to_string();
+    db.with_conn(move |c| {
+        c.execute(
+            "UPDATE harness_session_events SET created_at = datetime('now', '-10 minutes') \
+             WHERE session_id = ?1 AND kind IN ('blocked', 'question')",
+            [&id],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+fn waiting_alerts(db: &Database) -> i64 {
+    db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT COUNT(*) FROM value_items WHERE dedup_key LIKE 'session-blocked-%' \
+             AND state IN ('pending', 'routed', 'delivered')",
+            [],
+            |r| r.get::<_, i64>(0),
+        )?)
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_prompt_in_a_driven_session_goes_to_its_chat_and_not_to_the_owner() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-driven");
+    drive_on(&db, "hs-driven");
+    let blocked = fake_host(
+        tmp.path(),
+        &[("hs-driven", "blocked", 3)],
+        "Approve the edit?",
+    );
+
+    sweep_with_grace(&db, &blocked).await;
+    sweep_with_grace(&db, &blocked).await;
+
+    assert_eq!(
+        row_of(&db, "hs-driven").pm_wake.as_deref(),
+        Some(WAKE_BLOCKED)
+    );
+    assert_eq!(
+        value_item_count(&db),
+        0,
+        "HQ drives it: the owner is not asked"
+    );
+}
+
+#[tokio::test]
+async fn a_prompt_the_driver_left_standing_reaches_the_owner_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-stuck");
+    drive_on(&db, "hs-stuck");
+    let blocked = fake_host(
+        tmp.path(),
+        &[("hs-stuck", "blocked", 3)],
+        "Approve the edit?",
+    );
+
+    sweep_with_grace(&db, &blocked).await;
+    age_block(&db, "hs-stuck");
+    sweep_with_grace(&db, &blocked).await;
+    assert_eq!(
+        alert_count(&db),
+        1,
+        "still blocked after the grace: one item"
+    );
+
+    // The owner clears it without answering the helper: the same block is not raised again.
+    db.with_conn(|c| {
+        c.execute("UPDATE value_items SET state = 'engaged'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    sweep_with_grace(&db, &blocked).await;
+    assert_eq!(alert_count(&db), 1, "a block is said once");
+}
+
+#[tokio::test]
+async fn a_driven_session_whose_chat_closed_still_reaches_the_owner() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-orphan");
+    drive_on(&db, "hs-orphan");
+    let blocked = fake_host(
+        tmp.path(),
+        &[("hs-orphan", "blocked", 3)],
+        "Approve the edit?",
+    );
+
+    sweep_with_grace(&db, &blocked).await;
+    // The web driver gives a session back when its chat is gone.
+    db.with_conn(|c| registry::set_owner(c, "hs-orphan", None))
+        .unwrap();
+    age_block(&db, "hs-orphan");
+    sweep_with_grace(&db, &blocked).await;
+
+    let titles: Vec<String> = db
+        .with_conn(|c| {
+            Ok(
+                c.prepare(
+                    "SELECT title FROM value_items WHERE source_task = 'session-supervisor'",
+                )?
+                .query_map([], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?,
+            )
+        })
+        .unwrap();
+    assert_eq!(titles.len(), 1, "nobody drives it now: the owner answers");
+    assert!(titles[0].ends_with("is waiting for you"), "{titles:?}");
+}
+
+#[tokio::test]
+async fn a_chat_that_only_watches_tells_the_owner_at_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-watched");
+    watch_from_chat(&db, "hs-watched");
+    let blocked = fake_host(
+        tmp.path(),
+        &[("hs-watched", "blocked", 3)],
+        "Approve the edit?",
+    );
+
+    sweep_with_grace(&db, &blocked).await;
+
+    assert_eq!(
+        alert_count(&db),
+        1,
+        "a watching chat cannot answer the prompt"
+    );
+}
+
+#[tokio::test]
+async fn an_answered_prompt_takes_its_alert_out_of_the_inbox() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-moved");
+    watch_from_chat(&db, "hs-moved");
+    let blocked = fake_host(
+        tmp.path(),
+        &[("hs-moved", "blocked", 3)],
+        "Approve the edit?",
+    );
+    sweep(&db, &blocked, None).await;
+    assert_eq!(waiting_alerts(&db), 1);
+
+    let working = fake_host(tmp.path(), &[("hs-moved", "working", 4)], "editing");
+    sweep(&db, &working, None).await;
+
+    assert_eq!(
+        waiting_alerts(&db),
+        0,
+        "nothing waits on a session that moved on"
+    );
+    assert_eq!(alert_count(&db), 1, "the item is kept for the record");
 }

@@ -485,6 +485,34 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             axum::routing::post(notifications_api::mark_all_read_handler),
         )
         .route(
+            "/api/notifications/archive-all",
+            post(notifications_api::archive_all_handler),
+        )
+        .route(
+            "/api/notifications/read-all",
+            post(notifications_api::read_all_handler),
+        )
+        .route(
+            "/api/notifications/clear-done",
+            post(notifications_api::clear_done_handler),
+        )
+        .route(
+            "/api/notifications/restore",
+            post(notifications_api::restore_many_handler),
+        )
+        .route(
+            "/api/notifications/{id}/read",
+            post(notifications_api::read_handler),
+        )
+        .route(
+            "/api/notifications/silences",
+            get(notifications_api::silences_handler).post(notifications_api::silence_handler),
+        )
+        .route(
+            "/api/notifications/silences/{topic}",
+            axum::routing::delete(notifications_api::unsilence_handler),
+        )
+        .route(
             "/api/notifications/push",
             get(web_push::api::status_handler),
         )

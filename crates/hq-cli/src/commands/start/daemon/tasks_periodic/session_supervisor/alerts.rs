@@ -105,19 +105,85 @@ pub(super) fn alert_blocked(
     agent: &AgentInfo,
     screen: &str,
     resolve: &HostResolver,
+    grace: Duration,
 ) {
     let (id, seq) = (row.id.clone(), agent.state_change_seq);
     match db.with_conn(move |c| registry::claim_state_alert(c, &id, seq)) {
         Ok(true) => {}
-        _ => return,
+        _ => {
+            raise_unanswered(db, row, agent, screen, grace);
+            return;
+        }
     }
     record_block(db, row, agent);
-    let note = match by_policy(db, row, agent, screen, resolve) {
+    let note = match by_policy(db, row, agent, screen, resolve, grace) {
         PolicyStep::Answering => return,
         PolicyStep::Escalated(note) => Some(note),
         PolicyStep::NotJudged => None,
     };
-    raise_blocked(db, row, agent, screen, note.as_deref());
+    raise_blocked(db, row, agent, screen, note.as_deref(), grace);
+}
+
+/// The key every alert about one block of a session carries: one per `state_change_seq`.
+fn blocked_key(session_id: &str, seq: u64) -> String {
+    format!("{}{seq}", blocked_prefix(session_id))
+}
+
+fn blocked_prefix(session_id: &str) -> String {
+    format!("session-blocked-{session_id}-")
+}
+
+/// A block that whoever drives the session did not clear in `grace` reaches the owner after
+/// all. It covers a driving chat that could not answer, one that closed after the block was
+/// handed to it, and a command policy whose answer never landed. Nothing is said twice: a
+/// block that already has an inbox item, in any state, is left alone.
+fn raise_unanswered(
+    db: &Database,
+    row: &registry::HarnessSessionRow,
+    agent: &AgentInfo,
+    screen: &str,
+    grace: Duration,
+) {
+    if grace.is_zero() {
+        return;
+    }
+    let seq = agent.state_change_seq;
+    if !matches!(
+        hq_db::value_items::any_with_dedup(db, &blocked_key(&row.id, seq)),
+        Ok(false)
+    ) {
+        return;
+    }
+    let id = row.id.clone();
+    let waited = db
+        .with_conn(move |c| hq_db::session_events::blocked_for_ms(c, &id))
+        .ok()
+        .flatten()
+        .unwrap_or(0);
+    if u128::try_from(waited).unwrap_or(0) < grace.as_millis() {
+        return;
+    }
+    tracing::info!(session = %row.id, "session-supervisor: block not cleared by its driver, telling the owner");
+    if row.owner_thread.is_some() {
+        badge_web_inbox(db, row, seq);
+    } else {
+        let link = record_on_task(db, row, Event::Blocked);
+        raise_to_owner(db, row, agent, screen, None, link.as_ref());
+    }
+}
+
+/// A session that is no longer blocked asks nothing: its waiting "needs an answer" items leave
+/// the inbox, however the block was cleared (keys from a chat, the agent's own page, a timeout).
+pub(super) fn clear_blocked_alerts(db: &Database, session_id: &str) {
+    match hq_db::value_items::retire_waiting_numbered(db, &blocked_prefix(session_id)) {
+        Ok(0) => {}
+        Ok(n) => {
+            tracing::info!(session = %session_id, retired = n, "session-supervisor: block cleared, its alerts left the inbox")
+        }
+        Err(e) => {
+            tracing::warn!(session = %session_id, error = %e, "session-supervisor: could not clear the alerts of a cleared block")
+        }
+    }
 }
 
 /// What the session's command policy did with the dialog it blocked at.
@@ -138,6 +204,7 @@ fn by_policy(
     agent: &AgentInfo,
     screen: &str,
     resolve: &HostResolver,
+    grace: Duration,
 ) -> PolicyStep {
     use hq_core::command_policy::Decision;
     use hq_tools::harness_session::policy;
@@ -182,12 +249,12 @@ fn by_policy(
                     "Its '{}' command policy could not settle this: {reason}.",
                     rules.name
                 );
-                raise_blocked(&db2, &row2, &agent2, &screen2, Some(&note));
+                raise_blocked(&db2, &row2, &agent2, &screen2, Some(&note), grace);
             }
             Some(acted) => {
                 tracing::info!(session = %row2.id, ?acted, "session-supervisor: dialog answered by the command policy");
             }
-            None => raise_blocked(&db2, &row2, &agent2, &screen2, None),
+            None => raise_blocked(&db2, &row2, &agent2, &screen2, None, grace),
         }
     });
     PolicyStep::Answering
@@ -201,6 +268,7 @@ fn raise_blocked(
     agent: &AgentInfo,
     screen: &str,
     note: Option<&str>,
+    grace: Duration,
 ) {
     let seq = agent.state_change_seq;
     let link = record_on_task(db, row, Event::Blocked);
@@ -213,12 +281,31 @@ fn raise_blocked(
         &tail_excerpt(screen, MAX_TAIL_BYTES),
     );
     if hand_to_chat(db, row, WAKE_BLOCKED) {
-        badge_web_inbox(db, row, seq);
+        // A chat that drives the session answers the prompt itself, and asks the owner in
+        // their inbox when the answer is theirs to give. The owner hears about the block only
+        // if it is still there after `grace` (`raise_unanswered`). A chat that only watches
+        // cannot answer, so its owner is told at once.
+        if !row.drive || grace.is_zero() {
+            badge_web_inbox(db, row, seq);
+        }
         return;
     }
+    raise_to_owner(db, row, agent, screen, note, link.as_ref());
+}
+
+/// The inbox item for a block the owner has to answer.
+fn raise_to_owner(
+    db: &Database,
+    row: &registry::HarnessSessionRow,
+    agent: &AgentInfo,
+    screen: &str,
+    note: Option<&str>,
+    link: Option<&mission::TaskLink>,
+) {
+    let seq = agent.state_change_seq;
     let label = session_label(row);
     let excerpt = last_lines(screen, BLOCKED_EXCERPT_LINES);
-    let task_line = task_line(link.as_ref());
+    let task_line = task_line(link);
     let note_line = note.map_or_else(String::new, |n| format!("\n{n}"));
     let item = ValueItem::new(
         "session-supervisor",
@@ -229,7 +316,7 @@ fn raise_blocked(
             row.id, row.host
         ),
     )
-    .with_dedup_key(format!("session-blocked-{}-{seq}", row.id))
+    .with_dedup_key(blocked_key(&row.id, seq))
     .with_link(session_page(&row.id));
     let fresh = item.dedup_key.as_deref().is_some_and(|key| {
         matches!(
@@ -321,7 +408,7 @@ pub(super) fn badge_web_inbox(db: &Database, row: &registry::HarnessSessionRow, 
             row.id, row.host
         ),
     )
-    .with_dedup_key(format!("session-blocked-{}-{seq}", row.id))
+    .with_dedup_key(blocked_key(&row.id, seq))
     .with_link(session_page(&row.id));
     let _ = hq_db::value_items::emit(db, &item);
 }
