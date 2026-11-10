@@ -95,14 +95,15 @@ export function useStickToBottom(
     el.addEventListener('scroll', onScroll, { passive: true })
     el.addEventListener('wheel', onWheel, { passive: true })
     el.addEventListener('touchmove', moved, { passive: true })
-    el.addEventListener('keydown', onKey)
+    // Focus is usually in the composer or on the page, not in the scroller, so the keys are heard on the window.
+    window.addEventListener('keydown', onKey)
     el.addEventListener('pointerdown', onPress)
     window.addEventListener('pointerup', onRelease)
     return () => {
       el.removeEventListener('scroll', onScroll)
       el.removeEventListener('wheel', onWheel)
       el.removeEventListener('touchmove', moved)
-      el.removeEventListener('keydown', onKey)
+      window.removeEventListener('keydown', onKey)
       el.removeEventListener('pointerdown', onPress)
       window.removeEventListener('pointerup', onRelease)
     }
