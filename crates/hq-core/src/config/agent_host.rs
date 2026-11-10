@@ -91,6 +91,12 @@ pub struct AgentHostConfig {
     #[serde(default = "default_driver_checkin_minutes")]
     pub driver_checkin_minutes: u64,
 
+    /// Minutes a helper that a chat drives may wait at a prompt before you are told. HQ gets
+    /// that long to answer the prompt itself, and asks you in your inbox when the answer is
+    /// yours to give. 0 tells you about every prompt at once. At most 120.
+    #[serde(default = "default_driver_grace_minutes")]
+    pub driver_grace_minutes: u64,
+
     /// Whether a session a web chat starts watching starts with Drive on.
     /// Off keeps every new watch at updates only until the user flips the switch.
     #[serde(default = "default_drive_new_watches")]
@@ -473,6 +479,10 @@ fn default_command_timeout_secs() -> u64 {
     30
 }
 
+fn default_driver_grace_minutes() -> u64 {
+    5
+}
+
 fn default_driver_checkin_minutes() -> u64 {
     30
 }
@@ -546,6 +556,11 @@ impl AgentHostConfig {
         i64::from(self.max_ask_spawned_sessions.min(20))
     }
 
+    /// How long a driving chat gets to clear a helper's prompt before the owner is told.
+    pub fn driver_grace(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.driver_grace_minutes.min(120) * 60)
+    }
+
     /// How long a host may stay silent before the alert, or `None` when the alert is off.
     pub fn unreachable_alert_after(&self) -> Option<std::time::Duration> {
         (self.unreachable_alert_minutes > 0).then(|| {
@@ -568,6 +583,7 @@ impl Default for AgentHostConfig {
             command_timeout_secs: default_command_timeout_secs(),
             harness_profiles: BTreeMap::new(),
             driver_checkin_minutes: default_driver_checkin_minutes(),
+            driver_grace_minutes: default_driver_grace_minutes(),
             drive_new_watches: default_drive_new_watches(),
             driver_nudge_budget: default_driver_nudge_budget(),
             driver_no_progress_limit: default_driver_no_progress_limit(),

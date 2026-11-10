@@ -3,7 +3,7 @@
 // answers; on a first visit nothing is known and the shell draws what is safe on both.
 
 import { useSyncExternalStore } from 'react'
-import { PLACES, type Edition, type Place } from './routes'
+import { BAR_PLACES, PLACES, type Edition, type Place } from './routes'
 
 const STORAGE_KEY = 'hq-edition'
 const EDITIONS: readonly string[] = ['full', 'lite', 'mobile']
@@ -57,8 +57,8 @@ export function useEdition(): Edition | null {
   return useSyncExternalStore(subscribe, lastKnownEdition, () => null)
 }
 
-/** The places the rail and the bar show. Lite, and an edition not yet known, show Notes, Tasks and Inbox only. */
+/** The places the rail and the bar show: Notes, Chat and Inbox. Lite, and an edition not yet known, have no Chat. */
 export function placesFor(edition: Edition | null): Place[] {
-  const shown = edition === 'full' || edition === 'mobile' ? PLACES : PLACES.filter((p) => p.id === 'notes' || p.id === 'tasks' || p.id === 'inbox')
-  return shown
+  const bar = PLACES.filter((p) => BAR_PLACES.includes(p.id))
+  return edition === 'full' || edition === 'mobile' ? bar : bar.filter((p) => p.id !== 'chat')
 }

@@ -91,7 +91,7 @@ final class Alerts {
         String newest = null;
         int needing = 0;
         for (JSONObject item : items.values()) {
-            if (!AlertPoster.needsYou(item)) continue;
+            if (!AlertPoster.needsYou(item) || item.optBoolean(SILENCED, false)) continue;
             if (newest == null) newest = item.optString("title", "");
             needing++;
         }
@@ -104,10 +104,15 @@ final class Alerts {
     }
 
     /** Posts what is new in [items] and takes down what is gone, against the seen list kept under [seenKey]. */
-    private static void postNew(Context c, Map<String, JSONObject> items, String seenKey) {
+    private static void postNew(Context c, Map<String, JSONObject> all, String seenKey) {
         SharedPreferences prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String stored = prefs.getString(seenKey, null);
         List<String> seen = stored == null || stored.isEmpty() ? new ArrayList<String>() : Arrays.asList(stored.split(SEP));
+        // A silenced item gets no notice, but it is remembered as seen: turning its topic back on must not post what arrived meanwhile.
+        List<String> quiet = silencedIds(all);
+        Map<String, JSONObject> items = new LinkedHashMap<>(all);
+        items.keySet().removeAll(quiet);
+        List<String> quietNew = HubConfig.unseen(quiet, seen);
         List<String> fresh = HubConfig.unseen(new ArrayList<>(items.keySet()), seen);
         if (stored != null) AlertPoster.cancelGone(c, seen, items.keySet());
         synchronized (SHOWN) {
@@ -132,15 +137,26 @@ final class Alerts {
             for (String id : AlertPoster.post(c, items, replay, MAX_PER_POLL, true)) back.put(id, items.get(id));
             track(back);
         }
-        if (fresh.isEmpty() && stored != null) return;
-        if (stored != null && on) {
+        if (fresh.isEmpty() && quietNew.isEmpty() && stored != null) return;
+        if (stored != null && on && !fresh.isEmpty()) {
             List<String> shown = AlertPoster.post(c, items, fresh, MAX_PER_POLL);
             Map<String, JSONObject> mine = new LinkedHashMap<>();
             for (String id : shown) mine.put(id, items.get(id));
             track(mine);
         }
-        String joined = String.join(SEP, HubConfig.remember(seen, fresh, HubConfig.SEEN_CAP));
+        List<String> learned = new ArrayList<>(fresh);
+        learned.addAll(quietNew);
+        String joined = String.join(SEP, HubConfig.remember(seen, learned, HubConfig.SEEN_CAP));
         prefs.edit().putString(seenKey, joined).apply();
+    }
+
+    static final String SILENCED = "silenced";
+
+    /** The ids in [items] whose topic the owner silenced. */
+    static List<String> silencedIds(Map<String, JSONObject> items) {
+        List<String> out = new ArrayList<>();
+        for (Map.Entry<String, JSONObject> e : items.entrySet()) if (e.getValue().optBoolean(SILENCED, false)) out.add(e.getKey());
+        return out;
     }
 
     /** Remembers items that now have their own notice, so a lock, an unlock or the details switch can post them again. */

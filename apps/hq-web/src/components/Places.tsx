@@ -6,8 +6,12 @@ import { inboxBadge } from '~/lib/inboxBadge'
 import { placesFor, useEdition } from '~/lib/edition'
 import type { Place } from '~/lib/routes'
 
-/** One count for the Inbox badge: what needs the owner, helpers included (W6). */
-export const inboxNeedsYou = (pending: number, helpers: number) => pending + helpers
+/**
+ * One count for the Inbox badge: the requests waiting in the Inbox. A helper at a prompt is not
+ * counted by itself: HQ answers it or, when it cannot, puts a request in the Inbox, and that
+ * request is what counts. Counting both showed one question twice.
+ */
+export const inboxNeedsYou = (pending: number, _helpers = 0) => pending
 
 const ICONS: Record<Exclude<Place['id'], 'chat'>, typeof BookOpen> = {
   notes: BookOpen,
@@ -29,7 +33,7 @@ export function inboxAria(count: number): string {
   return count === 1 ? t('nav_inbox_needs_one') : t('nav_inbox_needs_many', { n: count })
 }
 
-/** The five places, as the rail (`a-rail-item`) or the phone's bottom bar (`a-nav-item`) draws them. Chat is raised on the HQ mark. */
+/** The places on the bar, as the rail (`a-rail-item`) or the phone's bottom bar (`a-nav-item`) draws them. Chat is raised on the HQ mark. */
 export function PlaceLinks({ kind }: { kind: 'rail' | 'nav' }) {
   const helpers = useHQStore((s) => s.needsYouCount)
   const pending = useHQStore((s) => s.pendingApprovalsCount)

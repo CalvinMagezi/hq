@@ -197,3 +197,33 @@ describe('the files this item owns', () => {
     }
   })
 })
+
+describe('keeping the inbox: read, Done, silence', () => {
+  const fresh = item({ id: 'n1', kind: 'value_item', title: 'Disk is filling up', actions: ['dismiss'], read: false, topic: 'upkeep' })
+  const seen = item({ id: 'n2', kind: 'value_item', title: 'Backup finished', actions: ['dismiss'], read: true, topic: 'upkeep', silenced: true })
+
+  test('an unread update is marked, a read one is not, and an older HQ marks nothing', async () => {
+    const html = await view({ tab: 'all', items: [fresh, seen, hqUpdate], updatesCount: 3, onReadAll: () => undefined, onClearAll: () => undefined })
+    expect(html.match(/data-unread/g)?.length).toBe(1)
+    expect(html).toContain(t('inbox_read_all'))
+    expect(html).toContain(t('inbox_clear_all_updates'))
+    expect(html).toContain(`aria-label="${t('inbox_silenced')}"`)
+  })
+
+  test('Mark all as read shows only while something is unread, and Done can be cleared', async () => {
+    const updates = await view({ tab: 'all', items: [seen], updatesCount: 1, onClearAll: () => undefined })
+    expect(updates).not.toContain(t('inbox_read_all'))
+    const done = await view({ tab: 'resolved', items: [item({ id: 'd1', state: 'approved', actions: [] })], onClearDone: () => undefined })
+    expect(done).toContain(t('inbox_clear_done'))
+    expect(await view({ tab: 'resolved', items: [] })).not.toContain(t('inbox_clear_done'))
+  })
+
+  test('only a topic can be silenced: what HQ asks itself never offers it', async () => {
+    const helper = item({ id: 'h1', topic: 'helpers', title: "Harness session 'x' is waiting for you", actions: ['dismiss'] })
+    const offered = await view({ tab: 'pending', items: [helper], selected: helper, onSilence: () => undefined })
+    expect(offered).toContain(t('silence_this_helpers'))
+    const own = { ...approval, topic: 'hq' }
+    const html = await view({ tab: 'pending', items: [own], selected: own, onSilence: () => undefined })
+    for (const key of ['silence_this_helpers', 'silence_this_tasks', 'silence_this_tips', 'silence_this_upkeep', 'silence_this_email'] as const) expect(html).not.toContain(t(key))
+  })
+})

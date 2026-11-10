@@ -1,5 +1,5 @@
-//! Notifications API over the value bus's `value_items` table: list, approve,
-//! dismiss and mark all read, each broadcast to open tabs.
+//! Notifications API over the value bus's `value_items` table: list, approve and dismiss, mark
+//! read, put away, clear the Done list and silence a topic, each broadcast to open tabs.
 
 use axum::{
     Json,
@@ -101,6 +101,12 @@ pub(crate) struct NotificationItem {
     pub(crate) created_at: DateTime<Utc>,
     pub(crate) metadata: NotificationMetadata,
     pub(crate) actions: Vec<String>,
+    /// The owner has opened it, or marked everything read since it arrived.
+    pub(crate) read: bool,
+    /// What it is about (`hq_db::inbox_prefs::Topic`), which is what the owner silences.
+    pub(crate) topic: String,
+    /// Its topic is silenced: it is listed, but nothing alerts and the badge does not count it.
+    pub(crate) silenced: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,6 +114,8 @@ pub(crate) struct NotificationsResponse {
     pub(crate) notifications: Vec<NotificationItem>,
     pub(crate) unread_count: usize,
     pub(crate) pending_approvals_count: usize,
+    /// Updates that arrived since the owner last read them, silenced topics left out.
+    pub(crate) unread_updates_count: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -132,7 +140,7 @@ pub(crate) struct NotificationActionResponse {
 /// Each item with the dialog it is about, when it is a blocked session's alert (`dialog_alerts`).
 const VALUE_ITEM_COLUMNS: &str = "SELECT v.id, v.source_task, v.kind, v.title, v.body, v.artifact_path, v.score, v.state, v.created_at, v.link, \
      d.session_id, d.pending_seq, d.kind, d.question, d.command, d.options, d.approve_option, d.answered_at IS NOT NULL, \
-     v.dedup_key, o.tool, o.args \
+     v.dedup_key, o.tool, o.args, v.read_at IS NOT NULL \
      FROM value_items v LEFT JOIN dialog_alerts d ON d.item_id = v.id \
      LEFT JOIN owner_approvals o ON o.item_id = v.id";
 
@@ -224,6 +232,7 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
         (true, true) => &["approve", "reject"],
         (true, false) => &["dismiss", "acknowledge"],
     };
+    let topic = hq_db::inbox_prefs::Topic::of_source(&source_task).as_str();
     let extra = BTreeMap::from([
         ("source_task".to_string(), source_task),
         ("val_kind".to_string(), kind_str),
@@ -260,6 +269,9 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
             sign_in,
         },
         actions: actions.iter().map(|a| a.to_string()).collect(),
+        read: row.get(21)?,
+        topic: topic.to_string(),
+        silenced: false,
     })
 }
 
@@ -269,7 +281,14 @@ pub(crate) fn scan_value_items(
     state_filter: Option<&str>,
 ) -> Result<Vec<NotificationItem>, anyhow::Error> {
     db.with_conn(|conn| {
-        let sql = format!("{VALUE_ITEM_COLUMNS}{}", state_where(state_filter));
+        // An item cleared off the Done list is on no list.
+        let filter = state_where(state_filter);
+        let cleared = if filter.is_empty() {
+            " WHERE v.cleared_at IS NULL"
+        } else {
+            " AND v.cleared_at IS NULL"
+        };
+        let sql = format!("{VALUE_ITEM_COLUMNS}{filter}{cleared}");
         let mut stmt = conn.prepare(&sql)?;
         let items = stmt
             .query_map([], notification_from_row)?
@@ -290,10 +309,18 @@ pub(crate) fn aggregate_notifications(
         all.retain(|n| n.category == cat);
     }
     all.sort_by_key(|a| std::cmp::Reverse(a.created_at));
+    let quiet = hq_db::inbox_prefs::Silenced::load(db)?;
+    for n in &mut all {
+        n.silenced = quiet.covers(&n.metadata.extra["source_task"]);
+    }
 
     let pending = || all.iter().filter(|n| n.state == NotificationState::Pending);
+    // The badge: a silenced topic waits in the list without counting.
     let pending_approvals_count = pending()
-        .filter(|n| n.kind == NotificationKind::ActionNeeded)
+        .filter(|n| n.kind == NotificationKind::ActionNeeded && !n.silenced)
+        .count();
+    let unread_updates_count = pending()
+        .filter(|n| n.kind == NotificationKind::ValueItem && !n.read && !n.silenced)
         .count();
     let unread_count = pending().count();
     all.truncate(limit);
@@ -302,6 +329,7 @@ pub(crate) fn aggregate_notifications(
         notifications: all,
         unread_count,
         pending_approvals_count,
+        unread_updates_count,
     })
 }
 
@@ -557,36 +585,192 @@ pub(crate) async fn notification_action_handler(
     .into_response()
 }
 
-/// Clears every update. A Needs you item waits for its answer: clearing all never declines one.
-pub(crate) async fn mark_all_read_handler(State(state): State<Arc<WsState>>) -> Response {
-    let waiting = state.db.with_conn(|conn| {
-        conn.execute(
-            "UPDATE value_items SET state='dismissed', engagement='dismissed', engaged_at=datetime('now') \
-             WHERE state IN ('pending', 'delivered', 'routed') AND kind NOT IN ('action_needed', 'proposal')",
-            [],
-        )?;
-        Ok(conn.query_row(
-            "SELECT COUNT(*) FROM value_items WHERE state IN ('pending', 'delivered', 'routed')",
-            [],
-            |r| r.get::<_, i64>(0),
-        )?)
-    });
-    let waiting = match waiting {
-        Ok(n) => n,
-        Err(e) => {
-            warn!(error = %e, "mark_all_read_handler failed");
-            return ApiError::internal(e).into_response();
+/// Tells every open tab that the inbox changed, with the counts its badge shows.
+fn announce_inbox(state: &WsState) {
+    state.announce_change(crate::CHANGE_INBOX);
+    if let Ok(res) = aggregate_notifications(&state.db, Some("pending"), None, 50) {
+        state.broadcast(
+            &serde_json::json!({
+                "type": "notification:badge_count",
+                "unread_count": res.unread_count,
+                "pending_approvals_count": res.pending_approvals_count,
+                "unread_updates_count": res.unread_updates_count,
+            })
+            .to_string(),
+        );
+    }
+}
+
+fn done(state: &WsState, body: serde_json::Value) -> Response {
+    announce_inbox(state);
+    Json(body).into_response()
+}
+
+/// `POST /api/notifications/mark-all-read`, the address older apps call for "Clear all
+/// updates": puts every update away. A Needs you item waits for its answer.
+pub(crate) async fn mark_all_read_handler(state: State<Arc<WsState>>) -> Response {
+    archive_all_handler(state).await
+}
+
+/// `POST /api/notifications/archive-all`: puts every update away, into Done, and names them so
+/// the app can offer Undo. Putting all away never declines a request.
+pub(crate) async fn archive_all_handler(State(state): State<Arc<WsState>>) -> Response {
+    match hq_db::inbox_prefs::archive_updates(&state.db) {
+        Ok(ids) => {
+            let ids: Vec<String> = ids.iter().map(|id| format!("val_{id}")).collect();
+            done(&state, serde_json::json!({ "ok": true, "ids": ids }))
         }
+        Err(e) => {
+            warn!(error = %e, "archive_all_handler failed");
+            ApiError::internal(e).into_response()
+        }
+    }
+}
+
+/// `POST /api/notifications/read-all`: marks everything waiting as read. Nothing is answered
+/// and nothing leaves its list.
+pub(crate) async fn read_all_handler(State(state): State<Arc<WsState>>) -> Response {
+    match hq_db::inbox_prefs::mark_all_read(&state.db) {
+        Ok(n) => done(&state, serde_json::json!({ "ok": true, "read": n })),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+/// `POST /api/notifications/{id}/read`: the owner opened it.
+pub(crate) async fn read_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    let Some(val_id) = id.strip_prefix("val_") else {
+        return ApiError::bad_request("unrecognized notification ID format").into_response();
     };
-    state.broadcast(
-        &serde_json::json!({
-            "type": "notification:badge_count",
-            "unread_count": waiting,
-            "pending_approvals_count": waiting,
+    match hq_db::inbox_prefs::mark_read(&state.db, val_id) {
+        Ok(true) => done(&state, serde_json::json!({ "ok": true })),
+        Ok(false) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+/// `POST /api/notifications/clear-done`: empties the Done list.
+pub(crate) async fn clear_done_handler(State(state): State<Arc<WsState>>) -> Response {
+    match hq_db::inbox_prefs::clear_done(&state.db) {
+        Ok(n) => done(&state, serde_json::json!({ "ok": true, "cleared": n })),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RestoreManyRequest {
+    pub(crate) ids: Vec<String>,
+}
+
+/// Most ids one Undo may name; "Clear all updates" on a long-neglected inbox stays under it.
+const MAX_RESTORE: usize = 1000;
+
+/// `POST /api/notifications/restore`: the Undo of putting all updates away, within the window.
+/// Answers how many came back; one that was answered since, or is too old, stays where it is.
+pub(crate) async fn restore_many_handler(
+    State(state): State<Arc<WsState>>,
+    Json(body): Json<RestoreManyRequest>,
+) -> Response {
+    if body.ids.len() > MAX_RESTORE {
+        return ApiError::bad_request("too many items to restore at once").into_response();
+    }
+    let window = crate::threads_api::UNDO_WINDOW_SECS;
+    let mut restored = 0;
+    for id in &body.ids {
+        let Some(val_id) = id.strip_prefix("val_") else {
+            return ApiError::bad_request("unrecognized notification ID format").into_response();
+        };
+        match hq_db::value_items::restore_dismissed(&state.db, val_id, window) {
+            Ok(true) => restored += 1,
+            Ok(false) => {}
+            Err(e) => return ApiError::internal(e).into_response(),
+        }
+    }
+    if restored == 0 && !body.ids.is_empty() {
+        return ApiError::Conflict(crate::threads_api::UNDO_TOO_LATE.into()).into_response();
+    }
+    done(
+        &state,
+        serde_json::json!({ "ok": true, "restored": restored }),
+    )
+}
+
+fn silences_body(db: &hq_db::Database) -> anyhow::Result<serde_json::Value> {
+    use hq_db::inbox_prefs::{ALL, Topic, silences};
+    let active = silences(db, Utc::now())?;
+    let until_of = |name: &str| active.iter().find(|s| s.topic == name);
+    let row = |name: &str| {
+        let s = until_of(name);
+        serde_json::json!({
+            "topic": name,
+            "silenced": s.is_some(),
+            "until": s.and_then(|s| s.until).map(|u| u.to_rfc3339()),
         })
-        .to_string(),
-    );
-    Json(serde_json::json!({ "ok": true })).into_response()
+    };
+    Ok(serde_json::json!({
+        "pause": row(ALL),
+        "topics": Topic::SILENCEABLE.iter().map(|t| row(t.as_str())).collect::<Vec<_>>(),
+    }))
+}
+
+/// `GET /api/notifications/silences`: the pause and every topic that can be silenced.
+pub(crate) async fn silences_handler(State(state): State<Arc<WsState>>) -> Response {
+    match silences_body(&state.db) {
+        Ok(body) => Json(body).into_response(),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct SilenceRequest {
+    /// A topic's name, or `all` for the pause.
+    pub(crate) topic: String,
+    /// How long, in minutes; absent until it is turned back on.
+    pub(crate) minutes: Option<i64>,
+}
+
+/// A week: longer than that is "until I turn it back on".
+const MAX_SILENCE_MINUTES: i64 = 7 * 24 * 60;
+
+/// `POST /api/notifications/silences`: silences a topic, or pauses them all. What HQ itself
+/// asks the owner is not a topic and is refused here.
+pub(crate) async fn silence_handler(
+    State(state): State<Arc<WsState>>,
+    Json(body): Json<SilenceRequest>,
+) -> Response {
+    let until = match body.minutes {
+        None => None,
+        Some(m) if (1..=MAX_SILENCE_MINUTES).contains(&m) => {
+            Some(Utc::now() + chrono::Duration::minutes(m))
+        }
+        Some(_) => return ApiError::bad_request("minutes is out of range").into_response(),
+    };
+    match hq_db::inbox_prefs::silence(&state.db, &body.topic, until) {
+        Ok(true) => {}
+        Ok(false) => return ApiError::bad_request("this cannot be silenced").into_response(),
+        Err(e) => return ApiError::internal(e).into_response(),
+    }
+    info!(topic = %body.topic, minutes = ?body.minutes, "inbox topic silenced");
+    match silences_body(&state.db) {
+        Ok(body) => done(&state, body),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+/// `DELETE /api/notifications/silences/{topic}`: turns a topic, or the pause, back on.
+pub(crate) async fn unsilence_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(topic): AxumPath<String>,
+) -> Response {
+    if let Err(e) = hq_db::inbox_prefs::unsilence(&state.db, &topic) {
+        return ApiError::internal(e).into_response();
+    }
+    match silences_body(&state.db) {
+        Ok(body) => done(&state, body),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
 }
 
 #[cfg(test)]
@@ -1158,5 +1342,135 @@ mod tests {
             "a refused action leaves the notice in place"
         );
         assert_eq!(act("dismiss").await.status(), 200);
+    }
+
+    fn insert(state: &WsState, source: &str, kind: hq_core::types::ValueKind) -> String {
+        let item = hq_core::types::ValueItem::new(source, kind, "t", "b");
+        hq_db::value_items::insert(&state.db, &item).unwrap();
+        format!("val_{}", item.id)
+    }
+
+    async fn json_of(res: Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn reading_keeps_an_update_in_its_list_and_drops_it_from_the_unread_count() {
+        use hq_core::types::ValueKind;
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(WsState::new(dir.path().to_path_buf(), None));
+        let news = insert(&state, "agent_notify", ValueKind::Fyi);
+        insert(&state, "disk-watchdog", ValueKind::Fyi);
+        let before = aggregate_notifications(&state.db, Some("pending"), None, 50).unwrap();
+        assert_eq!(before.unread_updates_count, 2);
+
+        let res = read_handler(State(state.clone()), AxumPath(news.clone())).await;
+        assert_eq!(res.status(), 200);
+        let after = aggregate_notifications(&state.db, Some("pending"), None, 50).unwrap();
+        assert_eq!(after.unread_updates_count, 1);
+        assert_eq!(after.notifications.len(), 2, "read is not put away");
+        assert!(after.notifications.iter().any(|n| n.id == news && n.read));
+
+        assert_eq!(read_all_handler(State(state.clone())).await.status(), 200);
+        let after = aggregate_notifications(&state.db, Some("pending"), None, 50).unwrap();
+        assert_eq!(
+            (after.unread_updates_count, after.notifications.len()),
+            (0, 2)
+        );
+    }
+
+    #[tokio::test]
+    async fn putting_all_away_can_be_undone_and_done_can_be_cleared() {
+        use hq_core::types::ValueKind;
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(WsState::new(dir.path().to_path_buf(), None));
+        let news = insert(&state, "agent_notify", ValueKind::Fyi);
+        let ask = insert(&state, "owner-approval", ValueKind::ActionNeeded);
+
+        let body = json_of(archive_all_handler(State(state.clone())).await).await;
+        assert_eq!(body["ids"], serde_json::json!([news]));
+        let pending = scan_value_items(&state.db, Some("pending")).unwrap();
+        assert_eq!(pending.iter().map(|n| &n.id).collect::<Vec<_>>(), [&ask]);
+
+        let undo = RestoreManyRequest {
+            ids: vec![news.clone()],
+        };
+        let res = restore_many_handler(State(state.clone()), Json(undo)).await;
+        assert_eq!(json_of(res).await["restored"], 1);
+        assert_eq!(
+            scan_value_items(&state.db, Some("pending")).unwrap().len(),
+            2
+        );
+        // A request can never be brought back by Undo: it was never put away.
+        let undo = RestoreManyRequest {
+            ids: vec![ask.clone()],
+        };
+        let res = restore_many_handler(State(state.clone()), Json(undo)).await;
+        assert_eq!(res.status(), 409);
+
+        archive_all_handler(State(state.clone())).await;
+        assert_eq!(
+            scan_value_items(&state.db, Some("history")).unwrap().len(),
+            1
+        );
+        assert_eq!(clear_done_handler(State(state.clone())).await.status(), 200);
+        assert!(
+            scan_value_items(&state.db, Some("history"))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            scan_value_items(&state.db, None).unwrap().len(),
+            1,
+            "the request still waits"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_silenced_topic_is_listed_but_not_counted_and_hq_is_never_silenced() {
+        use hq_core::types::ValueKind;
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(WsState::new(dir.path().to_path_buf(), None));
+        let helper = insert(&state, "session-supervisor", ValueKind::ActionNeeded);
+        insert(&state, "owner-approval", ValueKind::ActionNeeded);
+
+        let ask = |topic: &str, minutes| SilenceRequest {
+            topic: topic.into(),
+            minutes,
+        };
+        let res = silence_handler(State(state.clone()), Json(ask("hq", None))).await;
+        assert_eq!(res.status(), 400);
+        let res = silence_handler(State(state.clone()), Json(ask("helpers", Some(0)))).await;
+        assert_eq!(res.status(), 400);
+        let res = silence_handler(State(state.clone()), Json(ask("helpers", Some(60)))).await;
+        let body = json_of(res).await;
+        let helpers = body["topics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["topic"] == "helpers");
+        assert_eq!(helpers.unwrap()["silenced"], true);
+        assert!(helpers.unwrap()["until"].is_string());
+
+        let list = aggregate_notifications(&state.db, Some("pending"), None, 50).unwrap();
+        assert_eq!(
+            list.notifications.len(),
+            2,
+            "silenced items are still listed"
+        );
+        assert_eq!(
+            list.pending_approvals_count, 1,
+            "only HQ's own request counts"
+        );
+        let item = list.notifications.iter().find(|n| n.id == helper).unwrap();
+        assert!(item.silenced && item.topic == "helpers");
+
+        let res = unsilence_handler(State(state.clone()), AxumPath("helpers".into())).await;
+        assert_eq!(res.status(), 200);
+        let list = aggregate_notifications(&state.db, Some("pending"), None, 50).unwrap();
+        assert_eq!(list.pending_approvals_count, 2);
     }
 }

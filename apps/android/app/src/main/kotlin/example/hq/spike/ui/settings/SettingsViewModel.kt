@@ -128,6 +128,8 @@ data class SettingsUi(
     val stale: Boolean = false,
     /** Save a copy now: idle, running, done or failed. */
     val copy: BackupCopy.State = BackupCopy.State.Idle,
+    val silences: Silences? = null,
+    val silenceBusy: Boolean = false,
 ) {
     val page: SettingsPage get() = stack.lastOrNull() ?: SettingsPage.Home
 
@@ -145,8 +147,10 @@ class SettingsActions(
     val onTab: (SettingsWords.SafetyTab) -> Unit = {},
     val onForgetSite: (String) -> Unit = {},
     val onPhoneRow: (String) -> Unit = {},
-    /** Set by the shell: opens HQ Coder on the Helpers page. */
+    /** Set by the shell: opens the GitHub connection over the place that is showing. */
     var onCodeFromPhone: () -> Unit = {},
+    /** Set by the shell: opens Tasks or Helpers, by the row's key. */
+    var onWork: (String) -> Unit = {},
     val onCopyDiagnostics: () -> Unit = {},
     val onDismissLine: () -> Unit = {},
     val onMode: (Boolean) -> Unit = {},
@@ -156,6 +160,9 @@ class SettingsActions(
     val onRestartConfirm: () -> Unit = {},
     val onFix: (PhoneFix) -> Unit = {},
     val onChannel: (String) -> Unit = {},
+    val onSilenceTopic: (String, Boolean) -> Unit = { _, _ -> },
+    val onPause: (Int) -> Unit = {},
+    val onResume: () -> Unit = {},
     val onDetails: (Boolean) -> Unit = {},
     val onUpgraderNoteSeen: () -> Unit = {},
     val onServerConnect: (String, String) -> Unit = { _, _ -> },
@@ -218,10 +225,16 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     val actions = SettingsActions(
         onOpen = ::open,
         onBack = { _state.update { if (it.busyBehind()) it else if (it.stack.isEmpty()) it.copy(open = false) else it.copy(stack = it.stack.dropLast(1)) } },
-        onPage = { p -> _state.update { it.copy(stack = it.stack + p) } },
+        onPage = { p ->
+            _state.update { it.copy(stack = it.stack + p) }
+            if (p == SettingsPage.Notifications) loadSilences()
+        },
         onTab = { t -> _state.update { it.copy(safetyTab = t) } },
         onForgetSite = ::forgetSite,
         onPhoneRow = ::phoneRow,
+        onSilenceTopic = ::silenceTopic,
+        onPause = ::pause,
+        onResume = ::resume,
         onCopyDiagnostics = ::copyDiagnostics,
         onDismissLine = { _state.update { it.copy(line = null) } },
         onMode = { toActive -> _state.update { if (it.restarting || toActive == (it.mode == "active")) it else it.copy(askMode = toActive) } },
@@ -346,18 +359,38 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun refreshNow() {
         if (frozen) return
         val local = listOf("settings" to "/api/settings", "chatApps" to "/api/chat-apps", "devices" to "/api/auth/devices", "budgets" to "/api/budgets", "health" to "/health", "vault" to "/api/vault-status", TRUSTED_SITES to "/api/fetch-sites")
-        val remote = listOf("providers" to "/api/usage/providers", "copilot" to "/api/copilot-usage", "forecast" to "/api/usage/forecast")
+        val remote = listOf("providers" to "/api/usage/providers", "copilot" to "/api/copilot-usage", "forecast" to "/api/usage/forecast", "github" to "/api/github")
         coroutineScope {
             val slow = remote.map { (key, path) -> async { key to get(path) } }
             val fast = local.map { (key, path) -> async { key to get(path) } }.awaitAll().toMap()
             if (frozen) return@coroutineScope
             val server = async { serverReport() }
             val before = _state.value.snap
-            publish(fast, mapOf("providers" to Got(before.providers, before.providers != null), "copilot" to Got(before.copilot, before.copilot != null), "forecast" to Got(before.forecast, before.forecast != null)))
+            publish(fast, mapOf("providers" to Got(before.providers, before.providers != null), "copilot" to Got(before.copilot, before.copilot != null), "forecast" to Got(before.forecast, before.forecast != null), "github" to Got(before.github, before.github != null)))
             val late = slow.awaitAll().toMap()
             serverBackup = server.await()
             if (frozen) return@coroutineScope
             publish(fast, late)
+        }
+    }
+
+    private fun loadSilences() = changeSilences(quiet = true) { client.json(SILENCES_PATH) }
+
+    private fun silenceTopic(topic: String, silence: Boolean) = changeSilences {
+        if (silence) client.postJson(SILENCES_PATH, JSONObject().put("topic", topic)) else client.deleteJson("$SILENCES_PATH/$topic")
+    }
+
+    private fun pause(minutes: Int) = changeSilences { client.postJson(SILENCES_PATH, JSONObject().put("topic", SILENCE_ALL).put("minutes", minutes)) }
+
+    private fun resume() = changeSilences { client.deleteJson("$SILENCES_PATH/$SILENCE_ALL") }
+
+    /** Every silence call answers with the whole list, which replaces what is shown. A first read that fails ([quiet]) leaves the section out: an older HQ has no such route. */
+    private fun changeSilences(quiet: Boolean = false, call: suspend () -> JSONObject) {
+        if (frozen) return
+        _state.update { it.copy(silenceBusy = true) }
+        viewModelScope.launch {
+            val now = try { SettingsWords.silences(call()) } catch (e: HqUnavailable) { null }
+            _state.update { it.copy(silenceBusy = false, silences = now ?: it.silences, line = if (now == null && !quiet) ctx().getString(R.string.inbox_fail_no_reply) else it.line) }
         }
     }
 
@@ -373,7 +406,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val before = _state.value.snap
         val kept = mapOf(
             "settings" to before.settings, "chatApps" to before.chatApps, "devices" to before.devices, "budgets" to before.budgets, "health" to before.health,
-            "providers" to before.providers, "copilot" to before.copilot, "forecast" to before.forecast, "vault" to before.vault,
+            "providers" to before.providers, "copilot" to before.copilot, "forecast" to before.forecast, "vault" to before.vault, "github" to before.github,
         )
         // A route HQ did not answer at all keeps its last values; an error answer is still shown as one.
         val silent = got.filterValues { it.body == null && !it.answered }.keys.filter { kept[it] != null }
@@ -382,7 +415,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val snap = SettingsSnapshot(
             body("settings"), body("chatApps"), body("devices"), body("budgets"), body("health"),
             unavailable = got.filterValues { it.body == null && it.answered }.keys,
-            providers = body("providers"), copilot = body("copilot"), forecast = body("forecast"), vault = body("vault"),
+            providers = body("providers"), copilot = body("copilot"), forecast = body("forecast"), vault = body("vault"), github = body("github"),
         )
         val now = Instant.now()
         val sites = got[TRUSTED_SITES]?.body?.optJSONArray("sites")?.let { a -> (0 until a.length()).map(a::getString) }
@@ -798,6 +831,11 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             actions.onCodeFromPhone()
             return
         }
+        if (key == WORK_TASKS_ROW || key == WORK_HELPERS_ROW) {
+            _state.update { it.copy(open = false) }
+            actions.onWork(key)
+            return
+        }
         val c = ctx()
         val intent = when (key) {
             "battery" -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
@@ -876,6 +914,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
+        const val SILENCES_PATH = "/api/notifications/silences"
+        const val SILENCE_ALL = "all"
         const val MODE_MAX = 64L
         private const val GOT_IT = "backup-got-it"
         const val EXIT_SCAN = 10

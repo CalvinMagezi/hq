@@ -486,6 +486,47 @@ pub fn retire(db: &Database, id: &str) -> Result<bool> {
     })
 }
 
+/// Whether any item, in any state, ever carried `dedup_key`. For a producer that must say a
+/// thing at most once however the owner answered it.
+pub fn any_with_dedup(db: &Database, dedup_key: &str) -> Result<bool> {
+    db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM value_items WHERE dedup_key = ?1)",
+            params![dedup_key],
+            |r| r.get(0),
+        )?)
+    })
+}
+
+/// Retires every waiting item whose dedup key is `prefix` followed by a number: the alerts of
+/// one session's blocks, once it is no longer blocked. Returns how many left the inbox.
+pub fn retire_waiting_numbered(db: &Database, prefix: &str) -> Result<usize> {
+    db.with_conn(|c| {
+        let waiting: Vec<(String, String)> = c
+            .prepare(
+                "SELECT id, dedup_key FROM value_items
+                 WHERE dedup_key LIKE ?1 ESCAPE '\\' AND state IN ('pending','routed','delivered')",
+            )?
+            .query_map(params![format!("{}%", escape_like(prefix))], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut retired = 0;
+        for (id, key) in waiting {
+            let rest = &key[prefix.len()..];
+            if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+                continue;
+            }
+            retired += c.execute(
+                "UPDATE value_items SET state='expired' \
+                 WHERE id = ?1 AND state IN ('pending','routed','delivered')",
+                params![id],
+            )?;
+        }
+        Ok(retired)
+    })
+}
+
 /// Expire pending/routed items past their TTL. Delivered items are kept for the ledger.
 pub fn gc_expired(db: &Database) -> Result<usize> {
     db.with_conn(|c| {
@@ -581,7 +622,7 @@ const MIN_ID_PREFIX_LEN: usize = 4;
 pub fn restore_dismissed(db: &Database, id: &str, window_secs: i64) -> Result<bool> {
     db.with_conn(|c| {
         let n = c.execute(
-            "UPDATE value_items SET state='delivered', engagement=NULL, engaged_at=NULL \
+            "UPDATE value_items SET state='delivered', engagement=NULL, engaged_at=NULL, cleared_at=NULL \
              WHERE id = ?1 AND state = 'dismissed' AND kind NOT IN ('action_needed', 'proposal') \
                AND julianday(engaged_at) >= julianday('now', ?2)",
             params![id, format!("-{window_secs} seconds")],

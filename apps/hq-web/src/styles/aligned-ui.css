@@ -112,7 +112,7 @@
 .a-bal.wait>span{border-style:dashed;color:var(--ink-muted)}
 .a-bal:hover>span{background:var(--surface-200)}
 
-/* Rail: the five places in bar order, then the gear. Chat is the HQ mark. */
+/* Rail: the places in bar order, then the gear. Chat is the HQ mark. */
 .a-rail{flex-direction:column;align-items:center;gap:4px;width:var(--rail-w);padding:12px 0 16px;background:var(--surface-100);border-right:1px solid var(--hairline)}
 .a-rail-item{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;width:80px;min-height:64px;border-radius:var(--radius-row);color:var(--ink-muted);font:700 12px/16px var(--font-sans)}
 .a-pill{position:relative;width:56px;height:32px;border-radius:16px;display:flex;align-items:center;justify-content:center}
@@ -126,7 +126,7 @@
 .a-rail-gap{flex:1 1 0}
 .a-badge{position:absolute;top:-4px;right:6px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--brand-green);color:var(--on-green);font:700 11px/16px var(--font-sans);text-align:center;font-style:normal}
 
-/* BottomBar (phone): five places, Chat raised in the middle, Inbox badge */
+/* BottomBar (phone): three places, Chat raised in the middle, Inbox badge */
 .a-nav{display:flex;height:var(--nav-h);padding-bottom:16px;background:var(--surface-100)}
 .a-nav-item{position:relative;flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--ink-muted);font:700 12px/16px var(--font-sans)}
 .a-nav-item .a-pill{width:64px}
@@ -494,3 +494,7 @@ textarea.a-input{min-height:96px;resize:vertical}
 .a-banner.work>.a-ic{color:var(--brand-blue)}
 .a-sw[aria-checked="true"]{background:var(--ink);border-color:var(--ink)}
 .a-chk[aria-checked="true"] u{background:var(--ink);border-color:var(--ink)}
+/* An update not read yet: a dot before its title. Read ones keep their place in the list. */
+.a-msg[data-unread] .a-msg-main b::before{content:"";display:inline-block;width:8px;height:8px;margin-right:8px;border-radius:50%;background:var(--brand-green);vertical-align:middle}
+.a-msg-time .a-ic{margin-right:4px;vertical-align:-3px}
+.hq-inbox-clear{display:flex;flex-wrap:wrap;gap:8px}

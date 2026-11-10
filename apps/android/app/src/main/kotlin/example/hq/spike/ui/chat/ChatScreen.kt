@@ -61,7 +61,11 @@ import kotlinx.coroutines.delay
 
 /** The Chat v2 board of the design: chat name row, the conversation or the empty start, and the composer. */
 @Composable
-fun ChatScreen(state: ChatUiState, actions: ChatActions, status: example.hq.spike.data.Connection = example.hq.spike.data.Connection.Connected, onStartHq: () -> Unit = {}, onAiKeys: () -> Unit = {}) {
+fun ChatScreen(
+    state: ChatUiState, actions: ChatActions, status: example.hq.spike.data.Connection = example.hq.spike.data.Connection.Connected, onStartHq: () -> Unit = {}, onAiKeys: () -> Unit = {},
+    /** What this chat waits on the owner for, drawn between the conversation and the composer. */
+    needs: @Composable () -> Unit = {},
+) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             example.hq.spike.ui.connection.ChatBanner(status, onStartHq, onAiKeys)
@@ -70,6 +74,7 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, status: example.hq.spik
                 if (state.messages.isEmpty() && state.live == null) EmptyChat(Suggestions.shown(state.suggestions), actions.onDraft) else Conversation(state, actions)
                 SlashPalette(state.draft, actions.onSlash, Modifier.align(Alignment.BottomCenter))
             }
+            needs()
             Composer(state, actions)
         }
     }

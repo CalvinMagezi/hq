@@ -347,6 +347,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val approval: ApprovalFacts? = null,
         /** For a new sign-in: the device that signed in, which Sign it out signs out. */
         val signInDevice: String? = null,
+        /** Its topic is silenced: listed, but left off the badge. False from an older server. */
+        val silenced: Boolean = false,
     )
 
     /** What HQ says an approval is about: [tool] and [args] verbatim, [loses] and [verb] (one of [LOSING_VERBS]) decided by HQ, never by the card's words. */
@@ -383,7 +385,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
                         n.getString("id"), n.optString("kind", ""), n.optString("title", ""), n.optString("description", ""), n.optString("state", ""),
                         n.optString("created_at", ""), meta?.optStringOrNull("link"), extra?.optStringOrNull("source_task"), extra?.optStringOrNull("val_kind"),
                         n.optJSONArray("actions").strings(), alertDialog(meta), approvalFacts(meta),
-                        signInDevice(meta),
+                        signInDevice(meta), n.optBoolean("silenced", false),
                     )
                 },
                 o.optInt("unread_count", 0), o.optInt("pending_approvals_count", 0),
@@ -614,6 +616,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     suspend fun postJson(path: String, body: JSONObject = JSONObject()): JSONObject = send(authed(path).post(json(body)).build()) { if (it.isBlank()) JSONObject() else JSONObject(it) }
 
     suspend fun deleteAt(path: String) { send(authed(path).delete().build()) { } }
+
+    suspend fun deleteJson(path: String): JSONObject = send(authed(path).delete().build()) { if (it.isBlank()) JSONObject() else JSONObject(it) }
 
     data class TrashedNote(val trashPath: String, val originalPath: String, val trashedOn: String, val daysLeft: Int)
 

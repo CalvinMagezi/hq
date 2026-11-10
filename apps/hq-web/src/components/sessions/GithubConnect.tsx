@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { ErrorText } from '~/components/sessions/ErrorText'
 import { edgeWorkerApi } from '~/lib/edgeWorker'
-import { githubApi, githubTask, type GithubLink, type GithubRepo, type GithubRun } from '~/lib/github'
+import { GITHUB_QUERY_KEY, githubApi, githubTask, type GithubLink, type GithubRepo, type GithubRun } from '~/lib/github'
 import { createTaskClient } from '~/lib/tasksApi'
 import { t } from '~/strings'
 
@@ -94,16 +95,19 @@ function JobForm({ link, run }: { link: GithubLink; run: GithubRun }) {
 export function GithubConnect() {
   const [link, setLink] = useState<GithubLink | null>(null)
   const [failed, setFailed] = useState(false)
+  const client = useQueryClient()
 
   const run = useCallback<GithubRun>(async (work) => {
     try {
       await work?.()
-      setLink(await githubApi.status())
+      const now = await githubApi.status()
+      setLink(now)
+      client.setQueryData(GITHUB_QUERY_KEY, now)
       setFailed(false)
     } catch {
       setFailed(true)
     }
-  }, [])
+  }, [client])
 
   useEffect(() => {
     void run()

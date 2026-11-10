@@ -69,13 +69,23 @@ import example.hq.spike.data.ConnectionWords
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 
-/** The five places on the bar, left to right (design page 3, Navigation board). */
-enum class Place(val label: String, val icon: ImageVector?) {
+/**
+ * Every place the shell can show. Three are on the bar, left to right: Notes, Chat, Inbox. Tasks and Helpers are where HQ
+ * and its agents work: they keep their pages and open from an Inbox item, a chat card, search, a link or Settings, never
+ * from the bar.
+ */
+enum class Place(val label: String, val icon: ImageVector?, val onBar: Boolean = true) {
     Notes("Notes", HqIcons.Notes),
-    Tasks("Tasks", HqIcons.Tasks),
+    Tasks("Tasks", HqIcons.Tasks, onBar = false),
     Chat("Chat", null),
-    Helpers("Helpers", HqIcons.Helpers),
+    Helpers("Helpers", HqIcons.Helpers, onBar = false),
     Inbox("Inbox", HqIcons.Inbox),
+    ;
+
+    companion object {
+        /** The bar's places, in order. */
+        val bar: List<Place> get() = Place.entries.filter { it.onBar }
+    }
 }
 
 private val BarContentHeight = 80.dp
@@ -202,7 +212,7 @@ fun BottomBar(current: Place, inboxBadge: Int, onSelect: (Place) -> Unit) {
         Modifier.fillMaxWidth().background(Mts.Surface100)
             .height(BarContentHeight + maxOf(BarMinBottom, navInset)).padding(bottom = maxOf(BarMinBottom, navInset)),
     ) {
-        for (place in Place.entries) {
+        for (place in Place.bar) {
             val selected = place == current
             Column(
                 Modifier.weight(1f).fillMaxHeight().selectable(selected, role = Role.Tab, onClick = { onSelect(place) }),
