@@ -36,6 +36,12 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   totals, not the exit of the first suite.
 - Work on a branch and open a pull request. Keep changes focused and atomic,
   write tests for new behavior, and follow the style of the surrounding code.
+- `layering.yaml` says which crate may depend on which and which files belong to
+  a module, and `cargo test -p hq-core --test layering` enforces it. The base
+  (`hq-core`, `hq-contract` and the kernel crates listed there) never depends on
+  a module. When that test fails, invert the dependency; never add a debt entry
+  or raise a number to make it pass. A new crate needs a tier. Plan:
+  `docs/plans/modular-hq.md`.
 - Do not hand-deploy to a server. Servers update themselves from signed releases
   (`docs/UPDATE_SYSTEM.md`, `deploy/README.md`).
 
@@ -123,7 +129,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   and `crates/hq-tools/tests/adoption_stays_local.rs` fails if adoption code imports a way out.
   "You haven't tried this" nudges are chosen on the device, never by the model. Policy:
   `docs/security/ADOPTION_DATA.md`.
-- **Identity is never model-writable.** Tools learn the caller only from reserved `_hq_*` arguments the runtime sets (`_hq_connector`, `_hq_caller_session`, `_hq_native_*`). Their names and readers live in the base, in `hq_core::caller` (`crates/hq-core/src/caller.rs`); no module defines its own. A native session strips every `_hq_*` key the model sent before it sets its own, and the MCP gateway does the same for its callers (it keeps only `_hq_spawned_session`, which can only take reach away). Provenance is recorded only where a write path knows the caller; otherwise it is `unknown`. Review state changes only through `note_review`.
+- **Identity is never model-writable.** Tools learn the caller only from reserved `_hq_*` arguments the runtime sets (`_hq_connector`, `_hq_caller_session`, `_hq_native_*`). Their names and readers live in the base, in `hq_core::caller` (`crates/hq-core/src/caller.rs`); no module defines its own. A native session strips every `_hq_*` key the model sent before it sets its own, and the MCP gateway does the same for its callers (it keeps only `_hq_spawned_session`, which can only take reach away) and refuses a call whose arguments are not an object, since nothing else can carry a marker. A tool that calls another tool passes on every `_hq_*` key the runtime set and none the caller wrote. Provenance is recorded only where a write path knows the caller; otherwise it is `unknown`. Review state changes only through `note_review`.
 - **Disk watchdog**: `crates/hq-cli/src/commands/start/daemon/tasks_periodic/disk_watchdog.rs` is a 6-hour daemon task
   that checks overall disk usage, the bun install cache, and `node_modules` and
   `target` bloat under configurable roots, putting a report in the owner's inbox on

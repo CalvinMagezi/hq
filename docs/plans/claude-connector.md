@@ -204,7 +204,7 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
    and trashing a note outside the system folders runs at once; a delete is a move into
    `_trash/`, kept 30 days. Task creates and updates run at once too, including tags and
    assignees, which used to wait because they put text in a mailbox. What replaced the check is
-   that a connector's task writes mail no one (`harness_session::writes_no_mail`, the rule
+   that a connector's task writes mail no one (`hq_core::caller::writes_no_mail`, the rule
    `task_create_from_note` already followed): the task keeps its tags and assignees as labels
    and fields, and no agent mailbox or chat hears of the create, the update or an unblock. The
    remaining reach is pull, not push: an agent that calls `task_next`, or the stack dispatcher
