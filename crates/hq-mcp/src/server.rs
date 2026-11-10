@@ -87,7 +87,7 @@ impl ServerHandler for HqMcpServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         // A pane HQ launched carries its session id, so what it calls is marked as spawned.
-        let marked = std::env::var(hq_tools::harness_session::SESSION_ENV)
+        let marked = std::env::var(hq_core::caller::SESSION_ENV)
             .ok()
             .filter(|id| !id.trim().is_empty())
             .and_then(|id| gateway::mark_spawned_session(request.arguments.as_ref(), &id));

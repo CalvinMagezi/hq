@@ -711,9 +711,9 @@ fn notify(db: &Database, task: &t::Task, reason: &str) {
 /// Whether the caller came in on a key whose text the owner has not vouched for: the handoff or
 /// tasks key, or a claude.ai connector grant.
 pub fn restricted_caller(args: &serde_json::Value) -> bool {
-    crate::harness_session::is_tasks_scope(args)
-        || crate::harness_session::is_handoff_scope(args)
-        || crate::harness_session::connector_label(args).is_some()
+    hq_core::caller::is_tasks_scope(args)
+        || hq_core::caller::is_handoff_scope(args)
+        || hq_core::caller::connector_label(args).is_some()
 }
 
 /// Refuses a restricted caller ([`restricted_caller`]) that would put a task on the worker's

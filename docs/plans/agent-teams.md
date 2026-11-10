@@ -15,7 +15,7 @@ that hold however deep the tree grows.
 
 | Guard | Where | Effect |
 |-------|-------|--------|
-| `refuse_if_spawned` | `harness_session/origin.rs`, used by spawn, resume and handoff | A session HQ launched may not start another one ("ask the owner"). |
+| `refuse_if_spawned` | `hq_core::caller`, used by spawn, resume and handoff | A session HQ launched may not start another one ("ask the owner"). |
 | `MAX_SPAWN_DEPTH = 2` | `a2a.rs` | Owner's lead, its worker, and one more level. A compile-time constant. |
 | `pick_harness`: the delegator's own agent only | `a2a.rs` | A Claude lead cannot hand work to Codex, Copilot or pi. No model, purpose or folder choice either. |
 | Session tokens only for `kind: claude` | `harness_session/launch.rs` (`mcp_access`) | Other agents cannot report, message or delegate. |

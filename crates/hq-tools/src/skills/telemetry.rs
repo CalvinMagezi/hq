@@ -231,8 +231,8 @@ mod tests {
         // The runtime's markers name the lease: the task is known.
         tool.execute(json!({
             "name": "sheets",
-            crate::provenance::NATIVE_SESSION_ARG: "s-1",
-            crate::provenance::NATIVE_LEASES_ARG: [lease],
+            hq_core::caller::NATIVE_SESSION_ARG: "s-1",
+            hq_core::caller::NATIVE_LEASES_ARG: [lease],
         }))
         .await
         .unwrap();

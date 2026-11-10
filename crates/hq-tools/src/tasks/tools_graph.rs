@@ -61,7 +61,7 @@ impl HqTool for TaskRelatedTool {
             .get("rebuild")
             .and_then(Value::as_bool)
             .unwrap_or(false)
-            && !crate::harness_session::is_tasks_scope(&args);
+            && !hq_core::caller::is_tasks_scope(&args);
         self.db.with_conn(move |c| related(c, &id, limit, rebuild))
     }
 }

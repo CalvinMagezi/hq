@@ -205,7 +205,7 @@ impl HqTool for TaskLinkListTool {
         let (kind, reference) = (opt_str(&args, "kind"), opt_str(&args, "ref"));
         // The tasks scope never learns the path of a note in the owner's vault, nor which tasks
         // started from one.
-        let scoped = crate::harness_session::is_tasks_scope(&args);
+        let scoped = hq_core::caller::is_tasks_scope(&args);
         if scoped && kind.as_deref() == Some(t::LINK_VAULT_NOTE) {
             bail!("this connection cannot look up vault notes");
         }

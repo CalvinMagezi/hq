@@ -111,7 +111,7 @@ impl HqTool for TaskCreateTool {
         let depends_on = tags_from_args(&args, "depends_on");
         // The tasks scope sets no routing tags or assignees (each names a mailbox that an agent
         // or the owner's chat drains) and cannot choose who a write is attributed to.
-        let scoped = crate::harness_session::is_tasks_scope(&args);
+        let scoped = hq_core::caller::is_tasks_scope(&args);
         if scoped {
             check_scoped_text(&args)?;
         }
@@ -165,7 +165,7 @@ impl HqTool for TaskCreateTool {
             );
         }
         let origin_thread = self.origin_thread.clone();
-        let caller_session = crate::harness_session::caller_session(&args).map(str::to_string);
+        let caller_session = hq_core::caller::caller_session(&args).map(str::to_string);
         let (task, created) = self.db.with_conn(move |c| {
             t::in_write_tx(c, |c| {
                 // Bad links are refused before the task exists.
@@ -231,7 +231,7 @@ impl HqTool for TaskCreateTool {
             out["deduplicated"] = json!(true);
             return Ok(out);
         }
-        if !crate::harness_session::writes_no_mail(&args) {
+        if !hq_core::caller::writes_no_mail(&args) {
             notify_recipients(&self.vault_path, &task, None, self.settings.route_tags);
         }
         let (links, advice) = self
@@ -388,7 +388,7 @@ impl HqTool for TaskListTool {
             .unwrap_or(DEFAULT_LIST_PAGE)
             .clamp(1, t::MAX_LIST_LIMIT);
         let offset = arg_usize(&args, "offset").unwrap_or(0);
-        let caller = crate::harness_session::caller_session(&args).map(str::to_string);
+        let caller = hq_core::caller::caller_session(&args).map(str::to_string);
         let want_stale = args.get("stale").and_then(Value::as_bool).unwrap_or(false);
         let stale_hours = i64::try_from(self.settings.stale_hours()).unwrap_or(i64::MAX);
         let ttl = super::tools_lease::ttl_secs(&self.settings);
@@ -577,8 +577,8 @@ impl HqTool for TaskGetTool {
     }
     async fn execute(&self, args: Value) -> Result<Value> {
         let id = task_ref(&args)?;
-        let caller = crate::harness_session::caller_session(&args).map(str::to_string);
-        let scoped = crate::harness_session::is_tasks_scope(&args);
+        let caller = hq_core::caller::caller_session(&args).map(str::to_string);
+        let scoped = hq_core::caller::is_tasks_scope(&args);
         let ttl = super::tools_lease::ttl_secs(&self.settings);
         let stale_hours = i64::try_from(self.settings.stale_hours()).unwrap_or(i64::MAX);
         let (
@@ -736,7 +736,7 @@ impl HqTool for TaskUpdateTool {
     }
     async fn execute(&self, args: Value) -> Result<Value> {
         let id = task_ref(&args)?;
-        let scoped = crate::harness_session::is_tasks_scope(&args);
+        let scoped = hq_core::caller::is_tasks_scope(&args);
         if scoped {
             check_scoped_text(&args)?;
         }
@@ -836,7 +836,7 @@ impl HqTool for TaskUpdateTool {
                 )?;
                 if scoped
                     && edits_text
-                    && !crate::harness_session::is_own_scope_actor(&scope_args, &previous.created_by)
+                    && !hq_core::caller::is_own_scope_actor(&scope_args, &previous.created_by)
                 {
                     bail!(
                         "this connection may edit the title and description only of tasks it created; \
@@ -870,7 +870,7 @@ impl HqTool for TaskUpdateTool {
         })?;
         let became_ready_for_review = task.status == t::STATUS_READY_FOR_REVIEW
             && previous.status != t::STATUS_READY_FOR_REVIEW;
-        if !crate::harness_session::writes_no_mail(&args) {
+        if !hq_core::caller::writes_no_mail(&args) {
             notify_unblocked(
                 &self.vault_path,
                 &task,
@@ -1047,7 +1047,7 @@ impl HqTool for TaskCommentAddTool {
         if body.is_empty() {
             bail!("body is required");
         }
-        if crate::harness_session::is_tasks_scope(&args) {
+        if hq_core::caller::is_tasks_scope(&args) {
             check_scoped_text(&args)?;
         }
         // A launched agent that proved its session is that session, whatever
@@ -1055,7 +1055,7 @@ impl HqTool for TaskCommentAddTool {
         // caller's own words.
         let hints = ActorHints::from_args(&args, "author");
         let settings = self.settings.clone();
-        let caller = crate::harness_session::caller_session(&args).map(str::to_string);
+        let caller = hq_core::caller::caller_session(&args).map(str::to_string);
         let comment = self.db.with_conn(move |c| {
             let task = t::get_task(c, &task_id)?
                 .ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
@@ -1102,7 +1102,7 @@ impl HqTool for TaskCommentListTool {
     }
     async fn execute(&self, args: Value) -> Result<Value> {
         let task_id = task_ref(&args)?;
-        let caller = crate::harness_session::caller_session(&args).map(str::to_string);
+        let caller = hq_core::caller::caller_session(&args).map(str::to_string);
         let comments = self.db.with_conn(move |c| {
             let task = t::get_task(c, &task_id)?
                 .ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;

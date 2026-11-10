@@ -20,29 +20,6 @@ pub struct WatchingChat {
     pub from_ask: bool,
 }
 
-/// Set by the gateway when the caller says it runs inside a session HQ spawned
-/// (header `x-hq-session-id`, filled from the `HQ_SESSION_ID` the pane was
-/// launched with). A caller that sets it itself only restricts itself.
-pub const SPAWNED_SESSION_ARG: &str = "_hq_spawned_session";
-
-/// The environment variable HQ sets in every pane it launches, naming the session.
-pub const SESSION_ENV: &str = "HQ_SESSION_ID";
-
-/// Argument the gateway sets, and only the gateway, to the session a call came
-/// from once that session proved itself with its token. Tools that act on behalf
-/// of an agent (messaging, claiming) read the caller from here, never from a
-/// field the caller supplies.
-pub const CALLER_SESSION_ARG: &str = "_hq_caller_session";
-
-/// The session the gateway attested for this call, if any.
-pub fn caller_session(args: &Value) -> Option<&str> {
-    args.get(CALLER_SESSION_ARG)
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-}
-
-pub const SPAWNED_REFUSAL: &str = "HQ-spawned sessions cannot resume, hand off or type into other sessions, or run full-mode asks; start a teammate with agent_delegate (or harness_session_spawn with from_session) and talk to it with agent_message_send";
-
 /// Argument a caller sets to say it runs inside HQ session `id` (the `HQ_SESSION_ID`
 /// its pane was launched with). Nothing attests it, so the spawn becomes a delegation
 /// from that session only after the caller's own origin cap and folder fence pass for
@@ -60,20 +37,6 @@ pub fn delegating_session(args: &Value) -> Option<String> {
                 .filter(|s| !s.is_empty())
         })
         .map(str::to_string)
-}
-
-/// The id of the HQ-spawned session this call came from, when the gateway marked it.
-pub fn spawned_session(args: &Value) -> Option<&str> {
-    args.get(SPAWNED_SESSION_ARG)
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-}
-
-pub fn refuse_if_spawned(args: &Value) -> Result<()> {
-    match spawned_session(args) {
-        Some(_) => bail!(SPAWNED_REFUSAL),
-        None => Ok(()),
-    }
 }
 
 pub(super) fn agent_host_config() -> hq_core::config::AgentHostConfig {

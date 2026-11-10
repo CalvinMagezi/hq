@@ -46,14 +46,14 @@ pub(super) fn ttl_secs(settings: &TasksConfig) -> i64 {
 /// client on a machine the owner may not control is visibly that wherever its work shows; any
 /// other caller may not take a name of that shape.
 fn lease_actor(args: &Value, actor: &str) -> Result<String> {
-    if let Some(label) = crate::harness_session::connector_label(args) {
-        return Ok(crate::harness_session::connector_actor(label));
+    if let Some(label) = hq_core::caller::connector_label(args) {
+        return Ok(hq_core::caller::connector_actor(label));
     }
-    if crate::harness_session::is_connector_actor(&t::clean_label(actor)) {
+    if hq_core::caller::is_connector_actor(&t::clean_label(actor)) {
         bail!("mcp:connector names are for claude.ai connections; claim under your own name");
     }
-    let scope = crate::harness_session::TASKS_SCOPE_ACTOR;
-    if crate::harness_session::is_tasks_scope(args) {
+    let scope = hq_core::caller::TASKS_SCOPE_ACTOR;
+    if hq_core::caller::is_tasks_scope(args) {
         let label = t::clean_label(actor);
         return Ok(if label.is_empty() {
             scope.to_string()
@@ -61,7 +61,7 @@ fn lease_actor(args: &Value, actor: &str) -> Result<String> {
             format!("{scope}/{label}")
         });
     }
-    if crate::harness_session::is_tasks_scope_actor(&t::clean_label(actor)) {
+    if hq_core::caller::is_tasks_scope_actor(&t::clean_label(actor)) {
         bail!("{scope} names are for the tasks-scoped key; claim under your own name");
     }
     Ok(actor.to_string())
@@ -70,18 +70,18 @@ fn lease_actor(args: &Value, actor: &str) -> Result<String> {
 /// The name without the tasks-scope prefix, which is the name a task is assigned to.
 fn assignee_name(actor: &str) -> &str {
     actor
-        .strip_prefix(crate::harness_session::TASKS_SCOPE_ACTOR)
+        .strip_prefix(hq_core::caller::TASKS_SCOPE_ACTOR)
         .and_then(|rest| rest.strip_prefix('/'))
         .unwrap_or(actor)
 }
 
 /// A tasks-scope caller may heartbeat or release only a lease it took on that scope.
 fn check_scope_owns_lease(conn: &rusqlite::Connection, args: &Value, token: &str) -> Result<()> {
-    if !crate::harness_session::is_tasks_scope(args) {
+    if !hq_core::caller::is_tasks_scope(args) {
         return Ok(());
     }
     match t::lease_for_token(conn, token)? {
-        Some(lease) if !crate::harness_session::is_own_scope_actor(args, &lease.actor) => {
+        Some(lease) if !hq_core::caller::is_own_scope_actor(args, &lease.actor) => {
             bail!(
                 "that lease was not taken on this connection; claim the task here to get your own"
             )
@@ -128,11 +128,11 @@ impl ActorHints {
     /// `created_by` or `actor`), used only when nothing stronger is present.
     pub fn from_args(args: &Value, name_arg: &str) -> Self {
         Self {
-            caller_session: crate::harness_session::caller_session(args).map(str::to_string),
+            caller_session: hq_core::caller::caller_session(args).map(str::to_string),
             lease_token: opt_str(args, "lease"),
             named: arg_str(args, name_arg),
-            tasks_scope: crate::harness_session::is_tasks_scope(args),
-            connector: crate::harness_session::connector_label(args).map(str::to_string),
+            tasks_scope: hq_core::caller::is_tasks_scope(args),
+            connector: hq_core::caller::connector_label(args).map(str::to_string),
         }
     }
 
@@ -160,10 +160,11 @@ impl ActorHints {
             // Working under a lease keeps it alive, and a lease that only expired resumes.
             let lease = t::use_lease(conn, token, ttl_secs(settings))?;
             // The tasks scope never writes under a name it did not get on that scope.
-            let own =
-                self.connector.as_deref().is_some_and(|label| {
-                    lease.actor == crate::harness_session::connector_actor(label)
-                }) || crate::harness_session::is_tasks_scope_actor(&lease.actor);
+            let own = self
+                .connector
+                .as_deref()
+                .is_some_and(|label| lease.actor == hq_core::caller::connector_actor(label))
+                || hq_core::caller::is_tasks_scope_actor(&lease.actor);
             if self.tasks_scope && !own {
                 bail!(
                     "that lease was not taken on this connection; claim the task here to get your own"
@@ -184,27 +185,26 @@ impl ActorHints {
             );
         }
         // A name of the scope's shape would let the scope edit that task's text as its own.
-        if !self.tasks_scope
-            && crate::harness_session::is_tasks_scope_actor(&t::clean_label(&self.named))
+        if !self.tasks_scope && hq_core::caller::is_tasks_scope_actor(&t::clean_label(&self.named))
         {
             bail!(
                 "{} names are for the tasks-scoped key; write under your own name",
-                crate::harness_session::TASKS_SCOPE_ACTOR
+                hq_core::caller::TASKS_SCOPE_ACTOR
             );
         }
         // A claude.ai connection is named for what it is, whatever name it passes.
         if let Some(label) = &self.connector {
             return Ok(Actor {
-                name: crate::harness_session::connector_actor(label),
+                name: hq_core::caller::connector_actor(label),
                 work_session_id: None,
                 lease: None,
             });
         }
-        if crate::harness_session::is_connector_actor(&t::clean_label(&self.named)) {
+        if hq_core::caller::is_connector_actor(&t::clean_label(&self.named)) {
             bail!("mcp:connector names are for claude.ai connections; write under your own name");
         }
         let name = if self.tasks_scope {
-            crate::harness_session::TASKS_SCOPE_ACTOR.to_string()
+            hq_core::caller::TASKS_SCOPE_ACTOR.to_string()
         } else if self.named.is_empty() {
             "unknown".to_string()
         } else {
@@ -417,7 +417,7 @@ impl HqTool for TaskClaimTool {
             .get("takeover")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let scoped = crate::harness_session::is_tasks_scope(&args);
+        let scoped = hq_core::caller::is_tasks_scope(&args);
         // Taking over ends another session's lease, which may be one HQ launched; a client on the
         // tasks key waits for a silent lease to expire instead.
         if scoped && takeover {
@@ -561,7 +561,7 @@ impl HqTool for TaskNextTool {
         }
         let assignee = opt_str(&args, "assignee").unwrap_or_else(|| actor.clone());
         let actor = lease_actor(&args, &actor)?;
-        let scoped = crate::harness_session::is_tasks_scope(&args);
+        let scoped = hq_core::caller::is_tasks_scope(&args);
         let include_unassigned = args
             .get("include_unassigned")
             .and_then(Value::as_bool)
@@ -731,8 +731,8 @@ impl HqTool for TaskReleaseTool {
             })
             .filter(|cp| !cp.is_empty())
         });
-        let scoped = crate::harness_session::is_tasks_scope(&args);
-        let mails_no_one = crate::harness_session::writes_no_mail(&args);
+        let scoped = hq_core::caller::is_tasks_scope(&args);
+        let mails_no_one = hq_core::caller::writes_no_mail(&args);
         // Handing work over is the cheapest time to find what it produced, while the agent still
         // has it in context.
         let mut handover_warning = None;

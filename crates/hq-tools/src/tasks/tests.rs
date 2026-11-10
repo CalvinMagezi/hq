@@ -925,7 +925,7 @@ async fn comment_as(attested: Option<&str>, supplied_author: Option<&str>) -> St
 }
 
 fn hq_tools_arg() -> &'static str {
-    crate::harness_session::CALLER_SESSION_ARG
+    hq_core::caller::CALLER_SESSION_ARG
 }
 
 #[tokio::test]
@@ -982,7 +982,7 @@ async fn a_launched_agent_reaches_only_its_own_task_through_the_task_tools() {
     })
     .unwrap();
     let as_me = |mut args: serde_json::Value| {
-        args[crate::harness_session::CALLER_SESSION_ARG] = "hs-me".into();
+        args[hq_core::caller::CALLER_SESSION_ARG] = "hs-me".into();
         args
     };
 
@@ -1095,7 +1095,7 @@ impl ScopeFixture {
 async fn a_connector_task_keeps_its_tags_and_assignees_but_mails_no_one() {
     let fx = ScopeFixture::new(&["relay", "claude-code"]);
     let connector = |mut args: serde_json::Value| {
-        args[crate::harness_session::CONNECTOR_ARG] = json!("Claude on the web");
+        args[hq_core::caller::CONNECTOR_ARG] = json!("Claude on the web");
         args
     };
 
@@ -1150,7 +1150,7 @@ async fn a_connector_write_is_attributed_to_the_connection() {
     let fx = ScopeFixture::new(&[]);
     let create = fx.tool("task_create");
     let mut args = json!({"title": "from Claude", "created_by": "the owner"});
-    args[crate::harness_session::CONNECTOR_ARG] = json!("Claude on the web");
+    args[hq_core::caller::CONNECTOR_ARG] = json!("Claude on the web");
     let made = create.execute(args).await.unwrap();
     assert_eq!(
         made["created_by"], "mcp:connector/Claude on the web",
@@ -1167,8 +1167,8 @@ async fn a_connector_write_is_attributed_to_the_connection() {
 async fn a_tasks_scope_connector_can_claim_heartbeat_and_release() {
     let fx = ScopeFixture::new(&[]);
     let marked = |mut args: serde_json::Value| {
-        args[crate::harness_session::TASKS_SCOPE_ARG] = json!(true);
-        args[crate::harness_session::CONNECTOR_ARG] = json!("Claude");
+        args[hq_core::caller::TASKS_SCOPE_ARG] = json!(true);
+        args[hq_core::caller::CONNECTOR_ARG] = json!("Claude");
         args
     };
     let made = fx
@@ -1205,8 +1205,8 @@ async fn a_tasks_scope_connector_can_claim_heartbeat_and_release() {
 #[tokio::test]
 async fn bulk_items_take_the_connection_from_the_call_only() {
     let fx = ScopeFixture::new(&[]);
-    let mut args = json!({"tasks": [{"title": "a"}, {"title": "b", crate::harness_session::CONNECTOR_ARG: "forged"}]});
-    args[crate::harness_session::CONNECTOR_ARG] = json!("Claude");
+    let mut args = json!({"tasks": [{"title": "a"}, {"title": "b", hq_core::caller::CONNECTOR_ARG: "forged"}]});
+    args[hq_core::caller::CONNECTOR_ARG] = json!("Claude");
     let made = fx.tool("task_create_many").execute(args).await.unwrap();
     for r in made["results"].as_array().unwrap() {
         let task = fx
@@ -1216,8 +1216,7 @@ async fn bulk_items_take_the_connection_from_the_call_only() {
             .unwrap();
         assert_eq!(task["created_by"], "mcp:connector/Claude", "{task}");
     }
-    let forged =
-        json!({"tasks": [{"title": "c", crate::harness_session::CONNECTOR_ARG: "forged"}]});
+    let forged = json!({"tasks": [{"title": "c", hq_core::caller::CONNECTOR_ARG: "forged"}]});
     let made = fx.tool("task_create_many").execute(forged).await.unwrap();
     let task = fx
         .tool("task_get")
@@ -1231,7 +1230,7 @@ async fn bulk_items_take_the_connection_from_the_call_only() {
 }
 
 fn tasks_scope(mut args: serde_json::Value) -> serde_json::Value {
-    args[crate::harness_session::TASKS_SCOPE_ARG] = json!(true);
+    args[hq_core::caller::TASKS_SCOPE_ARG] = json!(true);
     args
 }
 
@@ -4882,7 +4881,7 @@ async fn scoped_keys_cannot_put_work_on_the_edge_worker_queue() {
     let tool = |name: &str| all.iter().find(|t| t.name() == name).unwrap();
     let queue = crate::github::dispatch::DISPATCH_TAG;
     let handoff = |mut args: serde_json::Value| {
-        args[crate::harness_session::HANDOFF_SCOPE_ARG] = json!(true);
+        args[hq_core::caller::HANDOFF_SCOPE_ARG] = json!(true);
         args
     };
     let refused = tool("task_create")
@@ -4915,7 +4914,7 @@ async fn a_connector_cannot_put_work_on_the_edge_worker_queue() {
     let all = tools();
     let tool = |name: &str| all.iter().find(|t| t.name() == name).unwrap();
     let mut args = json!({"title": "work o/r", "tags": [crate::github::dispatch::DISPATCH_TAG]});
-    args[crate::harness_session::CONNECTOR_ARG] = json!("claude-ai");
+    args[hq_core::caller::CONNECTOR_ARG] = json!("claude-ai");
     let err = tool("task_create").execute(args).await.unwrap_err();
     assert!(
         err.to_string()

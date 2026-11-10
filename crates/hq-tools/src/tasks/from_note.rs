@@ -296,14 +296,14 @@ impl HqTool for TaskCreateFromNoteTool {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(String::from);
-        if crate::harness_session::is_connector_actor(&hq_db::tasks::clean_label(&arg_str(
+        if hq_core::caller::is_connector_actor(&hq_db::tasks::clean_label(&arg_str(
             &args,
             "created_by",
         ))) {
             bail!("mcp:connector names are for claude.ai connections; file under your own name");
         }
-        let created_by = match crate::harness_session::connector_label(&args) {
-            Some(label) => crate::harness_session::connector_actor(label),
+        let created_by = match hq_core::caller::connector_label(&args) {
+            Some(label) => hq_core::caller::connector_actor(label),
             None => {
                 let v = arg_str(&args, "created_by");
                 if v.is_empty() { "hq".to_string() } else { v }
@@ -311,10 +311,10 @@ impl HqTool for TaskCreateFromNoteTool {
         };
         // The tasks scope may rewrite the text of tasks filed under its name, and a promoted
         // note's text becomes a launched session's prompt, so no other caller files under it.
-        if crate::harness_session::is_tasks_scope_actor(&hq_db::tasks::clean_label(&created_by)) {
+        if hq_core::caller::is_tasks_scope_actor(&hq_db::tasks::clean_label(&created_by)) {
             bail!(
                 "{} names are for the tasks-scoped key; file under your own name",
-                crate::harness_session::TASKS_SCOPE_ACTOR
+                hq_core::caller::TASKS_SCOPE_ACTOR
             );
         }
 
@@ -418,7 +418,7 @@ impl HqTool for TaskCreateFromNoteTool {
         })?;
 
         // A connector's note tags would put text in a mailbox without the owner's approval.
-        if crate::harness_session::connector_label(&args).is_none() {
+        if hq_core::caller::connector_label(&args).is_none() {
             notify_recipients(self.vault.vault_path(), &task, None, self.route_tags);
         }
 

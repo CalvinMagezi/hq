@@ -582,13 +582,10 @@ async fn tools_see_the_connection_and_a_busy_connection_is_slowed() {
     let (app, state, _vault) = app_and_db();
     let db = &state.db;
     let token = full_access(&app).await;
-    let forged = json!({ hq_tools::harness_session::CONNECTOR_ARG: "owner" });
+    let forged = json!({ hq_core::caller::CONNECTOR_ARG: "owner" });
     let (_, _, echoed) = send(&app, mcp(&token, call_with("task_get", forged))).await;
     let seen: Value = serde_json::from_str(&text_of(&echoed)).unwrap();
-    assert_eq!(
-        seen[hq_tools::harness_session::CONNECTOR_ARG],
-        "Claude on the web"
-    );
+    assert_eq!(seen[hq_core::caller::CONNECTOR_ARG], "Claude on the web");
 
     let grant = db
         .with_conn(|c| hq_db::mcp_connector::list_grants(c, false, now()))

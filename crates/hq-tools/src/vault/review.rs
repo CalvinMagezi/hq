@@ -13,9 +13,9 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 use super::{names_private_folder, validate_path, validate_path_in_vault};
-use crate::harness_session::{CONNECTOR_ACTOR, spawned_session};
 use crate::provenance::{Writer, resolve};
 use crate::registry::HqTool;
+use hq_core::caller::{CONNECTOR_ACTOR, spawned_session};
 
 /// Why a note's author is not known, for the two ways that happens.
 const NOT_RECORDED_NOTE: &str = "The file on disk was changed outside HQ's tools, or was never \
@@ -400,8 +400,10 @@ impl HqTool for NoteProvenanceTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness_session::{CONNECTOR_ARG, SPAWNED_SESSION_ARG, connector_actor};
-    use crate::provenance::{NATIVE_AGENT_ARG, NATIVE_SESSION_ARG, Recorder, Writer as ProvWriter};
+    use crate::provenance::{Recorder, Writer as ProvWriter};
+    use hq_core::caller::{
+        CONNECTOR_ARG, NATIVE_AGENT_ARG, NATIVE_SESSION_ARG, SPAWNED_SESSION_ARG, connector_actor,
+    };
 
     struct Fx {
         db: Arc<Database>,

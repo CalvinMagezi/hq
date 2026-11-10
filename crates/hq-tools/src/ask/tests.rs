@@ -100,7 +100,7 @@ fn user_messages(db: &Database, thread: &str) -> usize {
 }
 
 fn handoff(mut args: Value) -> Value {
-    args[crate::harness_session::HANDOFF_SCOPE_ARG] = json!(true);
+    args[hq_core::caller::HANDOFF_SCOPE_ARG] = json!(true);
     args
 }
 
@@ -773,7 +773,7 @@ fn wait_secs_given_as_text_is_still_honoured() {
 
 #[test]
 fn a_session_hq_spawned_may_ask_read_only_but_not_in_full_mode() {
-    let marker = crate::harness_session::SPAWNED_SESSION_ARG;
+    let marker = hq_core::caller::SPAWNED_SESSION_ARG;
     let ask = |mode: &str, marked: bool| {
         let mut args = json!({"question": "q", "mode": mode});
         if marked {
@@ -784,7 +784,7 @@ fn a_session_hq_spawned_may_ask_read_only_but_not_in_full_mode() {
     assert_eq!(ask("read_only", true).unwrap().mode, AskMode::ReadOnly);
     assert_eq!(ask("", true).unwrap().mode, AskMode::ReadOnly);
     let err = ask("full", true).err().unwrap().to_string();
-    assert_eq!(err, crate::harness_session::SPAWNED_REFUSAL);
+    assert_eq!(err, hq_core::caller::SPAWNED_REFUSAL);
     assert_eq!(ask("full", false).unwrap().mode, AskMode::Full);
 }
 
@@ -812,13 +812,13 @@ async fn only_the_full_key_may_choose_the_model() {
 async fn a_connector_ask_runs_in_the_connector_scope() {
     let r = rig(Plan::AnswerSoon("ok"));
     let mut args = json!({"question": "q"});
-    args[crate::harness_session::CONNECTOR_ARG] = json!("Claude on the web");
+    args[hq_core::caller::CONNECTOR_ARG] = json!("Claude on the web");
     let out = r.ask.execute(args).await.unwrap();
     assert_eq!(out["status"], "answered");
     assert_eq!(r.runner.starts.lock().unwrap()[0].3, AskScope::Connector);
     // Another key's asks are not this grant's to read.
     let full = r.ask.execute(json!({"question": "other"})).await.unwrap();
     let mut read = json!({"ask_id": full["ask_id"], "wait_secs": 0});
-    read[crate::harness_session::CONNECTOR_ARG] = json!("Claude on the web");
+    read[hq_core::caller::CONNECTOR_ARG] = json!("Claude on the web");
     assert!(r.result.execute(read).await.is_err());
 }

@@ -1,50 +1,5 @@
 use super::*;
 
-/// Set by the MCP gateway (never by a caller) on calls that arrive on the
-/// handoff-scoped key, so `agent_host.handoff_cwd_allow` can bind them.
-pub const HANDOFF_SCOPE_ARG: &str = "_hq_handoff_scope";
-/// Set by the gateway, never by a caller, on a call that arrived on the tasks scope.
-pub const TASKS_SCOPE_ARG: &str = "_hq_tasks_scope";
-/// Who a tasks-scope write is attributed to, whatever name the caller supplies.
-pub const TASKS_SCOPE_ACTOR: &str = "mcp:tasks";
-/// Set by the gateway, never by a caller, on a call from a claude.ai connector grant. Its
-/// value is the grant's label.
-pub const CONNECTOR_ARG: &str = "_hq_connector";
-/// Prefix of the name a connector grant's writes are attributed to.
-pub const CONNECTOR_ACTOR: &str = "mcp:connector";
-
-/// The connector grant's label, when the call came in on one.
-pub fn connector_label(args: &Value) -> Option<&str> {
-    args.get(CONNECTOR_ARG).and_then(Value::as_str)
-}
-
-/// The name a connector grant's writes are attributed to: `mcp:connector/<label>`.
-pub fn connector_actor(label: &str) -> String {
-    format!("{CONNECTOR_ACTOR}/{}", hq_db::tasks::clean_label(label))
-}
-
-/// Whether a scoped call may treat `name` as its own: the tasks scope's names, or this
-/// connector grant's name. A tasks-scope grant writes and leases under the latter.
-pub fn is_own_scope_actor(args: &Value, name: &str) -> bool {
-    connector_label(args).is_some_and(|label| name == connector_actor(label))
-        || is_tasks_scope_actor(name)
-}
-
-/// Whether `name` is of the connector's shape, which only a connector grant may write under.
-pub fn is_connector_actor(name: &str) -> bool {
-    name.to_ascii_lowercase().starts_with(CONNECTOR_ACTOR)
-}
-
-/// Whether `name` is one a tasks-scope caller writes under: the bare scope actor, or the
-/// `mcp:tasks/<label>` a work lease taken on that scope is named.
-pub fn is_tasks_scope_actor(name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    name == TASKS_SCOPE_ACTOR
-        || name
-            .strip_prefix(TASKS_SCOPE_ACTOR)
-            .is_some_and(|rest| rest.starts_with('/'))
-}
-
 /// Characters a shell would expand inside the path the agent is started in.
 pub(super) const CWD_FORBIDDEN: [char; 4] = ['~', '$', '`', '\0'];
 
@@ -342,27 +297,6 @@ pub fn workspace_start_dir(
 /// Whether a launch error says the folder was missing.
 pub fn is_missing_dir_error(e: &anyhow::Error) -> bool {
     format!("{e:#}").contains(MISSING_DIR_MARKER)
-}
-
-/// Whether a tool call arrived on the tasks scope. That scope may file and edit tasks but
-/// must not reach anything else, so task tools that would otherwise write to an agent's
-/// mailbox, attribute a write to a name the caller picked, or set routing tags skip it.
-pub fn is_tasks_scope(args: &Value) -> bool {
-    args.get(TASKS_SCOPE_ARG).and_then(Value::as_bool) == Some(true)
-}
-
-/// Whether a task write must mail no one: not an agent mailbox behind a tag or assignee, and
-/// not the owner's chat. The tasks scope and every claude.ai connector grant write this way, so
-/// text from a Claude conversation (which may have read a hostile page) reaches an agent only
-/// when the agent looks at the task, never as a message pushed at it. The owner needs no
-/// approval for these writes because of it.
-pub fn writes_no_mail(args: &Value) -> bool {
-    is_tasks_scope(args) || connector_label(args).is_some()
-}
-
-/// Whether a tool call arrived on the handoff-scoped key.
-pub fn is_handoff_scope(args: &Value) -> bool {
-    args.get(HANDOFF_SCOPE_ARG).and_then(Value::as_bool) == Some(true)
 }
 
 /// Vault folders that hold the owner's identity, threads and databases.

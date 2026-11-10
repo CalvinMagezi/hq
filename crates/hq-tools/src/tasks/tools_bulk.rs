@@ -22,10 +22,10 @@ const INHERITED: &[&str] = &["lease", "actor", "created_by", "author"];
 /// They come only from the call itself: an item or `defaults` carrying one is ignored, so a bulk
 /// call can neither act as another session nor drop its scope for its items.
 const ATTESTED: &[&str] = &[
-    crate::harness_session::CALLER_SESSION_ARG,
-    crate::harness_session::TASKS_SCOPE_ARG,
-    crate::harness_session::HANDOFF_SCOPE_ARG,
-    crate::harness_session::CONNECTOR_ARG,
+    hq_core::caller::CALLER_SESSION_ARG,
+    hq_core::caller::TASKS_SCOPE_ARG,
+    hq_core::caller::HANDOFF_SCOPE_ARG,
+    hq_core::caller::CONNECTOR_ARG,
 ];
 
 fn items_of(args: &Value, field: &str) -> Result<Vec<Value>> {

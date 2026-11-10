@@ -16,17 +16,10 @@ use hq_db::provenance::{Attribution, SourceKind};
 use serde_json::Value;
 use tracing::debug;
 
-use crate::harness_session::{caller_session, connector_actor, connector_label};
-
-/// Set by a native agent session, never by the model: the session the call belongs to.
-pub const NATIVE_SESSION_ARG: &str = "_hq_native_session";
-/// Set by a native agent session: the agent's name.
-pub const NATIVE_AGENT_ARG: &str = "_hq_native_agent";
-/// Set by a native agent session: ids of the task leases it was handed, newest last. Whether any
-/// is still live, and on which task, is read from the database when a write is recorded.
-pub const NATIVE_LEASES_ARG: &str = "_hq_native_leases";
-/// Everything a native session sets starts with this; the gateway drops all of it from callers.
-pub const NATIVE_ARG_PREFIX: &str = "_hq_native_";
+use hq_core::caller::{
+    NATIVE_AGENT_ARG, NATIVE_ARG_PREFIX, NATIVE_LEASES_ARG, NATIVE_SESSION_ARG, caller_session,
+    connector_actor, connector_label,
+};
 
 /// What is known about who is writing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,8 +156,8 @@ pub fn pass_on_attestation(outer: &Value, inner: &mut Value) {
     };
     for (key, value) in attested {
         let runtime_set = key.starts_with(NATIVE_ARG_PREFIX)
-            || key == crate::harness_session::CONNECTOR_ARG
-            || key == crate::harness_session::CALLER_SESSION_ARG;
+            || key == hq_core::caller::CONNECTOR_ARG
+            || key == hq_core::caller::CALLER_SESSION_ARG;
         if runtime_set {
             map.insert(key.clone(), value.clone());
         }
@@ -358,7 +351,7 @@ impl Recorder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness_session::{CALLER_SESSION_ARG, CONNECTOR_ARG};
+    use hq_core::caller::{CALLER_SESSION_ARG, CONNECTOR_ARG};
     use hq_db::harness_sessions_registry::{self as sessions, NewSession, Placement};
     use hq_db::provenance::ReviewState;
     use hq_db::tasks::{self as t, LeaseIdentity};

@@ -795,7 +795,7 @@ mod tests {
             json!({})
         }
         async fn execute(&self, args: Value) -> anyhow::Result<Value> {
-            Ok(json!({"caller": hq_tools::harness_session::caller_session(&args)}))
+            Ok(json!({"caller": hq_core::caller::caller_session(&args)}))
         }
     }
 

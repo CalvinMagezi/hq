@@ -9,6 +9,8 @@
 //! task open and close the lease.
 
 use super::*;
+pub(super) use hq_core::text::is_invisible;
+pub use hq_core::text::{clean_label, has_hidden_chars};
 use sha2::{Digest, Sha256};
 
 /// Recognizable prefix, so a leaked lease token is easy to spot and scan for.
@@ -19,8 +21,6 @@ pub const END_EXPIRED: &str = "expired";
 pub const END_SUPERSEDED: &str = "superseded";
 pub const END_SESSION_ENDED: &str = "session_ended";
 
-/// Longest label (actor, harness, host, cwd, branch, session ref) kept.
-const MAX_LABEL_CHARS: usize = 120;
 /// Longest release summary kept on the task thread.
 const MAX_SUMMARY_CHARS: usize = 2000;
 /// An actor may start this many leases in `CLAIM_WINDOW_MINUTES`.
@@ -98,44 +98,6 @@ fn row_to_lease(r: &rusqlite::Row) -> rusqlite::Result<WorkSession> {
         end_reason: r.get(12)?,
         active_seconds: r.get::<_, Option<i64>>(13)?.unwrap_or(0).max(0),
     })
-}
-
-/// A label with control characters dropped and its length capped. Lease text is
-/// shown to other agents and written to the task thread, which is read back as
-/// trusted input, so it is kept short and single-line.
-pub fn clean_label(text: &str) -> String {
-    let kept: String = text
-        .chars()
-        .filter(|c| !c.is_control() && !is_invisible(*c))
-        .take(MAX_LABEL_CHARS)
-        .collect();
-    kept.trim().to_string()
-}
-
-/// Whether `text` has a control or invisible character, which could make shown text read as
-/// something else.
-pub fn has_hidden_chars(text: &str) -> bool {
-    text.chars().any(|c| c.is_control() || is_invisible(c))
-}
-
-/// Zero-width, bidirectional-override and byte-order characters: they print as
-/// nothing or reorder what is around them, so a label could look like another.
-pub(super) fn is_invisible(c: char) -> bool {
-    matches!(
-        c,
-        '\u{00AD}'
-            | '\u{115F}'..='\u{1160}'
-            | '\u{180E}'
-            | '\u{200B}'..='\u{200F}'
-            | '\u{2028}'..='\u{202E}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{2069}'
-            | '\u{3164}'
-            | '\u{FE00}'..='\u{FE0F}'
-            | '\u{FEFF}'
-            | '\u{FFA0}'
-            | '\u{E0000}'..='\u{E007F}'
-    )
 }
 
 /// Names a claimer may not take, because HQ writes under them: spawned sessions

@@ -14,9 +14,10 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 use crate::agent_host::AgentStatus;
-use crate::harness_session::{HarnessCategory, Purpose, caller_session};
+use crate::harness_session::{HarnessCategory, Purpose};
 use crate::registry::HqTool;
 use crate::util::arg_str;
+use hq_core::caller::caller_session;
 use hq_core::config::TeamsConfig;
 
 /// Longest message body, in characters.
@@ -1414,7 +1415,7 @@ mod tests {
         );
 
         let mut attested = json!({"to_session": "hs-b", "body": "hi", "sender": "hs-other"});
-        attested[crate::harness_session::CALLER_SESSION_ARG] = "hs-a".into();
+        attested[hq_core::caller::CALLER_SESSION_ARG] = "hs-a".into();
         let sent = tool.execute(attested).await.unwrap();
         let thread = w.db.with_conn(|c| t::list_comments(c, &w.task)).unwrap();
         assert_eq!(thread.len(), 1);
@@ -1913,7 +1914,7 @@ mod tests {
         let w = world();
         let tool = AgentMessageSendTool { db: w.db.clone() };
         let mut args = json!({"to_session": "hs-b", "body": "hi\u{1b}[201~\u{3}there"});
-        args[crate::harness_session::CALLER_SESSION_ARG] = "hs-a".into();
+        args[hq_core::caller::CALLER_SESSION_ARG] = "hs-a".into();
         tool.execute(args).await.unwrap();
         let thread = w.db.with_conn(|c| t::list_comments(c, &w.task)).unwrap();
         assert_eq!(thread[0].body, "hi[201~there");

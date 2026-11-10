@@ -40,6 +40,7 @@ use crate::agent_host::{
     PromptOutcome,
 };
 use anyhow::{Result, bail};
+use hq_core::caller::*;
 use hq_db::Database;
 use hq_db::harness_sessions_registry::{self as registry, HarnessSessionRow, Placement};
 use serde_json::{Value, json};

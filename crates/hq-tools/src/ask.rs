@@ -68,9 +68,9 @@ impl AskScope {
     /// Read only from the markers the gateway sets (`_hq_handoff_scope`, `_hq_connector`),
     /// never from anything the caller wrote: the gateway drops those keys before it sets them.
     pub fn from_args(args: &Value) -> Self {
-        if crate::harness_session::is_handoff_scope(args) {
+        if hq_core::caller::is_handoff_scope(args) {
             Self::Handoff
-        } else if crate::harness_session::connector_label(args).is_some() {
+        } else if hq_core::caller::connector_label(args).is_some() {
             Self::Connector
         } else {
             Self::Full
@@ -328,8 +328,8 @@ impl AskArgs {
             );
         }
         let mode = AskMode::parse(&arg_str(args, "mode"))?;
-        if mode == AskMode::Full && crate::harness_session::spawned_session(args).is_some() {
-            bail!("{}", crate::harness_session::SPAWNED_REFUSAL);
+        if mode == AskMode::Full && hq_core::caller::spawned_session(args).is_some() {
+            bail!("{}", hq_core::caller::SPAWNED_REFUSAL);
         }
         if scope == AskScope::Handoff && mode == AskMode::Full {
             bail!(
@@ -347,8 +347,8 @@ impl AskArgs {
         }
         let model = non_blank("model");
         let restricted = scope == AskScope::Handoff
-            || crate::harness_session::connector_label(args).is_some()
-            || crate::harness_session::is_tasks_scope(args);
+            || hq_core::caller::connector_label(args).is_some()
+            || hq_core::caller::is_tasks_scope(args);
         if model.is_some() && restricted {
             bail!("this connection cannot choose the model; leave `model` out");
         }

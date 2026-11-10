@@ -430,14 +430,10 @@ async fn handle_call_as(
         call_args = json!({});
     }
     if MARKED_DENIED_TOOLS.contains(&args.tool.as_str())
-        && hq_tools::harness_session::spawned_session(&call_args).is_some()
+        && hq_core::caller::spawned_session(&call_args).is_some()
     {
         return Err(ErrorData::invalid_params(
-            format!(
-                "{}: {}",
-                args.tool,
-                hq_tools::harness_session::SPAWNED_REFUSAL
-            ),
+            format!("{}: {}", args.tool, hq_core::caller::SPAWNED_REFUSAL),
             None,
         ));
     }
@@ -662,10 +658,7 @@ pub fn mark_spawned_session(
         *inner = json!({});
     }
     if let Some(obj) = inner.as_object_mut() {
-        obj.insert(
-            hq_tools::harness_session::SPAWNED_SESSION_ARG.into(),
-            json!(id),
-        );
+        obj.insert(hq_core::caller::SPAWNED_SESSION_ARG.into(), json!(id));
     }
     Some(marked)
 }
@@ -677,12 +670,9 @@ fn attest_caller(args: &mut Value, caller_session: Option<&str>) {
     let Some(obj) = args.as_object_mut() else {
         return;
     };
-    obj.remove(hq_tools::harness_session::CALLER_SESSION_ARG);
+    obj.remove(hq_core::caller::CALLER_SESSION_ARG);
     if let Some(id) = caller_session {
-        obj.insert(
-            hq_tools::harness_session::CALLER_SESSION_ARG.into(),
-            json!(id),
-        );
+        obj.insert(hq_core::caller::CALLER_SESSION_ARG.into(), json!(id));
     }
 }
 
@@ -693,28 +683,19 @@ fn mark_scope(args: &mut Value, allowed: Option<&[&str]>, connector: Option<&str
     let Some(obj) = args.as_object_mut() else {
         return;
     };
-    obj.remove(hq_tools::harness_session::HANDOFF_SCOPE_ARG);
-    obj.remove(hq_tools::harness_session::TASKS_SCOPE_ARG);
-    obj.remove(hq_tools::harness_session::CONNECTOR_ARG);
+    obj.remove(hq_core::caller::HANDOFF_SCOPE_ARG);
+    obj.remove(hq_core::caller::TASKS_SCOPE_ARG);
+    obj.remove(hq_core::caller::CONNECTOR_ARG);
     // Native agent sessions set these themselves; a caller here never may.
-    obj.retain(|key, _| !key.starts_with(hq_tools::provenance::NATIVE_ARG_PREFIX));
+    obj.retain(|key, _| !key.starts_with(hq_core::caller::NATIVE_ARG_PREFIX));
     if let Some(label) = connector {
-        obj.insert(
-            hq_tools::harness_session::CONNECTOR_ARG.into(),
-            json!(label),
-        );
+        obj.insert(hq_core::caller::CONNECTOR_ARG.into(), json!(label));
     }
     if allowed == Some(HANDOFF_ALLOWLIST) {
-        obj.insert(
-            hq_tools::harness_session::HANDOFF_SCOPE_ARG.into(),
-            json!(true),
-        );
+        obj.insert(hq_core::caller::HANDOFF_SCOPE_ARG.into(), json!(true));
     }
     if allowed == Some(TASKS_ALLOWLIST) {
-        obj.insert(
-            hq_tools::harness_session::TASKS_SCOPE_ARG.into(),
-            json!(true),
-        );
+        obj.insert(hq_core::caller::TASKS_SCOPE_ARG.into(), json!(true));
     }
 }
 
@@ -774,7 +755,7 @@ mod tests {
         let call = json!({"tool": "hq_ask", "args": {"question": "q"}});
         let map = call.as_object().unwrap();
         let marked = mark_spawned_session(Some(map), "hs-claude-code-1a2b/../x").unwrap();
-        let marker = hq_tools::harness_session::SPAWNED_SESSION_ARG;
+        let marker = hq_core::caller::SPAWNED_SESSION_ARG;
         assert_eq!(marked["args"][marker], "hs-claude-code-1a2bx");
         assert_eq!(marked["args"]["question"], "q");
         let blank = mark_spawned_session(Some(map), "///").unwrap();
@@ -979,7 +960,7 @@ mod tests {
 
     #[test]
     fn only_an_attested_grant_carries_the_connector_marker() {
-        let key = hq_tools::harness_session::CONNECTOR_ARG;
+        let key = hq_core::caller::CONNECTOR_ARG;
         let mut forged = json!({"q": 1, key: "owner"});
         mark_scope(&mut forged, None, None);
         assert!(
@@ -1026,7 +1007,7 @@ mod tests {
 
     #[test]
     fn a_caller_cannot_pose_as_a_native_agent_session() {
-        use hq_tools::provenance::{NATIVE_AGENT_ARG, NATIVE_LEASES_ARG, NATIVE_SESSION_ARG};
+        use hq_core::caller::{NATIVE_AGENT_ARG, NATIVE_LEASES_ARG, NATIVE_SESSION_ARG};
         let mut args = json!({
             "path": "Notes/a.md",
             NATIVE_SESSION_ARG: "someone-elses-session",
@@ -1208,8 +1189,8 @@ mod tests {
 
     #[test]
     fn each_scope_gets_only_its_own_marker_and_a_caller_cannot_forge_either() {
-        let handoff = hq_tools::harness_session::HANDOFF_SCOPE_ARG;
-        let tasks = hq_tools::harness_session::TASKS_SCOPE_ARG;
+        let handoff = hq_core::caller::HANDOFF_SCOPE_ARG;
+        let tasks = hq_core::caller::TASKS_SCOPE_ARG;
         let forged = || serde_json::json!({ handoff: true, tasks: true, "x": 1 });
 
         let mut args = forged();
@@ -1266,7 +1247,7 @@ mod tests {
 
     #[test]
     fn only_the_handoff_key_gets_the_scope_marker_and_a_caller_cannot_forge_it() {
-        let key = hq_tools::harness_session::HANDOFF_SCOPE_ARG;
+        let key = hq_core::caller::HANDOFF_SCOPE_ARG;
         let mut args = serde_json::json!({ key: true, "cwd": "/x" });
         mark_scope(&mut args, None, None);
         assert!(args.get(key).is_none(), "owner calls carry no marker");
@@ -1285,7 +1266,7 @@ mod tests {
             name: "config_manage",
         }));
         let db = hq_db::Database::open_memory().unwrap();
-        let marker = hq_tools::harness_session::SPAWNED_SESSION_ARG;
+        let marker = hq_core::caller::SPAWNED_SESSION_ARG;
         let marked = serde_json::json!({"tool": "config_manage", "args": {marker: "hs-1"}});
         assert!(
             handle_call(&registry, Some(marked.as_object().unwrap()), &db, None)
@@ -1498,7 +1479,7 @@ mod tests {
         let db = hq_db::Database::open_memory().unwrap();
         let mut inner = serde_json::json!({});
         if let Some(id) = supplied {
-            inner[hq_tools::harness_session::CALLER_SESSION_ARG] = id.into();
+            inner[hq_core::caller::CALLER_SESSION_ARG] = id.into();
         }
         let call = serde_json::json!({"tool": "echo_args", "args": inner});
         let result = handle_call_as(
@@ -1518,7 +1499,7 @@ mod tests {
             .unwrap()
             .to_string();
         let args: serde_json::Value = serde_json::from_str(&text).unwrap();
-        hq_tools::harness_session::caller_session(&args).map(str::to_string)
+        hq_core::caller::caller_session(&args).map(str::to_string)
     }
 
     #[tokio::test]

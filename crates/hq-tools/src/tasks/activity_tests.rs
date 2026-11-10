@@ -1,9 +1,8 @@
 use super::*;
-use crate::provenance::{
-    NATIVE_AGENT_ARG, NATIVE_LEASES_ARG, NATIVE_SESSION_ARG, Recorder, Writer,
-};
+use crate::provenance::{Recorder, Writer};
 use crate::registry::HqTool;
 use crate::vault::{Reviewer, review_note};
+use hq_core::caller::{NATIVE_AGENT_ARG, NATIVE_LEASES_ARG, NATIVE_SESSION_ARG};
 use hq_db::harness_sessions_registry::{NewSession, Placement};
 use std::sync::Arc;
 

@@ -175,13 +175,15 @@ impl AgentSession {
     /// is dropped before this session's own are added; otherwise it could name itself as another
     /// session or a connector. The MCP gateway does the same for its callers.
     pub(super) fn attested_arguments(&self, arguments: &serde_json::Value) -> serde_json::Value {
-        use hq_tools::provenance::{NATIVE_AGENT_ARG, NATIVE_LEASES_ARG, NATIVE_SESSION_ARG};
+        use hq_core::caller::{
+            NATIVE_AGENT_ARG, NATIVE_LEASES_ARG, NATIVE_SESSION_ARG, RUNTIME_ARG_PREFIX,
+        };
 
         let mut args = arguments.clone();
         let Some(object) = args.as_object_mut() else {
             return args;
         };
-        object.retain(|key, _| !key.starts_with("_hq_"));
+        object.retain(|key, _| !key.starts_with(RUNTIME_ARG_PREFIX));
         object.insert(NATIVE_SESSION_ARG.into(), self.session_id.clone().into());
         object.insert(
             NATIVE_AGENT_ARG.into(),
