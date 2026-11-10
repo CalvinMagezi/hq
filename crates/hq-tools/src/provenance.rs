@@ -17,7 +17,7 @@ use serde_json::Value;
 use tracing::debug;
 
 use hq_core::caller::{
-    NATIVE_AGENT_ARG, NATIVE_ARG_PREFIX, NATIVE_LEASES_ARG, NATIVE_SESSION_ARG, caller_session,
+    NATIVE_AGENT_ARG, NATIVE_LEASES_ARG, NATIVE_SESSION_ARG, RUNTIME_ARG_PREFIX, caller_session,
     connector_actor, connector_label,
 };
 
@@ -150,15 +150,14 @@ pub fn pass_on_attestation(outer: &Value, inner: &mut Value) {
     let Some(map) = inner.as_object_mut() else {
         return;
     };
-    map.retain(|key, _| !key.starts_with("_hq_"));
+    map.retain(|key, _| !key.starts_with(RUNTIME_ARG_PREFIX));
     let Some(attested) = outer.as_object() else {
         return;
     };
+    // The runtime cleaned `outer` before this tool saw it, so every key under the prefix there
+    // is the runtime's, whichever marker it is.
     for (key, value) in attested {
-        let runtime_set = key.starts_with(NATIVE_ARG_PREFIX)
-            || key == hq_core::caller::CONNECTOR_ARG
-            || key == hq_core::caller::CALLER_SESSION_ARG;
-        if runtime_set {
+        if key.starts_with(RUNTIME_ARG_PREFIX) {
             map.insert(key.clone(), value.clone());
         }
     }
@@ -839,6 +838,17 @@ mod tests {
         assert_eq!(inner[CONNECTOR_ARG], "Claude");
         assert!(inner.get(CALLER_SESSION_ARG).is_none());
         assert!(inner.get("_hq_other").is_none());
+
+        // Every marker the runtime set travels, a scope as much as a session, and one added
+        // later too.
+        let scoped = json!({
+            hq_core::caller::TASKS_SCOPE_ARG: true,
+            hq_core::caller::SPAWNED_SESSION_ARG: "hs-1",
+            "_hq_added_next_year": "set by the runtime",
+        });
+        let mut nested = json!({ hq_core::caller::TASKS_SCOPE_ARG: false });
+        pass_on_attestation(&scoped, &mut nested);
+        assert_eq!(nested, scoped);
 
         // With no markers outside, nothing inside survives either.
         let mut bare = json!({ NATIVE_SESSION_ARG: "forged" });

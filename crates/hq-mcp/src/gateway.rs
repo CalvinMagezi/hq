@@ -429,6 +429,7 @@ async fn handle_call_as(
     if call_args.is_null() {
         call_args = json!({});
     }
+    refuse_unmarkable(&args.tool, &call_args).map_err(|e| ErrorData::invalid_params(e, None))?;
     if MARKED_DENIED_TOOLS.contains(&args.tool.as_str())
         && hq_core::caller::spawned_session(&call_args).is_some()
     {
@@ -487,6 +488,7 @@ pub async fn call_tool_whole(
         .get(tool)
         .ok_or_else(|| format!("unknown tool: {tool}"))?;
     let mut args = if args.is_null() { json!({}) } else { args };
+    refuse_unmarkable(tool, &args)?;
     mark_scope(&mut args, allowed, None);
     hq_tools::registry::validate_and_execute(t, args)
         .await
@@ -661,6 +663,17 @@ pub fn mark_spawned_session(
         obj.insert(hq_core::caller::SPAWNED_SESSION_ARG.into(), json!(id));
     }
     Some(marked)
+}
+
+/// Who is calling is written into the call's arguments as an object's keys. A list, a string or
+/// a number has nowhere to carry them, so it would reach the tool with no marker at all, and a
+/// tool reads a call with no marker as the owner's: a scoped key or a session token would see
+/// everything. Such a call is refused before anything is marked.
+fn refuse_unmarkable(tool: &str, args: &Value) -> Result<(), String> {
+    if args.is_object() {
+        return Ok(());
+    }
+    Err(format!("{tool}: args must be an object of named arguments"))
 }
 
 /// The caller's session is whatever the gateway attested: a value in the call
@@ -1530,6 +1543,80 @@ mod tests {
             .to_string();
         let args: serde_json::Value = serde_json::from_str(&text).unwrap();
         hq_core::caller::caller_session(&args).map(str::to_string)
+    }
+
+    /// A list or a string cannot carry the markers, so a tool would see a scoped caller as the
+    /// owner. The call must stop at the gateway, whoever makes it.
+    #[tokio::test]
+    async fn arguments_that_cannot_carry_a_marker_never_reach_a_tool() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(EchoArgs));
+        let db = hq_db::Database::open_memory().unwrap();
+        let callers = [
+            Caller::default(),
+            Caller {
+                session: Some("hs-real"),
+                connector: None,
+            },
+            Caller {
+                session: None,
+                connector: Some("Claude"),
+            },
+        ];
+        for caller in callers {
+            for args in [
+                json!([]),
+                json!([{"a": 1}]),
+                json!("x"),
+                json!(3),
+                json!(true),
+            ] {
+                let call = json!({"tool": "echo_args", "args": args});
+                let refused = handle_call_as(&registry, call.as_object(), &db, None, caller)
+                    .await
+                    .expect_err("a non-object reached the tool");
+                assert!(
+                    refused.message.contains("args must be an object"),
+                    "{}",
+                    refused.message
+                );
+            }
+            // No arguments at all is an empty object, as before.
+            for call in [
+                json!({"tool": "echo_args"}),
+                json!({"tool": "echo_args", "args": null}),
+            ] {
+                handle_call_as(&registry, call.as_object(), &db, None, caller)
+                    .await
+                    .expect("no arguments is allowed");
+            }
+        }
+        let whole = call_tool_whole(&registry, "echo_args", json!([]), Some(&["echo_args"])).await;
+        assert_eq!(
+            whole.unwrap_err(),
+            "echo_args: args must be an object of named arguments"
+        );
+    }
+
+    /// The spawned-session marker is written by the transport before dispatch, so it has to
+    /// survive the strip of what a caller sent and reach the tool.
+    #[tokio::test]
+    async fn the_marker_the_transport_set_reaches_the_tool() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(EchoArgs));
+        let db = hq_db::Database::open_memory().unwrap();
+        let call = json!({"tool": "echo_args", "args": {"q": 1}});
+        let marked = mark_spawned_session(call.as_object(), "hs-spawned").unwrap();
+        let result = handle_call_as(&registry, Some(&marked), &db, None, Caller::default())
+            .await
+            .unwrap();
+        let text = serde_json::to_value(&result).unwrap()["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let seen: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(hq_core::caller::spawned_session(&seen), Some("hs-spawned"));
+        assert_eq!(seen["q"], 1);
     }
 
     #[tokio::test]

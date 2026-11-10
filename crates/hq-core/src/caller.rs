@@ -8,8 +8,10 @@
 //! The gateway keeps one caller-sent key, [`SPAWNED_SESSION_ARG`], because it can only take
 //! reach away. A tool that reads one of these is reading the runtime, never the caller.
 //!
-//! A new marker belongs in [`GATEWAY_MARKERS`] or [`NATIVE_MARKERS`] and under the prefix. The
-//! tests here and in the gateway then cover it without another line.
+//! A new marker belongs in [`GATEWAY_MARKERS`] or [`NATIVE_MARKERS`] and under the prefix; the
+//! tests here and in the gateway then cover a caller forging it. A marker the transport writes
+//! into the arguments before the gateway runs, as it does for [`SPAWNED_SESSION_ARG`], must
+//! also be kept by the gateway's strip, or it never reaches a tool.
 //!
 //! The names and their readers live in the base because everything that writes on someone's
 //! behalf depends on them: tasks, vault review, provenance, `hq_ask`, the gateway and the

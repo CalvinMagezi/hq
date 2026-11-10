@@ -18,15 +18,11 @@ const KEY_REF_PREFIX: char = '@';
 /// Fields every item inherits from the call, so the caller sets them once. An item may set its
 /// own `lease`, `actor` or names, as it could in a single call.
 const INHERITED: &[&str] = &["lease", "actor", "created_by", "author"];
-/// What the gateway proved about the caller: the session it is, and the scoped key it came in on.
-/// They come only from the call itself: an item or `defaults` carrying one is ignored, so a bulk
-/// call can neither act as another session nor drop its scope for its items.
-const ATTESTED: &[&str] = &[
-    hq_core::caller::CALLER_SESSION_ARG,
-    hq_core::caller::TASKS_SCOPE_ARG,
-    hq_core::caller::HANDOFF_SCOPE_ARG,
-    hq_core::caller::CONNECTOR_ARG,
-];
+/// What the runtime said about the caller (the session it is, the scoped key it came in on) is
+/// every key under this prefix. They come only from the call itself: an item or `defaults`
+/// carrying one is ignored, so a bulk call can neither act as another session nor drop its scope
+/// for its items, whichever marker it is.
+const ATTESTED_PREFIX: &str = hq_core::caller::RUNTIME_ARG_PREFIX;
 
 fn items_of(args: &Value, field: &str) -> Result<Vec<Value>> {
     let Some(items) = args.get(field).and_then(Value::as_array) else {
@@ -49,10 +45,10 @@ fn prepare(
     item: &Map<String, Value>,
 ) -> Map<String, Value> {
     let mut spec = item.clone();
-    spec.retain(|field, _| !ATTESTED.contains(&field.as_str()));
+    spec.retain(|field, _| !field.starts_with(ATTESTED_PREFIX));
     for (field, value) in defaults
         .iter()
-        .filter(|(field, _)| !ATTESTED.contains(&field.as_str()))
+        .filter(|(field, _)| !field.starts_with(ATTESTED_PREFIX))
     {
         spec.entry(field.clone()).or_insert_with(|| value.clone());
     }
@@ -61,9 +57,9 @@ fn prepare(
             spec.insert((*key).to_string(), v.clone());
         }
     }
-    for key in ATTESTED {
-        if let Some(proof) = args.get(*key) {
-            spec.insert((*key).to_string(), proof.clone());
+    for (key, proof) in args.as_object().into_iter().flatten() {
+        if key.starts_with(ATTESTED_PREFIX) {
+            spec.insert(key.clone(), proof.clone());
         }
     }
     spec
@@ -290,5 +286,47 @@ impl HqTool for TaskUpdateManyTool {
             obj.insert("hq_task_protocol".to_string(), hint);
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hq_core::caller::{GATEWAY_MARKERS, NATIVE_MARKERS};
+    use serde_json::json;
+
+    /// An item or `defaults` cannot carry a marker of its own, known today or added later, and
+    /// each item gets exactly the markers the runtime put on the call.
+    #[test]
+    fn an_item_takes_its_markers_from_the_call_and_never_from_itself() {
+        let mut call = json!({"tasks": [], "actor": "relay"});
+        let mut forged = serde_json::Map::new();
+        forged.insert("title".into(), json!("one"));
+        for marker in GATEWAY_MARKERS.iter().chain(NATIVE_MARKERS) {
+            call[*marker] = json!("from the runtime");
+            forged.insert((*marker).to_string(), json!("forged"));
+        }
+        call["_hq_added_next_year"] = json!("from the runtime");
+        forged.insert("_hq_only_in_the_item".into(), json!("forged"));
+
+        for (defaults, item) in [
+            (serde_json::Map::new(), forged.clone()),
+            (forged.clone(), serde_json::Map::new()),
+        ] {
+            let spec = prepare(&call, &defaults, &item);
+            for marker in GATEWAY_MARKERS.iter().chain(NATIVE_MARKERS) {
+                assert_eq!(spec[*marker], "from the runtime", "{marker}");
+            }
+            assert_eq!(spec["_hq_added_next_year"], "from the runtime");
+            assert!(!spec.contains_key("_hq_only_in_the_item"));
+            assert_eq!(spec["actor"], "relay");
+        }
+
+        // A call the runtime marked with nothing gives its items nothing.
+        let unmarked = prepare(&json!({"tasks": []}), &serde_json::Map::new(), &forged);
+        assert!(
+            unmarked.keys().all(|key| !key.starts_with("_hq_")),
+            "{unmarked:?}"
+        );
     }
 }
