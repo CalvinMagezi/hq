@@ -32,6 +32,7 @@ interface HQState {
   workbenchFeedsCount: boolean
   setWorkbenchFeedsCount: (feeds: boolean) => void
   updateNotificationState: (id: string, state: import('~/lib/notificationsApi').NotificationState) => void
+  markNotificationRead: (id: string) => void
 
   systemNotice: string | null
   setSystemNotice: (message: string | null) => void
@@ -81,10 +82,12 @@ export const useHQStore = create<HQState>()(
           const next = s.notifications.map((n) => (n.id === id ? { ...n, state } : n))
           const unread = next.filter((n) => n.state === 'pending').length
           const pending = next.filter(
-            (n) => n.state === 'pending' && n.kind === 'action_needed'
+            (n) => n.state === 'pending' && n.kind === 'action_needed' && !n.silenced
           ).length
           return { notifications: next, unreadNotificationsCount: unread, pendingApprovalsCount: pending }
         }),
+
+      markNotificationRead: (id) => set((s) => ({ notifications: s.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)) })),
 
       systemNotice: null,
       setSystemNotice: (systemNotice) => set({ systemNotice }),

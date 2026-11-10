@@ -19,11 +19,11 @@ export interface SettingsRowDef {
   id: string
   label: StringKey
   /** Null for a row that acts instead of opening a page (Sign out this browser). */
-  path: SettingsPath | '/helpers' | null
+  path: SettingsPath | '/helpers' | '/tasks' | null
 }
 
 export interface SettingsGroupDef {
-  id: 'browser' | 'accounts' | 'behaves' | 'data'
+  id: 'browser' | 'accounts' | 'behaves' | 'work' | 'data'
   label: StringKey
   rows: SettingsRowDef[]
 }
@@ -68,11 +68,26 @@ export function settingsGroups({ lite, hub }: WhereHqRuns): SettingsGroupDef[] {
         { id: 'folders', label: 'row_folders', path: '/settings/folders' },
       ],
     },
+    {
+      // Tasks and Helpers are where HQ and its agents work. They are off the bar, and this is
+      // the door for a person who wants to look in.
+      id: 'work',
+      label: 'group_work',
+      rows: [
+        { id: 'work_tasks', label: 'row_work_tasks', path: '/tasks' },
+        { id: 'work_helpers', label: 'row_work_helpers', path: '/helpers' },
+      ],
+    },
     { id: 'data', label: 'group_data', rows: [{ id: 'backup', label: 'row_backup', path: '/settings/backup' }] },
   ]
+  // Lite keeps its tasks and runs no helpers.
+  if (lite) {
+    const work = groups.find((g) => g.id === 'work')!
+    work.rows = work.rows.filter((r) => r.id === 'work_tasks')
+  }
   if (!lite) return groups
   return groups
-    .map((g) => ({ ...g, rows: g.rows.filter((r) => r.path === null || LITE_PATHS.includes(r.path as SettingsPath)) }))
+    .map((g) => ({ ...g, rows: g.rows.filter((r) => r.path === null || r.path === '/tasks' || LITE_PATHS.includes(r.path as SettingsPath)) }))
     .filter((g) => g.rows.length > 0)
 }
 

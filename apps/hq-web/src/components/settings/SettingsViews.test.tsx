@@ -62,3 +62,32 @@ test('backup reads Last backup 3 h ago, grey unless a backup can be started', ()
 test('Disconnect Telegram says it is set up from the start again', () => {
   expect(t('disconnect_app_body', { app: 'Telegram' })).toContain('To use Telegram again, you set it up from the start.')
 })
+
+import { SilenceView, pauseLine } from './SilenceSection'
+import type { Silences } from '~/lib/notificationsApi'
+
+const quiet = (over: Partial<Silences> = {}): Silences => ({
+  pause: { topic: 'all', silenced: false, until: null },
+  topics: ['helpers', 'tasks', 'tips', 'upkeep', 'email'].map((topic) => ({ topic, silenced: topic === 'helpers', until: null })),
+  ...over,
+})
+const silenceProps = { busy: false, onPause: () => undefined, onResume: () => undefined, onTopic: () => undefined }
+
+test('Silence lists every topic as a switch that is on unless silenced, and says what always gets through', () => {
+  const out = html(createElement(SilenceView, { silences: quiet(), ...silenceProps }))
+  expect(out).toContain(t('silence_intro'))
+  expect(out.match(/role="switch"/g)?.length).toBe(5)
+  expect(out.match(/aria-checked="false"/g)?.length).toBe(1)
+  expect(out).toContain(t('silence_pause_hour'))
+  expect(out).not.toContain(t('silence_resume'))
+  // HQ's own requests are not a topic, so there is nothing to switch off for them.
+  expect(out).not.toContain('>HQ<')
+})
+
+test('a pause shows when it ends and offers to turn back on', () => {
+  expect(pauseLine({ topic: 'all', silenced: false, until: null })).toBeNull()
+  expect(pauseLine({ topic: 'all', silenced: true, until: null })).toBe(t('silence_paused'))
+  const out = html(createElement(SilenceView, { silences: quiet({ pause: { topic: 'all', silenced: true, until: '2026-11-10T18:00:00Z' } }), ...silenceProps }))
+  expect(out).toContain(t('silence_resume'))
+  expect(out).not.toContain(t('silence_pause_hour'))
+})

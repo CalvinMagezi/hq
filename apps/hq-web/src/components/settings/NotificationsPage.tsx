@@ -13,6 +13,7 @@ import {
   type PushState,
 } from '~/lib/webPush'
 import { t, type StringKey } from '~/strings'
+import { SilenceSection } from './SilenceSection'
 
 export type NotificationsMode = PushState | 'shared' | 'hub' | null
 
@@ -185,6 +186,9 @@ export function NotificationsPage() {
     <>
       <NotificationsView mode={mode} phone={phone} prefs={prefs} busy={busy} host={typeof location === 'undefined' ? '' : location.host} testLine={testLine} onToggle={(k) => void toggle(k)} onTest={() => void test()} />
       {failed && <p className="a-muted a-body-sm" role="alert">{t('notif_failed')}</p>}
+      <div className="mt-6">
+        <SilenceSection />
+      </div>
     </>
   )
 }

@@ -24,7 +24,7 @@ const status = (over: Partial<BackupStatus>): BackupStatus => ({ configured: tru
 
 describe('the four groups (check 1)', () => {
   test('headings come in the phone order, This browser first', () => {
-    expect(settingsGroups(HERE).map((g) => t(g.label))).toEqual(['This browser', 'Your accounts', 'How HQ behaves', 'Your data'])
+    expect(settingsGroups(HERE).map((g) => t(g.label))).toEqual(['This browser', 'Your accounts', 'How HQ behaves', 'What HQ is working on', 'Your data'])
   })
 
   test('rows are the phone names, and the Claude connector is gone (W34)', () => {
@@ -33,6 +33,7 @@ describe('the four groups (check 1)', () => {
       'Notifications', 'Time zone', 'Install and version', 'Data used', 'Sign out this browser',
       'AI service and keys', 'Messaging apps', 'Other devices', 'HQ Coder',
       'Spending limits', 'Safety and limits', 'Folders helpers may use',
+      'Tasks', 'Helpers',
       'Backup and about',
     ])
     expect(JSON.stringify(settingsGroups(HERE))).not.toMatch(/claude/i)
@@ -44,7 +45,7 @@ describe('the four groups (check 1)', () => {
 
   test('Lite keeps This browser and Other devices (H8)', () => {
     const rows = settingsGroups({ lite: true, hub: false }).flatMap((g) => g.rows.map((r) => r.id))
-    expect(rows).toEqual(['notifications', 'time', 'version', 'data', 'signout', 'devices'])
+    expect(rows).toEqual(['notifications', 'time', 'version', 'data', 'signout', 'devices', 'work_tasks'])
   })
 
   test('the HQ window reads "This window" and has no Install and version (H9, B11)', () => {

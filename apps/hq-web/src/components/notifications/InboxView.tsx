@@ -2,7 +2,7 @@ import { Check, RefreshCw, Search } from 'lucide-react'
 import { Fragment } from 'react'
 import { Panes, PaneHead } from '~/components/ui/Panes'
 import { groupByDay } from '~/lib/inboxCard'
-import type { InboxTab, NotificationItem } from '~/lib/notificationsApi'
+import type { InboxTab, NotificationItem, SilenceTopic } from '~/lib/notificationsApi'
 import { t, type StringKey } from '~/strings'
 import { NotificationCard } from './NotificationCard'
 import { NotificationDetail } from './NotificationDetail'
@@ -41,6 +41,12 @@ export interface InboxViewProps {
   onRefresh: () => void
   /** Set when there are updates to clear in one go. */
   onClearAll?: () => void
+  /** Set when an update is unread: marks them all read and leaves them listed. */
+  onReadAll?: () => void
+  /** Set on Done when it lists something: empties the list. */
+  onClearDone?: () => void
+  /** Silences the topic of the open item. */
+  onSilence?: (topic: SilenceTopic) => void
   onAction(id: string, action: string): Promise<void>
   /** Clears one update; it reports its own failure. */
   onClear: (id: string) => void
@@ -113,14 +119,28 @@ export function InboxView(p: InboxViewProps) {
                 </button>
               ))}
             </div>
-            {p.onClearAll && (
+            {(p.onClearAll || p.onReadAll) && (
               <div className="hq-inbox-clear">
-                <button type="button" className="a-btn quiet compact" onClick={p.onClearAll}>
-                  {t('inbox_clear_all_updates')}
-                </button>
+                {p.onReadAll && (
+                  <button type="button" className="a-btn quiet compact" onClick={p.onReadAll}>
+                    {t('inbox_read_all')}
+                  </button>
+                )}
+                {p.onClearAll && (
+                  <button type="button" className="a-btn quiet compact" onClick={p.onClearAll}>
+                    {t('inbox_clear_all_updates')}
+                  </button>
+                )}
               </div>
             )}
           </>
+        )}
+        {p.tab === 'resolved' && p.onClearDone && (
+          <div className="hq-inbox-clear">
+            <button type="button" className="a-btn quiet compact" onClick={p.onClearDone}>
+              {t('inbox_clear_done')}
+            </button>
+          </div>
         )}
         {p.tab === 'pending' ? (
           <div className="hq-inbox-list">
@@ -154,7 +174,7 @@ export function InboxView(p: InboxViewProps) {
       showDetail={!!p.selected}
       listLabel={t('inbox_title')}
       detailLabel={t('inbox_details')}
-      detail={<NotificationDetail notification={p.selected} onAction={p.onAction} onAnswered={p.onAnswered} loadingAction={p.loadingAction} onOpenLink={p.onOpenLink} />}
+      detail={<NotificationDetail notification={p.selected} onAction={p.onAction} onAnswered={p.onAnswered} loadingAction={p.loadingAction} onOpenLink={p.onOpenLink} onSilence={p.onSilence} />}
     />
   )
 }

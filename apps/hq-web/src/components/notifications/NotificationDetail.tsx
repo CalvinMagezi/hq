@@ -1,11 +1,11 @@
 import { Link } from '@tanstack/react-router'
-import { ArrowLeft, ArrowUpRight, Inbox } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, BellOff, Inbox } from 'lucide-react'
 import { useState } from 'react'
 import { PaneHead } from '~/components/ui/Panes'
 import { allowLabel, allowTone, quoteArgs } from '~/components/ui/ApprovalCard'
 import { answerErrorLine, lapsed, REQUEST_LIFETIME_MS, serverHqLine } from '~/lib/inboxCard'
-import type { NotificationItem } from '~/lib/notificationsApi'
-import { t } from '~/strings'
+import { silenceTopicOf, type NotificationItem, type SilenceTopic } from '~/lib/notificationsApi'
+import { t, type StringKey } from '~/strings'
 import { DialogAnswer, openDialog } from './DialogAnswer'
 
 const WHEN_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle: 'short' }
@@ -17,12 +17,22 @@ interface Props {
   loadingAction: string | null
   /** Where the link in the item's own words goes. */
   onOpenLink?: (link: string) => void
+  /** Silences the item's topic; what HQ asks itself has none and never offers it. */
+  onSilence?: (topic: SilenceTopic) => void
+}
+
+const SILENCE_LABEL: Record<SilenceTopic, StringKey> = {
+  helpers: 'silence_this_helpers',
+  tasks: 'silence_this_tasks',
+  tips: 'silence_this_tips',
+  upkeep: 'silence_this_upkeep',
+  email: 'silence_this_email',
 }
 
 const formatWhen = (ms: number) => new Intl.DateTimeFormat(undefined, WHEN_FORMAT).format(ms)
 
 /** The open item: its words, the quote of what it would run, the details, and the answers in a footer that stays put. */
-export function NotificationDetail({ notification, onAction, onAnswered, loadingAction, onOpenLink }: Props) {
+export function NotificationDetail({ notification, onAction, onAnswered, loadingAction, onOpenLink, onSilence }: Props) {
   const [failure, setFailure] = useState<string | null>(null)
   const back = (
     <Link to="/inbox" className="a-ib a-back" aria-label={t('inbox_back')}>
@@ -51,6 +61,7 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
   const made = new Date(n.created_at).getTime()
   const server = serverHqLine(n)
   const link = n.metadata.link
+  const topic = silenceTopicOf(n)
   const answering = (action: string) => loadingAction === `${action}-${n.id}`
   const busy = loadingAction !== null
   const act = async (action: string) => {
@@ -113,6 +124,17 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
               </div>
             )}
           </div>
+          {isPending && topic && n.silenced && (
+            <p className="a-cap a-muted">
+              <BellOff className="a-ic sm" aria-hidden="true" /> {t('inbox_silenced')}
+            </p>
+          )}
+          {isPending && topic && !n.silenced && onSilence && (
+            <button type="button" className="a-btn quiet compact" onClick={() => onSilence(topic)}>
+              <BellOff className="a-ic sm" aria-hidden="true" />
+              {t(SILENCE_LABEL[topic])}
+            </button>
+          )}
         </div>
       </div>
       {isPending && !lapsed(n) && (

@@ -52,7 +52,11 @@ export interface Place {
   phone: string
 }
 
-/** The rail and bar order: Notes, Tasks, Chat, Helpers, Inbox. */
+/**
+ * Every place that has an address. Only three are on the rail and the bar (`BAR_PLACES`): Tasks and
+ * Helpers are where HQ and its agents work, so a person reaches them from an Inbox item, a chat
+ * card or Settings, never from the bar.
+ */
 export const PLACES: Place[] = [
   { id: 'notes', path: '/notes', phone: 'hq://notes' },
   { id: 'tasks', path: '/tasks', phone: 'hq://tasks' },
@@ -60,6 +64,9 @@ export const PLACES: Place[] = [
   { id: 'helpers', path: '/helpers', phone: 'hq://helpers' },
   { id: 'inbox', path: '/inbox', phone: 'hq://inbox' },
 ]
+
+/** The rail and bar order: Notes, Chat, Inbox. */
+export const BAR_PLACES: Place['id'][] = ['notes', 'chat', 'inbox']
 
 /** The Settings pages that have an address (a name beyond these opens the Settings home). */
 export const SETTINGS_SECTIONS = [
