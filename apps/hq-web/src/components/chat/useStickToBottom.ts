@@ -78,7 +78,12 @@ export function useStickToBottom(
     const onScroll = () => {
       const near = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_SLACK_PX
       if (near) stickRef.current = true
-      else if (letsGo(near, el.scrollTop, lastTop, dragging || performance.now() - movedAt < INTENT_MS)) stickRef.current = false
+      else if (el.scrollTop < lastTop) {
+        const readerMoved = dragging || performance.now() - movedAt < INTENT_MS
+        if (letsGo(near, el.scrollTop, lastTop, readerMoved)) stickRef.current = false
+        // A jump up nobody asked for, while following, would strand the view until the next resize.
+        else if (stickRef.current) el.scrollTop = el.scrollHeight
+      }
       lastTop = el.scrollTop
       setAtBottom(near || stickRef.current)
       if (near) setHasUnseen(false)
