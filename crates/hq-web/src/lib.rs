@@ -13,6 +13,7 @@ mod chat_apps;
 mod chat_uploads;
 mod coder_api;
 mod copilot_usage_api;
+mod device_actions_api;
 mod device_auth;
 mod devices_door;
 mod dialog_answer;
@@ -103,6 +104,9 @@ pub struct WsState {
     /// WS message aborts the turn's driver task, which drops the harness
     /// stream and finalizes the turn.
     pub(crate) active_chat_turns: ws::ChatTurnMap,
+    /// Requests sent to a phone and not yet settled (`calendar_create_event`).
+    pub(crate) device_actions: Arc<hq_tools::calendar::DeviceActionStore>,
+    pub(crate) device_action_rate: device_actions_api::RateWindow,
     /// Web Push, when `web_push` is on and its key could be loaded.
     pub(crate) web_push: Option<Arc<web_push::WebPush>>,
     /// The one-time code a signed-in device hands to a new one.
@@ -145,6 +149,8 @@ impl WsState {
             connector: None,
             connector_cfg: None,
             active_chat_turns: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            device_actions: Arc::default(),
+            device_action_rate: Default::default(),
             web_push: None,
             device_codes: device_auth::DeviceCodes::default(),
             auth_epoch: tokio::sync::watch::channel(0).0,
@@ -318,7 +324,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         subagent_followup::spawn_subagent_followup(state.clone());
     }
 
-    let router = oauth::routes(Router::new(), &state)
+    let router = device_actions_api::routes(oauth::routes(Router::new(), &state))
         .route("/ws", get(ws::ws_handler))
         .route("/health", get(api::health_handler))
         .route(hello::HELLO_PATH, get(hello::hello_handler))
