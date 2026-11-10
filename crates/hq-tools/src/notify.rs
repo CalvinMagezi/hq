@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use crate::registry::{HqTool, ToolPolicy};
 
 /// Inbox source of the notifications this tool sends.
-pub const NOTIFY_SOURCE: &str = "agent_notify";
+pub const NOTIFY_SOURCE: &str = hq_core::types::AGENT_NOTIFY_SOURCE;
 
 const MAX_TITLE_CHARS: usize = 120;
 const MAX_BODY_CHARS: usize = 2000;
@@ -25,7 +25,22 @@ const MAX_DEDUP_CHARS: usize = 200;
 /// Dedup keys HQ's own items use and the inbox reads meaning from: a new device's sign-in item is
 /// `device-sign-in:<device id>` (`hq_web::device_auth`), shown with It was me and Sign it out.
 /// An agent's notification may not take one, so it cannot pass as that card.
-pub const RESERVED_DEDUP_PREFIXES: &[&str] = &["device-sign-in:", "edge-worker-dispatch"];
+///
+/// The last four are the keys an approval is read under. Approving an item signs it whatever its
+/// kind, and the gate that lets a call through reads the newest item with its key and nothing
+/// else, so a notice filed under one of these could be approved in place of the request, or could
+/// make the gate wait so the real request is never filed. Each prefix is owned by one producer:
+/// `owner-approval` (`hq_agent::governance`), `connector:` (`hq_web::oauth::guard`),
+/// `folder-grant:` (`harness_session::folder_request`) and `self-update-approval-` (`self_update`).
+/// A test beside each producer fails if its prefix is not listed here.
+pub const RESERVED_DEDUP_PREFIXES: &[&str] = &[
+    "device-sign-in:",
+    "edge-worker-dispatch",
+    "owner-approval",
+    "connector:",
+    "folder-grant:",
+    "self-update-approval-",
+];
 
 pub fn create_notify_tools(
     db: Arc<Database>,
@@ -317,6 +332,30 @@ mod tests {
                 .await
                 .is_ok()
         );
+    }
+
+    /// The key an approval is read under must be one only its producer can file: approving a
+    /// notice signs it, and the gate reads by key alone.
+    #[tokio::test]
+    async fn a_notice_cannot_be_filed_under_a_key_an_approval_is_read_under() {
+        let (tool, db) = tool(5);
+        for key in [
+            "owner-approval:web:t1:bash:3f2a",
+            "Owner-Approval:relay:telegram:9:web_fetch:ab",
+            "connector:grant-1:vault_delete:ab12",
+            "folder-grant:hs-claude-code-1:/home/me/app",
+            "self-update-approval-7-0a1b2c3d4e5f-9f8e7d6c5b4a3210",
+        ] {
+            let err = tool
+                .execute(json!({"title": "Approve this", "dedup_key": key}))
+                .await
+                .unwrap_err();
+            assert!(
+                err.to_string().contains("keeps for its own items"),
+                "{key}: {err}"
+            );
+        }
+        assert!(inbox(&db).is_empty());
     }
 
     #[tokio::test]

@@ -1,6 +1,18 @@
 use super::*;
 use serde_json::json;
 
+/// `notify_owner` must not file a notice under the key an approval is read under, or the
+/// notice could be approved in its place.
+#[test]
+fn the_approval_key_prefix_is_one_notify_owner_will_not_file_a_notice_under() {
+    assert!(
+        hq_tools::notify::RESERVED_DEDUP_PREFIXES
+            .iter()
+            .any(|p| format!("{KEY_PREFIX}:web:t1:bash:ab").starts_with(p)),
+        "{KEY_PREFIX}"
+    );
+}
+
 fn approval() -> (Arc<Database>, Arc<OwnerApproval>) {
     let db = Arc::new(Database::open_memory().unwrap());
     let approval = OwnerApproval::new(db.clone(), "web:t1");

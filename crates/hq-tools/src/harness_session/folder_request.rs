@@ -255,6 +255,16 @@ fn lookup_failed() -> anyhow::Error {
 mod tests {
     use super::*;
 
+    #[test]
+    fn the_approval_key_prefix_is_one_notify_owner_will_not_file_a_notice_under() {
+        assert!(
+            crate::notify::RESERVED_DEDUP_PREFIXES
+                .iter()
+                .any(|p| KEY_PREFIX.to_ascii_lowercase().starts_with(p)),
+            "{KEY_PREFIX}"
+        );
+    }
+
     fn setup() -> (tempfile::TempDir, Database) {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::open(&dir.path().join("t.db")).unwrap();

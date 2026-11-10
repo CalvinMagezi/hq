@@ -1,7 +1,7 @@
 # Modular HQ: a guarded base, modules on top
 
-Status: steps 1 to 4 are built, in the change that adds this file. Everything after that is a
-proposal, and several steps wait on the owner decisions listed near the end.
+Status: steps 1 to 4 and A0 to A2 are built on the branch that adds this file. Everything after
+that is a proposal, and several steps wait on the owner decisions listed near the end.
 
 ## Where this came from
 
@@ -245,16 +245,17 @@ changes for a person or a caller.
 | 3 | `hq-contract` holds the tool contract | `HqTool`, `ToolPolicy` and `ToolRegistry` sit below every crate that uses them. Three `hq-agent` files no longer mention `hq-tools`; 129 references to concrete tools remain | None. No build gets smaller from this alone |
 | 4 | Markers are dropped and passed on by prefix, and a call that cannot carry them is refused | A marker added later cannot be forged through `/mcp`, inside a bulk task item or through the `hq` alias. A call whose arguments are a list, a string or a number is refused: before, it reached the tool with no marker, and a session token or a connector grant was then read as the owner for tools that list things | Yes: an unknown `_hq_*` argument no longer reaches a tool; `hq_call` with non-object `args` is an error; a `_hq_caller_session` typed into the local `hq task` command is dropped |
 
-### Phase A: first, three suspected live defects
+### Phase A: first, three suspected live defects (built)
 
 Each is its own pull request and none depends on the others. They come first because they are
-on `main` today and because later steps stand on them.
+on `main` today and because later steps stand on them. All three are done and tested on the
+branch.
 
 | # | Step | Size | Change |
 |---|---|---|---|
-| A0 | A test that builds a family member's Discord session and tries every note tool against a private note (see "Found along the way", item 1). If anything leaks, close it so the default is refusal: a tool that reads notes and is not known to the scope wrapper is refused for a restricted audience | S to M | Only if a leak is found |
-| A1 | A test that saving config keeps a section the struct does not know, then the fix. By reading, `save_patch` rewrites the file from the typed struct, so saving a budget from the web app on a machine that also runs a forwarder would delete its `edge:` section. Also the precondition for any module owning its config | S | Fixes the loss |
-| A2 | Inbox approval keys (item 2): agent notices are stored under a prefix the caller cannot choose, only items from sources that ask can be signed as approvals, and a test proves `notify_owner` refuses every prefix an approval is read under | M | An agent can no longer file a notice under an approval's key |
+| A0 | Done. A test builds a restricted session through the builder the relays use and tries every note-reading tool against a private note. It found a real leak: `context_packet` and `vault_find` returned the note. The scope wrapper now takes every `vault`-category tool and runs over the whole catalog, so the shortcut, export, packet, review and provenance tools are refused for a restricted audience unless the wrapper knows how to filter them | S to M | Yes: a restricted audience loses `vault_find`, `vault_note`, `vault_log`, the exports and `context_packet`; `vault_read` and `vault_search` keep their label checks |
+| A1 | Done. Saving config kept only what the typed struct holds, so saving a budget from the web app on a machine that also runs a forwarder deleted its `edge:` section. The sections other commands own are now carried over, with a test. Other unknown keys are still not preserved, so a field a patch cleared stays cleared. Also the precondition for any module owning its config | S | Fixes the loss |
+| A2 | Done. `notify_owner` refuses all four prefixes an approval is read under, and a test beside each producer fails if its prefix is not on the list. Approving an agent's notice also signs nothing, so even a key that slipped through could not be spent. Not done: agent notices are still stored under a key the caller picks, outside those prefixes; a prefix the caller cannot choose is the stronger fix | M | An agent can no longer file a notice under an approval's key |
 
 ### Phase A, continued: measure and pin
 
@@ -432,13 +433,12 @@ count does not count, because it falls whenever the work is done.
 
 Not part of the split. Items marked "by reading" were not executed.
 
-1. **Possible disclosure gap for restricted audiences (by reading).** The vault scope wrapper
-   wraps tools whose names start with `vault_` or `memory_`. `context_packet`, `note_review`
-   and `note_provenance` come from the same factory and do not match; the shortcut tools
-   (`vault_find` among them) are added after the wrapper; the export tools come from another
-   factory. Whether another filter removes them for a family member's Discord session was not
-   checked. Step A0 is the test.
-2. **Inbox approval keys share a namespace with agent notices (by reading).** Approving any
+1. **Disclosure gap for restricted audiences. Confirmed and fixed (A0).** The vault scope
+   wrapper wrapped tools whose names start with `vault_` or `memory_`, before the shortcut
+   tools were added. `context_packet` and `vault_find` returned a note not labelled for the
+   audience. This was a confirmed leak for any restricted identity built through the session
+   builder; no other filter removed those tools.
+2. **Inbox approval keys share a namespace with agent notices (by reading; fixed in A2).** Approving any
    inbox item signs it, the approval gate reads the newest item by dedup key alone, and
    `notify_owner` lets the caller choose the key except for two reserved prefixes. None of
    the four prefixes an approval is read under is reserved: `owner-approval:`, `connector:`,

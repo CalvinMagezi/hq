@@ -1,6 +1,17 @@
 use super::*;
 use hq_core::types::ValueState;
 
+/// The approval key a connector call is read under is `connector:<grant>:<tool>:<digest>`
+/// (`gate` in guard.rs). `notify_owner` must not file a notice under it.
+#[test]
+fn the_connector_approval_key_is_one_notify_owner_will_not_file_a_notice_under() {
+    assert!(
+        hq_tools::notify::RESERVED_DEDUP_PREFIXES
+            .iter()
+            .any(|p| "connector:grant-1:vault_delete:ab12".starts_with(p))
+    );
+}
+
 #[test]
 fn the_digest_ignores_key_order_and_caller_markers() {
     let a = Call::of(&json!({"params": {"name": "hq_call", "arguments":

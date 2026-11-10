@@ -263,13 +263,18 @@ fn sign_approvals(c: &rusqlite::Connection, ids: &[String]) {
         return;
     };
     for id in ids {
-        let Ok(dedup_key) = c.query_row(
-            "SELECT dedup_key FROM value_items WHERE id = ?1",
+        let Ok((dedup_key, source)) = c.query_row(
+            "SELECT dedup_key, source_task FROM value_items WHERE id = ?1",
             params![id],
-            |r| r.get::<_, Option<String>>(0),
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?)),
         ) else {
             continue;
         };
+        // What an agent files is a notice, never a request. Approving one must not leave a signed
+        // approval that a call with the same key could spend.
+        if source == hq_core::types::AGENT_NOTIFY_SOURCE {
+            continue;
+        }
         let mac = hq_core::approval_key::hmac_hex(
             &key,
             &hq_core::approval_key::value_approval_message(id, dedup_key.as_deref()),
@@ -732,6 +737,31 @@ mod tests {
 
     fn open_db() -> Database {
         Database::open_memory().unwrap()
+    }
+
+    /// An agent's notice can be approved (the action route does not check the item's kind), but
+    /// that must not sign anything a call with the same key could then spend.
+    #[test]
+    fn approving_an_agent_notice_signs_nothing() {
+        let db = open_db();
+        let notice = ValueItem::new(
+            hq_core::types::AGENT_NOTIFY_SOURCE,
+            ValueKind::Fyi,
+            "Approve this",
+            "b",
+        )
+        .with_dedup_key("owner-approval:web:t1:bash:ab");
+        let id = notice.id.clone();
+        emit(&db, &notice).unwrap();
+        assert!(approve_by_id(&db, &id).unwrap());
+        assert!(!is_signed_approval(&db, "owner-approval:web:t1:bash:ab").unwrap());
+        assert_eq!(
+            approval_gate(&db, "owner-approval:web:t1:bash:ab").unwrap(),
+            ApprovalGate::Pending(RequestState::from_latest(
+                latest_engagement_by_dedup(&db, "owner-approval:web:t1:bash:ab").unwrap(),
+                chrono::Utc::now()
+            )),
+        );
     }
 
     #[test]

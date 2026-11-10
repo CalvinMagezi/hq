@@ -105,6 +105,11 @@ const DEFAULT_TTL_DAYS: i64 = 7;
 /// Source of a due-date reminder for a task the person made in chat. Pushed like `notify_owner`.
 pub const DUE_REMINDER_SOURCE: &str = "due_reminder";
 
+/// Source of the notices an agent files with `notify_owner`. Nothing an agent files is ever a
+/// request the owner approves: approving such an item signs nothing (see
+/// `hq_db::value_items::answer_by_id`).
+pub const AGENT_NOTIFY_SOURCE: &str = "agent_notify";
+
 /// Source of the weekly adoption digest: how the person uses HQ.
 pub const ADOPTION_DIGEST_SOURCE: &str = "adoption_digest";
 

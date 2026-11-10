@@ -709,6 +709,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_approval_key_is_one_notify_owner_will_not_file_a_notice_under() {
+        let key = approval_dedup_key(7, "0a1b2c3d4e5f6789", "9f8e7d6c5b4a32100123");
+        assert!(
+            crate::notify::RESERVED_DEDUP_PREFIXES
+                .iter()
+                .any(|p| key.to_ascii_lowercase().starts_with(p)),
+            "{key}"
+        );
+    }
+
+    #[test]
     fn slugify_compacts_and_truncates() {
         assert_eq!(slugify("Add a trivial comment!"), "add-a-trivial-comment");
         assert_eq!(slugify("  --weird--  input  "), "weird-input");
