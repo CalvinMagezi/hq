@@ -1,4 +1,4 @@
-# HQ Control Center
+# HQ web app
 
 PWA for Agent-HQ: vault, chat, tasks and notifications. Built with TanStack Start (SPA mode), React 19 and Vite.
 
