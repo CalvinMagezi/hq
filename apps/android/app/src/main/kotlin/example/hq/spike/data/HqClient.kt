@@ -723,6 +723,23 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
             JSONObject(text).optJSONArray("tasks").objects().map { Triple(it.getString("display_id"), it.optString("title", ""), it.optString("status", "")) }
         }
 
+    /** Tells HQ the phone has the device action; the id is the only thing in the request. */
+    suspend fun ackDeviceAction(actionId: String) {
+        send(authed("/api/device-actions/${java.net.URLEncoder.encode(actionId, "UTF-8")}/ack").post(EMPTY_JSON).build()) { }
+    }
+
+    /** Reports what the phone did. [result] is the contract's outcome object, with no identity in it. */
+    suspend fun postDeviceActionResult(actionId: String, result: JSONObject) {
+        send(authed("/api/device-actions/${java.net.URLEncoder.encode(actionId, "UTF-8")}/result").post(result.toString().toRequestBody("application/json".toMediaType())).build()) { }
+    }
+
+    /** The device actions still open for this session, so one whose socket dropped after the insert can still be settled. */
+    suspend fun pendingDeviceActions(): List<ChatEvent.DeviceAction> = send(authed("/api/device-actions/pending").build()) { body ->
+        val root = body.trim()
+        val list = if (root.startsWith("[")) JSONArray(root) else JSONObject(root).optJSONArray("actions") ?: JSONArray()
+        (0 until list.length()).mapNotNull { list.optJSONObject(it)?.let(ChatEvent::deviceAction) }
+    }
+
     suspend fun wsTicket(): String = send(authed("/api/ws-ticket").post(EMPTY_JSON).build()) { JSONObject(it).getString("ticket") }
 
     fun openSocket(ticket: String, listener: WebSocketListener): WebSocket =

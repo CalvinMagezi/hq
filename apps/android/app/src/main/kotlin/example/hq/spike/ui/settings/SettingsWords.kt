@@ -31,7 +31,7 @@ data class SettingsSnapshot(
     val github: JSONObject? = null,
 )
 
-enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp, StoredKeys, Technical, Noticed, Update, Speech, Assistant }
+enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp, StoredKeys, Technical, Noticed, Update, Speech, Assistant, Calendar }
 
 /** The Settings row that opens the GitHub connection. */
 const val HQ_CODER_ROW = "github"

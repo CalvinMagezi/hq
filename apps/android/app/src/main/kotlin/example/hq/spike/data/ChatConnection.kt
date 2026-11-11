@@ -32,11 +32,8 @@ class ChatConnection(private val client: HqClient, scope: CoroutineScope) {
     }
 
     /** False when there is no open socket, so the caller can keep the message as a draft. */
-    fun sendChat(content: String, threadId: String?, clientId: String, replaceFrom: String? = null, files: List<Attachment> = emptyList(), source: String? = null): Boolean = write(
-        JSONObject().put("type", "chat").put("content", content).put("thread_id", threadId ?: JSONObject.NULL).put("client_id", clientId)
-            .put("attachments", JSONArray(files.map { JSONObject().put("name", it.name).put("path", it.path).put("mime", it.mime).put("size", it.size) }))
-            .apply { replaceFrom?.let { put("replace_from", it) }; source?.let { put("source", it) } },
-    )
+    fun sendChat(content: String, threadId: String?, clientId: String, replaceFrom: String? = null, files: List<Attachment> = emptyList(), source: String? = null): Boolean =
+        write(chatFrame(content, threadId, clientId, replaceFrom, files, source))
 
     fun stop(threadId: String): Boolean = write(JSONObject().put("type", "stop").put("thread_id", threadId))
 
@@ -91,11 +88,23 @@ class ChatConnection(private val client: HqClient, scope: CoroutineScope) {
         }
     }
 
-    private companion object {
-        const val EVENT_BUFFER = 512
-        const val MIN_WAIT_MS = 1_000L
-        const val MAX_WAIT_MS = 15_000L
+    companion object {
+        /**
+         * The chat frame. `device` is the phone's own zone and clock for this turn only: HQ offers device tools such as
+         * calendar creation only when it is present, and drops it when the clock is far from its own.
+         */
+        fun chatFrame(
+            content: String, threadId: String?, clientId: String, replaceFrom: String?, files: List<Attachment>, source: String?,
+            zone: String = java.time.ZoneId.systemDefault().id, nowUtc: java.time.Instant = java.time.Instant.now(),
+        ): JSONObject = JSONObject().put("type", "chat").put("content", content).put("thread_id", threadId ?: JSONObject.NULL).put("client_id", clientId)
+            .put("attachments", JSONArray(files.map { JSONObject().put("name", it.name).put("path", it.path).put("mime", it.mime).put("size", it.size) }))
+            .put("device", JSONObject().put("tz", zone).put("now_utc", nowUtc.toString()))
+            .apply { replaceFrom?.let { put("replace_from", it) }; source?.let { put("source", it) } }
+
+        private const val EVENT_BUFFER = 512
+        private const val MIN_WAIT_MS = 1_000L
+        private const val MAX_WAIT_MS = 15_000L
         /** A connection that lasted this long was a working one; a shorter one keeps the growing wait. */
-        const val STABLE_OPEN_MS = 5_000L
+        private const val STABLE_OPEN_MS = 5_000L
     }
 }

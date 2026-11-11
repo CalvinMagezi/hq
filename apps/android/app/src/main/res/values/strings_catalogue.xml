@@ -3735,6 +3735,16 @@
     <string name="coder_send_back">Send back with this note</string>
     <string name="coder_job_spend">%1$s of %2$s</string>
     <string name="coder_job_try">try %1$s</string>
+    <string name="cal_row_title">Calendar HQ saves events to</string>
+    <string name="cal_status_no_access">Not allowed yet</string>
+    <string name="cal_status_none">No calendar chosen</string>
+    <string name="cal_intro">When you ask HQ to add an event, it saves it straight to the calendar you pick here, on this phone. Whether that calendar also syncs to an account is up to the calendar.</string>
+    <string name="cal_need_access">HQ needs permission to read and write your calendar before it can save events.</string>
+    <string name="cal_allow">Allow calendar access</string>
+    <string name="cal_denied_note">Calendar access is off. Turn it on in the phone\'s app settings for HQ.</string>
+    <string name="cal_group_calendars">Save events to</string>
+    <string name="cal_none_writable">No calendar on this phone can take new events.</string>
+    <string name="cal_chosen">Chosen</string>
     <string name="group_work">What HQ is working on</string>
     <string name="row_work_tasks">Tasks</string>
     <string name="row_work_helpers">Helpers</string>

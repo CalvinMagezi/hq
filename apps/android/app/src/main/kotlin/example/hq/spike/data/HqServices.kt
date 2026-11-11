@@ -27,6 +27,14 @@ class HqServices private constructor(private val app: Context) {
     val background = HqClient(token = { HubService.token(app) }, onSignedOut = { HubService.recoverToken(app) }, callSeconds = BACKGROUND_CALL_SECONDS)
     val connection = ChatConnection(client, scope)
 
+    /** Saves calendar events HQ asks for; it listens on the same socket for as long as the process lives. */
+    private val calendarPrefs = example.hq.spike.calendar.CalendarPrefs(app)
+    val calendarStore = example.hq.spike.calendar.AndroidCalendarStore(app)
+    private val deviceActions = example.hq.spike.calendar.DeviceActionHandler(
+        example.hq.spike.calendar.HqDeviceActionLink(client),
+        example.hq.spike.calendar.CalendarCreator(calendarStore, calendarPrefs, calendarPrefs),
+    )
+
     private val _status = MutableStateFlow<Connection>(Connection.Starting(0, 0, null))
 
     /** The one Connection state every place reads, decided once here by [ConnectionRules.decide]. */
@@ -50,6 +58,7 @@ class HqServices private constructor(private val app: Context) {
     private var stepMovedAt = System.currentTimeMillis()
 
     init {
+        deviceActions.start(scope, connection)
         scope.launch(Dispatchers.IO) { client.warmUp() }
         scope.launch {
             while (true) {
