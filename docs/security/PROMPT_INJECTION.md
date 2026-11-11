@@ -92,6 +92,9 @@ normal and the `BypassPermissions` paths.
    - `harness_session_send`, which types into a running coding agent. A
      tainted turn may also type into or answer (`harness_session_answer`) only a
      session its own web chat watches; a relay chat or an MCP client has none.
+   - `calendar_create_event`, which adds an event to the owner's phone calendar
+     (`CALENDAR_CREATION.md`). A clean turn creates it with no approval, by the
+     owner's choice; once the turn has read outside text, the owner is asked.
 5. **Nobody to ask.** A session with no approval store cannot wait for the
    owner, so once tainted:
    - it never starts, briefs or types into another agent:

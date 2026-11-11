@@ -426,6 +426,18 @@ impl SessionBuilder {
         self
     }
 
+    /// Offers `calendar_create_event` in this session. Only a chat turn that came from the
+    /// owner's phone has a link to give; every other session never calls this.
+    pub fn device_calendar(
+        mut self,
+        device: std::sync::Arc<hq_tools::calendar::DeviceCalendar>,
+    ) -> Self {
+        self.extra_tools.push(Box::new(
+            crate::calendar_tool::CalendarCreateEventTool::new(device),
+        ));
+        self
+    }
+
     /// Set the security profile for governance.
     pub fn security_profile(mut self, profile: SecurityProfile) -> Self {
         self.security_profile = profile;

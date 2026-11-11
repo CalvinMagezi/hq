@@ -7,6 +7,7 @@ pub mod bash_policy;
 pub mod bash_sandbox;
 pub mod budget_gate;
 pub mod builder;
+pub mod calendar_tool;
 pub(crate) mod callable_agents;
 pub(crate) mod coding;
 pub mod context;

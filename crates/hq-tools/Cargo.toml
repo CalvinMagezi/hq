@@ -17,6 +17,8 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 gray_matter = { workspace = true }
 chrono = { workspace = true }
+chrono-tz = "0.10"
+rand = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 anyhow = { workspace = true }

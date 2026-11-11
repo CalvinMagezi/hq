@@ -54,6 +54,9 @@ enum ClientMsg {
         replace_from: Option<String>,
         /// Where the words came from; only "voice" is kept (D7). Never shown to the model.
         source: Option<String>,
+        /// The phone's zone and clock, sent by the Android app. Used for this turn only; its
+        /// presence is what offers `calendar_create_event`. Older apps omit it.
+        device: Option<crate::device_actions_api::DeviceInfo>,
     },
     Stop {
         thread_id: Option<String>,
@@ -150,6 +153,7 @@ async fn dispatch(state: &Arc<WsState>, text: &str) {
             client_id,
             replace_from,
             source,
+            device,
         } => {
             let text = chat_uploads::strip_marker(&content);
             let files = chat_uploads::resolve(&state.vault_path, attachments).await;
@@ -164,6 +168,7 @@ async fn dispatch(state: &Arc<WsState>, text: &str) {
                         client_id,
                         replace_from,
                         source: spoken_source(source.as_deref()),
+                        device,
                     },
                 )
                 .await;
@@ -294,6 +299,8 @@ struct ChatRequest {
     replace_from: Option<String>,
     /// `Some(VOICE_SOURCE)` for a question asked by voice.
     source: Option<&'static str>,
+    /// What the phone reported with this message; dropped after the turn starts.
+    device: Option<crate::device_actions_api::DeviceInfo>,
 }
 
 /// The one source a chat message may carry: it marks a spoken question in every app (D7).
@@ -379,6 +386,9 @@ async fn handle_chat(state: &Arc<WsState>, req: ChatRequest) {
             asked_at,
             text: stored_text(&req),
             registry: state.registry.clone(),
+        }),
+        device: tid.as_deref().and_then(|t| {
+            crate::device_actions_api::device_for_turn(state, t, req.device.as_ref())
         }),
     };
     let abort = spawn_supervised(turn, config, req.text, history, req.files);
@@ -614,6 +624,7 @@ pub(crate) async fn start_driver_turn(
         ask: None,
         spoken: None,
         offer: None,
+        device: None,
     };
     let abort = spawn_supervised(turn, config, prompt, history, Vec::new());
     turns.insert(
@@ -695,6 +706,8 @@ struct ChatTurn {
     spoken: Option<String>,
     /// Set for a reply to the person's own message: the reply may carry one offer.
     offer: Option<crate::offers_api::OfferContext>,
+    /// The phone this reply is for, when it reported a zone and clock.
+    device: Option<Arc<hq_tools::calendar::DeviceCalendar>>,
 }
 
 /// Runs a turn and watches it. A panic inside the run would otherwise leave no
@@ -807,6 +820,7 @@ impl ChatTurn {
             }),
             isolated: true,
             image_parts,
+            device_calendar: self.device.clone(),
             ..Default::default()
         };
         // Same shared runner as the Telegram/Discord relays: session model, tool
@@ -1185,6 +1199,7 @@ mod tests {
             client_id: Some("local-1".into()),
             replace_from: replace_from.map(Into::into),
             source: None,
+            device: None,
         }
     }
 
@@ -1439,6 +1454,7 @@ mod tests {
             ask: None,
             spoken: None,
             offer: None,
+            device: None,
         };
         let task = tokio::spawn(async { panic!("boom") });
         state.active_chat_turns.write().await.insert(
@@ -1477,6 +1493,7 @@ mod tests {
             ask: None,
             spoken: None,
             offer: None,
+            device: None,
         };
         let task = tokio::spawn(std::future::pending::<()>());
         task.abort();

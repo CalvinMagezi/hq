@@ -248,6 +248,7 @@ async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<Stri
         }),
         spoken: None,
         offer: None,
+        device: None,
     };
     let abort = spawn_supervised(turn, config, req.question.to_string(), history, Vec::new());
     turns.insert(
@@ -415,6 +416,7 @@ mod tests {
             }),
             spoken: None,
             offer: None,
+            device: None,
         }
     }
 
@@ -947,6 +949,7 @@ mod tests {
                 client_id: Some("local-1".into()),
                 replace_from: Some(ids[0].clone()),
                 source: None,
+                device: None,
             },
         )
         .await;
