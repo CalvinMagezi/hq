@@ -1209,6 +1209,7 @@ export const en = {
   note_history_first: "First",
   note_history_line: "{label} · {who} · {when}",
   note_drawer_copy_path: "Copy path",
+  note_drawer_copy_failed: "Couldn't copy the path. Select it and copy by hand.",
   note_drawer_loading: "Getting the note",
   note_drawer_failed: "Couldn't load the note. HQ didn't answer in time. Try again.",
   note_drawer_try_again: "Try again",
