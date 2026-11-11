@@ -1,19 +1,27 @@
 import { answerErrorLine } from '~/lib/inboxCard'
 import { createFileRoute, useNavigate, useParams, useRouter } from '@tanstack/react-router'
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useHQStore } from '~/store/hqStore'
 import {
   fetchNotificationsClient,
   executeNotificationAction,
   markAllNotificationsRead,
+  markNotificationRead,
+  clearAllUpdates,
+  clearDoneList,
+  silenceTopic,
+  unsilenceTopic,
   restoreNotification,
   restoreNotifications,
   clearableUpdateIds,
   inInboxTab,
   type InboxTab,
   type NotificationState,
+  type SilenceTopic,
 } from '~/lib/notificationsApi'
-import { toastUndo, toastAlert } from '~/lib/toast'
+import { toastUndo, toastAlert, toastNotice } from '~/lib/toast'
+import { useWS } from '~/context/WebSocketContext'
 import { t, tn } from '~/strings'
 import { failureLine } from '~/lib/version'
 import { InboxView } from '~/components/notifications/InboxView'
@@ -47,15 +55,20 @@ function NotificationsPage() {
   const pendingApprovalsCount = useHQStore((s) => s.pendingApprovalsCount)
   const setNotificationCounts = useHQStore((s) => s.setNotificationCounts)
   const updateNotificationState = useHQStore((s) => s.updateNotificationState)
+  const markRead = useHQStore((s) => s.markNotificationRead)
 
+  // Reloads overlap (an event during a tab switch): only the newest answer is shown.
+  const loadSeq = useRef(0)
   const loadData = useCallback(async () => {
+    const seq = ++loadSeq.current
     setIsRefreshing(true)
     try {
-      const res = await fetchNotificationsClient({
-        state: activeTab === 'resolved' ? 'resolved' : 'pending',
-      })
+      const done = activeTab === 'resolved'
+      const res = await fetchNotificationsClient({ state: done ? 'resolved' : 'pending' })
+      if (seq !== loadSeq.current) return
       setNotifications(res.notifications)
-      setNotificationCounts(res.unread_count, res.pending_approvals_count)
+      // The Done list has nothing pending in it, so its counts would zero the badge.
+      if (!done) setNotificationCounts(res.unread_count, res.pending_approvals_count)
       setCheckedAt(new Date())
     } catch (e) {
       console.error('Failed to load notifications:', e)
@@ -68,9 +81,39 @@ function NotificationsPage() {
     loadData()
   }, [loadData])
 
+  // The list follows HQ while it is open: a request that arrives, or one answered in a chat or
+  // on another device, shows here without Refresh. A reconnect and coming back to the tab read
+  // again, since events sent meanwhile are gone.
+  const { subscribe, connected } = useWS()
+  useEffect(() => {
+    if (connected) void loadData()
+  }, [connected, loadData])
+  useEffect(
+    () =>
+      subscribe((msg) => {
+        if (msg.type === 'inbox:change' || msg.type === 'notification:resolved' || msg.type === 'notification:restored') void loadData()
+      }),
+    [subscribe, loadData],
+  )
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void loadData()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [loadData])
+
   // The address names the open item, so Back and a shared link both land on it.
   const selectedNotification = useMemo(() => notifications.find((n) => n.id === linkedId) ?? null, [linkedId, notifications])
   const closeDetail = useCallback(() => void navigate({ to: '/inbox' }), [navigate])
+
+  // Opening an item reads it.
+  const openUnread = selectedNotification && selectedNotification.read === false && selectedNotification.state === 'pending' ? selectedNotification.id : null
+  useEffect(() => {
+    if (!openUnread) return
+    markRead(openUnread)
+    markNotificationRead(openUnread).catch(() => undefined)
+  }, [openUnread, markRead])
 
   const handleAction = async (id: string, action: string) => {
     setLoadingAction(`${action}-${id}`)
@@ -104,9 +147,8 @@ function NotificationsPage() {
 
   // Only updates are cleared in bulk; a Needs-you request waits for its own answer.
   const handleClearUpdates = async () => {
-    const ids = clearableUpdateIds(notifications)
     try {
-      await markAllNotificationsRead()
+      const ids = (await clearAllUpdates()).ids ?? clearableUpdateIds(notifications)
       await loadData()
       toastUndo(
         tn('updates_cleared', ids.length),
@@ -121,6 +163,24 @@ function NotificationsPage() {
       toastAlert(failureLine(err, 'fail_clear_updates_newer', t('fail_clear_updates_no_reply')))
     }
   }
+
+  const failed = () => toastAlert(t('inbox_fail_no_reply'))
+  const handleReadAll = () => markAllNotificationsRead().then(loadData).catch(failed)
+  const handleClearDone = () =>
+    clearDoneList()
+      .then(loadData)
+      .then(() => toastNotice(t('inbox_done_cleared')))
+      .catch(failed)
+  // Settings keeps its own copy of the silences; a change made here makes it read again.
+  const queryClient = useQueryClient()
+  const forgetSilences = () => queryClient.invalidateQueries({ queryKey: ['inbox-silences'] })
+  // Silencing is about what interrupts: the items stay listed. Undo turns the topic back on.
+  const handleSilence = (topic: SilenceTopic) =>
+    silenceTopic(topic)
+      .then(loadData)
+      .then(() => toastUndo(t('silence_done'), () => unsilenceTopic(topic).then(loadData).then(forgetSilences), t('silence_undone')))
+      .then(forgetSilences)
+      .catch(failed)
 
   const items = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -155,6 +215,9 @@ function NotificationsPage() {
       refreshing={isRefreshing}
       onRefresh={loadData}
       onClearAll={canClearAll ? handleClearUpdates : undefined}
+      onReadAll={activeTab === 'all' && notifications.some((n) => inInboxTab(n, 'all') && n.read === false) ? handleReadAll : undefined}
+      onClearDone={activeTab === 'resolved' && items.length > 0 ? handleClearDone : undefined}
+      onSilence={handleSilence}
       onAction={handleAction}
       onClear={(id) => handleAction(id, 'dismiss').catch((e) => useHQStore.getState().setSystemNotice(answerErrorLine(e)))}
       onAnswered={handleAnswered}

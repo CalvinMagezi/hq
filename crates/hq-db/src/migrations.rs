@@ -442,6 +442,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "121_offer_schedule",
         include_str!("../sql/121_offer_schedule.sql"),
     ),
+    (
+        "122_inbox_read_and_silence",
+        include_str!("../sql/122_inbox_read_and_silence.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

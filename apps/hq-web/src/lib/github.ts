@@ -28,6 +28,9 @@ export interface GithubLink {
   repos: GithubRepo[]
 }
 
+/** One cache entry for the connection, so the Settings row follows what the card just did. */
+export const GITHUB_QUERY_KEY = ['github']
+
 export const githubApi = {
   status: () => hqJson<GithubLink>('/api/github'),
   connect: () => hqJson<{ url: string }>('/api/github/connect', 'POST'),

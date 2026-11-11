@@ -83,9 +83,10 @@ pub fn main_title(hub_web: bool) -> String {
 }
 
 /// The page of HQ's web app a notice or a card may open, or none. Only these are allowed:
-/// `/`, `/chat`, `/settings/devices`, `/helpers/<id>` and `/inbox/<id>`, with no query, no
-/// fragment and an id of letters, digits, `-` and `_`. Anything else (a full address, `..`, a
-/// backslash) is refused, so a card can never steer the window elsewhere.
+/// `/`, `/chat`, `/notes`, `/inbox`, `/helpers`, `/settings/devices`, `/helpers/<id>` and
+/// `/inbox/<id>`, with no query, no fragment and an id of letters, digits, `-` and `_`. Anything
+/// else (a full address, `..`, a backslash) is refused, so a card can never steer the window
+/// elsewhere.
 pub fn main_path_allowed(path: &str) -> Option<String> {
     let id_ok = |id: &str| {
         (1..=64).contains(&id.len())
@@ -94,7 +95,7 @@ pub fn main_path_allowed(path: &str) -> Option<String> {
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     };
     let allowed = match path {
-        "/" | "/chat" | "/settings/devices" => true,
+        "/" | "/chat" | "/notes" | "/inbox" | "/helpers" | "/settings/devices" => true,
         _ => path
             .strip_prefix("/helpers/")
             .or_else(|| path.strip_prefix("/inbox/"))
@@ -196,6 +197,9 @@ mod tests {
         for ok in [
             "/",
             "/chat",
+            "/notes",
+            "/inbox",
+            "/helpers",
             "/settings/devices",
             "/helpers/abc_12-X",
             "/inbox/9f3",

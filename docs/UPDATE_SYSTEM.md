@@ -322,7 +322,12 @@ channel is refused on another. `manifest_url` must start with `<base_url>/<owner
 and carry no query or fragment. The artifacts are fetched from the same
 directory as the manifest. Promoting a build to `stable` means signing and
 uploading a new `channel-stable.json` that points at an existing release; no
-artifact is rebuilt or re-uploaded. `--pin` skips the pointer and reads
+artifact is rebuilt or re-uploaded. `auto-promote.yml` does this every day: the newest main
+release that has been out 24 hours and whose CI and Release runs passed, if it is newer than
+what `stable` points at (`scripts/release/pick-promotable.sh`). It dispatches `promote.yml`, so the
+signature and checksum checks are the same as a manual promotion. Set the repository variable
+`AUTO_PROMOTE` to `off` to stop it; run it by hand with `soak_hours` 0 to skip the wait.
+`--pin` skips the pointer and reads
 `<base_url>/<owner>/<repo>/releases/download/v<version>/manifest.json`.
 
 ### What a build must embed

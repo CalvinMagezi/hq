@@ -275,6 +275,7 @@ pub async fn run_session_supervisor(db: &Database, config: &HqConfig) -> Result<
         Sweep {
             host_budget: HOST_SWEEP_BUDGET,
             unreachable_after: config.agent_host.unreachable_alert_after(),
+            driver_grace: config.agent_host.driver_grace(),
         },
     )
     .await
@@ -286,6 +287,8 @@ struct Sweep {
     host_budget: Duration,
     /// How long a host with sessions may stay silent before the alert; `None` never alerts.
     unreachable_after: Option<Duration>,
+    /// How long a block handed to a driving chat may stand before the owner hears of it.
+    driver_grace: Duration,
 }
 
 impl Sweep {
@@ -294,6 +297,7 @@ impl Sweep {
         Sweep {
             host_budget,
             unreachable_after: None,
+            driver_grace: Duration::ZERO,
         }
     }
 }
@@ -322,6 +326,7 @@ fn sweep_alive(
     row: &registry::HarnessSessionRow,
     seen: Seen<'_>,
     resolve: &HostResolver,
+    driver_grace: Duration,
 ) {
     let Seen {
         agent,
@@ -345,6 +350,7 @@ fn sweep_alive(
             "unblocked",
             serde_json::json!({ "blocked_ms": waited, "status": agent.status.as_str() }),
         );
+        clear_blocked_alerts(db, &row.id);
     }
     let (id, status) = (row.id.clone(), agent.status.as_str());
     if let Err(e) = db.with_conn(move |c| registry::set_seen(c, &id, status)) {
@@ -361,7 +367,7 @@ fn sweep_alive(
         // Only the survey's own block is silenced. A finished turn always alerts: it carries
         // the driver's wake, and a state change after the keypress must not lose it.
         AgentStatus::Blocked if dismissed => {}
-        AgentStatus::Blocked => alert_blocked(db, row, agent, screen, resolve),
+        AgentStatus::Blocked => alert_blocked(db, row, agent, screen, resolve, driver_grace),
         AgentStatus::Done => alert_finished(db, row, agent, screen, head),
         _ => {}
     }
@@ -560,7 +566,7 @@ async fn supervise(
                     dismissed,
                     head,
                 };
-                sweep_alive(db, &row, seen, &resolve);
+                sweep_alive(db, &row, seen, &resolve, sweep.driver_grace);
                 keep_resume_current(db, &row, &agent, &resolve).await;
                 alive.push((row, *agent));
                 continue;
@@ -591,6 +597,8 @@ async fn supervise(
         }
         let token = row.resume_token.clone();
         tracing::info!(session = %row.id, harness = %row.harness, "session-supervisor: marked exited");
+        // A session that is gone has no prompt left to answer.
+        clear_blocked_alerts(db, &row.id);
         record_event(
             db,
             &row.id,

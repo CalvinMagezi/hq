@@ -10,6 +10,7 @@ export type SettingsPath =
   | '/settings/keys'
   | '/settings/messaging'
   | '/settings/devices'
+  | '/settings/github'
   | '/settings/spending'
   | '/settings/safety'
   | '/settings/folders'
@@ -19,11 +20,11 @@ export interface SettingsRowDef {
   id: string
   label: StringKey
   /** Null for a row that acts instead of opening a page (Sign out this browser). */
-  path: SettingsPath | '/helpers' | null
+  path: SettingsPath | '/helpers' | '/tasks' | null
 }
 
 export interface SettingsGroupDef {
-  id: 'browser' | 'accounts' | 'behaves' | 'data'
+  id: 'browser' | 'accounts' | 'behaves' | 'work' | 'data'
   label: StringKey
   rows: SettingsRowDef[]
 }
@@ -56,7 +57,7 @@ export function settingsGroups({ lite, hub }: WhereHqRuns): SettingsGroupDef[] {
         { id: 'keys', label: 'row_ai_keys', path: '/settings/keys' },
         { id: 'messaging', label: 'row_messaging', path: '/settings/messaging' },
         { id: 'devices', label: 'row_other_devices', path: '/settings/devices' },
-        { id: 'code', label: 'github_title', path: '/helpers' },
+        { id: 'github', label: 'row_github', path: '/settings/github' },
       ],
     },
     {
@@ -68,11 +69,26 @@ export function settingsGroups({ lite, hub }: WhereHqRuns): SettingsGroupDef[] {
         { id: 'folders', label: 'row_folders', path: '/settings/folders' },
       ],
     },
+    {
+      // Tasks and Helpers are where HQ and its agents work. They are off the bar, and this is
+      // the door for a person who wants to look in.
+      id: 'work',
+      label: 'group_work',
+      rows: [
+        { id: 'work_tasks', label: 'row_work_tasks', path: '/tasks' },
+        { id: 'work_helpers', label: 'row_work_helpers', path: '/helpers' },
+      ],
+    },
     { id: 'data', label: 'group_data', rows: [{ id: 'backup', label: 'row_backup', path: '/settings/backup' }] },
   ]
+  // Lite keeps its tasks and runs no helpers.
+  if (lite) {
+    const work = groups.find((g) => g.id === 'work')!
+    work.rows = work.rows.filter((r) => r.id === 'work_tasks')
+  }
   if (!lite) return groups
   return groups
-    .map((g) => ({ ...g, rows: g.rows.filter((r) => r.path === null || LITE_PATHS.includes(r.path as SettingsPath)) }))
+    .map((g) => ({ ...g, rows: g.rows.filter((r) => r.path === null || r.path === '/tasks' || LITE_PATHS.includes(r.path as SettingsPath)) }))
     .filter((g) => g.rows.length > 0)
 }
 
@@ -149,6 +165,21 @@ export function formatSize(bytes: number): string {
   if (bytes >= 10 * MB) return `${Math.round(bytes / MB)} MB`
   if (bytes >= MB / 10) return `${(bytes / MB).toFixed(1)} MB`
   return `${Math.round(bytes / 1024)} KB`
+}
+
+/** The GitHub row's words: who it is connected to, or the step that is left. Null until HQ has answered. */
+export interface GithubTrail {
+  key: StringKey
+  owner?: string
+  needsLook: boolean
+}
+
+export function githubTrail(link: { standing: string; owner: string | null } | null | undefined): GithubTrail | null {
+  if (!link) return null
+  if (link.standing === 'connected') return { key: 'github_connected_as', owner: link.owner ?? '', needsLook: false }
+  if (link.standing === 'needs_install') return { key: 'trail_github_install', needsLook: true }
+  if (link.standing === 'reconnect') return { key: 'trail_github_reconnect', needsLook: true }
+  return { key: 'trail_github_off', needsLook: false }
 }
 
 /** The Notifications row's words: the two switches only while this browser really receives them. */

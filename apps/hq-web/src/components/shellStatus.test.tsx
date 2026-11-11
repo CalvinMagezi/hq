@@ -34,7 +34,7 @@ describe('header in the seven states', () => {
 
 describe('badge and strip', () => {
   test('rail and bar badge is amber and Workbench has none', () => {
-    expect(inboxNeedsYou(2, 3)).toBe(5)
+    expect(inboxNeedsYou(2, 3)).toBe(2)
     for (const f of ['src/components/AppRail.tsx', 'src/components/BottomNav.tsx', 'src/components/Places.tsx']) expect(read(f)).not.toMatch(/workbenchBadge|workbench[A-Za-z]*Count/i)
     expect(read('src/styles/aligned-ui.css')).toMatch(/\.a-badge\{background:var\(--warn\)/)
   })

@@ -60,6 +60,8 @@ data class InboxUi(
 ) {
     val shownNeeds: List<InboxCard> get() = needs.filter { it.id !in cleared }
     val shownUpdates: List<InboxCard> get() = updates.filter { it.id !in cleared }
+    /** What the bar counts: the requests whose topic the owner has not silenced. */
+    val badge: Int get() = shownNeeds.count { !it.silenced }
 }
 
 /** A voice approval just allowed: [at] is the time it was allowed, [sent] after Keep going has been sent. */
@@ -109,6 +111,11 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Reads the inbox now rather than at the next poll: a chat that waits for an answer shows its request at once. */
+    suspend fun refreshNow() {
+        if (!frozen) refresh()
+    }
+
     fun freeze(fixed: InboxUi) {
         frozen = true
         _state.value = fixed
@@ -123,7 +130,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** How many things are waiting on the owner, for the badge on the nav bar. */
-    val badge: Int get() = _state.value.shownNeeds.size
+    val badge: Int get() = _state.value.badge
 
     /** Re-reads whether the banner shows: on every poll and when the app comes back from Android settings. */
     fun refreshBanner() {

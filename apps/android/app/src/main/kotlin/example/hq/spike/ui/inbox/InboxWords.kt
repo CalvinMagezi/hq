@@ -54,6 +54,8 @@ data class InboxCard(
     /** For a new sign-in: the device that signed in, and its name when HQ's device list has it. */
     val signInDevice: String? = null,
     val deviceLabel: String? = null,
+    /** Its topic is silenced: it waits in the list without counting on the badge. */
+    val silenced: Boolean = false,
 )
 
 /** Turns what the server stores into the plain titles, bodies and buttons of the Inbox board. */
@@ -65,7 +67,9 @@ object InboxWords {
     private const val MAX_BODY = 160
     private const val APPROVAL_BODY = 400
 
-    fun card(item: InboxItem): InboxCard {
+    fun card(item: InboxItem): InboxCard = worded(item).copy(silenced = item.silenced)
+
+    private fun worded(item: InboxItem): InboxCard {
         val helper = HELPER_TITLE.matchEntire(item.title.trim())
         val session = SESSION.find(item.description)
         return when {

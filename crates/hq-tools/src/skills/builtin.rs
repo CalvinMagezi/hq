@@ -32,6 +32,9 @@ pub struct Shipped {
     pub applies: fn(&HqConfig) -> bool,
 }
 
+/// The skill `calendar_create_event` refuses to run without.
+pub const CALENDAR_CREATION_SKILL: &str = "calendar-creation";
+
 /// The set is decided once at start, and GitHub can be connected any time after, so the worker
 /// is always offered. Whether it acts is `dispatch::allowed_repos`.
 fn every_install(_: &HqConfig) -> bool {
@@ -39,14 +42,24 @@ fn every_install(_: &HqConfig) -> bool {
 }
 
 /// Every built-in skill. A test checks this list against `assets/skills/`.
-pub const BUILTIN_SKILLS: &[Shipped] = &[Shipped {
-    name: "edge-coding-worker",
-    files: &[(
-        SKILL_FILE,
-        include_str!("../../assets/skills/edge-coding-worker/SKILL.md"),
-    )],
-    applies: every_install,
-}];
+pub const BUILTIN_SKILLS: &[Shipped] = &[
+    Shipped {
+        name: "edge-coding-worker",
+        files: &[(
+            SKILL_FILE,
+            include_str!("../../assets/skills/edge-coding-worker/SKILL.md"),
+        )],
+        applies: every_install,
+    },
+    Shipped {
+        name: CALENDAR_CREATION_SKILL,
+        files: &[(
+            SKILL_FILE,
+            include_str!("../../assets/skills/calendar-creation/SKILL.md"),
+        )],
+        applies: every_install,
+    },
+];
 
 /// The active built-ins, set once from the config the process loaded. `None` until
 /// [`configure`] runs: nothing is active, so a library user or a test sees no built-in by default.

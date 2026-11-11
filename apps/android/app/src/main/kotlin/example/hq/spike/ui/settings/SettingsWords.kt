@@ -27,12 +27,18 @@ data class SettingsSnapshot(
     val forecast: JSONObject? = null,
     /** What HQ says about the vault (/api/vault-status): its path and, from a build that has it, how many notes are indexed. */
     val vault: JSONObject? = null,
+    /** Where the GitHub connection stands (/api/github). Null from an HQ without HQ Coder. */
+    val github: JSONObject? = null,
 )
 
 enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp, StoredKeys, Technical, Noticed, Update, Speech, Assistant, Calendar }
 
-/** The Settings row that opens HQ Coder on the Helpers page. */
+/** The Settings row that opens the GitHub connection. */
 const val HQ_CODER_ROW = "github"
+
+/** The Settings rows that open Tasks and Helpers, which are off the bar. */
+const val WORK_TASKS_ROW = "work_tasks"
+const val WORK_HELPERS_ROW = "work_helpers"
 
 data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
 
@@ -40,6 +46,9 @@ data class HomeGroup(val title: String, val rows: List<HomeRow>, val note: Strin
 
 /** A line on a read-only page: a title with its value, and a sentence that says what it means. */
 data class FactRow(val title: String, val value: String, val text: String? = null, val good: Boolean = false, val opens: SettingsPage? = null)
+
+typealias SilenceRow = SettingsWords.SilenceRow
+typealias Silences = SettingsWords.Silences
 
 /** The words of the Settings board, built from what the server sent. Pure, so each line can be tested from a real response. */
 object SettingsWords {
@@ -143,12 +152,18 @@ object SettingsWords {
                 HomeRow(SettingsPage.Keys, "key", w.s(R.string.row_ai_keys), keysStatus(w, snap.settings, snap.providers)),
                 HomeRow(SettingsPage.Messaging, "chat", w.s(R.string.row_messaging), messagingStatus(w, snap.chatApps)),
                 HomeRow(SettingsPage.Devices, "phone", w.s(R.string.devices_title), devicesStatus(w, snap.devices)),
-                HomeRow(null, HQ_CODER_ROW, w.s(R.string.github_title), w.s(R.string.github_row_body)),
+                HomeRow(null, HQ_CODER_ROW, w.s(R.string.row_github), githubStatus(w, snap.github), warn = githubWarns(snap.github)),
             ) + listOfNotNull(server),
             note = claudeViaLaptop(w),
             lead = strip,
         ),
         HomeGroup(w.s(R.string.settings_group_behaves), listOf(HomeRow(SettingsPage.Safety, "shield", w.s(R.string.row_safety), if (snap.settings == null) notAnswered(w) else w.s(R.string.connect_scope_read_only_title)))),
+        HomeGroup(
+            w.s(R.string.group_work), listOf(
+                HomeRow(null, WORK_TASKS_ROW, w.s(R.string.row_work_tasks), w.s(R.string.trail_work_tasks)),
+                HomeRow(null, WORK_HELPERS_ROW, w.s(R.string.row_work_helpers), w.s(R.string.trail_work_helpers)),
+            ),
+        ),
         HomeGroup(
             w.s(R.string.settings_group_data), listOf(
                 HomeRow(SettingsPage.Spending, "gauge", w.s(R.string.row_spending), spendingStatus(w, snap.budgets)),
@@ -159,7 +174,21 @@ object SettingsWords {
 
     /** Until the first read has finished, the rows that come from HQ say so, rather than "No answer yet". */
     private fun withChecking(w: Words, loaded: Boolean, groups: List<HomeGroup>): List<HomeGroup> =
-        if (loaded) groups else groups.map { g -> if (g.title == w.s(R.string.settings_group_phone)) g else g.copy(rows = g.rows.map { if (it.page == SettingsPage.About) it else it.copy(status = w.s(R.string.settings_checking)) }) }
+        if (loaded) groups else groups.map { g -> if (g.title == w.s(R.string.settings_group_phone)) g else g.copy(rows = g.rows.map { if (it.page == SettingsPage.About || it.key in FIXED_ROWS) it else it.copy(status = w.s(R.string.settings_checking)) }) }
+
+    /** Rows whose line never comes from HQ, so it has nothing to check. */
+    private val FIXED_ROWS = setOf(WORK_TASKS_ROW, WORK_HELPERS_ROW)
+
+    /** Who GitHub is connected to, or the step that is left; what HQ Coder is, while HQ has not said. */
+    fun githubStatus(w: Words, g: JSONObject?): String = when (g?.optString("standing")) {
+        "connected" -> w.s(R.string.github_connected_as, g.text("owner").orEmpty())
+        "needs_install" -> w.s(R.string.trail_github_install)
+        "reconnect" -> w.s(R.string.trail_github_reconnect)
+        "not_connected" -> w.s(R.string.trail_github_off)
+        else -> w.s(R.string.github_row_body)
+    }
+
+    fun githubWarns(g: JSONObject?): Boolean = g?.optString("standing") in setOf("needs_install", "reconnect")
 
     fun aboutStatus(w: Words, h: JSONObject?): String = h?.text("version")?.let { w.s(R.string.settings_hq_version, it) } ?: if (h == null) notAnswered(w) else w.s(R.string.settings_hq_running)
 
@@ -600,4 +629,33 @@ object SettingsWords {
     }
 
     private fun numOrNull(o: JSONObject?, name: String): Double? = o?.takeIf { it.has(name) && !it.isNull(name) }?.optDouble(name)?.takeIf { it.isFinite() }
+
+    data class SilenceRow(val topic: String, val silenced: Boolean, val until: Instant?)
+    data class Silences(val pause: SilenceRow, val topics: List<SilenceRow>)
+
+    private val SILENCE_TIME_FORMAT: java.time.format.DateTimeFormatter
+        get() = java.time.format.DateTimeFormatter.ofPattern("EEE h:mm a", java.util.Locale.getDefault())
+
+    fun silences(o: JSONObject): Silences {
+        fun row(obj: JSONObject?) = SilenceRow(
+            topic = obj?.optString("topic").orEmpty(),
+            silenced = obj?.optBoolean("silenced", false) == true,
+            until = time(obj, "until"),
+        )
+        val pause = row(o.optJSONObject("pause"))
+        val topics = o.arr("topics").items().map(::row)
+        return Silences(pause, topics)
+    }
+
+    fun silenceLine(w: Words, row: SilenceRow, zone: ZoneId = ZoneId.systemDefault()): String {
+        if (!row.silenced) return w.s(R.string.silence_on)
+        val until = row.until ?: return w.s(R.string.silence_off)
+        return w.s(R.string.silence_off_until, until.atZone(zone).format(SILENCE_TIME_FORMAT))
+    }
+
+    fun pauseLine(w: Words, pause: SilenceRow, zone: ZoneId = ZoneId.systemDefault()): String? {
+        if (!pause.silenced) return null
+        val until = pause.until ?: return w.s(R.string.silence_paused)
+        return w.s(R.string.silence_paused_until, until.atZone(zone).format(SILENCE_TIME_FORMAT))
+    }
 }

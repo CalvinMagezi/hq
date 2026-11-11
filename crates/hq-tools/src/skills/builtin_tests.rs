@@ -3,6 +3,7 @@ use crate::skills::{list_skills, parse_skill, security_flags, validate_skill, va
 
 const NAME: &str = "edge-coding-worker";
 const ACTIVE_NOW: &[&str] = &[NAME];
+const CALENDAR: &str = CALENDAR_CREATION_SKILL;
 
 fn assets_dir() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/skills")
@@ -86,11 +87,14 @@ fn every_shipped_skill_is_valid_clean_and_marked_as_hq_s() {
 fn a_built_in_is_active_unless_it_is_turned_off() {
     assert_eq!(
         active_for(&config_with(&[], &[])),
-        [NAME],
+        [NAME, CALENDAR],
         "GitHub can be connected after start, with no repos listed"
     );
-    assert_eq!(active_for(&config_with(&["o/r"], &[])), [NAME]);
-    assert!(active_for(&config_with(&["o/r"], &["EDGE-CODING-WORKER"])).is_empty());
+    assert_eq!(active_for(&config_with(&["o/r"], &[])), [NAME, CALENDAR]);
+    assert_eq!(
+        active_for(&config_with(&["o/r"], &["EDGE-CODING-WORKER"])),
+        [CALENDAR]
+    );
     assert_eq!(
         unknown_off(&config_with(&[], &["edge-coding-wroker"])),
         ["edge-coding-wroker"]
@@ -444,4 +448,23 @@ async fn a_released_name_is_an_ordinary_skill_until_the_built_in_is_active_again
 fn shipped_file_any(name: &str) -> String {
     let _now = set_active_for_this_thread(Some(ACTIVE_NOW));
     shipped_file(name, SKILL_FILE).unwrap().to_string()
+}
+
+#[test]
+fn calendar_creation_ships_active_with_a_hash_and_fails_closed_when_off() {
+    let _now = set_active_for_this_thread(Some(&[CALENDAR]));
+    assert!(is_active(CALENDAR));
+    assert_eq!(shipped_hash(CALENDAR).unwrap().len(), 64);
+    let text = shipped_file(CALENDAR, SKILL_FILE).unwrap();
+    assert!(text.contains("calendar_create_event"));
+    assert!(
+        active_for(&config_with(&[], &["calendar-creation"]))
+            .iter()
+            .all(|n| *n != CALENDAR),
+        "the owner can turn it off"
+    );
+    drop(_now);
+    let _off = set_active_for_this_thread(Some(&[]));
+    assert!(!is_active(CALENDAR));
+    assert!(shipped_hash(CALENDAR).is_none());
 }

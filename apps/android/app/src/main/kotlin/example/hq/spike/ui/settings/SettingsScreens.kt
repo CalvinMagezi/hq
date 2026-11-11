@@ -116,6 +116,8 @@ private fun icon(key: String): ImageVector = when (key) {
     "shield" -> HqIcons.Shield
     "gauge" -> HqIcons.Gauge
     HQ_CODER_ROW -> HqIcons.Code
+    WORK_TASKS_ROW -> HqIcons.Tasks
+    WORK_HELPERS_ROW -> HqIcons.Helpers
     else -> HqIcons.Archive
 }
 
@@ -852,9 +854,60 @@ internal fun Notifications(ui: SettingsUi, actions: SettingsActions) {
                 }
             }
         }
+        ui.silences?.let { SilenceSection(it, ui.silenceBusy, actions) }
         ServerHqSection(n.server, ui, actions)
     }
     if (asking) DetailsDialog(onKeep = { asking = false }, onShow = { asking = false; actions.onDetails(true) })
+}
+
+private const val PAUSE_HOUR_MINUTES = 60
+private const val PAUSE_NIGHT_MINUTES = 8 * 60
+
+private val SILENCE_TOPICS = listOf(
+    Triple("helpers", R.string.topic_helpers, R.string.topic_helpers_about),
+    Triple("tasks", R.string.topic_tasks, R.string.topic_tasks_about),
+    Triple("tips", R.string.topic_tips, R.string.topic_tips_about),
+    Triple("upkeep", R.string.topic_upkeep, R.string.topic_upkeep_about),
+    Triple("email", R.string.topic_email, R.string.topic_email_about),
+)
+
+/** Which topics may interrupt the owner. Kept on HQ, so it holds for the web as well. Each switch reads "notifications on". */
+@Composable
+private fun SilenceSection(silences: Silences, busy: Boolean, actions: SettingsActions) {
+    val w = example.hq.spike.ui.shell.rememberWords()
+    val paused = SettingsWords.pauseLine(w, silences.pause)
+    Label(stringResource(R.string.silence_title))
+    Text(stringResource(R.string.silence_intro), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 4.dp, end = 20.dp, bottom = 8.dp))
+    Group {
+        Column(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(stringResource(R.string.silence_pause), style = HqType.BodyBold, color = Mts.Ink)
+            if (paused != null) Text(paused, style = HqType.BodySm, color = Mts.InkMuted)
+            Row {
+                if (paused != null) DialogButton(stringResource(R.string.silence_resume)) { if (!busy) actions.onResume() }
+                else {
+                    DialogButton(stringResource(R.string.silence_pause_hour)) { if (!busy) actions.onPause(PAUSE_HOUR_MINUTES) }
+                    DialogButton(stringResource(R.string.silence_pause_night)) { if (!busy) actions.onPause(PAUSE_NIGHT_MINUTES) }
+                }
+            }
+        }
+        for ((topic, name, about) in SILENCE_TOPICS) {
+            val row = silences.topics.firstOrNull { it.topic == topic } ?: continue
+            Divider()
+            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(name), style = HqType.BodyBold, color = Mts.Ink)
+                    Text(SettingsWords.silenceLine(w, row) + " \u00b7 " + stringResource(about), style = HqType.BodySm, color = Mts.InkMuted)
+                }
+                Switch(
+                    checked = !row.silenced, onCheckedChange = { on -> actions.onSilenceTopic(topic, !on) }, enabled = !busy,
+                    colors = SwitchDefaults.colors(
+                        checkedTrackColor = Mts.BrandGreen, checkedThumbColor = Mts.OnGreen, checkedBorderColor = Mts.BrandGreen,
+                        uncheckedTrackColor = Mts.Surface200, uncheckedThumbColor = Mts.Line, uncheckedBorderColor = Mts.Line,
+                    ),
+                )
+            }
+        }
+    }
 }
 
 /** The details switch. With no secure screen lock it is dimmed, drawn off and cannot be turned on. */

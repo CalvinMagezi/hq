@@ -1,0 +1,82 @@
+name: Auto-promote
+
+# Moves the stable channel forward by itself, so an install that follows the default channel is
+# never far behind main. Once a day it takes the newest main release that has been out for the soak
+# time, whose CI and Release runs both passed, and runs promote.yml for it, which verifies the
+# signature and checksums and signs the pointer. Set the repository variable AUTO_PROMOTE to "off"
+# to stop it. Manual runs promote right away when no soak is wanted: pass soak_hours 0.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      soak_hours:
+        description: "Hours a release must have been out. Empty uses the default of 24"
+        required: false
+        default: ""
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: auto-promote
+  cancel-in-progress: false
+
+env:
+  DEFAULT_SOAK_HOURS: "24"
+  MAX_CANDIDATES: "5"
+
+jobs:
+  auto-promote:
+    name: Pick and promote
+    if: github.ref == 'refs/heads/main' && vars.AUTO_PROMOTE != 'off'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write # dispatch promote.yml
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOAK_INPUT: ${{ inputs.soak_hours }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Find the newest release that is soaked and green
+        id: pick
+        run: |
+          soak=${SOAK_INPUT:-$DEFAULT_SOAK_HOURS}
+          [[ "$soak" =~ ^[0-9]+$ ]] || { echo "soak_hours must be a whole number" >&2; exit 1; }
+          rm -rf stable && mkdir stable
+          gh release download channel-stable --dir stable --pattern channel-stable.json
+          stable=$(jq -er .version stable/channel-stable.json)
+          gh release list --limit 100 --json tagName,isPrerelease,publishedAt > releases.json
+          mapfile -t candidates < <(bash scripts/release/pick-promotable.sh --releases releases.json --stable-version "$stable" --now "$(date -u +%s)" --soak-hours "$soak" | head -n "$MAX_CANDIDATES")
+          if [ "${#candidates[@]}" -eq 0 ]; then
+            echo "Stable is $stable; no newer main release has been out $soak hours."
+            exit 0
+          fi
+          for tag in "${candidates[@]}"; do
+            sha=$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha)
+            ok=1
+            for wf in ci.yml release.yml; do
+              # The newest run on that commit decides, so a re-run that passed clears an earlier failure.
+              c=$(gh run list --workflow "$wf" --commit "$sha" --limit 1 --json status,conclusion --jq 'if length == 0 then "none" elif .[0].status != "completed" then "running" else .[0].conclusion end')
+              echo "$tag $wf: $c"
+              [ "$c" = success ] || ok=0
+            done
+            if [ "$ok" = 1 ]; then
+              echo "tag=$tag" >> "$GITHUB_OUTPUT"
+              echo "Promoting $tag (stable was $stable)."
+              exit 0
+            fi
+          done
+          echo "None of the newest candidates (${candidates[*]}) is green yet; stable stays at $stable."
+
+      - name: Run promote
+        if: steps.pick.outputs.tag != ''
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+        run: gh workflow run promote.yml --ref main -f "tag=$TAG"

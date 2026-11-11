@@ -21,11 +21,13 @@ import { startDataCounter } from '~/lib/dataUsage'
 import { fetchHello } from '~/lib/hello'
 import { useHubPhone, useInHub } from '~/lib/hubWindow'
 import { DEFAULT_PUSH_PREFS, getPushState, readPushPrefs } from '~/lib/webPush'
-import { LANDING_PATH, WIDE_MIN_PX, ageWords, trailNotifKey, backupNeedsLook, formatSize, hashRedirect, liteNotice, type BackupStatus } from '~/lib/settingsGroups'
+import { LANDING_PATH, WIDE_MIN_PX, ageWords, trailNotifKey, githubTrail, backupNeedsLook, formatSize, hashRedirect, liteNotice, type BackupStatus, type GithubTrail } from '~/lib/settingsGroups'
 import { HqHttpError } from '~/lib/hqAuth'
 import { ChatAppsSection } from '~/components/settings/ChatAppsSection'
 import { UsagePage } from '~/components/settings/UsageLimits'
 import { DevicesSection } from '~/components/settings/DevicesSection'
+import { GithubConnect } from '~/components/sessions/GithubConnect'
+import { GITHUB_QUERY_KEY, githubApi } from '~/lib/github'
 import { ProviderKeysSection } from '~/components/settings/ProviderKeysSection'
 import {
   SESSION_FOLDERS_QUERY_KEY,
@@ -194,6 +196,10 @@ export function SafetyPage() {
   )
 }
 
+export function GithubPage() {
+  return <GithubConnect />
+}
+
 export function FoldersPage() {
   return <SessionFoldersSection />
 }
@@ -216,6 +222,7 @@ const TITLES: Record<string, StringKey> = {
   '/settings/keys': 'row_ai_keys',
   '/settings/messaging': 'row_messaging',
   '/settings/devices': 'row_other_devices',
+  '/settings/github': 'row_github',
   '/settings/spending': 'row_spending',
   '/settings/safety': 'row_safety',
   '/settings/folders': 'row_folders',
@@ -235,7 +242,7 @@ function useWide(): boolean {
 }
 
 /** Words at the right of each home row, from what this browser already knows. */
-function useTrailing(hub: boolean, phone: boolean, backup: BackupStatus | null): Record<string, string> {
+function useTrailing(hub: boolean, phone: boolean, backup: BackupStatus | null, github: GithubTrail | null): Record<string, string> {
   const prefs = useStoredPrefs()
   const pushOn = usePushOn()
   const zone = useClockZone() || deviceTimeZone()
@@ -254,6 +261,9 @@ function useTrailing(hub: boolean, phone: boolean, backup: BackupStatus | null):
     data: phone ? t('data_used_row_window') : used === null ? '' : t('data_used_row', { size: formatSize(used) }),
     signout: t(hub ? 'trail_sign_out_window' : 'trail_sign_out_browser'),
     backup: backupRowWords(backup),
+    github: github ? t(github.key, { owner: github.owner ?? '' }) : '',
+    work_tasks: t('trail_work_tasks'),
+    work_helpers: t('trail_work_helpers'),
   }
 }
 
@@ -292,8 +302,11 @@ function SettingsLayout() {
     else if (home && wide) void navigate({ to: LANDING_PATH, replace: true })
   }, [hash, home, wide, navigate])
 
-  const trailing = useTrailing(hub, phone, backup)
+  // Lite has no HQ Coder, so it is never asked.
+  const github = githubTrail(useQuery({ queryKey: GITHUB_QUERY_KEY, queryFn: githubApi.status, enabled: !lite, retry: false }).data)
+  const trailing = useTrailing(hub, phone, backup, github)
   const needsLook = [
+    ...(github?.needsLook ? ['github'] : []),
     ...(backupNeedsLook(backup) ? ['backup'] : []),
     ...(notificationsOff && !wide ? ['notifications'] : []),
   ]

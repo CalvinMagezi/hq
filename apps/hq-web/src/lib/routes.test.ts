@@ -77,10 +77,11 @@ describe('Lite (spec 02)', () => {
   test('Notes, Tasks and Inbox are left alone', () => {
     for (const p of ['/notes', '/notes/a/b', '/tasks', '/inbox']) expect(liteRedirect(p)).toBeNull()
   })
-  test('the rail has exactly three places', () => {
-    expect(placesFor('lite').map((p) => p.id)).toEqual(['notes', 'tasks', 'inbox'])
-    expect(placesFor('full').map((p) => p.id)).toEqual(['notes', 'tasks', 'chat', 'helpers', 'inbox'])
-    expect(placesFor(null).length).toBe(3)
+  test('the rail has Notes, Chat and Inbox, and Lite has no Chat', () => {
+    expect(placesFor('lite').map((p) => p.id)).toEqual(['notes', 'inbox'])
+    expect(placesFor('full').map((p) => p.id)).toEqual(['notes', 'chat', 'inbox'])
+    expect(placesFor('mobile').map((p) => p.id)).toEqual(['notes', 'chat', 'inbox'])
+    expect(placesFor(null).map((p) => p.id)).toEqual(['notes', 'inbox'])
   })
   test('toEdition only trusts known names', () => {
     expect(toEdition('lite')).toBe('lite')

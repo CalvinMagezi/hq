@@ -44,6 +44,8 @@ import example.hq.spike.ui.settings.SettingsViewModel
 import example.hq.spike.ui.settings.settingsFixture
 import example.hq.spike.ui.inbox.InboxCard
 import example.hq.spike.ui.inbox.AllowedPage
+import example.hq.spike.ui.inbox.ChatNeeds
+import example.hq.spike.ui.inbox.needsOfChat
 import example.hq.spike.ui.inbox.InboxDetails
 import example.hq.spike.ui.inbox.InboxScreen
 import example.hq.spike.ui.inbox.SignOutAsk
@@ -166,7 +168,8 @@ class ShellActivity : ComponentActivity() {
     private fun rereadNotifications() {
         notifFacts = NotifAccess.read(this)
         inbox.actions.onServerOpen = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Notifications) }
-        settings.actions.onCodeFromPhone = { requested = Place.Helpers; helpers.actions.onGithubOpen() }
+        settings.actions.onCodeFromPhone = { helpers.actions.onGithubOpen() }
+        settings.actions.onWork = { key -> requested = if (key == example.hq.spike.ui.settings.WORK_TASKS_ROW) Place.Tasks else Place.Helpers }
         inbox.refreshBanner()
     }
 
@@ -232,7 +235,8 @@ class ShellActivity : ComponentActivity() {
             return
         }
         closePages()
-        requested = link.place
+        // Coming back from GitHub opens its sheet over the place the owner left, since Helpers is no longer where it lives.
+        if (!link.github) requested = link.place
         applyLink(link)
     }
 
@@ -332,7 +336,7 @@ class ShellActivity : ComponentActivity() {
         if (intent.getBooleanExtra(AlertPoster.EXTRA_NOTICE_TAP, false)) example.hq.spike.measure.Counters.get(this).bump(example.hq.spike.measure.Counter.NoticeTapped)
     }
 
-    private fun placeOf(intent: Intent): Place? = linkOf(intent)?.place
+    private fun placeOf(intent: Intent): Place? = linkOf(intent)?.takeUnless { it.github }?.place
 
     /** The design-check extras (place, badge, fixture, balance) work only in a debuggable build: the shell is the launcher, so any app can start it with extras. */
     private fun debuggable(): Boolean = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -410,6 +414,20 @@ class ShellActivity : ComponentActivity() {
                 if (stopped != null && StartRules.autoOpenOk(StartRules.lastAutoOpen(this@ShellActivity), now)) { StartRules.markAutoOpen(this@ShellActivity, now); connectionOpen = true }
             }
             LaunchedEffect(chatState.failed, connectionOpen) { if (chatState.failed || connectionOpen) services.refreshAi() }
+            // A reply in progress may stop to ask for the owner's OK: the inbox is read every few seconds while one runs,
+            // and once more when it ends, so the request shows in the chat and in the Inbox without waiting for the poll.
+            val replying = chatState.live != null
+            LaunchedEffect(replying) {
+                if (fixture != null) return@LaunchedEffect
+                if (!replying) {
+                    inbox.refreshNow()
+                    return@LaunchedEffect
+                }
+                while (true) {
+                    delay(CHAT_NEEDS_POLL_MS)
+                    inbox.refreshNow()
+                }
+            }
             val savedAt = remember(status) { StartRules.lastAnswer(this@ShellActivity).takeIf { it > 0 } }
             val uiScope = androidx.compose.runtime.rememberCoroutineScope()
             val atTop: (Place) -> Unit = { place ->
@@ -440,7 +458,7 @@ class ShellActivity : ComponentActivity() {
                             onNotNow = settings.actions.onUpdateNotNow,
                         )
                     },
-                    startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
+                    startAt = start, inboxBadge = if (badge > 0) badge else inboxState.badge, status = shown,
                     onSearch = { openSearch(example.hq.spike.ui.search.SearchStart()) }, onOpenSearch = ::openSearch, onSettings = settings.actions.onOpen, updateDot = settingsState.updateDot,
                     subline = { place -> if (place == Place.Tasks && tasksState.tab == TaskTab.All) TaskFilterWords.bar(tasksState.scoped.count { TasksLogic.open(it) }) else null },
                     topActions = { place ->
@@ -453,7 +471,7 @@ class ShellActivity : ComponentActivity() {
                     overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); SettingsHost(settingsState, settings.actions); SearchHost(searchState, shown); if (tasksState.away.open) AwayHost(tasksState); web?.let { page -> WebHostScreen(page, onClose = { web = null }, onStartHq = ::tryStartAgain, onNotes = { web = null; requested = Place.Notes }) } },
                 ) { place ->
                     when (place) {
-                        Place.Chat -> ChatScreen(chatState, chat.actions, status = shown, onStartHq = ::tryStartAgain, onAiKeys = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Keys) })
+                        Place.Chat -> ChatScreen(chatState, chat.actions, status = shown, onStartHq = ::tryStartAgain, onAiKeys = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Keys) }, needs = { ChatNeeds(needsOfChat(inboxState.shownNeeds, chatState.threadId), inboxState, inbox.actions) })
                         Place.Notes -> NotesPlace(notesState)
                         Place.Inbox -> InboxPlace(inboxState)
                         Place.Tasks -> TasksPlace(tasksState)
@@ -610,6 +628,8 @@ class ShellActivity : ComponentActivity() {
     companion object {
         /** The running notice sets this to "connection" so a tap on a stopped HQ opens the sheet. */
         const val EXTRA_SHEET = "sheet"
+        /** How often the inbox is read while a reply runs, so a request it stops for shows in the chat. */
+        const val CHAT_NEEDS_POLL_MS = 4_000L
         const val STATE_WEB = "web"
         const val MODE_FILE_MAX = 64L
         const val TAIL_BYTES = 16_384L

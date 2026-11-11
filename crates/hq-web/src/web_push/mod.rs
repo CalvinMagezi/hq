@@ -173,6 +173,12 @@ impl WebPush {
             if !hq_db::value_items::claim_push(db, &item.id)? || !self.wants(&item) {
                 continue;
             }
+            // A silenced topic waits in the inbox without a push. Read per item: the owner
+            // may silence one between two items of the same pass.
+            if hq_db::inbox_prefs::Silenced::load(db)?.covers(&item.source_task) {
+                tracing::debug!(id = %item.id, "web push: its topic is silenced, not pushed");
+                continue;
+            }
             let subs = hq_db::push_subscriptions::list(db)?;
             let delivered = self.push_item(db, &item, &subs).await;
             tracing::debug!(id = %item.id, delivered, "web push: pushed an inbox item");
@@ -222,9 +228,12 @@ impl WebPush {
             waiting.extend(hq_db::value_items::list_by_state(db, state)?);
         }
         let now = Utc::now();
+        let quiet = hq_db::inbox_prefs::Silenced::load(db)?;
         waiting.retain(|i| {
             let live = i.expires_at.is_none_or(|at| at > now);
-            live && self.wants(i) && gained.contains(&PushKind::of(i))
+            live && self.wants(i)
+                && !quiet.covers(&i.source_task)
+                && gained.contains(&PushKind::of(i))
         });
         waiting.sort_by_key(|i| i.created_at);
         let skip = waiting.len().saturating_sub(REPLAY_MAX);
@@ -550,6 +559,34 @@ mod tests {
         hq_db::value_items::emit(&db, &item).unwrap();
         assert_eq!(push(dir.path(), true).dispatch_once(&db).await.unwrap(), 0);
         assert!(received.requests.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_silenced_topic_is_not_pushed_and_hq_s_own_request_still_is() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = hq_db::Database::open_memory().unwrap();
+        let (base, received) = mock_push_service().await;
+        subscribe(&db, &format!("{base}/ok/a"));
+        assert!(hq_db::inbox_prefs::silence(&db, hq_db::inbox_prefs::ALL, None).unwrap());
+        let helper = ValueItem::new(
+            "session-supervisor",
+            ValueKind::ActionNeeded,
+            "Harness session 'x' is waiting for you",
+            "b",
+        );
+        let ask = ValueItem::new(
+            "owner-approval",
+            ValueKind::ActionNeeded,
+            "HQ wants to run web_fetch",
+            "b",
+        );
+        hq_db::value_items::emit(&db, &helper).unwrap();
+        hq_db::value_items::emit(&db, &ask).unwrap();
+        assert_eq!(push(dir.path(), false).dispatch_once(&db).await.unwrap(), 1);
+        assert_eq!(received.requests.lock().unwrap().len(), 1);
+        // Turning the topic back on does not push what arrived while it was silent.
+        hq_db::inbox_prefs::unsilence(&db, hq_db::inbox_prefs::ALL).unwrap();
+        assert_eq!(push(dir.path(), false).dispatch_once(&db).await.unwrap(), 0);
     }
 
     #[tokio::test]

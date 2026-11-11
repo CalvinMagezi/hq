@@ -56,12 +56,53 @@ export interface NotificationItem {
   created_at: string
   metadata: NotificationMetadata
   actions: string[]
+  /** The owner opened it, or marked everything read since it arrived. Absent from an older HQ. */
+  read?: boolean
+  /** What it is about; the owner silences a topic, never one item. */
+  topic?: string
+  /** Its topic is silenced: listed, but no notification and no count on the badge. */
+  silenced?: boolean
+}
+
+export const SILENCE_TOPICS = ['helpers', 'tasks', 'tips', 'upkeep', 'email'] as const
+export type SilenceTopic = (typeof SILENCE_TOPICS)[number]
+
+/** The topic an item can be silenced by; null for what HQ asks itself, which always gets through. */
+export function silenceTopicOf(item: Pick<NotificationItem, 'topic'>): SilenceTopic | null {
+  return (SILENCE_TOPICS as readonly string[]).includes(item.topic ?? '') ? (item.topic as SilenceTopic) : null
+}
+
+export interface SilenceRow {
+  topic: string
+  silenced: boolean
+  /** When it ends by itself; null until it is turned back on. */
+  until: string | null
+}
+
+export interface Silences {
+  pause: SilenceRow
+  topics: SilenceRow[]
+}
+
+export function fetchSilences(): Promise<Silences> {
+  return hqJson('/api/notifications/silences')
+}
+
+/** Silences a topic, or everything with `all`; without minutes it lasts until turned back on. */
+export function silenceTopic(topic: SilenceTopic | 'all', minutes?: number): Promise<Silences> {
+  return hqJson('/api/notifications/silences', 'POST', minutes ? { topic, minutes } : { topic })
+}
+
+export function unsilenceTopic(topic: SilenceTopic | 'all'): Promise<Silences> {
+  return hqJson(`/api/notifications/silences/${encodeURIComponent(topic)}`, 'DELETE')
 }
 
 interface NotificationsResponse {
   notifications: NotificationItem[]
   unread_count: number
   pending_approvals_count: number
+  /** Updates that arrived since the owner last read them. Absent from an older HQ. */
+  unread_updates_count?: number
 }
 
 interface ListNotificationsFilter {
@@ -95,8 +136,24 @@ export function forgetTrustedSite(site: string): Promise<unknown> {
   return hqJson(`/api/fetch-sites/${encodeURIComponent(site)}`, 'DELETE')
 }
 
+/** Marks everything waiting as read. Nothing is answered and nothing leaves its list. */
 export function markAllNotificationsRead(): Promise<{ ok: boolean }> {
-  return hqJson('/api/notifications/mark-all-read', 'POST')
+  return hqJson('/api/notifications/read-all', 'POST')
+}
+
+/** The owner opened one item. */
+export function markNotificationRead(id: string): Promise<{ ok: boolean }> {
+  return hqJson(`/api/notifications/${encodeURIComponent(id)}/read`, 'POST')
+}
+
+/** Puts every update away, into Done, and names them for Undo. A request is never touched. */
+export function clearAllUpdates(): Promise<{ ok: boolean; ids?: string[] }> {
+  return hqJson('/api/notifications/archive-all', 'POST')
+}
+
+/** Empties the Done list. */
+export function clearDoneList(): Promise<{ ok: boolean }> {
+  return hqJson('/api/notifications/clear-done', 'POST')
 }
 
 /** Puts one cleared update back (Undo of a single dismiss). HQ answers 409 when it changed since. */

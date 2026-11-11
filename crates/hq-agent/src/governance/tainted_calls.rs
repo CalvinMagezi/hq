@@ -37,6 +37,9 @@ pub(super) fn tainted_reason(tool: &str, args: &Value, taint: &TaintTracker) -> 
         hq_tools::github::coder::CODER_TOOL if coder_write(args) => {
             Some("would start or steer a coding job".into())
         }
+        hq_tools::calendar::TOOL_NAME => {
+            Some("would add an event to the owner's phone calendar".into())
+        }
         "web_fetch" => fetch_reason(args.get("url").and_then(Value::as_str)?, taint),
         "web_search" => {
             let query = args.get("query").and_then(Value::as_str)?;
@@ -166,6 +169,19 @@ mod tests {
         let long = format!("https://docs.example.com/x?d={}", "a".repeat(250));
         assert!(reason(&long).unwrap().contains("bytes of path and query"));
         assert!(reason("not a url").is_some());
+    }
+
+    #[test]
+    fn a_tainted_session_needs_the_owner_for_a_calendar_event_a_clean_one_does_not() {
+        let args = json!({"title": "x", "start_local": "2030-01-01T10:00"});
+        let tool = hq_tools::calendar::TOOL_NAME;
+        assert_eq!(tainted_reason(tool, &args, &TaintTracker::new()), None);
+        assert!(tainted_reason(tool, &args, &tainted()).is_some());
+        // Where nobody can be asked, it does not run at all.
+        let unattended = tainted();
+        unattended.set_unattended();
+        assert!(unasked_denial(tool, &args, &unattended, false).is_some());
+        assert_eq!(unasked_denial(tool, &args, &tainted(), false), None);
     }
 
     #[test]
