@@ -32,8 +32,13 @@ class DeviceActionHandlerTest {
 
     private val ledger = object : CalendarLedger { override fun get(requestId: String): Long? = null; override fun put(requestId: String, eventId: Long) {} }
     private val none = object : PreferredCalendar { override fun get(): Long? = null }
+    private class FakeReader(var allowed: Boolean = true, val rows: List<CalendarInstance> = emptyList()) : CalendarReader {
+        override fun hasPermission() = allowed
+        override fun instances(fromMs: Long, toMs: Long) = rows.filter { it.beginMs < toMs && it.endMs > fromMs }
+    }
+    private var reader = FakeReader()
     private val logs = mutableListOf<String>()
-    private fun handler(link: Link, now: Instant = Instant.parse("2026-11-10T00:00:00Z")) = DeviceActionHandler(link, CalendarCreator(Denied(), ledger, none), { now }, { logs += it })
+    private fun handler(link: Link, now: Instant = Instant.parse("2026-11-10T00:00:00Z")) = DeviceActionHandler(link, CalendarCreator(Denied(), ledger, none), CalendarLister(reader), { now }, { logs += it })
 
     private fun action(id: String = "a1", expires: String? = "2026-11-10T01:00:00Z", name: String = "calendar.create") = ChatEvent.DeviceAction(
         id, "t1", name, 1,
@@ -83,5 +88,37 @@ class DeviceActionHandlerTest {
     @Test fun logsCarryNoTitle() = runBlocking {
         handler(Link()).handle(action())
         assertTrue(logs.isNotEmpty() && logs.none { it.contains("Secret title") })
+    }
+
+    private fun listAction(id: String = "l1") = ChatEvent.DeviceAction(
+        id, "t1", "calendar.list", 1,
+        JSONObject().put("request_id", "3f2b8a52-6f0e-4d3e-9a55-0d0c3c1f7a12").put("from_ms", 0L).put("to_ms", 1000L).put("zone", "Europe/London").put("limit", 50),
+        "2026-11-10T01:00:00Z",
+    )
+
+    @Test fun aListActionIsAckedAndAnswered() = runBlocking {
+        reader = FakeReader(rows = listOf(CalendarInstance(7, "Secret title", 100, 200, false, "Home", true)))
+        val link = Link()
+        handler(link).handle(listAction())
+        assertEquals(listOf("l1"), link.acks)
+        val body = link.results.single().second
+        assertEquals("listed", body.getString("outcome"))
+        assertEquals(1, body.getInt("v"))
+        assertEquals(7L, body.getJSONArray("events").getJSONObject(0).getLong("id"))
+        assertTrue(logs.none { it.contains("Secret title") })
+    }
+
+    @Test fun aListWithoutPermissionIsPermissionDenied() = runBlocking {
+        reader = FakeReader(allowed = false)
+        val link = Link()
+        handler(link).handle(listAction())
+        assertEquals("permission_denied", link.results.single().second.getString("outcome"))
+    }
+
+    @Test fun aBadListPayloadIsInvalidEvent() = runBlocking {
+        val link = Link()
+        val bad = listAction().let { it.copy(payload = JSONObject(it.payload.toString()).put("location", "x")) }
+        handler(link).handle(bad)
+        assertEquals("invalid_event", link.results.single().second.getString("outcome"))
     }
 }

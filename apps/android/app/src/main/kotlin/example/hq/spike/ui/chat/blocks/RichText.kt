@@ -1,5 +1,10 @@
 package example.hq.spike.ui.chat.blocks
 
+import android.content.ActivityNotFoundException
+import android.content.ContentUris
+import android.content.Context
+import android.content.Intent
+import android.provider.CalendarContract
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
@@ -15,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -37,7 +43,7 @@ private val LinkStyle = TextLinkStyles(SpanStyle(color = Mts.BrandBlue, fontWeig
  * recognises (a backticked vault path, a link to a `.md` file). A note reference is a blue, bold, underlined
  * link that calls [onOpenNote]; any other link opens in the browser.
  */
-fun inlineText(text: String, onOpenNote: (String) -> Unit, onOpenUrl: (String) -> Unit): AnnotatedString = buildAnnotatedString {
+fun inlineText(text: String, onOpenNote: (String) -> Unit, onOpenUrl: (String) -> Unit, onOpenCalendar: (CalendarLink) -> Unit = {}): AnnotatedString = buildAnnotatedString {
     var at = 0
     for (m in INLINE.findAll(text)) {
         append(text.substring(at, m.range.first))
@@ -51,7 +57,7 @@ fun inlineText(text: String, onOpenNote: (String) -> Unit, onOpenUrl: (String) -
             bold != null -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(bold) }
             code != null -> codeSpan(code, onOpenNote)
             wiki != null -> NoteRefs.wikilink(wiki).let { (target, shown) -> noteLink(NoteRefs.sanitize(target), shown, onOpenNote) }
-            else -> externalOrNote(label!!, href!!, onOpenNote, onOpenUrl)
+            else -> externalOrNote(label!!, href!!, onOpenNote, onOpenUrl, onOpenCalendar)
         }
     }
     append(text.substring(at))
@@ -68,10 +74,12 @@ private fun AnnotatedString.Builder.noteLink(path: String?, label: String, onOpe
     withLink(LinkAnnotation.Clickable("note:$path", LinkStyle) { onOpenNote(path) }) { append(label) }
 }
 
-private fun AnnotatedString.Builder.externalOrNote(label: String, href: String, onOpenNote: (String) -> Unit, onOpenUrl: (String) -> Unit) {
+private fun AnnotatedString.Builder.externalOrNote(label: String, href: String, onOpenNote: (String) -> Unit, onOpenUrl: (String) -> Unit, onOpenCalendar: (CalendarLink) -> Unit) {
     val note = NoteRefs.fromLink(href)
+    val event = CalendarLinks.parse(href)
     when {
         note != null -> noteLink(note, label, onOpenNote)
+        event != null -> withLink(LinkAnnotation.Clickable("calendar:${event.eventId}", LinkStyle) { onOpenCalendar(event) }) { append(label) }
         href.startsWith("http://") || href.startsWith("https://") -> withLink(LinkAnnotation.Clickable("url:$href", LinkStyle) { onOpenUrl(href) }) {
             append(label)
             appendInlineContent(EXTERNAL_ICON, "\u2197")
@@ -91,6 +99,16 @@ private val ExternalIcon = mapOf(
 @Composable
 fun RichText(text: String, style: TextStyle, color: Color, onOpenNote: (String) -> Unit, modifier: Modifier = Modifier) {
     val uri = LocalUriHandler.current
-    val annotated = remember(text, onOpenNote) { inlineText(text, onOpenNote) { uri.openUri(it) } }
+    val context = LocalContext.current
+    val annotated = remember(text, onOpenNote) { inlineText(text, onOpenNote, { uri.openUri(it) }, { openCalendarEvent(context, it) }) }
     Text(annotated, style = style, color = color, modifier = modifier, inlineContent = ExternalIcon)
+}
+
+/** Opens the event in the phone's calendar app. If none can show it, nothing happens. */
+private fun openCalendarEvent(context: Context, link: CalendarLink) {
+    val intent = Intent(Intent.ACTION_VIEW, ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, link.eventId))
+        .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, link.beginMs)
+        .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, link.endMs)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try { context.startActivity(intent) } catch (e: ActivityNotFoundException) { }
 }

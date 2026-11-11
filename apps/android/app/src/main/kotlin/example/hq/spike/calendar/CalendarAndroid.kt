@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.provider.CalendarContract
 import android.provider.CalendarContract.Calendars
 import android.provider.CalendarContract.Events
+import android.provider.CalendarContract.Instances
 
 /** The real Calendar Provider. Insert and read go through the content resolver on whatever thread calls; callers use a background one. */
 class AndroidCalendarStore(context: Context) : CalendarStore {
@@ -86,6 +87,39 @@ class AndroidCalendarStore(context: Context) : CalendarStore {
         fun hasPermission(c: Context): Boolean =
             c.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED &&
                 c.checkSelfPermission(Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED
+    }
+}
+
+/** Instances for the list action. Only the five columns the contract allows are queried; nothing else about an event is read. */
+class AndroidCalendarReader(context: Context) : CalendarReader {
+    private val app = context.applicationContext
+
+    override fun hasPermission(): Boolean = app.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+
+    override fun instances(fromMs: Long, toMs: Long): List<CalendarInstance> {
+        val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().also {
+            ContentUris.appendId(it, fromMs)
+            ContentUris.appendId(it, toMs)
+        }.build()
+        val out = mutableListOf<CalendarInstance>()
+        try {
+            app.contentResolver.query(
+                uri,
+                arrayOf(Instances.EVENT_ID, Instances.TITLE, Instances.BEGIN, Instances.END, Instances.ALL_DAY, Instances.CALENDAR_DISPLAY_NAME, Instances.VISIBLE),
+                "${Instances.VISIBLE} = 1 AND ${Events.DELETED} = 0",
+                null,
+                "${Instances.BEGIN} ASC, ${Instances.EVENT_ID} ASC",
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    out += CalendarInstance(c.getLong(0), c.getString(1).orEmpty(), c.getLong(2), c.getLong(3), c.getInt(4) == 1, c.getString(5).orEmpty(), c.getInt(6) == 1)
+                }
+            }
+        } catch (e: SecurityException) {
+            throw CalendarStoreException("read not allowed", e)
+        } catch (e: IllegalArgumentException) {
+            throw CalendarStoreException("read rejected", e)
+        }
+        return out
     }
 }
 

@@ -29,12 +29,13 @@ class HqDeviceActionLink(private val client: HqClient) : DeviceActionLink {
 }
 
 /**
- * Runs `calendar.create` device actions. It lives on the process scope next to the chat socket, so an action is handled
+ * Runs `calendar.create` and `calendar.list` device actions. It lives on the process scope next to the chat socket, so an action is handled
  * whenever the socket is up, with or without a screen open. Only ids, phases and outcome codes are logged.
  */
 class DeviceActionHandler(
     private val link: DeviceActionLink,
     private val creator: CalendarCreator,
+    private val lister: CalendarLister,
     private val now: () -> Instant = Instant::now,
     private val log: (String) -> Unit = { Log.i(TAG, it) },
 ) {
@@ -62,7 +63,7 @@ class DeviceActionHandler(
     }
 
     suspend fun handle(action: ChatEvent.DeviceAction) {
-        if (action.name != CalendarLimits.ACTION_NAME || action.version != CalendarLimits.WIRE_VERSION) return
+        if (action.name !in HANDLED || action.version != CalendarLimits.WIRE_VERSION) return
         unposted[action.actionId]?.let { post(action.actionId, it); return }
         if (!seen.add(action.actionId)) return
         if (expired(action)) { log("device_action ${action.actionId} phase=expired"); return }
@@ -72,9 +73,17 @@ class DeviceActionHandler(
         post(action.actionId, outcome.toJson())
     }
 
-    private fun run(action: ChatEvent.DeviceAction): CalendarOutcome = when (val parsed = CalendarRequests.parse(action.payload)) {
+    private fun run(action: ChatEvent.DeviceAction): CalendarOutcome =
+        if (action.name == CalendarLimits.LIST_ACTION_NAME) runList(action) else runCreate(action)
+
+    private fun runCreate(action: ChatEvent.DeviceAction): CalendarOutcome = when (val parsed = CalendarRequests.parse(action.payload)) {
         is ParsedRequest.Bad -> parsed.outcome
         is ParsedRequest.Ok -> creator.create(parsed.request)
+    }
+
+    private fun runList(action: ChatEvent.DeviceAction): CalendarOutcome = when (val parsed = CalendarListRequests.parse(action.payload)) {
+        is ParsedListRequest.Bad -> parsed.outcome
+        is ParsedListRequest.Ok -> lister.list(parsed.request)
     }
 
     private fun expired(action: ChatEvent.DeviceAction): Boolean {
@@ -104,5 +113,6 @@ class DeviceActionHandler(
 
     private companion object {
         const val TAG = "DeviceAction"
+        val HANDLED = setOf(CalendarLimits.ACTION_NAME, CalendarLimits.LIST_ACTION_NAME)
     }
 }

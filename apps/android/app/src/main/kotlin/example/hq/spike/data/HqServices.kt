@@ -33,6 +33,7 @@ class HqServices private constructor(private val app: Context) {
     private val deviceActions = example.hq.spike.calendar.DeviceActionHandler(
         example.hq.spike.calendar.HqDeviceActionLink(client),
         example.hq.spike.calendar.CalendarCreator(calendarStore, calendarPrefs, calendarPrefs),
+        example.hq.spike.calendar.CalendarLister(example.hq.spike.calendar.AndroidCalendarReader(app)),
     )
 
     private val _status = MutableStateFlow<Connection>(Connection.Starting(0, 0, null))
