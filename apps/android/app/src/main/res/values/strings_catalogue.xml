@@ -2123,6 +2123,7 @@
     <string name="note_drawer_label">Note: %1$s</string>
     <string name="note_drawer_copy_path">Copy path</string>
     <string name="note_drawer_copied">Path copied</string>
+    <string name="note_drawer_copy_failed">Couldn\'t copy the path. Select it and copy by hand.</string>
     <string name="note_drawer_close">Close</string>
     <string name="note_drawer_loading">Getting the note</string>
     <string name="note_drawer_failed">Couldn\'t load the note. HQ didn\'t answer in time. Try again.</string>

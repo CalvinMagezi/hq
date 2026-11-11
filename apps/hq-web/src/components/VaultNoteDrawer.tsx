@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { AlertCircle, Check, ChevronRight, Copy, FileText, Folder } from 'lucide-react'
 import { useVaultNoteStore } from '~/store/vaultNoteStore'
@@ -7,6 +7,7 @@ import { useBackClosesLayer } from '~/lib/backLayer'
 import { fetchNoteForDrawer, type NoteDetailResponse } from '~/lib/vaultApi'
 import { folderTrail } from '~/lib/search'
 import { useEdition } from '~/lib/edition'
+import { toastAlert } from '~/lib/toast'
 import { MarkdownViewer } from './MarkdownViewer'
 import { Sheet } from './ui/Sheet'
 import { t } from '~/strings'
@@ -22,6 +23,8 @@ export function VaultNoteDrawer() {
   const [data, setData] = useState<NoteDetailResponse | null>(null)
   const [copied, setCopied] = useState(false)
   const lite = useEdition() === 'lite'
+  const copiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(copiedTimer.current), [])
 
   const load = useCallback((path: string) => {
     let active = true
@@ -51,9 +54,14 @@ export function VaultNoteDrawer() {
   const isNote = !!data && !data.notFound && !data.isDir
 
   const copyPath = () => {
-    void navigator.clipboard.writeText(notePath)
-    setCopied(true)
-    setTimeout(() => setCopied(false), COPIED_FLASH_MS)
+    navigator.clipboard
+      .writeText(notePath)
+      .then(() => {
+        setCopied(true)
+        clearTimeout(copiedTimer.current)
+        copiedTimer.current = setTimeout(() => setCopied(false), COPIED_FLASH_MS)
+      })
+      .catch(() => toastAlert(t('note_drawer_copy_failed')))
   }
   // The note goes into the chat's draft as a note reference, as Search's "Ask HQ about this note" does.
   const askAbout = () => {

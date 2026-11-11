@@ -125,9 +125,13 @@ export function ChatView({ active, threadId }: Props) {
     setEditing(null)
   }, [activeThreadId])
 
-  // The watched helpers are asked for only while their details can be seen.
+  // The watched helpers are asked for only while their details can be seen; resizing across the docked width changes that.
   useEffect(() => {
-    setSessionsOpen(sideOpen || (typeof window !== 'undefined' && window.matchMedia(DOCKED_QUERY).matches))
+    const docked = window.matchMedia(DOCKED_QUERY)
+    const update = () => setSessionsOpen(sideOpen || docked.matches)
+    update()
+    docked.addEventListener('change', update)
+    return () => docked.removeEventListener('change', update)
   }, [sideOpen])
 
   // A note action hands over text; append it so a half-written message survives.
