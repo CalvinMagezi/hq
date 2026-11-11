@@ -21,6 +21,7 @@ object CalendarLimits {
     const val MS_PER_MINUTE = 60_000L
     const val WIRE_VERSION = 1
     const val ACTION_NAME = "calendar.create"
+    const val LIST_ACTION_NAME = "calendar.list"
 }
 
 /** A moment the provider stores: epoch millis in UTC plus the zone the row is saved with. */
@@ -122,7 +123,7 @@ object CalendarRequests {
     private fun Ok(r: CalendarRequest) = ParsedRequest.Ok(r)
     private fun Bad(o: CalendarOutcome.InvalidEvent) = ParsedRequest.Bad(o)
 
-    private fun isUuid(s: String) = try { UUID.fromString(s).toString() == s.lowercase() } catch (e: IllegalArgumentException) { false }
+    internal fun isUuid(s: String) = try { UUID.fromString(s).toString() == s.lowercase() } catch (e: IllegalArgumentException) { false }
 
     private fun JSONObject.optNullable(key: String): String? = if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
 

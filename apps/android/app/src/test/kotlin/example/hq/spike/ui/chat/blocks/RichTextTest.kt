@@ -32,4 +32,12 @@ class RichTextTest {
         assertEquals("run make test or make, then a b", text)
         assertEquals(emptyList<String>(), tags)
     }
+
+    @Test fun anEventLinkIsLiveOnlyInItsExactShape() {
+        val (_, good) = links("see [Dentist](hq://calendar/event/7?begin=1&end=2)")
+        assertEquals(listOf("calendar:7"), good)
+        val (text, bad) = links("see [Dentist](hq://calendar/event/7?begin=1&end=2&x=3) and [x](content://com.android.calendar/events/7)")
+        assertEquals("see Dentist and x", text)
+        assertEquals(emptyList<String>(), bad)
+    }
 }
