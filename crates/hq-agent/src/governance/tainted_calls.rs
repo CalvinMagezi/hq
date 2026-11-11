@@ -185,6 +185,19 @@ mod tests {
     }
 
     #[test]
+    fn reading_the_calendar_taints_so_a_later_create_asks_the_owner() {
+        use crate::governance::taint::is_untrusted_source;
+        let read = hq_tools::calendar::LIST_TOOL_NAME;
+        assert!(is_untrusted_source(read, "device"));
+        let taint = TaintTracker::new();
+        let create = json!({"title": "x", "start_local": "2030-01-01T10:00"});
+        let create_tool = hq_tools::calendar::TOOL_NAME;
+        assert_eq!(tainted_reason(create_tool, &create, &taint), None);
+        taint.mark(read);
+        assert!(tainted_reason(create_tool, &create, &taint).is_some());
+    }
+
+    #[test]
     fn a_tainted_session_needs_the_owner_to_start_a_job_but_not_to_read_one() {
         let taint = tainted();
         let start = json!({"action": "start", "repo": "o/r", "job": "x"});

@@ -21,6 +21,16 @@ pub const PHONE_OUTCOMES: &[&str] = &[
     CREATION_UNVERIFIED,
 ];
 
+pub const LISTED: &str = "listed";
+
+/// What the phone may report for `calendar.list`.
+pub const LIST_PHONE_OUTCOMES: &[&str] = &[
+    LISTED,
+    PERMISSION_DENIED,
+    CALENDAR_UNAVAILABLE,
+    INVALID_EVENT,
+];
+
 /// Where a created event lives. Says nothing about cloud sync, which HQ cannot know.
 pub const SAVED_TO: &str = "device_calendar";
 

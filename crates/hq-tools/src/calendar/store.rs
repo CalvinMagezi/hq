@@ -20,6 +20,7 @@ pub const LATE_RESULT_GRACE_SECS: i64 = 300;
 /// How long a finished action is remembered, so the same request id gets the same answer.
 pub const SETTLED_KEEP_SECS: i64 = 600;
 pub const ACTION_NAME: &str = "calendar.create";
+pub const LIST_ACTION_NAME: &str = "calendar.list";
 pub const WIRE_VERSION: u32 = 1;
 
 pub trait Clock: Send + Sync {
@@ -76,6 +77,7 @@ pub enum OpenError {
 }
 
 struct Record {
+    name: &'static str,
     thread_id: String,
     request_id: String,
     phase: Phase,
@@ -152,9 +154,29 @@ impl DeviceActionStore {
         }
     }
 
-    /// Starts an action for `thread_id`. The frame is what goes to the phone.
+    /// Starts a `calendar.create` action for `thread_id`.
     pub fn open(
         &self,
+        thread_id: &str,
+        tool_call_id: &str,
+        request_id: &str,
+        payload: Value,
+        timeouts: Timeouts,
+    ) -> Result<Opened, OpenError> {
+        self.open_named(
+            ACTION_NAME,
+            thread_id,
+            tool_call_id,
+            request_id,
+            payload,
+            timeouts,
+        )
+    }
+
+    /// Starts an action called `name` for `thread_id`. The frame is what goes to the phone.
+    pub fn open_named(
+        &self,
+        name: &'static str,
         thread_id: &str,
         tool_call_id: &str,
         request_id: &str,
@@ -186,7 +208,7 @@ impl DeviceActionStore {
             "action_id": action_id,
             "thread_id": thread_id,
             "tool_call_id": tool_call_id,
-            "name": ACTION_NAME,
+            "name": name,
             "v": WIRE_VERSION,
             "payload": payload,
             "ack_by": ack_by.to_rfc3339(),
@@ -197,6 +219,7 @@ impl DeviceActionStore {
         inner.actions.insert(
             action_id.clone(),
             Record {
+                name,
                 thread_id: thread_id.to_string(),
                 request_id: request_id.to_string(),
                 phase: Phase::Open,
@@ -214,6 +237,11 @@ impl DeviceActionStore {
             frame,
             phase,
         })
+    }
+
+    /// What kind of action `action_id` is, so a result is judged against the right contract.
+    pub fn action_name(&self, action_id: &str) -> Option<&'static str> {
+        self.lock().actions.get(action_id).map(|r| r.name)
     }
 
     /// The phone has the action and will act on it.
@@ -313,7 +341,7 @@ impl DeviceActionStore {
                 json!({
                     "action_id": id,
                     "thread_id": r.thread_id,
-                    "name": ACTION_NAME,
+                    "name": r.name,
                     "v": WIRE_VERSION,
                     "payload": r.payload,
                     "acked": r.phase == Phase::Acked,

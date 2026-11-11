@@ -1,4 +1,4 @@
-# Creating calendar events from the phone
+# Creating and reading calendar events from the phone
 
 Ask HQ in the phone app to put something on your calendar and it is saved straight to the
 phone's calendar, with no review screen. A clear request creates the event. A request with a
@@ -58,3 +58,33 @@ The phone stores them as UTC midnight to the next UTC midnight, as the provider 
   Test on a device after a change here.
 - An all-day event on a past date is created without a question.
 - A timed event with an explicit end has no maximum length.
+
+## Reading events
+
+Ask what is on your calendar and HQ reads it from the phone with `calendar_list_events`. It is
+offered only in a turn that carried `device`, and only while the built-in skill `calendar-reading`
+is active. It uses the same `device_action` channel and routes as creation, with the action
+`calendar.list` (wire version 1).
+
+- Arguments are optional: `start_local` and `end_local` (phone-local, `YYYY-MM-DDTHH:MM` or
+  `YYYY-MM-DD`, end exclusive). The default window is today in the phone's zone. There is no
+  maximum span. HQ turns the window into epoch milliseconds with the phone's zone (DST aware), so
+  the app does no calendar arithmetic. Payload: `request_id`, `from_ms`, `to_ms`, `zone`, `limit`.
+- The app returns `listed` with `events` (`id`, `begin_ms`, `end_ms`, `all_day`, `title`,
+  `calendar_label`), `truncated` and `next_from_ms`; or `permission_denied`,
+  `calendar_unavailable`, `invalid_event`. It reads every visible calendar, skips deleted events,
+  keeps declined ones, and shows a recurring event once per occurrence.
+- HQ keeps at most 50 events (`CALENDAR_LIST_MAX_EVENTS`). When more exist the result says
+  `truncated` and gives `next_start_local`, the start of the first omitted event in the phone's
+  zone. The model sees per event only: a cleaned one-line title (200 characters), local start and
+  end (all-day events as dates), the calendar label and `open_link`. Location, notes, guests and
+  conference links are neither requested nor passed on.
+- An all-day event is stored as UTC midnights, so HQ judges it by dates: its own dates in UTC
+  against the window's dates in the phone zone. One that fails is dropped before the cap.
+  A timed event must start before the window ends and end after it starts.
+- `open_link` is built by HQ from numbers only: `hq://calendar/event/{id}?begin=..&end=..`. An id
+  that is not plain digits drops the event. The phone never supplies a URL; the app opens the
+  event in the calendar when the link is tapped.
+- Calendar text is untrusted. `calendar_list_events` is in `UNTRUSTED_SOURCE_TOOLS`, so after a
+  read `calendar_create_event` asks the owner. Logs carry the request id, phase, outcome code and
+  counts, never titles. See `docs/security/PROMPT_INJECTION.md`.

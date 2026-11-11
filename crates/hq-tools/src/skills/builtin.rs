@@ -35,6 +35,9 @@ pub struct Shipped {
 /// The skill `calendar_create_event` refuses to run without.
 pub const CALENDAR_CREATION_SKILL: &str = "calendar-creation";
 
+/// The skill `calendar_list_events` refuses to run without.
+pub const CALENDAR_READING_SKILL: &str = "calendar-reading";
+
 /// The set is decided once at start, and GitHub can be connected any time after, so the worker
 /// is always offered. Whether it acts is `dispatch::allowed_repos`.
 fn every_install(_: &HqConfig) -> bool {
@@ -56,6 +59,14 @@ pub const BUILTIN_SKILLS: &[Shipped] = &[
         files: &[(
             SKILL_FILE,
             include_str!("../../assets/skills/calendar-creation/SKILL.md"),
+        )],
+        applies: every_install,
+    },
+    Shipped {
+        name: CALENDAR_READING_SKILL,
+        files: &[(
+            SKILL_FILE,
+            include_str!("../../assets/skills/calendar-reading/SKILL.md"),
         )],
         applies: every_install,
     },

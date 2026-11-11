@@ -12,7 +12,7 @@ use tokio::sync::watch;
 
 use super::check::{Checked, check};
 use super::outcome::{self, PHONE_OUTCOMES, SAVED_TO};
-use super::store::{DeviceActionStore, Opened, Phase, Timeouts};
+use super::store::{self, DeviceActionStore, Opened, Phase, Timeouts};
 use crate::skills::builtin::{self, CALENDAR_CREATION_SKILL};
 
 pub const TOOL_NAME: &str = "calendar_create_event";
@@ -50,15 +50,15 @@ impl PhoneClock {
     }
 }
 
-type Emit = Arc<dyn Fn(Value) + Send + Sync>;
+pub(super) type Emit = Arc<dyn Fn(Value) + Send + Sync>;
 
 /// One chat turn's link to the phone that sent it.
 pub struct DeviceCalendar {
-    thread_id: String,
-    store: Arc<DeviceActionStore>,
-    emit: Emit,
-    phone: PhoneClock,
-    timeouts: Timeouts,
+    pub(super) thread_id: String,
+    pub(super) store: Arc<DeviceActionStore>,
+    pub(super) emit: Emit,
+    pub(super) phone: PhoneClock,
+    pub(super) timeouts: Timeouts,
 }
 
 impl DeviceCalendar {
@@ -153,12 +153,19 @@ impl DeviceCalendar {
         };
         tracing::info!(%request_id, %action_id, phase = "sent", "device action");
         (self.emit)(frame);
-        let result = self.wait(&action_id, phase).await;
+        let result = self.wait(&action_id, phase, outcome::unverified).await;
         tracing::info!(%request_id, %action_id, phase = "done", outcome = outcome::code(&result), "device action");
         result
     }
 
-    async fn wait(&self, action_id: &str, mut phase: watch::Receiver<Phase>) -> Value {
+    /// `lost` builds the outcome for "the answer never came", which differs by action: a create
+    /// may have happened, a read has nothing to report.
+    pub(super) async fn wait(
+        &self,
+        action_id: &str,
+        mut phase: watch::Receiver<Phase>,
+        lost: fn(&str) -> Value,
+    ) -> Value {
         let ack = Duration::from_secs(self.timeouts.ack_secs);
         let result = Duration::from_secs(self.timeouts.result_secs);
         let first = tokio::time::timeout(ack, phase.wait_for(|p| *p != Phase::Open))
@@ -168,7 +175,7 @@ impl DeviceCalendar {
             Ok(Ok(Phase::Abandoned)) => return outcome::unreachable(),
             Ok(Ok(_)) => {}
             // The sender lives in the store; losing it means the action was pruned.
-            Ok(Err(_)) => return outcome::unverified("action_lost"),
+            Ok(Err(_)) => return lost("action_lost"),
             Err(_) if self.store.abandon_if_unacked(action_id) => return outcome::unreachable(),
             // The ack landed in the instant the timer fired.
             Err(_) => {}
@@ -176,11 +183,11 @@ impl DeviceCalendar {
         let second = tokio::time::timeout(result, phase.wait_for(|p| *p == Phase::Settled)).await;
         if second.is_err() {
             self.store.give_up(action_id);
-            return outcome::unverified("no_result_in_time");
+            return lost("no_result_in_time");
         }
         self.store
             .outcome(action_id)
-            .unwrap_or_else(|| outcome::unverified("action_lost"))
+            .unwrap_or_else(|| lost("action_lost"))
     }
 }
 
@@ -203,13 +210,35 @@ fn wire_payload(request_id: &str, zone: Tz, c: &Checked) -> Value {
     v
 }
 
-/// Whether `body` is a result worth storing: a known version and a known outcome.
+/// Whether `body` is a result worth storing for a `calendar.create`: a known version and a
+/// known outcome.
 pub fn result_is_acceptable(body: &Value) -> bool {
+    outcome_is_known(body, PHONE_OUTCOMES)
+}
+
+pub(super) fn outcome_is_known(body: &Value, allowed: &[&str]) -> bool {
     body.get("v").and_then(Value::as_u64) == Some(1)
         && body
             .get("outcome")
             .and_then(Value::as_str)
-            .is_some_and(|o| PHONE_OUTCOMES.contains(&o))
+            .is_some_and(|o| allowed.contains(&o))
+}
+
+/// `result_is_acceptable` for the action called `name`. An unknown name accepts nothing.
+pub fn result_is_acceptable_for(name: &str, body: &Value) -> bool {
+    match name {
+        store::ACTION_NAME => result_is_acceptable(body),
+        store::LIST_ACTION_NAME => outcome_is_known(body, outcome::LIST_PHONE_OUTCOMES),
+        _ => false,
+    }
+}
+
+/// `finalize` for the action called `name`.
+pub fn finalize_for(name: &str, body: &Value, payload: &Value) -> Value {
+    match name {
+        store::LIST_ACTION_NAME => super::list::finalize_list(body, payload),
+        _ => finalize(body, payload),
+    }
 }
 
 const CREATED_FIELDS: &[&str] = &[
@@ -251,12 +280,12 @@ pub fn finalize(body: &Value, payload: &Value) -> Value {
 
 /// Longest phone-supplied string the model is shown. Calendar names and accounts can be set by
 /// whoever shared a calendar, so they are bounded and stripped of line breaks before any model sees them.
-const PHONE_TEXT_MAX_CHARS: usize = 200;
+pub(super) const PHONE_TEXT_MAX_CHARS: usize = 200;
 /// Most calendars offered as choices in one question.
 const MAX_CHOICES: usize = 8;
 
 /// One line, no control characters, at most `max` characters.
-fn clean(raw: &str, max: usize) -> String {
+pub(super) fn clean(raw: &str, max: usize) -> String {
     let one_line: String = raw
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
@@ -270,7 +299,7 @@ fn clean(raw: &str, max: usize) -> String {
         .collect()
 }
 
-fn pass_through(code: &str, body: &Value) -> Value {
+pub(super) fn pass_through(code: &str, body: &Value) -> Value {
     let keep: &[&str] = match code {
         outcome::CLARIFICATION_REQUIRED => &["reason", "ask", "choices"],
         outcome::PERMISSION_DENIED => &["missing", "next_step"],

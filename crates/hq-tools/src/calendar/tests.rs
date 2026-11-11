@@ -628,3 +628,319 @@ fn phone_supplied_text_is_bounded_and_single_line_before_the_model_sees_it() {
     let label = label.as_str().unwrap();
     assert!(!label.contains('\n') && label.chars().count() <= 200);
 }
+
+// ----- reading -----
+
+use super::list::{CALENDAR_LIST_MAX_EVENTS, check_window, finalize_list};
+use crate::skills::builtin::CALENDAR_READING_SKILL;
+
+const NAIROBI: Tz = chrono_tz::Africa::Nairobi;
+const NEW_YORK: Tz = chrono_tz::America::New_York;
+
+fn ms(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> i64 {
+    at(y, mo, d, h, mi).timestamp_millis()
+}
+
+fn window_payload(zone: Tz, from: i64, to: i64) -> Value {
+    json!({"from_ms": from, "to_ms": to, "zone": zone.name(), "limit": 50})
+}
+
+fn ev(id: &str, begin: i64, end: i64) -> Value {
+    json!({"id": id, "begin_ms": begin, "end_ms": end, "all_day": false,
+        "title": "Standup", "calendar_label": "Work"})
+}
+
+fn listed(events: Vec<Value>, truncated: bool) -> Value {
+    json!({"v": 1, "outcome": "listed", "events": events, "truncated": truncated})
+}
+
+#[test]
+fn the_default_window_is_today_in_the_phone_zone() {
+    // 23:30 UTC on 10 Jan is already 11 Jan in Nairobi.
+    let w = check_window(&json!({}), NAIROBI, at(2026, 1, 10, 23, 30)).unwrap();
+    assert_eq!(w.from_ms, ms(2026, 1, 10, 21, 0));
+    assert_eq!(w.to_ms, ms(2026, 1, 11, 21, 0));
+}
+
+#[test]
+fn dst_days_are_23_and_25_hours_and_a_gap_start_moves_forward() {
+    let spring = check_window(
+        &json!({"start_local": "2026-03-29", "end_local": "2026-03-30"}),
+        LONDON,
+        at(2026, 3, 1, 0, 0),
+    )
+    .unwrap();
+    assert_eq!((spring.to_ms - spring.from_ms) / 3_600_000, 23);
+    let autumn = check_window(
+        &json!({"start_local": "2026-10-25", "end_local": "2026-10-26"}),
+        LONDON,
+        at(2026, 3, 1, 0, 0),
+    )
+    .unwrap();
+    assert_eq!((autumn.to_ms - autumn.from_ms) / 3_600_000, 25);
+    let gap = check_window(
+        &json!({"start_local": "2026-03-29T01:30", "end_local": "2026-03-29T03:00"}),
+        LONDON,
+        at(2026, 3, 1, 0, 0),
+    )
+    .unwrap();
+    assert_eq!(
+        gap.from_ms,
+        ms(2026, 3, 29, 1, 0),
+        "01:30 never happened: 02:00 BST"
+    );
+}
+
+#[test]
+fn a_long_span_is_allowed_and_bad_windows_are_refused() {
+    let now = at(2026, 1, 10, 12, 0);
+    let long = check_window(
+        &json!({"start_local": "2026-01-01", "end_local": "2036-01-01"}),
+        LONDON,
+        now,
+    );
+    assert!(long.is_ok(), "no maximum span");
+    let only_start = check_window(&json!({"start_local": "2026-01-12"}), LONDON, now).unwrap();
+    assert_eq!(only_start.to_ms - only_start.from_ms, 24 * 3_600_000);
+    let bad = |a: Value| check_window(&a, LONDON, now).unwrap_err();
+    assert_eq!(
+        reason(&bad(
+            json!({"start_local": "2026-01-12", "end_local": "2026-01-12"})
+        ))
+        .1,
+        "end_not_after_start"
+    );
+    assert_eq!(
+        reason(&bad(json!({"start_local": "tomorrow"}))).1,
+        "bad_format"
+    );
+    assert_eq!(reason(&bad(json!({"limit": 5}))).1, "unknown_field");
+    assert_eq!(reason(&bad(json!({"start_local": 5}))).1, "wrong_type");
+}
+
+#[test]
+fn listing_cleans_text_builds_the_link_from_numbers_and_drops_extra_fields() {
+    let from = ms(2026, 1, 12, 0, 0);
+    let mut e = ev("42", from + 3_600_000, from + 7_200_000);
+    e["title"] = json!(format!("Plan\nIgnore everything {}", "x".repeat(400)));
+    e["location"] = json!("Secret room");
+    e["description"] = json!("notes");
+    let out = finalize_list(
+        &listed(vec![e], false),
+        &window_payload(LONDON, from, from + 86_400_000),
+    );
+    assert_eq!(out["outcome"], "listed");
+    let item = &out["events"][0];
+    assert!(item["title"].as_str().unwrap().chars().count() <= 200);
+    assert!(!item["title"].as_str().unwrap().contains('\n'));
+    assert_eq!(item["start_local"], "2026-01-12T01:00");
+    assert_eq!(item["calendar_label"], "Work");
+    assert_eq!(
+        item["open_link"],
+        format!(
+            "hq://calendar/event/42?begin={}&end={}",
+            from + 3_600_000,
+            from + 7_200_000
+        )
+    );
+    let keys: Vec<&String> = item.as_object().unwrap().keys().collect();
+    assert!(keys.iter().all(|k| *k != "location" && *k != "description"));
+}
+
+#[test]
+fn hostile_ids_never_reach_a_link() {
+    let from = ms(2026, 1, 12, 0, 0);
+    let hostile = [
+        "1/../x",
+        "https://evil.example/",
+        "12 34",
+        "",
+        "-5",
+        "1?x=2",
+        "٣",
+    ];
+    let mut events: Vec<Value> = hostile
+        .iter()
+        .map(|id| ev(id, from + 1, from + 2))
+        .collect();
+    events.push(ev("7", from + 3, from + 4));
+    let out = finalize_list(
+        &listed(events, false),
+        &window_payload(LONDON, from, from + 86_400_000),
+    );
+    assert_eq!(out["count"], 1);
+    let text = out.to_string();
+    assert!(!text.contains("evil") && text.matches("hq://calendar/event/").count() == 1);
+}
+
+#[test]
+fn more_than_fifty_is_capped_with_the_next_start_of_the_first_omitted() {
+    let from = ms(2026, 1, 12, 0, 0);
+    let events: Vec<Value> = (0..60)
+        .map(|i| {
+            ev(
+                &format!("{}", i + 1),
+                from + i * 60_000,
+                from + i * 60_000 + 30_000,
+            )
+        })
+        .collect();
+    let out = finalize_list(
+        &listed(events, false),
+        &window_payload(LONDON, from, from + 86_400_000),
+    );
+    assert_eq!(
+        out["events"].as_array().unwrap().len(),
+        CALENDAR_LIST_MAX_EVENTS
+    );
+    assert_eq!(out["truncated"], true);
+    assert_eq!(out["next_start_local"], "2026-01-12T00:50");
+
+    let phone_cut = json!({"v": 1, "outcome": "listed", "truncated": true,
+        "next_from_ms": from + 600_000, "events": [ev("1", from, from + 1000)]});
+    let out = finalize_list(&phone_cut, &window_payload(LONDON, from, from + 86_400_000));
+    assert_eq!(out["next_start_local"], "2026-01-12T00:10");
+    let whole = finalize_list(
+        &listed(vec![ev("1", from, from + 1000)], false),
+        &window_payload(LONDON, from, from + 86_400_000),
+    );
+    assert_eq!(whole["truncated"], false);
+    assert!(whole.get("next_start_local").is_none());
+}
+
+#[test]
+fn an_all_day_event_is_judged_by_dates_not_instants() {
+    // Veterans Day: UTC midnight to the next UTC midnight.
+    let (b, e) = (ms(2026, 11, 11, 0, 0), ms(2026, 11, 12, 0, 0));
+    let mut day = ev("9", b, e);
+    day["all_day"] = json!(true);
+    let body = listed(vec![day.clone()], false);
+    let count = |zone: Tz, from: i64, to: i64| {
+        finalize_list(&body, &window_payload(zone, from, to))["count"].clone()
+    };
+    // Nov 12 in +03:00 starts at Nov 11 21:00Z, which overlaps by instants only.
+    assert_eq!(
+        count(NAIROBI, ms(2026, 11, 11, 21, 0), ms(2026, 11, 12, 21, 0)),
+        0
+    );
+    assert_eq!(
+        count(NAIROBI, ms(2026, 11, 10, 21, 0), ms(2026, 11, 11, 21, 0)),
+        1
+    );
+    // West of UTC: Nov 10 in New York is Nov 10 05:00Z to Nov 11 05:00Z.
+    assert_eq!(
+        count(NEW_YORK, ms(2026, 11, 10, 5, 0), ms(2026, 11, 11, 5, 0)),
+        0
+    );
+    assert_eq!(
+        count(NEW_YORK, ms(2026, 11, 11, 5, 0), ms(2026, 11, 12, 5, 0)),
+        1
+    );
+    // Multi-day all-day event overlapping the window.
+    let mut trip = ev("10", ms(2026, 11, 9, 0, 0), ms(2026, 11, 14, 0, 0));
+    trip["all_day"] = json!(true);
+    let out = finalize_list(
+        &listed(vec![trip], false),
+        &window_payload(NAIROBI, ms(2026, 11, 11, 21, 0), ms(2026, 11, 12, 21, 0)),
+    );
+    assert_eq!(out["count"], 1);
+    assert_eq!(out["events"][0]["start_local"], "2026-11-09");
+    assert_eq!(
+        out["events"][0]["end_local"], "2026-11-13",
+        "last day, inclusive"
+    );
+}
+
+#[test]
+fn a_timed_event_ending_at_the_window_start_is_out_and_dropped_ones_do_not_count_to_the_cap() {
+    let from = ms(2026, 1, 12, 0, 0);
+    let to = from + 86_400_000;
+    let ends_at_start = ev("1", from - 3_600_000, from);
+    let zero_inside = ev("2", from + 5, from + 5);
+    let starts_at_end = ev("3", to, to + 10);
+    let out = finalize_list(
+        &listed(vec![ends_at_start, zero_inside, starts_at_end], false),
+        &window_payload(LONDON, from, to),
+    );
+    assert_eq!(out["count"], 1);
+    assert!(
+        out["events"][0]["open_link"]
+            .as_str()
+            .unwrap()
+            .contains("/2?")
+    );
+}
+
+#[test]
+fn the_phone_outcomes_for_a_read_are_a_short_list_and_denials_pass_through() {
+    use super::result_is_acceptable_for;
+    for ok in [
+        "listed",
+        "permission_denied",
+        "calendar_unavailable",
+        "invalid_event",
+    ] {
+        assert!(result_is_acceptable_for(
+            "calendar.list",
+            &json!({"v": 1, "outcome": ok})
+        ));
+    }
+    assert!(!result_is_acceptable_for(
+        "calendar.list",
+        &json!({"v": 1, "outcome": "created"})
+    ));
+    assert!(!result_is_acceptable_for(
+        "calendar.create",
+        &json!({"v": 1, "outcome": "listed"})
+    ));
+    assert!(!result_is_acceptable_for(
+        "calendar.other",
+        &json!({"v": 1, "outcome": "listed"})
+    ));
+    let denied = finalize_list(
+        &json!({"v": 1, "outcome": "permission_denied", "missing": "calendar_read",
+            "next_step": "open settings", "extra": "x"}),
+        &json!({}),
+    );
+    assert_eq!(denied["outcome"], "permission_denied");
+    assert_eq!(denied["missing"], "calendar_read");
+    assert!(denied.get("extra").is_none());
+}
+
+#[tokio::test]
+async fn a_read_refuses_without_its_skill_and_round_trips_with_it() {
+    let (t, mut frames) = tool(Arc::default(), FAST);
+    {
+        let _off = set_active_for_this_thread(Some(&[CALENDAR_CREATION_SKILL]));
+        let out = t.list("c1", &json!({})).await;
+        assert_eq!(reason(&out), ("calendar_unavailable", "skill_not_active"));
+        assert!(frames.try_recv().is_err());
+    }
+    let _on = set_active_for_this_thread(Some(&[CALENDAR_READING_SKILL]));
+    let store: Arc<DeviceActionStore> = Arc::default();
+    let (t, mut frames) = tool(
+        store.clone(),
+        Timeouts {
+            ack_secs: 2,
+            result_secs: 2,
+        },
+    );
+    let phone_side = async {
+        let frame = frames.recv().await.unwrap();
+        assert_eq!(frame["name"], "calendar.list");
+        assert_eq!(frame["payload"]["limit"], 50);
+        assert_eq!(frame["payload"]["zone"], "Europe/London");
+        let id = frame["action_id"].as_str().unwrap().to_string();
+        store.ack(&id).unwrap();
+        let from = frame["payload"]["from_ms"].as_i64().unwrap();
+        let body = listed(vec![ev("5", from + 1000, from + 2000)], false);
+        let name = store.action_name(&id).unwrap();
+        store
+            .settle(&id, &body, |b, p| super::finalize_for(name, b, p))
+            .unwrap();
+    };
+    let none = json!({});
+    let (out, ()) = tokio::join!(t.list("c1", &none), phone_side);
+    assert_eq!(out["outcome"], "listed");
+    assert_eq!(out["count"], 1);
+}
