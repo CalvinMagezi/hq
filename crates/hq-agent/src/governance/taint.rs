@@ -38,6 +38,8 @@ const UNTRUSTED_SOURCE_TOOLS: &[&str] = &[
     "context_packet",
     "subagent_run_status",
     "subagent_run_result",
+    // Titles and calendar names come from invitations and shared calendars.
+    hq_tools::calendar::LIST_TOOL_NAME,
     "hq",
 ];
 

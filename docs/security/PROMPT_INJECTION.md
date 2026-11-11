@@ -94,7 +94,10 @@ normal and the `BypassPermissions` paths.
      session its own web chat watches; a relay chat or an MCP client has none.
    - `calendar_create_event`, which adds an event to the owner's phone calendar
      (`CALENDAR_CREATION.md`). A clean turn creates it with no approval, by the
-     owner's choice; once the turn has read outside text, the owner is asked.
+     owner's choice; once the turn has read outside text, the owner is asked. Reading the
+     calendar (`calendar_list_events`) is itself an untrusted source, since titles and
+     calendar names come from invitations and shared calendars: after a read, creating an
+     event asks the owner.
 5. **Nobody to ask.** A session with no approval store cannot wait for the
    owner, so once tainted:
    - it never starts, briefs or types into another agent:

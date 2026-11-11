@@ -61,3 +61,52 @@ impl AgentTool for CalendarCreateEventTool {
         })
     }
 }
+
+/// `calendar_list_events`: reads the owner's phone calendar through the same link.
+pub struct CalendarListEventsTool {
+    device: Arc<DeviceCalendar>,
+    description: String,
+}
+
+impl CalendarListEventsTool {
+    pub fn new(device: Arc<DeviceCalendar>) -> Self {
+        let description = format!("{} {}", device.list_description(), device.context_line());
+        Self {
+            device,
+            description,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl AgentTool for CalendarListEventsTool {
+    fn name(&self) -> &str {
+        self.device.list_name()
+    }
+    fn description(&self) -> &str {
+        &self.description
+    }
+    fn parameters(&self) -> Value {
+        self.device.list_parameters()
+    }
+    fn category(&self) -> &str {
+        CATEGORY
+    }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn requires_live_user_turn(&self) -> bool {
+        true
+    }
+    async fn execute(&self, id: &str, args: Value) -> Result<ToolResult> {
+        let outcome = self.device.list(id, &args).await;
+        Ok(ToolResult {
+            content: vec![ToolResultContent {
+                r#type: "text".into(),
+                text: outcome.to_string(),
+            }],
+            details: None,
+            context_modifier: None,
+        })
+    }
+}

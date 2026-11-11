@@ -4,6 +4,7 @@ use crate::skills::{list_skills, parse_skill, security_flags, validate_skill, va
 const NAME: &str = "edge-coding-worker";
 const ACTIVE_NOW: &[&str] = &[NAME];
 const CALENDAR: &str = CALENDAR_CREATION_SKILL;
+const READING: &str = CALENDAR_READING_SKILL;
 
 fn assets_dir() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/skills")
@@ -87,13 +88,16 @@ fn every_shipped_skill_is_valid_clean_and_marked_as_hq_s() {
 fn a_built_in_is_active_unless_it_is_turned_off() {
     assert_eq!(
         active_for(&config_with(&[], &[])),
-        [NAME, CALENDAR],
+        [NAME, CALENDAR, READING],
         "GitHub can be connected after start, with no repos listed"
     );
-    assert_eq!(active_for(&config_with(&["o/r"], &[])), [NAME, CALENDAR]);
+    assert_eq!(
+        active_for(&config_with(&["o/r"], &[])),
+        [NAME, CALENDAR, READING]
+    );
     assert_eq!(
         active_for(&config_with(&["o/r"], &["EDGE-CODING-WORKER"])),
-        [CALENDAR]
+        [CALENDAR, READING]
     );
     assert_eq!(
         unknown_off(&config_with(&[], &["edge-coding-wroker"])),
@@ -467,4 +471,25 @@ fn calendar_creation_ships_active_with_a_hash_and_fails_closed_when_off() {
     let _off = set_active_for_this_thread(Some(&[]));
     assert!(!is_active(CALENDAR));
     assert!(shipped_hash(CALENDAR).is_none());
+}
+
+#[test]
+fn calendar_reading_ships_with_a_hash_and_fails_closed_when_off() {
+    let _now = set_active_for_this_thread(Some(&[READING]));
+    assert!(is_active(READING));
+    assert_eq!(shipped_hash(READING).unwrap().len(), 64);
+    assert!(
+        shipped_file(READING, SKILL_FILE)
+            .unwrap()
+            .contains("calendar_list_events")
+    );
+    assert!(
+        active_for(&config_with(&[], &["calendar-reading"]))
+            .iter()
+            .all(|n| *n != READING)
+    );
+    drop(_now);
+    let _off = set_active_for_this_thread(Some(&[]));
+    assert!(!is_active(READING));
+    assert!(shipped_hash(READING).is_none());
 }

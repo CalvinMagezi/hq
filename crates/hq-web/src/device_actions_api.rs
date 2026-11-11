@@ -12,7 +12,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use chrono::{DateTime, TimeDelta, Utc};
-use hq_tools::calendar::{DeviceCalendar, PhoneClock, Reject, finalize, result_is_acceptable};
+use hq_tools::calendar::{
+    DeviceCalendar, PhoneClock, Reject, finalize_for, result_is_acceptable_for,
+};
 use serde_json::{Value, json};
 
 use crate::WsState;
@@ -106,9 +108,13 @@ async fn result_handler(
     if let Some(r) = limited(&state) {
         return r;
     }
-    if !result_is_acceptable(&body) {
+    let Some(name) = state.device_actions.action_name(&action_id) else {
+        return rejected(Reject::Unknown);
+    };
+    if !result_is_acceptable_for(name, &body) {
         return refusal(StatusCode::BAD_REQUEST, "bad_result");
     }
+    let finalize = |body: &Value, payload: &Value| finalize_for(name, body, payload);
     match state.device_actions.settle(&action_id, &body, finalize) {
         Ok(()) => {
             tracing::info!(%action_id, phase = "result", "device action");
