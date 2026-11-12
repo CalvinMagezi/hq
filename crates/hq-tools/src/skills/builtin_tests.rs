@@ -5,6 +5,7 @@ const NAME: &str = "edge-coding-worker";
 const ACTIVE_NOW: &[&str] = &[NAME];
 const BRIEF: &str = "hq-task-brief";
 const WAYFINDER: &str = "hq-wayfinder";
+const ENGINEERING: &str = "hq-engineering-core";
 const CALENDAR: &str = CALENDAR_CREATION_SKILL;
 const READING: &str = CALENDAR_READING_SKILL;
 const EDITING: &str = CALENDAR_EDITING_SKILL;
@@ -91,16 +92,32 @@ fn every_shipped_skill_is_valid_clean_and_marked_as_hq_s() {
 fn a_built_in_is_active_unless_it_is_turned_off() {
     assert_eq!(
         active_for(&config_with(&[], &[])),
-        [NAME, BRIEF, WAYFINDER, CALENDAR, READING, EDITING],
+        [
+            NAME,
+            BRIEF,
+            ENGINEERING,
+            WAYFINDER,
+            CALENDAR,
+            READING,
+            EDITING
+        ],
         "GitHub can be connected after start, with no repos listed"
     );
     assert_eq!(
         active_for(&config_with(&["o/r"], &[])),
-        [NAME, BRIEF, WAYFINDER, CALENDAR, READING, EDITING]
+        [
+            NAME,
+            BRIEF,
+            ENGINEERING,
+            WAYFINDER,
+            CALENDAR,
+            READING,
+            EDITING
+        ]
     );
     assert_eq!(
         active_for(&config_with(&["o/r"], &["EDGE-CODING-WORKER"])),
-        [BRIEF, WAYFINDER, CALENDAR, READING, EDITING]
+        [BRIEF, ENGINEERING, WAYFINDER, CALENDAR, READING, EDITING]
     );
     assert_eq!(
         unknown_off(&config_with(&[], &["edge-coding-wroker"])),
@@ -566,4 +583,9 @@ fn assert_plugin_mirror(name: &str) {
 #[test]
 fn the_plugin_copy_of_the_wayfinder_skill_has_the_same_body() {
     assert_plugin_mirror(WAYFINDER);
+}
+
+#[test]
+fn the_plugin_copy_of_the_engineering_core_skill_has_the_same_body() {
+    assert_plugin_mirror(ENGINEERING);
 }

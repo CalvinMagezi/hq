@@ -66,6 +66,14 @@ pub const BUILTIN_SKILLS: &[Shipped] = &[
         applies: every_install,
     },
     Shipped {
+        name: "hq-engineering-core",
+        files: &[(
+            SKILL_FILE,
+            include_str!("../../assets/skills/hq-engineering-core/SKILL.md"),
+        )],
+        applies: every_install,
+    },
+    Shipped {
         name: "hq-wayfinder",
         files: &[(
             SKILL_FILE,
