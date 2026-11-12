@@ -31,6 +31,13 @@ class CountsTest {
         assertEquals("2${nb}tasks", Counts.tasks(testWords(), 2))
     }
 
+    @Test fun theBarBadgeStopsAtNine() {
+        assertEquals("1", Counts.navBadge(1))
+        assertEquals("9", Counts.navBadge(9))
+        assertEquals("9+", Counts.navBadge(10))
+        assertEquals("9+", Counts.navBadge(162))
+    }
+
     @Test fun noSubtasksSaysNoneYet() {
         assertEquals("None yet", TasksLogic.subtaskLabel(testWords(), 0, 0))
         assertEquals("1${nb}of${nb}3${nb}done", TasksLogic.subtaskLabel(testWords(), 1, 3))

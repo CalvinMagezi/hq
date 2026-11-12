@@ -358,4 +358,14 @@ class SettingsWordsTest {
         assertEquals("Paused until Wed 4:30 PM", SettingsWords.pauseLine(testWords(), s.pause, ZoneOffset.UTC))
         assertNull(SettingsWords.pauseLine(testWords(), s.topics[0], ZoneOffset.UTC))
     }
+
+    @Test fun theHelperRuleReadsHqsSettingAndDefaultsToLettingAgentsHandleIt() {
+        fun policy(json: String) = SettingsWords.helperPolicy(org.json.JSONObject(json))
+        assertNull(SettingsWords.helperPolicy(null))
+        assertNull(policy("{}"))
+        assertEquals(SettingsWords.HelperPolicy.LosesWork, policy("""{"inbox":{"fleet":{"helper_policy":"loses_work"}}}"""))
+        assertEquals(SettingsWords.HelperPolicy.Everything, policy("""{"inbox":{"fleet":{"helper_policy":"everything"}}}"""))
+        assertNull(policy("""{"inbox":{"fleet":{"helper_policy":"something_new"}}}"""))
+        assertEquals(SettingsWords.HelperPolicy.Nothing, policy("""{"inbox":{"fleet":{"helper_policy":"nothing"}}}"""))
+    }
 }

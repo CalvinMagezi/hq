@@ -349,6 +349,14 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val signInDevice: String? = null,
         /** Its topic is silenced: listed, but left off the badge. False from an older server. */
         val silenced: Boolean = false,
+        /** Only the owner can decide it. Null from an HQ that does not say, which the phone treats as today. */
+        val ownerOnly: Boolean? = null,
+        /** Who it is from: `you`, `helpers` or `system`. Null from an older HQ. */
+        val sourceGroup: String? = null,
+        /** Why it left Needs you by itself (`auto_tidy:<rule>`); set only on the items HQ tidied away. */
+        val expiredReason: String? = null,
+        /** How many times the owner already allowed this site in a chat; 0 when HQ does not say. */
+        val siteApprovals: Int? = null,
     )
 
     /** What HQ says an approval is about: [tool] and [args] verbatim, [loses] and [verb] (one of [LOSING_VERBS]) decided by HQ, never by the card's words. */
@@ -371,7 +379,16 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val verb: String? = null,
     )
 
-    data class InboxList(val items: List<InboxItem>, val unread: Int, val pending: Int)
+    data class InboxList(
+        val items: List<InboxItem>,
+        val unread: Int,
+        val pending: Int,
+        /** The waiting decisions only the owner can make, and the helper requests the agents handle; null from an older HQ. */
+        val needsOwnerOnly: Int? = null,
+        val needsHelpers: Int? = null,
+        /** Items the tidy moved to Done that can still be restored. */
+        val expiredCount: Int = 0,
+    )
 
     /** The inbox, newest first. [state] is pending, approved, dismissed, resolved or history; null for all. */
     suspend fun notifications(state: String?, limit: Int = 50): InboxList =
@@ -386,9 +403,14 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
                         n.optString("created_at", ""), meta?.optStringOrNull("link"), extra?.optStringOrNull("source_task"), extra?.optStringOrNull("val_kind"),
                         n.optJSONArray("actions").strings(), alertDialog(meta), approvalFacts(meta),
                         signInDevice(meta), n.optBoolean("silenced", false),
+                        if (n.has("owner_only")) n.optBoolean("owner_only") else null, n.optStringOrNull("source_group"), n.optStringOrNull("expired_reason"),
+                        siteApprovals(n, meta),
                     )
                 },
                 o.optInt("unread_count", 0), o.optInt("pending_approvals_count", 0),
+                if (o.has("needs_you_owner_only")) o.optInt("needs_you_owner_only") else null,
+                if (o.has("needs_you_helpers")) o.optInt("needs_you_helpers") else null,
+                o.optInt("expired_count", 0),
             )
         }
 
@@ -837,6 +859,16 @@ internal val LOSING_VERBS = setOf("delete", "remove", "stop", "sign out", "revok
 private fun losingVerb(o: JSONObject): String? = if (o.isNull("verb")) null else o.optString("verb", "").trim().lowercase().takeIf { it in LOSING_VERBS }
 
 /** The approval in a notification's metadata, or null for any other notice. */
+/** The count of times this site was allowed, from the item or its approval; null when HQ does not say. */
+internal fun siteApprovals(item: JSONObject, meta: JSONObject?): Int? {
+    val approval = meta?.optJSONObject("approval")
+    return when {
+        item.has("site_approvals") && !item.isNull("site_approvals") -> item.optInt("site_approvals")
+        approval != null && approval.has("site_approvals") && !approval.isNull("site_approvals") -> approval.optInt("site_approvals")
+        else -> null
+    }
+}
+
 internal fun approvalFacts(meta: JSONObject?): HqClient.ApprovalFacts? {
     val a = meta?.optJSONObject("approval") ?: return null
     val args = if (a.isNull("args")) "" else a.opt("args")?.let { if (it is String) it else it.toString() }.orEmpty()

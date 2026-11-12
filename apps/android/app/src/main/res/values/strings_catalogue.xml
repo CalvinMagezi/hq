@@ -3800,4 +3800,37 @@
     <string name="trail_work_helpers">The agents HQ runs, and starting one</string>
     <string name="balance_open">Open spending details</string>
     <string name="notes_dot_new">New in your Vault</string>
+    <plurals name="inbox_catch_up_body">
+        <item quantity="one">%1$s are waiting. %2$s is from a helper and more than a day old. Clear it\? It is cleared, not allowed.</item>
+        <item quantity="other">%1$s are waiting. %2$s are from helpers and more than a day old. Clear those\? They are cleared, not allowed.</item>
+    </plurals>
+    <string name="inbox_catch_up_clear">Clear old</string>
+    <string name="inbox_catch_up_show">Show the %1$s that need you</string>
+    <string name="inbox_helpers_group">From helpers (%1$s)</string>
+    <string name="inbox_helpers_open">Open</string>
+    <string name="inbox_helpers_hide">Hide</string>
+    <string name="inbox_helpers_clear">Clear</string>
+    <plurals name="helpers_cleared">
+        <item quantity="one">%1$s helper request cleared</item>
+        <item quantity="other">%1$s helper requests cleared</item>
+    </plurals>
+    <string name="inbox_no_longer_waiting">No longer waiting</string>
+    <string name="inbox_restore">Restore</string>
+    <string name="inbox_digest_show">Show</string>
+    <string name="inbox_digest_hide">Hide</string>
+    <string name="inbox_row_open">Open</string>
+    <string name="settings_helper_policy_title">Helpers ask me for</string>
+    <string name="settings_helper_policy_intro">How much your helpers bring to you. Your agents answer the rest.</string>
+    <string name="settings_helper_policy_nothing">Nothing, my agents handle it</string>
+    <string name="settings_helper_policy_nothing_about">Helpers ask their agents first. You hear only if nobody answers for 15 minutes. You also hear when only you can decide.</string>
+    <string name="settings_helper_policy_loses">Only things that lose work</string>
+    <string name="settings_helper_policy_loses_about">Your agents handle the rest. You are asked at once before a helper deletes or overwrites something.</string>
+    <string name="settings_helper_policy_everything">Everything</string>
+    <string name="settings_helper_policy_everything_about">Every question a helper asks comes to you straight away.</string>
+    <string name="settings_helper_policy_unknown">HQ has not said yet</string>
+    <string name="inbox_update_collapsed">Collapsed</string>
+    <string name="inbox_update_expanded">Expanded</string>
+    <string name="settings_helper_policy_note">The app shows this setting but cannot change it yet. Change it in HQ on your computer.</string>
+    <string name="topic_helpers_finishing">Helpers finishing</string>
+    <string name="topic_helpers_finishing_about">A helper that finished or stopped</string>
 </resources>

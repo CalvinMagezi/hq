@@ -30,7 +30,8 @@ sealed interface Answer {
     data class Failed(val reason: String) : Answer
 }
 
-data class DoneEntry(val id: String, val title: String, val createdAt: String)
+/** What the owner decided, or, with [expired], a request HQ stopped waiting on by itself, which can be restored. */
+data class DoneEntry(val id: String, val title: String, val createdAt: String, val expired: Boolean = false)
 
 data class InboxLine(val text: String, val action: String? = null)
 
@@ -57,11 +58,20 @@ data class InboxUi(
     val askSignOut: InboxCard? = null,
     val signingOut: Boolean = false,
     val signOutError: String? = null,
+    /** HQ's own count of decisions only the owner can make; null from an HQ that does not count them. */
+    val ownerOnlyCount: Int? = null,
+    /** The owner chose to see the decisions rather than clear the old helper requests. */
+    val catchUpDismissed: Boolean = false,
+    /** Done rows whose Restore is in flight: the button waits so a second tap cannot repeat it. */
+    val restoring: Set<String> = emptySet(),
 ) {
     val shownNeeds: List<InboxCard> get() = needs.filter { it.id !in cleared }
     val shownUpdates: List<InboxCard> get() = updates.filter { it.id !in cleared }
     /** What the bar counts: the requests whose topic the owner has not silenced. */
-    val badge: Int get() = shownNeeds.count { !it.silenced }
+    val badge: Int get() = ownerOnlyCount ?: shownNeeds.count { !it.silenced }
+
+    /** The tab holds the catch-up card: more than a few helper requests, and the owner has not waved it off. */
+    val catchUp: Boolean get() = !catchUpDismissed && NeedsLayout.catchUp(shownNeeds)
 }
 
 /** A voice approval just allowed: [at] is the time it was allowed, [sent] after Keep going has been sent. */
@@ -83,23 +93,26 @@ class InboxActions(
     val onAllowedDone: () -> Unit = {},
     val onAskSignOut: (InboxCard?) -> Unit = {},
     val onSignOutConfirm: () -> Unit = {},
+    val onClearHelpers: () -> Unit = {},
+    val onShowOwner: () -> Unit = {},
+    val onRestore: (DoneEntry) -> Unit = {},
 )
 
 class InboxViewModel(app: Application) : AndroidViewModel(app) {
     private val client = HqServices.get(app).client
     private val _state = MutableStateFlow(InboxUi())
     val state: StateFlow<InboxUi> = _state
-    private var clearing: Job? = null
-    private var lastCleared: List<InboxCard> = emptyList()
+    private val queue = ClearQueue({ id -> client.answerNotification(id, "dismiss") }, { id -> Undo.restore(ClientRestore(client), UndoKind.Notification, id) })
     private var frozen = false
 
     val actions = InboxActions(
         onTab = { t -> _state.update { it.copy(tab = t) } }, onAllow = { answer(it, allow = true) }, onAllowSite = { answer(it, allow = true, wholeSite = true) }, onNotNow = { answer(it, allow = false) },
-        onDetails = { c -> _state.update { it.copy(details = c) } }, onClear = { clear(listOf(it), getApplication<Application>().getString(R.string.undo_update_cleared)) },
-        onClearAll = { clear(_state.value.shownUpdates, "") }, onUndo = ::undo, onDismissLine = { lastCleared = emptyList(); _state.update { it.copy(line = null) } },
+        onDetails = { c -> _state.update { it.copy(details = c) } }, onClear = { clear(listOf(it)) },
+        onClearAll = { clear(_state.value.shownUpdates) }, onUndo = ::undo, onDismissLine = { queue.latest()?.let { queue.expire(it) }; _state.update { it.copy(line = null) } },
         onBannerNotNow = { NotifAccess.snooze(getApplication()); refreshBanner() },
         onKeepGoing = ::keepGoing, onAllowedDone = { _state.update { it.copy(allowed = null) } },
         onAskSignOut = { c -> _state.update { it.copy(askSignOut = c, signOutError = null) } }, onSignOutConfirm = ::signOut,
+        onClearHelpers = { clear(NeedsLayout.oldHelpers(_state.value.shownNeeds)) }, onShowOwner = { _state.update { it.copy(catchUpDismissed = true) } }, onRestore = ::restoreDone,
     )
 
     init {
@@ -151,7 +164,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         val history = try { client.notifications("history", HISTORY_LIMIT) } catch (e: HqUnavailable) { null }
         if (frozen) return
         val lists = inboxLists(pending.items, history?.items.orEmpty()).let { l -> InboxLists(withDeviceNames(l.needs), l.updates, l.done) }
-        _state.update { it.copy(loaded = true, offline = false, needs = lists.needs, updates = lists.updates, done = lists.done, details = it.details?.let { d -> lists.needs.firstOrNull { n -> n.id == d.id } }, checkedAt = InboxWords.clock(java.time.OffsetDateTime.now().toString())) }
+        _state.update { it.copy(loaded = true, offline = false, needs = lists.needs, updates = lists.updates, done = lists.done, details = it.details?.let { d -> lists.needs.firstOrNull { n -> n.id == d.id } }, ownerOnlyCount = pending.needsOwnerOnly, checkedAt = InboxWords.clock(java.time.OffsetDateTime.now().toString())) }
     }
 
     /** Names each new sign-in's device from HQ's device list; one it cannot read keeps the plain "A new device". */
@@ -241,29 +254,41 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         return true
     }
 
-    /** Dismisses at once; Undo inside the window restores them on the server. */
-    private fun clear(cards: List<InboxCard>, text: String) {
+    /** Hides the cards at once and dismisses them in the background, one clear after another; Undo restores what was dismissed. */
+    private fun clear(cards: List<InboxCard>) {
         if (cards.isEmpty()) return
-        clearing?.cancel()
         val app = getApplication<Application>()
-        val ids = cards.map { it.id }
-        val line = if (ids.size == 1) text else app.resources.getQuantityString(R.plurals.updates_cleared, ids.size, ids.size)
-        _state.update { it.copy(line = InboxLine(line, app.getString(R.string.undo)), updates = it.updates.filter { u -> u.id !in ids }) }
-        lastCleared = cards
-        clearing = viewModelScope.launch {
-            ids.forEach { id -> try { client.answerNotification(id, "dismiss") } catch (e: HqUnavailable) { /* it shows again on the next refresh */ } }
-        }
+        val ids = cards.flatMap { it.ids }
+        val line = app.resources.getQuantityString(ClearWords.plural(cards), cards.size, cards.size)
+        _state.update { it.copy(line = InboxLine(line, app.getString(R.string.undo)), updates = it.updates.filter { u -> u.id !in ids }, needs = it.needs.filter { n -> n.id !in ids }) }
+        val batch = queue.begin(cards)
+        viewModelScope.launch { queue.run(batch) }
     }
 
     private fun undo() {
-        clearing?.cancel()
-        val cards = lastCleared
-        lastCleared = emptyList()
         val app = getApplication<Application>()
         viewModelScope.launch {
-            var late = false
-            cards.forEach { c -> if (Undo.restore(ClientRestore(client), UndoKind.Notification, c.id) == UndoResult.TooLate) late = true }
-            _state.update { it.copy(line = if (late) InboxLine(Undo.failLine(app, UndoResult.TooLate).orEmpty()) else null, updates = if (late) it.updates else (it.updates + cards).distinctBy { u -> u.id }) }
+            val undone = queue.undo() ?: return@launch
+            val cards = undone.cards
+            _state.update {
+                it.copy(
+                    line = if (undone.late) InboxLine(Undo.failLine(app, UndoResult.TooLate).orEmpty()) else null,
+                    updates = (it.updates + cards.filter { c -> c.kind == CardKind.Update }).distinctBy { u -> u.id },
+                    needs = (it.needs + cards.filter { c -> c.kind != CardKind.Update }).distinctBy { n -> n.id },
+                )
+            }
+            refresh()
+        }
+    }
+
+    /** Puts back a request HQ stopped waiting on. A refusal (HQ's 409) says it is too late, in the same words as Undo. */
+    private fun restoreDone(entry: DoneEntry) {
+        if (entry.id in _state.value.restoring) return
+        val app = getApplication<Application>()
+        _state.update { it.copy(restoring = it.restoring + entry.id) }
+        viewModelScope.launch {
+            val result = Undo.restore(ClientRestore(client), UndoKind.Notification, entry.id)
+            _state.update { it.copy(restoring = it.restoring - entry.id, line = Undo.failLine(app, result)?.let { text -> InboxLine(text) }) }
             refresh()
         }
     }
@@ -280,14 +305,34 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
 
 class InboxLists(val needs: List<InboxCard>, val updates: List<InboxCard>, val done: List<DoneEntry>)
 
-private val NEEDS_ORDER = listOf(CardKind.SignIn, CardKind.HelperAsks, CardKind.TaskReview, CardKind.Approval, CardKind.HelperStuck)
+internal val NEEDS_ORDER = listOf(CardKind.SignIn, CardKind.HelperAsks, CardKind.TaskReview, CardKind.Approval, CardKind.HelperStuck)
 
 /** What the three tabs show for what the server holds: things that need the owner, updates, and what the owner already decided. */
 fun inboxLists(pending: List<example.hq.spike.data.HqClient.InboxItem>, history: List<example.hq.spike.data.HqClient.InboxItem>): InboxLists {
     val cards = pending.map(InboxWords::card)
     val needs = cards.filter { it.kind != CardKind.Update }
         .sortedWith(compareBy({ NEEDS_ORDER.indexOf(it.kind) }, { if (it.kind == CardKind.Approval || it.kind == CardKind.TaskReview) it.createdAt else "" }))
-    val done = history.filter { it.kind == "action_needed" && (it.state == "approved" || it.state == "dismissed") }
-        .map { DoneEntry(it.id, (if (it.state == "approved") "Allowed: " else "Not now: ") + InboxWords.card(it).title, it.createdAt) }
-    return InboxLists(needs, cards.filter { it.kind == CardKind.Update }, done)
+    val done = history.filter { it.kind == "action_needed" && (it.state == "approved" || it.state == "dismissed" || it.expiredReason != null) }
+        .map {
+            val title = InboxWords.card(it).title
+            if (it.expiredReason != null) DoneEntry(it.id, title, it.createdAt, expired = true)
+            else DoneEntry(it.id, (if (it.state == "approved") "Allowed: " else "Not now: ") + title, it.createdAt)
+        }
+    return InboxLists(needs, foldUpdates(cards.filter { it.kind == CardKind.Update }), done)
+}
+
+private const val SAME_EVENT_SECS = 60L
+
+/** One row per event: updates with the same words within a minute are one event. The row keeps every id, so clearing it clears them all. */
+fun foldUpdates(updates: List<InboxCard>): List<InboxCard> {
+    val kept = mutableListOf<InboxCard>()
+    for (u in updates) {
+        val at = example.hq.spike.data.Instants.parse(u.createdAt)
+        val i = kept.indexOfFirst { o ->
+            val other = example.hq.spike.data.Instants.parse(o.createdAt)
+            o.title == u.title && o.body == u.body && at != null && other != null && kotlin.math.abs(java.time.Duration.between(at, other).seconds) <= SAME_EVENT_SECS
+        }
+        if (i < 0) kept += u else kept[i] = kept[i].copy(alsoIds = kept[i].alsoIds + u.ids)
+    }
+    return kept
 }
