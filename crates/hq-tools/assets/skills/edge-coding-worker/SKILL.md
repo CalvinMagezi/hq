@@ -15,7 +15,7 @@ You drive, a sub-agent edits, CI tests, and a person merges. Never merge yoursel
 3. **Edit through a sub-agent.** Call `spawn_subagents` with one child:
    - `agent_type`: `coder`, and `model`: the task's first worker model, when it names one.
    - `allowed_paths`: exactly `[<path>]`, nothing else. The child has file and search tools there, and no shell.
-   - `goal`: the task, the files it may touch, the done criteria, and: "Edit only files under <path>. Run no commands and do not use bash. Do not touch .github/. Finish with the list of files you changed and why."
+   - `goal`: the task, the files it may touch, the done criteria, and: "First call load_skill for hq-engineering-edge, and for hq-engineering-core to borrow its two review axes (Acceptance, Standards) only, since you cannot run its gates. Edit only files under <path>. Run no commands and do not use bash. Do not touch .github/. Finish with the list of files you changed and why."
    - `success_criteria`: the task's done criteria.
 4. **Publish.** First call `task_comment_list`: a note from `owner` is a change to the job, so make it before publishing. Call `github_write` with the `repo`, a `branch` named after the task (its display id in lower case), a commit `message`, a pull request `title`, and a `body` that names the task. Keep the pull request link it returns. Then call `task_heartbeat` with a `checkpoint`: the branch, the link, how many fixes so far, and the next step.
 5. **Read CI.** Call `github_read` with action `wait_ci`, the `repo` and the branch as `ref`. It waits for you at no cost and answers `ci`: `passed`, `failed`, `none` (this commit has no CI, so say so in the handover) or `running` (call it once more).

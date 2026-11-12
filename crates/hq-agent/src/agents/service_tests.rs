@@ -227,6 +227,53 @@ fn child_session_gets_the_skill_catalog_and_load_skill_when_the_vault_has_skills
     assert_eq!(with.tool_count(), without.tool_count() + 1);
 }
 
+/// Built-ins reach a child through the catalog, not the vault: an active built-in is listed from
+/// the text embedded in the binary even when the vault holds no mirror of it. `edge-coding-worker`
+/// tells its confined `coder` child to `load_skill` the no-shell variant, so both must show.
+#[test]
+fn a_coder_child_in_a_vault_without_a_mirror_sees_the_active_built_ins() {
+    use hq_tools::skills::builtin::{active_for, set_active_for_this_thread};
+
+    let active = active_for(&hq_core::config::HqConfig::default());
+    let _now = set_active_for_this_thread(Some(&active));
+    let vault = tempfile::tempdir().unwrap();
+    assert!(!hq_core::skills_dir(vault.path()).exists(), "no mirror");
+
+    let service = AgentService::new(
+        Arc::new(DummyProvider),
+        vault.path().to_path_buf(),
+        vec![vault.path().to_path_buf()],
+        SessionConfig::default(),
+        SecurityProfile::Guarded,
+        0,
+        3,
+        Duration::from_secs(60),
+    );
+    let mut req = ChildRequest::new("t1", "edit the checkout");
+    req.agent_type = hq_core::types::SubagentType::Coder;
+    let resolution = service.authorize_and_resolve(&req).unwrap();
+    let run_ctx = RunCtx {
+        parent_run_id: "parent-1".to_string(),
+        sink: None,
+        parent_messages: None,
+        seq: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        ledger: crate::agents::ledger::Ledger::open(
+            None,
+            &crate::agents::ChildPlan::single(req.clone()),
+            &crate::agents::ChildExecContext::default(),
+            false,
+        ),
+    };
+    let child = service.build_child_session(&req, &resolution, &run_ctx, "child-1");
+    let prompt = child.system_prompt().unwrap();
+    for name in ["hq-engineering-edge", "hq-engineering-core"] {
+        assert!(
+            prompt.contains(name),
+            "{name} is in the coder child's catalog"
+        );
+    }
+}
+
 /// A read-only parent must not be able to hand its work to a child that may write.
 #[test]
 fn children_run_under_the_parents_permission_mode_and_nested_ones_too() {

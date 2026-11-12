@@ -74,6 +74,14 @@ pub const BUILTIN_SKILLS: &[Shipped] = &[
         applies: every_install,
     },
     Shipped {
+        name: "hq-engineering-edge",
+        files: &[(
+            SKILL_FILE,
+            include_str!("../../assets/skills/hq-engineering-edge/SKILL.md"),
+        )],
+        applies: every_install,
+    },
+    Shipped {
         name: "hq-wayfinder",
         files: &[(
             SKILL_FILE,
@@ -111,7 +119,7 @@ pub const BUILTIN_SKILLS: &[Shipped] = &[
 /// [`configure`] runs: nothing is active, so a library user or a test sees no built-in by default.
 static ACTIVE: RwLock<Option<Vec<&'static str>>> = RwLock::new(None);
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     /// Per-thread override for tests, so each test decides what is active without a global.
     static TEST_ACTIVE: std::cell::RefCell<Option<Vec<&'static str>>> =
@@ -144,18 +152,19 @@ fn unknown_off(config: &HqConfig) -> Vec<String> {
         .collect()
 }
 
-/// Sets what is active for the calling thread until the returned guard is dropped. For tests.
-#[cfg(test)]
-pub(crate) fn set_active_for_this_thread(names: Option<&[&'static str]>) -> ActiveGuard {
+/// Sets what is active for the calling thread until the returned guard is dropped. For tests,
+/// here and in crates that build sessions (feature `test-support`).
+#[cfg(any(test, feature = "test-support"))]
+pub fn set_active_for_this_thread(names: Option<&[&'static str]>) -> ActiveGuard {
     let previous = TEST_ACTIVE.with(|t| t.replace(names.map(<[&str]>::to_vec)));
     ActiveGuard(previous)
 }
 
 /// Restores the calling thread's previous override when dropped.
-#[cfg(test)]
-pub(crate) struct ActiveGuard(Option<Vec<&'static str>>);
+#[cfg(any(test, feature = "test-support"))]
+pub struct ActiveGuard(Option<Vec<&'static str>>);
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl Drop for ActiveGuard {
     fn drop(&mut self) {
         let previous = self.0.take();
@@ -164,7 +173,7 @@ impl Drop for ActiveGuard {
 }
 
 fn active_names() -> Vec<&'static str> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     if let Some(names) = TEST_ACTIVE.with(|t| t.borrow().clone()) {
         return names;
     }

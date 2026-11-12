@@ -6,6 +6,7 @@ const ACTIVE_NOW: &[&str] = &[NAME];
 const BRIEF: &str = "hq-task-brief";
 const WAYFINDER: &str = "hq-wayfinder";
 const ENGINEERING: &str = "hq-engineering-core";
+const EDGE_ENGINEERING: &str = "hq-engineering-edge";
 const CALENDAR: &str = CALENDAR_CREATION_SKILL;
 const READING: &str = CALENDAR_READING_SKILL;
 const EDITING: &str = CALENDAR_EDITING_SKILL;
@@ -96,6 +97,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             NAME,
             BRIEF,
             ENGINEERING,
+            EDGE_ENGINEERING,
             WAYFINDER,
             CALENDAR,
             READING,
@@ -109,6 +111,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             NAME,
             BRIEF,
             ENGINEERING,
+            EDGE_ENGINEERING,
             WAYFINDER,
             CALENDAR,
             READING,
@@ -117,7 +120,15 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
     );
     assert_eq!(
         active_for(&config_with(&["o/r"], &["EDGE-CODING-WORKER"])),
-        [BRIEF, ENGINEERING, WAYFINDER, CALENDAR, READING, EDITING]
+        [
+            BRIEF,
+            ENGINEERING,
+            EDGE_ENGINEERING,
+            WAYFINDER,
+            CALENDAR,
+            READING,
+            EDITING
+        ]
     );
     assert_eq!(
         unknown_off(&config_with(&[], &["edge-coding-wroker"])),
