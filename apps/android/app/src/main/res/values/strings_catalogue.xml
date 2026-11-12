@@ -1723,8 +1723,6 @@
     <string name="conn_server_value">%1$s · Connected</string>
     <string name="conn_phone_step">Step %1$s of 4 · %2$s s</string>
     <string name="conn_open_label">Open connection details</string>
-    <string name="balance_open">Open spending details</string>
-    <string name="notes_dot_new">New in your Vault</string>
     <string name="notice_running">HQ is running</string>
     <string name="notice_active_body">Answering your chats and running scheduled tasks.</string>
     <string name="notice_standby_body">Only the app is on. Chats and scheduled tasks are paused.</string>
@@ -3800,4 +3798,6 @@
     <string name="trail_github_reconnect">Needs reconnecting</string>
     <string name="trail_work_tasks">What HQ is tracking and doing</string>
     <string name="trail_work_helpers">The agents HQ runs, and starting one</string>
+    <string name="balance_open">Open spending details</string>
+    <string name="notes_dot_new">New in your Vault</string>
 </resources>

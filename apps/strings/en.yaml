@@ -3839,3 +3839,6 @@ trail_github_install: "Pick repositories to finish"
 trail_github_reconnect: "Needs reconnecting"
 trail_work_tasks: "What HQ is tracking and doing"
 trail_work_helpers: "The agents HQ runs, and starting one"
+
+balance_open: "Open spending details"
+notes_dot_new: "New in your Vault"
