@@ -243,8 +243,10 @@ fn state_rule_lines(dir: &std::path::Path, report: &hq_host::OverrideReport) -> 
 }
 
 /// How long an ACP agent gets to answer `initialize` before doctor calls it stuck.
+#[cfg(unix)]
 const ACP_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// How long it gets to end when doctor is done with it, before its whole group is killed.
+#[cfg(unix)]
 const ACP_PROBE_STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// What `initialize` told doctor about an ACP agent, or why it could not.
