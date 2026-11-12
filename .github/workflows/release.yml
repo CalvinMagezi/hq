@@ -83,6 +83,11 @@ jobs:
           bun run build
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      # Restored after the disk cleanup above: the cached target directory is large.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: release-test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo test --workspace --locked
         env:
           HQ_REQUIRE_BUILT_APP: "1"
@@ -170,6 +175,11 @@ jobs:
         run: |
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
           rustup default "$RUST_TOOLCHAIN"
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: release-build-${{ matrix.platform }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build hq
         env:
@@ -476,7 +486,8 @@ jobs:
   # written to a temporary file and deleted at the end, whatever happens.
   android-apk:
     name: Build Android APK
-    needs: [test, version, android-hq, web]
+    # The pull request's CI already ran these tests before the merge, and `sign` still waits for `test`.
+    needs: [version, android-hq, web]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 45
