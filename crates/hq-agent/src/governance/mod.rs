@@ -383,3 +383,6 @@ mod tests;
 
 #[cfg(test)]
 mod injection_tests;
+
+#[cfg(test)]
+mod device_class_tests;

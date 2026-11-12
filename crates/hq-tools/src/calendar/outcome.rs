@@ -8,10 +8,9 @@ pub const CLARIFICATION_REQUIRED: &str = "clarification_required";
 pub const PERMISSION_DENIED: &str = "permission_denied";
 pub const INVALID_EVENT: &str = "invalid_event";
 pub const CALENDAR_UNAVAILABLE: &str = "calendar_unavailable";
-pub const DEVICE_UNREACHABLE: &str = "device_unreachable";
 pub const CREATION_UNVERIFIED: &str = "creation_unverified";
 
-/// What the phone may report. `device_unreachable` is HQ's own verdict and never comes from it.
+/// What the phone may report. `device_unreachable` is HQ's own verdict (`device_actions::unreachable`) and never comes from it.
 pub const PHONE_OUTCOMES: &[&str] = &[
     CREATED,
     CLARIFICATION_REQUIRED,
@@ -89,10 +88,6 @@ pub fn unavailable(reason: &str) -> Value {
     json!({"outcome": CALENDAR_UNAVAILABLE, "reason": reason})
 }
 
-pub fn unreachable() -> Value {
-    json!({"outcome": DEVICE_UNREACHABLE})
-}
-
 pub fn unverified(reason: &str) -> Value {
     json!({"outcome": CREATION_UNVERIFIED, "reason": reason})
 }
@@ -103,12 +98,4 @@ pub fn update_unverified(reason: &str) -> Value {
 
 pub fn delete_unverified(reason: &str) -> Value {
     json!({"outcome": DELETE_UNVERIFIED, "reason": reason})
-}
-
-/// The outcome code, for logs.
-pub fn code(outcome: &Value) -> &str {
-    outcome
-        .get("outcome")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown")
 }

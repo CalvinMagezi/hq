@@ -6,11 +6,12 @@ use chrono::{DateTime, LocalResult, NaiveDate, NaiveDateTime, TimeDelta, TimeZon
 use chrono_tz::Tz;
 use serde_json::{Map, Value, json};
 
+use super::LIST_ACTION_NAME;
 use super::check::{DATE_FORMAT, TIMED_FORMAT};
-use super::create::{DeviceCalendar, PHONE_TEXT_MAX_CHARS, clean, pass_through};
-use super::outcome::{self, invalid};
-use super::store::{LIST_ACTION_NAME, Opened};
-use crate::skills::builtin::{self, CALENDAR_READING_SKILL};
+use super::create::{PHONE_TEXT_MAX_CHARS, clean, pass_through};
+use super::outcome::{self, LIST_PHONE_OUTCOMES, invalid};
+use crate::device_actions::{DeviceLink, DeviceToolSpec, RiskClass, RunFuture};
+use crate::skills::builtin::CALENDAR_READING_SKILL;
 
 pub const LIST_TOOL_NAME: &str = "calendar_list_events";
 /// Events one call returns. The phone is asked for the same number.
@@ -126,73 +127,58 @@ fn wire_payload(request_id: &str, zone: Tz, w: &Window) -> Value {
     })
 }
 
-impl DeviceCalendar {
-    pub fn list_name(&self) -> &'static str {
-        LIST_TOOL_NAME
-    }
+pub(super) const SPEC: DeviceToolSpec = DeviceToolSpec {
+    name: LIST_TOOL_NAME,
+    wire_action: LIST_ACTION_NAME,
+    risk: RiskClass::Read,
+    skill: CALENDAR_READING_SKILL,
+    phone_outcomes: LIST_PHONE_OUTCOMES,
+    description: LIST_TOOL_DESCRIPTION,
+    parameters,
+    describe,
+    finalize: finalize_list,
+    unavailable: outcome::unavailable,
+    lost: outcome::unavailable,
+    run,
+};
 
-    pub fn list_description(&self) -> &'static str {
-        LIST_TOOL_DESCRIPTION
-    }
+fn run<'a>(link: &'a DeviceLink, tool_call_id: &'a str, args: &'a Value) -> RunFuture<'a> {
+    Box::pin(run_list(link, tool_call_id, args))
+}
 
-    pub fn list_parameters(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "start_local": {
-                    "type": "string",
-                    "description": "Phone-local start: YYYY-MM-DDTHH:MM or YYYY-MM-DD. Default: the start of today."
-                },
-                "end_local": {
-                    "type": "string",
-                    "description": "Phone-local end, exclusive, same formats. Default: the end of the start's day."
-                }
+fn describe(_args: &Value) -> String {
+    "would read events from the owner's phone calendar".into()
+}
+
+fn parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "start_local": {
+                "type": "string",
+                "description": "Phone-local start: YYYY-MM-DDTHH:MM or YYYY-MM-DD. Default: the start of today."
             },
-            "additionalProperties": false
-        })
-    }
-
-    /// Runs one read. Always returns one of the contract's outcomes, never an error.
-    pub async fn list(&self, tool_call_id: &str, args: &Value) -> Value {
-        if builtin::shipped_hash(CALENDAR_READING_SKILL).is_none()
-            || !builtin::is_active(CALENDAR_READING_SKILL)
-        {
-            return outcome::unavailable("skill_not_active");
-        }
-        let window = match check_window(args, self.phone.zone, self.phone.now()) {
-            Ok(w) => w,
-            Err(refusal) => return refusal,
-        };
-        let request_id = uuid::Uuid::new_v4().to_string();
-        let payload = wire_payload(&request_id, self.phone.zone, &window);
-        let opened = self.store.open_named(
-            LIST_ACTION_NAME,
-            &self.thread_id,
-            tool_call_id,
-            &request_id,
-            payload,
-            self.timeouts,
-        );
-        let (action_id, frame, phase) = match opened {
-            Ok(Opened::New {
-                action_id,
-                frame,
-                phase,
-            }) => (action_id, frame, phase),
-            Ok(Opened::Known { outcome }) => {
-                return outcome.unwrap_or_else(|| outcome::unavailable("still_waiting"));
+            "end_local": {
+                "type": "string",
+                "description": "Phone-local end, exclusive, same formats. Default: the end of the start's day."
             }
-            Err(_) => return outcome::unavailable("too_many_pending"),
-        };
-        tracing::info!(%request_id, %action_id, phase = "sent", "device action");
-        (self.emit)(frame);
-        let result = self.wait(&action_id, phase, outcome::unavailable).await;
-        tracing::info!(
-            %request_id, %action_id, phase = "done", outcome = outcome::code(&result),
-            events = result["count"].as_u64().unwrap_or(0), "device action"
-        );
-        result
+        },
+        "additionalProperties": false
+    })
+}
+
+/// Runs one read. Always returns one of the contract's outcomes, never an error.
+pub async fn run_list(link: &DeviceLink, tool_call_id: &str, args: &Value) -> Value {
+    if let Some(refusal) = link.skill_gate(&SPEC) {
+        return refusal;
     }
+    let window = match check_window(args, link.phone.zone, link.phone.now()) {
+        Ok(w) => w,
+        Err(refusal) => return refusal,
+    };
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let payload = wire_payload(&request_id, link.phone.zone, &window);
+    link.round_trip(&SPEC, tool_call_id, payload).await
 }
 
 /// An event id the phone may name: ASCII digits only, so a link built from it can only

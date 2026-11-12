@@ -5,11 +5,12 @@ use chrono_tz::Tz;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use super::delete::{check_delete, finalize_delete};
-use super::store::{DELETE_ACTION_NAME, DeviceActionStore, Opened, Timeouts, UPDATE_ACTION_NAME};
+use super::delete::{check_delete, finalize_delete, run_delete};
 use super::target::parse_link;
-use super::update::{check_update, finalize_update};
-use super::{DeviceCalendar, PhoneClock, describe_modification, result_is_acceptable_for};
+use super::update::{check_update, finalize_update, run_update};
+use super::{DELETE_ACTION_NAME, UPDATE_ACTION_NAME};
+use crate::device_actions::store::{DeviceActionStore, Opened, Timeouts};
+use crate::device_actions::{DeviceLink, PhoneClock, always_ask_reason, result_is_acceptable_for};
 use crate::skills::builtin::set_active_for_this_thread;
 use crate::skills::builtin::{CALENDAR_CREATION_SKILL, CALENDAR_EDITING_SKILL};
 
@@ -434,14 +435,14 @@ fn the_route_accepts_only_each_actions_own_outcomes() {
 
 type Frames = mpsc::UnboundedReceiver<Value>;
 
-fn device(store: Arc<DeviceActionStore>, timeouts: Timeouts) -> (DeviceCalendar, Frames) {
+fn device(store: Arc<DeviceActionStore>, timeouts: Timeouts) -> (DeviceLink, Frames) {
     let (tx, rx) = mpsc::unbounded_channel();
     let emit = Arc::new(move |frame: Value| {
         let _ = tx.send(frame);
     });
     let phone = PhoneClock::parse("Europe/London", &Utc::now().to_rfc3339()).unwrap();
     (
-        DeviceCalendar::new("thread-1", store, emit, phone).with_timeouts(timeouts),
+        DeviceLink::new("thread-1", store, emit, phone).with_timeouts(timeouts),
         rx,
     )
 }
@@ -473,10 +474,8 @@ fn future_args(extra: Value) -> Value {
 async fn both_tools_refuse_without_their_skill_and_send_nothing() {
     let _off = set_active_for_this_thread(Some(&[CALENDAR_CREATION_SKILL]));
     let (t, mut frames) = device(Arc::default(), FAST);
-    let up = t
-        .update("c1", &future_args(json!({"new_title": "x"})))
-        .await;
-    let del = t.delete("c2", &future_args(json!({}))).await;
+    let up = run_update(&t, "c1", &future_args(json!({"new_title": "x"}))).await;
+    let del = run_delete(&t, "c2", &future_args(json!({}))).await;
     for out in [up, del] {
         assert_eq!(
             (
@@ -493,14 +492,14 @@ async fn both_tools_refuse_without_their_skill_and_send_nothing() {
 async fn a_bad_request_never_reaches_the_phone() {
     let _on = set_active_for_this_thread(Some(&[CALENDAR_EDITING_SKILL]));
     let (t, mut frames) = device(Arc::default(), FAST);
-    let out = t.update("c1", &future_args(json!({}))).await;
+    let out = run_update(&t, "c1", &future_args(json!({}))).await;
     assert_eq!(refusal(&out).1, "no_changes");
-    let out = t
-        .delete(
-            "c2",
-            &json!({"open_link": "x", "title": "t", "start_local": "2030-01-01"}),
-        )
-        .await;
+    let out = run_delete(
+        &t,
+        "c2",
+        &json!({"open_link": "x", "title": "t", "start_local": "2030-01-01"}),
+    )
+    .await;
     assert_eq!(refusal(&out).1, "bad_link");
     assert!(frames.try_recv().is_err());
 }
@@ -533,12 +532,14 @@ async fn an_update_round_trips_with_the_wire_payload_the_phone_expects() {
             let name = store.action_name(&id).unwrap();
             let body = json!({"v": 1, "outcome": "updated"});
             store
-                .settle(&id, &body, |b, p| super::finalize_for(name, b, p))
+                .settle(&id, &body, |b, p| {
+                    crate::device_actions::finalize_for(name, b, p)
+                })
                 .unwrap();
         }
     };
     let args = future_args(json!({"new_title": "Check-up"}));
-    let (out, ()) = tokio::join!(t.update("call-9", &args), phone_side);
+    let (out, ()) = tokio::join!(run_update(&t, "call-9", &args), phone_side);
     assert_eq!(out, json!({"outcome": "updated"}));
     assert!(store.pending(None).is_empty());
 }
@@ -559,17 +560,22 @@ async fn a_delete_round_trips_and_a_silent_phone_is_unverified_or_unreachable() 
             let name = store.action_name(&id).unwrap();
             let body = json!({"v": 1, "outcome": "deleted"});
             store
-                .settle(&id, &body, |b, p| super::finalize_for(name, b, p))
+                .settle(&id, &body, |b, p| {
+                    crate::device_actions::finalize_for(name, b, p)
+                })
                 .unwrap();
         }
     };
     let args = future_args(json!({}));
-    let (out, ()) = tokio::join!(t.delete("c1", &args), phone_side);
+    let (out, ()) = tokio::join!(run_delete(&t, "c1", &args), phone_side);
     assert_eq!(out, json!({"outcome": "deleted"}));
 
     // Nobody acks: the request is withdrawn and nothing happened.
     let (t, _frames) = device(Arc::default(), FAST);
-    assert_eq!(t.delete("c2", &args).await["outcome"], "device_unreachable");
+    assert_eq!(
+        run_delete(&t, "c2", &args).await["outcome"],
+        "device_unreachable"
+    );
 
     // Acked but never answered: it may have happened.
     let store: Arc<DeviceActionStore> = Arc::default();
@@ -578,7 +584,7 @@ async fn a_delete_round_trips_and_a_silent_phone_is_unverified_or_unreachable() 
         let frame = frames.recv().await.unwrap();
         store.ack(frame["action_id"].as_str().unwrap()).unwrap();
     };
-    let (out, ()) = tokio::join!(t.delete("c3", &args), acker);
+    let (out, ()) = tokio::join!(run_delete(&t, "c3", &args), acker);
     assert_eq!(
         (
             out["outcome"].as_str().unwrap(),
@@ -592,7 +598,7 @@ async fn a_delete_round_trips_and_a_silent_phone_is_unverified_or_unreachable() 
         let frame = frames.recv().await.unwrap();
         store.ack(frame["action_id"].as_str().unwrap()).unwrap();
     };
-    let (out, ()) = tokio::join!(t.update("c4", &up_args), acker);
+    let (out, ()) = tokio::join!(run_update(&t, "c4", &up_args), acker);
     assert_eq!(out["outcome"], "update_unverified");
 }
 
@@ -620,7 +626,9 @@ fn the_same_request_id_gets_the_first_answer_for_both_actions() {
         store.ack(&action_id).unwrap();
         let body = json!({"v": 1, "outcome": "event_changed"});
         store
-            .settle(&action_id, &body, |b, p| super::finalize_for(name, b, p))
+            .settle(&action_id, &body, |b, p| {
+                crate::device_actions::finalize_for(name, b, p)
+            })
             .unwrap();
         let Opened::Known {
             outcome: Some(first),
@@ -635,7 +643,7 @@ fn the_same_request_id_gets_the_first_answer_for_both_actions() {
 
 #[test]
 fn the_owner_is_told_the_action_and_a_short_cleaned_title() {
-    let delete = describe_modification(
+    let delete = always_ask_reason(
         "calendar_delete_event",
         &json!({"title": format!("Plan\n{}", "x".repeat(300)), "open_link": "l", "start_local": "s"}),
     )
@@ -646,7 +654,7 @@ fn the_owner_is_told_the_action_and_a_short_cleaned_title() {
         !delete.contains('\n') && delete.chars().count() < 140,
         "{delete}"
     );
-    let update = describe_modification(
+    let update = always_ask_reason(
         "calendar_update_event",
         &json!({"title": "Dentist", "new_title": "Check-up", "new_start_local": "2026-02-11T09:30"}),
     )
@@ -655,12 +663,9 @@ fn the_owner_is_told_the_action_and_a_short_cleaned_title() {
         update,
         "would change the event \"Dentist\" on the owner's phone calendar: title to \"Check-up\", start to 2026-02-11T09:30"
     );
-    assert_eq!(
-        describe_modification("calendar_create_event", &json!({})),
-        None
-    );
+    assert_eq!(always_ask_reason("calendar_create_event", &json!({})), None);
     assert!(
-        describe_modification("calendar_delete_event", &json!({}))
+        always_ask_reason("calendar_delete_event", &json!({}))
             .unwrap()
             .contains("an event")
     );

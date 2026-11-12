@@ -1,7 +1,8 @@
 use super::*;
 use axum::body::Body;
 use axum::http::Request;
-use hq_tools::calendar::store::{Opened, Timeouts};
+use hq_tools::calendar::ACTION_NAME;
+use hq_tools::device_actions::store::{Opened, Timeouts};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
@@ -40,7 +41,8 @@ fn open_action(state: &WsState, thread: &str) -> String {
         "time_zone": "Europe/London", "all_day": false, "duration_defaulted": true});
     match state
         .device_actions
-        .open(
+        .open_named(
+            ACTION_NAME,
             thread,
             "call",
             &uuid::Uuid::new_v4().to_string(),
@@ -160,7 +162,8 @@ async fn a_result_after_the_window_is_gone() {
     let state = state_in(vault.path());
     let id = match state
         .device_actions
-        .open(
+        .open_named(
+            ACTION_NAME,
             "t1",
             "c",
             "r",

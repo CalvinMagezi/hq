@@ -12,8 +12,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use chrono::{DateTime, TimeDelta, Utc};
-use hq_tools::calendar::{
-    DeviceCalendar, PhoneClock, Reject, finalize_for, result_is_acceptable_for,
+use hq_tools::device_actions::{
+    DeviceLink, PhoneClock, Reject, finalize_for, result_is_acceptable_for,
 };
 use serde_json::{Value, json};
 
@@ -141,12 +141,12 @@ async fn pending_handler(
 }
 
 /// The link a chat turn gets to the phone that sent it, or `None` when the frame carried no
-/// usable `device`: then the calendar tool is not offered. Logs only why.
+/// usable `device`: then the device tools are not offered. Logs only why.
 pub(crate) fn device_for_turn(
     state: &WsState,
     thread_id: &str,
     device: Option<&DeviceInfo>,
-) -> Option<Arc<DeviceCalendar>> {
+) -> Option<Arc<DeviceLink>> {
     let device = device?;
     let Some(clock) = PhoneClock::parse(&device.tz, &device.now_utc) else {
         tracing::info!(reason = "bad_zone_or_time", "device ignored");
@@ -160,7 +160,7 @@ pub(crate) fn device_for_turn(
     let emit = Arc::new(move |frame: Value| {
         let _ = tx.send(frame.to_string());
     });
-    Some(Arc::new(DeviceCalendar::new(
+    Some(Arc::new(DeviceLink::new(
         thread_id,
         state.device_actions.clone(),
         emit,

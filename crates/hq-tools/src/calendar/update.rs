@@ -6,15 +6,17 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use serde_json::{Value, json};
 
+use super::UPDATE_ACTION_NAME;
 use super::check::{
     DATE_FORMAT, Local, TIMED_FORMAT, TITLE_MAX_CHARS, check_all_day_start, check_timed_start,
     overlap_question, resolve, text,
 };
-use super::create::DeviceCalendar;
 use super::list::MS_PER_DAY;
 use super::outcome::{self, UPDATE_PHONE_OUTCOMES, invalid};
-use super::store::UPDATE_ACTION_NAME;
-use super::target::{Target, base_payload, finalize_modification, reject_unknown, target};
+use super::target::{
+    Target, base_payload, describe_target, finalize_modification, quoted, reject_unknown, target,
+};
+use crate::device_actions::{DeviceLink, DeviceToolSpec, RiskClass, RunFuture};
 use crate::skills::builtin::CALENDAR_EDITING_SKILL;
 
 pub const UPDATE_TOOL_NAME: &str = "calendar_update_event";
@@ -209,45 +211,65 @@ pub fn finalize_update(body: &Value, _payload: &Value) -> Value {
     )
 }
 
-impl DeviceCalendar {
-    pub fn update_name(&self) -> &'static str {
-        UPDATE_TOOL_NAME
-    }
+pub(super) const SPEC: DeviceToolSpec = DeviceToolSpec {
+    name: UPDATE_TOOL_NAME,
+    wire_action: UPDATE_ACTION_NAME,
+    risk: RiskClass::Modify,
+    skill: CALENDAR_EDITING_SKILL,
+    phone_outcomes: UPDATE_PHONE_OUTCOMES,
+    description: UPDATE_TOOL_DESCRIPTION,
+    parameters,
+    describe,
+    finalize: finalize_update,
+    unavailable: outcome::unavailable,
+    lost: outcome::update_unverified,
+    run,
+};
 
-    pub fn update_description(&self) -> &'static str {
-        UPDATE_TOOL_DESCRIPTION
-    }
+fn run<'a>(link: &'a DeviceLink, tool_call_id: &'a str, args: &'a Value) -> RunFuture<'a> {
+    Box::pin(run_update(link, tool_call_id, args))
+}
 
-    pub fn update_parameters(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "open_link": {"type": "string", "description": "The open_link of the event, copied from calendar_list_events."},
-                "title": {"type": "string", "description": "The event's current title exactly as listed."},
-                "start_local": {"type": "string", "description": "The event's current start exactly as listed."},
-                "new_title": {"type": "string", "description": "1 to 200 characters."},
-                "new_start_local": {"type": "string", "description": "Same format as start_local (a date for an all-day event). Keeps the length unless new_end_local is given."},
-                "new_end_local": {"type": "string", "description": "Same format as start_local. For an all-day event, the last day, inclusive."}
-            },
-            "required": ["open_link", "title", "start_local"],
-            "additionalProperties": false
-        })
+/// The approval line. Titles are untrusted, so they are cleaned and cut.
+fn describe(args: &Value) -> String {
+    let mut changes = Vec::new();
+    if let Some(t) = quoted(args, "new_title") {
+        changes.push(format!("title to \"{t}\""));
     }
+    for (key, label) in [("new_start_local", "start"), ("new_end_local", "end")] {
+        if let Some(v) = quoted(args, key) {
+            changes.push(format!("{label} to {v}"));
+        }
+    }
+    format!(
+        "would change {} on the owner's phone calendar: {}",
+        describe_target(args),
+        changes.join(", ")
+    )
+}
 
-    pub async fn update(&self, tool_call_id: &str, args: &Value) -> Value {
-        let (target, changes) = match check_update(args, self.phone.zone, self.phone.now()) {
-            Ok(checked) => checked,
-            Err(refusal) => return refusal,
-        };
-        let request_id = uuid::Uuid::new_v4().to_string();
-        let payload = wire_payload(&request_id, self.phone.zone, &target, &changes);
-        self.run_modification(
-            UPDATE_ACTION_NAME,
-            CALENDAR_EDITING_SKILL,
-            tool_call_id,
-            payload,
-            outcome::update_unverified,
-        )
-        .await
-    }
+fn parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "open_link": {"type": "string", "description": "The open_link of the event, copied from calendar_list_events."},
+            "title": {"type": "string", "description": "The event's current title exactly as listed."},
+            "start_local": {"type": "string", "description": "The event's current start exactly as listed."},
+            "new_title": {"type": "string", "description": "1 to 200 characters."},
+            "new_start_local": {"type": "string", "description": "Same format as start_local (a date for an all-day event). Keeps the length unless new_end_local is given."},
+            "new_end_local": {"type": "string", "description": "Same format as start_local. For an all-day event, the last day, inclusive."}
+        },
+        "required": ["open_link", "title", "start_local"],
+        "additionalProperties": false
+    })
+}
+
+pub async fn run_update(link: &DeviceLink, tool_call_id: &str, args: &Value) -> Value {
+    let (target, changes) = match check_update(args, link.phone.zone, link.phone.now()) {
+        Ok(checked) => checked,
+        Err(refusal) => return refusal,
+    };
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let payload = wire_payload(&request_id, link.phone.zone, &target, &changes);
+    link.round_trip(&SPEC, tool_call_id, payload).await
 }

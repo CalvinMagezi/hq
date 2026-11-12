@@ -26,10 +26,11 @@ const MAX_UNASKED_URL_DATA_BYTES: usize = 200;
 /// box rarely passes 100; a longer query is more likely text the model is carrying.
 const MAX_UNASKED_QUERY_CHARS: usize = 150;
 
-/// Why this call needs the owner whether or not the session is tainted, or `None`. Changing or
-/// deleting an event is not something the owner can undo from their notes, so it always asks.
+/// Why this call needs the owner whether or not the session is tainted, or `None`. Changing,
+/// deleting or sending on the phone is not something the owner can undo from their notes, so a
+/// device tool of that risk class always asks.
 pub(super) fn always_ask_reason(tool: &str, args: &Value) -> Option<String> {
-    hq_tools::calendar::describe_modification(tool, args)
+    hq_tools::device_actions::always_ask_reason(tool, args)
 }
 
 /// Why this call from a tainted session needs the owner although the same call from a clean
@@ -43,9 +44,6 @@ pub(super) fn tainted_reason(tool: &str, args: &Value, taint: &TaintTracker) -> 
         hq_tools::github::coder::CODER_TOOL if coder_write(args) => {
             Some("would start or steer a coding job".into())
         }
-        hq_tools::calendar::TOOL_NAME => {
-            Some("would add an event to the owner's phone calendar".into())
-        }
         "web_fetch" => fetch_reason(args.get("url").and_then(Value::as_str)?, taint),
         "web_search" => {
             let query = args.get("query").and_then(Value::as_str)?;
@@ -53,7 +51,7 @@ pub(super) fn tainted_reason(tool: &str, args: &Value, taint: &TaintTracker) -> 
             (chars > MAX_UNASKED_QUERY_CHARS)
                 .then(|| format!("would send a {chars}-character search query out"))
         }
-        _ => None,
+        _ => hq_tools::device_actions::tainted_reason(tool, args),
     }
 }
 

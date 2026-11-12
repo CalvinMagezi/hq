@@ -4,10 +4,12 @@
 use chrono_tz::Tz;
 use serde_json::{Value, json};
 
-use super::create::DeviceCalendar;
+use super::DELETE_ACTION_NAME;
 use super::outcome::{self, DELETE_PHONE_OUTCOMES, invalid};
-use super::store::DELETE_ACTION_NAME;
-use super::target::{Target, base_payload, finalize_modification, reject_unknown, target};
+use super::target::{
+    Target, base_payload, describe_target, finalize_modification, reject_unknown, target,
+};
+use crate::device_actions::{DeviceLink, DeviceToolSpec, RiskClass, RunFuture};
 use crate::skills::builtin::CALENDAR_EDITING_SKILL;
 
 pub const DELETE_TOOL_NAME: &str = "calendar_delete_event";
@@ -38,42 +40,51 @@ pub fn finalize_delete(body: &Value, _payload: &Value) -> Value {
     )
 }
 
-impl DeviceCalendar {
-    pub fn delete_name(&self) -> &'static str {
-        DELETE_TOOL_NAME
-    }
+pub(super) const SPEC: DeviceToolSpec = DeviceToolSpec {
+    name: DELETE_TOOL_NAME,
+    wire_action: DELETE_ACTION_NAME,
+    risk: RiskClass::Destructive,
+    skill: CALENDAR_EDITING_SKILL,
+    phone_outcomes: DELETE_PHONE_OUTCOMES,
+    description: DELETE_TOOL_DESCRIPTION,
+    parameters,
+    describe,
+    finalize: finalize_delete,
+    unavailable: outcome::unavailable,
+    lost: outcome::delete_unverified,
+    run,
+};
 
-    pub fn delete_description(&self) -> &'static str {
-        DELETE_TOOL_DESCRIPTION
-    }
+fn run<'a>(link: &'a DeviceLink, tool_call_id: &'a str, args: &'a Value) -> RunFuture<'a> {
+    Box::pin(run_delete(link, tool_call_id, args))
+}
 
-    pub fn delete_parameters(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "open_link": {"type": "string", "description": "The open_link of the event, copied from calendar_list_events."},
-                "title": {"type": "string", "description": "The event's title exactly as listed."},
-                "start_local": {"type": "string", "description": "The event's start exactly as listed."}
-            },
-            "required": ["open_link", "title", "start_local"],
-            "additionalProperties": false
-        })
-    }
+fn describe(args: &Value) -> String {
+    format!(
+        "would delete {} from the owner's phone calendar",
+        describe_target(args)
+    )
+}
 
-    pub async fn delete(&self, tool_call_id: &str, args: &Value) -> Value {
-        let target = match check_delete(args, self.phone.zone) {
-            Ok(t) => t,
-            Err(refusal) => return refusal,
-        };
-        let request_id = uuid::Uuid::new_v4().to_string();
-        let payload = base_payload(&request_id, self.phone.zone, &target);
-        self.run_modification(
-            DELETE_ACTION_NAME,
-            CALENDAR_EDITING_SKILL,
-            tool_call_id,
-            payload,
-            outcome::delete_unverified,
-        )
-        .await
-    }
+fn parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "open_link": {"type": "string", "description": "The open_link of the event, copied from calendar_list_events."},
+            "title": {"type": "string", "description": "The event's title exactly as listed."},
+            "start_local": {"type": "string", "description": "The event's start exactly as listed."}
+        },
+        "required": ["open_link", "title", "start_local"],
+        "additionalProperties": false
+    })
+}
+
+pub async fn run_delete(link: &DeviceLink, tool_call_id: &str, args: &Value) -> Value {
+    let target = match check_delete(args, link.phone.zone) {
+        Ok(t) => t,
+        Err(refusal) => return refusal,
+    };
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let payload = base_payload(&request_id, link.phone.zone, &target);
+    link.round_trip(&SPEC, tool_call_id, payload).await
 }

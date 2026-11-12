@@ -38,17 +38,18 @@ const UNTRUSTED_SOURCE_TOOLS: &[&str] = &[
     "context_packet",
     "subagent_run_status",
     "subagent_run_result",
-    // Titles and calendar names come from invitations and shared calendars.
-    hq_tools::calendar::LIST_TOOL_NAME,
     "hq",
 ];
 
 /// Tool category whose every member is an untrusted source.
 const UNTRUSTED_SOURCE_CATEGORY: &str = "remote_mcp";
 
-/// Whether a tool's result should taint the session.
+/// Whether a tool's result should taint the session. A device tool of the read risk class
+/// is one: calendar titles and message senders come from other people.
 pub fn is_untrusted_source(tool_name: &str, category: &str) -> bool {
-    category == UNTRUSTED_SOURCE_CATEGORY || UNTRUSTED_SOURCE_TOOLS.contains(&tool_name)
+    category == UNTRUSTED_SOURCE_CATEGORY
+        || UNTRUSTED_SOURCE_TOOLS.contains(&tool_name)
+        || hq_tools::device_actions::is_untrusted_source(tool_name)
 }
 
 /// A host name in the owner's words: in a URL, or bare like `docs.example.com`.
