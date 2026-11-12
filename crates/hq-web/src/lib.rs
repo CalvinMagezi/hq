@@ -401,6 +401,14 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route("/api/adoption", get(adoption_api::adoption_handler))
         .route("/api/offers/replay", get(adoption_api::replay_handler))
         .route("/api/offers/answer", post(offers_api::answer_handler))
+        .route(
+            "/api/offers/later/open",
+            post(offers_api::later_open_handler),
+        )
+        .route("/api/offers/never", post(offers_api::never_handler))
+        .route("/api/offers/fewer", post(offers_api::fewer_handler))
+        .route("/api/offers/summary", get(offers_api::summary_handler))
+        .route("/api/offers/clear", post(offers_api::clear_handler))
         .route("/api/setup/status", get(setup_api::status_handler))
         .route("/api/setup/test", post(setup_api::test_handler))
         .route("/api/setup/provider", post(setup_api::provider_handler))

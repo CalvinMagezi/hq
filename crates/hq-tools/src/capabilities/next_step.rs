@@ -199,7 +199,8 @@ pub fn offer_for(
         return Ok(None);
     };
     let done = cap.tools.iter().any(|t| turn_tools.contains(t));
-    if done || !ready.contains(capability) || hq_db::offers::muted(conn, now)?.contains(*kind) {
+    let muted = hq_db::offers::muted(conn, now)?;
+    if done || !ready.contains(capability) || muted.contains(*kind) || muted.contains(capability) {
         return Ok(None);
     }
     let last = hq_db::offers::last_shown(conn)?;

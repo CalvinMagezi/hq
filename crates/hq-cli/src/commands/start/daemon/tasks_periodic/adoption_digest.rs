@@ -205,9 +205,11 @@ mod tests {
         assert!(item.body.contains("1 this week, 4 last week"));
         assert!(item.body.contains("5 minutes after the first message"));
         assert!(item.body.contains("used again in week four"));
-        assert!(item.body.contains(
-            "turn a list you paste into separate tasks: shown 3, yes 1, not now 2, muted for now"
-        ));
+        assert!(
+            item.body.contains(
+                "turn a pasted list into tasks: shown 3, yes 1, not now 2, muted for now"
+            )
+        );
         assert!(item.body.contains("Nothing was sent anywhere"));
         assert!(!item.body.contains('\u{2014}'));
         assert_eq!(item.dedup_key.as_deref(), Some("adoption-2026-W45"));

@@ -258,6 +258,24 @@ pub fn prompt_block(
 mod tests {
     use super::*;
 
+    /// A pill shows `says` as its label and `example` as the text it puts in the composer. Both
+    /// have to fit a pill on a small phone.
+    const MAX_PILL_TEXT_CHARS: usize = 40;
+
+    #[test]
+    fn what_a_pill_shows_fits_in_forty_characters() {
+        let too_long: Vec<String> = catalog()
+            .iter()
+            .flat_map(|c| [("says", &c.says), ("example", &c.example)].map(|(f, v)| (c, f, v)))
+            .filter(|(_, _, v)| v.chars().count() > MAX_PILL_TEXT_CHARS)
+            .map(|(c, f, v)| format!("{}.{f} ({} chars): {v}", c.id, v.chars().count()))
+            .collect();
+        assert!(
+            too_long.is_empty(),
+            "shorten in capabilities.yaml: {too_long:#?}"
+        );
+    }
+
     fn all_tools(_: &str) -> bool {
         true
     }

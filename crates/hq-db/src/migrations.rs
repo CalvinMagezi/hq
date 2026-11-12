@@ -463,6 +463,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "127_site_allowed_once",
         include_str!("../sql/127_site_allowed_once.sql"),
     ),
+    (
+        "128_offer_memory",
+        include_str!("../sql/128_offer_memory.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

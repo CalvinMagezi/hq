@@ -386,6 +386,8 @@ async fn handle_chat(state: &Arc<WsState>, req: ChatRequest) {
             asked_at,
             text: stored_text(&req),
             registry: state.registry.clone(),
+            voice: req.source.is_some()
+                || hq_tools::capabilities::offers::is_voice_client_id(req.client_id.as_deref()),
         }),
         device: tid.as_deref().and_then(|t| {
             crate::device_actions_api::device_for_turn(state, t, req.device.as_ref())
@@ -406,7 +408,7 @@ async fn handle_chat(state: &Arc<WsState>, req: ChatRequest) {
 
 /// Whether this chat's turn left an approval waiting for the owner, so an app says "HQ needs your
 /// OK to finish" instead of "HQ answered".
-fn waiting_for_owner(db: &hq_db::Database, thread_id: &str) -> bool {
+pub(crate) fn waiting_for_owner(db: &hq_db::Database, thread_id: &str) -> bool {
     let prefix = hq_agent::governance::owner_approval_prefix(&format!("web:{thread_id}"));
     hq_db::value_items::count_waiting_with_prefix(db, &prefix).is_ok_and(|n| n > 0)
 }
@@ -847,6 +849,7 @@ impl ChatTurn {
                 )
             }
         };
+        // A failed turn offers nothing, and costs no query to find that out.
         if failure.is_none() && !content.trim().is_empty() {
             self.attach_offer(&config).await;
         }
@@ -874,12 +877,22 @@ impl ChatTurn {
         let Some(ctx) = self.offer.clone() else {
             return;
         };
+        let state = hq_tools::capabilities::offers::TurnState {
+            voice: ctx.voice,
+            approval_pending: self
+                .tid
+                .as_deref()
+                .is_some_and(|t| waiting_for_owner(&self.db, t)),
+            // The caller only gets here after a turn that worked.
+            errored: false,
+        };
         let tools = self
             .record
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .tool_names();
-        let chosen = crate::offers_api::choose(self.db.clone(), config.clone(), ctx, tools).await;
+        let chosen =
+            crate::offers_api::choose(self.db.clone(), config.clone(), ctx, tools, state).await;
         if let Some(offer) = chosen {
             self.record
                 .lock()

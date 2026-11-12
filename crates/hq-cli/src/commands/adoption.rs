@@ -257,9 +257,7 @@ mod tests {
         assert!(text.contains("Used this week (1 of 10 ready; last week 2)"));
         assert!(text.contains("- Read the text in a photo"));
         assert!(text.contains("Nothing was sent anywhere"));
-        assert!(text.contains(
-            "- Keep a list of things to do, with the day each one is due: shown 2, yes 1, not now 1"
-        ));
+        assert!(text.contains("- Keep a to-do list with due days: shown 2, yes 1, not now 1"));
         let json = r.to_json();
         assert_eq!(json["first_value"]["after_secs"], 300);
         assert_eq!(json["returned_week_four"], true);
