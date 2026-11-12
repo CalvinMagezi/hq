@@ -252,3 +252,36 @@ async fn a_handoff_approval_shows_the_task_text_and_lapses_when_it_changes() {
         "an approval of the old text does not cover the new one"
     );
 }
+
+#[tokio::test]
+async fn a_calendar_change_request_shows_the_event_the_change_and_binds_to_both() {
+    let (db, approval) = approval();
+    let args = json!({"open_link": "hq://calendar/event/42?begin=1&end=2", "title": "Dentist",
+        "start_local": "2026-02-10T15:00", "new_start_local": "2026-02-11T16:00"});
+    approval.check("calendar_update_event", &args).await;
+    let id = request_id(&db, "calendar_update_event");
+    let body: String = db
+        .with_conn(|c| {
+            Ok(
+                c.query_row("SELECT body FROM value_items WHERE id = ?1", [&id], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    for shown in [
+        "hq://calendar/event/42?begin=1&end=2",
+        "\"new_start_local\": \"2026-02-11T16:00\"",
+        "If approved, it would change the event \"Dentist\" on the owner's phone calendar: start to 2026-02-11T16:00.",
+    ] {
+        assert!(body.contains(shown), "{shown}\n{body}");
+    }
+    // Another event, or another change, is another request.
+    let other_event = json!({"open_link": "hq://calendar/event/43?begin=1&end=2", "title": "Dentist",
+        "start_local": "2026-02-10T15:00", "new_start_local": "2026-02-11T16:00"});
+    let other_change = json!({"open_link": "hq://calendar/event/42?begin=1&end=2", "title": "Dentist",
+        "start_local": "2026-02-10T15:00", "new_start_local": "2026-02-11T17:00"});
+    let key = |a: &Value| approval.key("calendar_update_event", a, None);
+    assert_ne!(key(&args), key(&other_event));
+    assert_ne!(key(&args), key(&other_change));
+}

@@ -1,4 +1,4 @@
-//! `calendar_create_event` as an agent tool. The logic is `hq_tools::calendar`; this wrapper
+//! The calendar tools as agent tools. The logic is `hq_tools::calendar`; this wrapper
 //! exists because the tool needs the model's tool call id, which the generic adapter drops.
 
 use std::sync::Arc;
@@ -100,6 +100,104 @@ impl AgentTool for CalendarListEventsTool {
     }
     async fn execute(&self, id: &str, args: Value) -> Result<ToolResult> {
         let outcome = self.device.list(id, &args).await;
+        Ok(ToolResult {
+            content: vec![ToolResultContent {
+                r#type: "text".into(),
+                text: outcome.to_string(),
+            }],
+            details: None,
+            context_modifier: None,
+        })
+    }
+}
+
+/// `calendar_update_event` through the same link.
+pub struct CalendarUpdateEventTool {
+    device: Arc<DeviceCalendar>,
+    description: String,
+}
+
+impl CalendarUpdateEventTool {
+    pub fn new(device: Arc<DeviceCalendar>) -> Self {
+        let description = format!("{} {}", device.update_description(), device.context_line());
+        Self {
+            device,
+            description,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl AgentTool for CalendarUpdateEventTool {
+    fn name(&self) -> &str {
+        self.device.update_name()
+    }
+    fn description(&self) -> &str {
+        &self.description
+    }
+    fn parameters(&self) -> Value {
+        self.device.update_parameters()
+    }
+    fn category(&self) -> &str {
+        CATEGORY
+    }
+    fn is_read_only(&self) -> bool {
+        false
+    }
+    fn requires_live_user_turn(&self) -> bool {
+        true
+    }
+    async fn execute(&self, id: &str, args: Value) -> Result<ToolResult> {
+        let outcome = self.device.update(id, &args).await;
+        Ok(ToolResult {
+            content: vec![ToolResultContent {
+                r#type: "text".into(),
+                text: outcome.to_string(),
+            }],
+            details: None,
+            context_modifier: None,
+        })
+    }
+}
+
+/// `calendar_delete_event` through the same link.
+pub struct CalendarDeleteEventTool {
+    device: Arc<DeviceCalendar>,
+    description: String,
+}
+
+impl CalendarDeleteEventTool {
+    pub fn new(device: Arc<DeviceCalendar>) -> Self {
+        let description = format!("{} {}", device.delete_description(), device.context_line());
+        Self {
+            device,
+            description,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl AgentTool for CalendarDeleteEventTool {
+    fn name(&self) -> &str {
+        self.device.delete_name()
+    }
+    fn description(&self) -> &str {
+        &self.description
+    }
+    fn parameters(&self) -> Value {
+        self.device.delete_parameters()
+    }
+    fn category(&self) -> &str {
+        CATEGORY
+    }
+    fn is_read_only(&self) -> bool {
+        false
+    }
+    fn requires_live_user_turn(&self) -> bool {
+        true
+    }
+    async fn execute(&self, id: &str, args: Value) -> Result<ToolResult> {
+        let outcome = self.device.delete(id, &args).await;
         Ok(ToolResult {
             content: vec![ToolResultContent {
                 r#type: "text".into(),

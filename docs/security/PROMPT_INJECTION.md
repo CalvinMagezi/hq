@@ -104,6 +104,11 @@ normal and the `BypassPermissions` paths.
      calendar (`calendar_list_events`) is itself an untrusted source, since titles and
      calendar names come from invitations and shared calendars: after a read, creating an
      event asks the owner.
+   - `calendar_update_event` and `calendar_delete_event`, which change or remove an event on
+     the phone calendar. These ask in every turn, clean or tainted, in every permission mode but
+     bypass (`always_ask_reason` in `tainted_calls.rs`): a deleted event cannot be recovered from
+     the vault. The request names the action and the event's cleaned, shortened title, and its
+     digest covers the event link, the title and start as listed, and every change.
 5. **Nobody to ask.** A session with no approval store cannot wait for the
    owner, so once tainted:
    - it never starts, briefs or types into another agent:
@@ -115,6 +120,9 @@ normal and the `BypassPermissions` paths.
      runs nothing that would need the owner in a chat (`needs_owner`) and none of
      the calls in rule 4. Each refusal puts one "HQ refused the tool" item in the
      owner's inbox saying what was left for them.
+
+   `calendar_update_event` and `calendar_delete_event` are the exception to "once tainted": a
+   session with no approval store never runs them, tainted or not, because nobody can be asked.
 
    Before it reads outside text an unattended turn runs what its preset allows,
    as before. The terminal chat and `ask_owner: false` keep running the rest,

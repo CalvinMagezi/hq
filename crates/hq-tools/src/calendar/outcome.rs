@@ -31,6 +31,41 @@ pub const LIST_PHONE_OUTCOMES: &[&str] = &[
     INVALID_EVENT,
 ];
 
+pub const UPDATED: &str = "updated";
+pub const DELETED: &str = "deleted";
+pub const EVENT_NOT_FOUND: &str = "event_not_found";
+pub const EVENT_CHANGED: &str = "event_changed";
+pub const READ_ONLY_CALENDAR: &str = "read_only_calendar";
+pub const RECURRING_UNSUPPORTED: &str = "recurring_unsupported";
+pub const UPDATE_UNVERIFIED: &str = "update_unverified";
+pub const DELETE_UNVERIFIED: &str = "delete_unverified";
+
+/// What the phone may report for `calendar.update`.
+pub const UPDATE_PHONE_OUTCOMES: &[&str] = &[
+    UPDATED,
+    EVENT_NOT_FOUND,
+    EVENT_CHANGED,
+    READ_ONLY_CALENDAR,
+    RECURRING_UNSUPPORTED,
+    INVALID_EVENT,
+    PERMISSION_DENIED,
+    CALENDAR_UNAVAILABLE,
+    UPDATE_UNVERIFIED,
+];
+
+/// What the phone may report for `calendar.delete`.
+pub const DELETE_PHONE_OUTCOMES: &[&str] = &[
+    DELETED,
+    EVENT_NOT_FOUND,
+    EVENT_CHANGED,
+    READ_ONLY_CALENDAR,
+    RECURRING_UNSUPPORTED,
+    INVALID_EVENT,
+    PERMISSION_DENIED,
+    CALENDAR_UNAVAILABLE,
+    DELETE_UNVERIFIED,
+];
+
 /// Where a created event lives. Says nothing about cloud sync, which HQ cannot know.
 pub const SAVED_TO: &str = "device_calendar";
 
@@ -60,6 +95,14 @@ pub fn unreachable() -> Value {
 
 pub fn unverified(reason: &str) -> Value {
     json!({"outcome": CREATION_UNVERIFIED, "reason": reason})
+}
+
+pub fn update_unverified(reason: &str) -> Value {
+    json!({"outcome": UPDATE_UNVERIFIED, "reason": reason})
+}
+
+pub fn delete_unverified(reason: &str) -> Value {
+    json!({"outcome": DELETE_UNVERIFIED, "reason": reason})
 }
 
 /// The outcome code, for logs.

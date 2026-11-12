@@ -1,4 +1,4 @@
-# Creating and reading calendar events from the phone
+# Creating, reading, changing and deleting calendar events on the phone
 
 Ask HQ in the phone app to put something on your calendar and it is saved straight to the
 phone's calendar, with no review screen. A clear request creates the event. A request with a
@@ -88,3 +88,44 @@ is active. It uses the same `device_action` channel and routes as creation, with
 - Calendar text is untrusted. `calendar_list_events` is in `UNTRUSTED_SOURCE_TOOLS`, so after a
   read `calendar_create_event` asks the owner, in that turn and in every later turn of the same chat thread. Logs carry the request id, phase, outcome code and
   counts, never titles. See `docs/security/PROMPT_INJECTION.md`.
+
+## Changing and deleting events
+
+`calendar_update_event` and `calendar_delete_event` act on one existing event. They are offered
+only in a turn that carried `device`, and only while the built-in skill `calendar-editing` is
+active. They use the same channel, routes and timeouts as creation, with the actions
+`calendar.update` and `calendar.delete` (wire version 1).
+
+- **Naming the event.** The model gets the event from `calendar_list_events` and passes its
+  `open_link`, its `title` and its `start_local` as listed. HQ parses the link strictly
+  (`hq://calendar/event/{digits}?begin={digits}&end={digits}`, ids and times at most 18 digits, no
+  other parameters; anything else is `invalid_event` with reason `bad_link`) and checks that
+  `start_local` equals the link's begin in the phone's zone (an all-day event by UTC date; reason
+  `start_mismatch`). A date-only `start_local` means an all-day event.
+- **What can change.** `new_title`, `new_start_local` and `new_end_local`, at least one (reason
+  `no_changes` otherwise). Nothing else: no place, notes, guests, reminders, recurrence or
+  calendar. Timed stays timed and all-day stays all-day (reason `kind_change`). With only a new
+  start the length is kept. A new timed start follows the creation rules (not in the past, not
+  years away, a repeated local hour asks which one); an all-day end is the last day, inclusive,
+  stored as the next UTC midnight. Renaming an event that already started is allowed.
+- **Wire.** Delete payload: `request_id`, `event_id`, `begin_ms`, `expected_title`, `zone`.
+  Update adds `all_day` (HQ's reading of the event's kind, so the phone can refuse a mismatch) and
+  `changes`: `title`, `start_ms`, `end_ms`, already converted by HQ with the phone's zone (DST aware).
+  A new start always comes with its end. The phone never receives local times. `expected_title` is
+  the title as the phone cleans it; an event listed as "(no title)" is sent with an empty one.
+- **Phone checks, in order:** permission, the event exists and is not deleted, the calendar allows
+  edits, the event is not recurring, then title and begin still match. It acts, reads the row
+  back, and reports `updated` or `deleted` only when the read-back agrees; otherwise
+  `update_unverified` or `delete_unverified`. A retried request id returns the first result.
+- **Outcomes the model sees:** `updated`, `deleted`, `event_not_found`, `event_changed` (the event
+  changed since it was listed), `read_only_calendar`, `recurring_unsupported`, `invalid_event`
+  (with a reason), `permission_denied` (with where to turn it on), `calendar_unavailable`, and
+  HQ's own `device_unreachable`, `update_unverified`, `delete_unverified`. Only the first two mean
+  it happened. A result outside this set is stored as unverified, never as success.
+- **Limits.** A recurring event (a rule, an instance or an exception) is refused in this version
+  (`recurring_unsupported`); the owner uses the calendar app. Any editable event the owner can read
+  may be changed, not only ones HQ created.
+- **Approval.** Every call asks the owner first, in a clean chat too, and does not run where
+  nobody can be asked. The inbox card shows the exact arguments plus a line naming the action,
+  the cleaned title and the changes. See `docs/security/OWNER_APPROVAL.md`.
+- Logs hold request ids, the action, the phase and an outcome code, never titles.

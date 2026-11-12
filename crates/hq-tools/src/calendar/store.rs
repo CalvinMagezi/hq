@@ -21,6 +21,8 @@ pub const LATE_RESULT_GRACE_SECS: i64 = 300;
 pub const SETTLED_KEEP_SECS: i64 = 600;
 pub const ACTION_NAME: &str = "calendar.create";
 pub const LIST_ACTION_NAME: &str = "calendar.list";
+pub const UPDATE_ACTION_NAME: &str = "calendar.update";
+pub const DELETE_ACTION_NAME: &str = "calendar.delete";
 pub const WIRE_VERSION: u32 = 1;
 
 pub trait Clock: Send + Sync {

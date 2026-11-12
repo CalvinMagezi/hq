@@ -18,13 +18,13 @@ pub const CALENDAR_LIST_MAX_EVENTS: usize = 50;
 /// Rows read from a phone's answer before the cap, so a hostile reply stays cheap.
 const MAX_ROWS_READ: usize = CALENDAR_LIST_MAX_EVENTS * 4;
 /// Longest run of digits taken as an event id.
-const ID_MAX_DIGITS: usize = 18;
+pub(super) const ID_MAX_DIGITS: usize = 18;
 /// A local time that never happened is moved forward in steps of this many minutes.
 const GAP_STEP_MINUTES: i64 = 30;
 const GAP_MAX_STEPS: i64 = 8;
-const LINK_PREFIX: &str = "hq://calendar/event/";
-const UNTITLED: &str = "(no title)";
-const MS_PER_DAY: i64 = 86_400_000;
+pub(super) const LINK_PREFIX: &str = "hq://calendar/event/";
+pub(super) const UNTITLED: &str = "(no title)";
+pub(super) const MS_PER_DAY: i64 = 86_400_000;
 const KNOWN_FIELDS: &[&str] = &["start_local", "end_local"];
 const RESERVED_PREFIX: &str = "_hq_";
 
