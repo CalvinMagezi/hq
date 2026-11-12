@@ -80,15 +80,22 @@ class ChatActions(
     val onExportFormat: (ExportFormat) -> Unit = {},
     val onExportClose: () -> Unit = {},
     val onExportAgain: () -> Unit = {},
-    /** Answers the offer under a reply: the reply's id, and Yes or Not now. */
-    val onOffer: (String, Boolean) -> Unit = { _, _ -> },
+    /** Answers the offer in the slot above the composer: the reply's id, and Yes, Not now or Later. */
+    val onOffer: (String, OfferAnswer) -> Unit = { _, _ -> },
     val onScheduleOffer: (String, Long) -> Unit = { _, _ -> },
+    /** "Fewer like this" and "Never show this" on a pill, by HQ's capability id. */
+    val onFewer: (String) -> Unit = {},
+    val onNever: (String) -> Unit = {},
+    /** Pins or unpins a chat in the chats sheet; the pins live on this phone only. */
+    val onPinChat: (String) -> Unit = {},
 )
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val services = HqServices.get(app)
     private val client = services.client
     private val drafts = app.getSharedPreferences(DRAFT_PREFS, Context.MODE_PRIVATE)
+    private val pins = app.getSharedPreferences(PIN_PREFS, Context.MODE_PRIVATE)
+    private var resultTimer: Job? = null
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state
 
@@ -111,7 +118,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         onDraft = ::setDraft, onSend = ::send, onStop = ::stop, onRetry = ::retry,
         onOpenChats = ::openChats, onCloseChats = { _state.update { it.copy(chatsOpen = false) } }, onNewChat = { newChat() },
         onOpenChat = ::openThread, onSearchChats = { q -> _state.update { it.copy(chatSearch = q) } },
-        onArchive = ::archive, onUndo = ::undoArchive, onDismissNotice = { archiving = null; _state.update { it.copy(notice = null) } },
+        onArchive = ::archive, onUndo = ::undoArchive, onDismissNotice = { commitArchive(); _state.update { it.copy(notice = null) } },
         onNotice = { text -> _state.update { it.copy(notice = Notice(text)) } },
         onOpenNote = ::openNote, onCloseNote = { _state.update { it.copy(note = null) } }, onAskAboutNote = ::askAbout,
         onOpenChart = { spec -> _state.update { it.copy(page = Page.Chart(spec)) } }, onOpenTable = ::openTable,
@@ -124,7 +131,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         onRegenerate = ::regenerate, onEditResend = ::editResend, onCancelEdit = { _state.update { s -> s.copy(editing = null, draft = "", files = s.files.filter { it.uri.isNotEmpty() }) } },
         onNoteMenu = { open -> _state.update { it.copy(noteMenu = open) } }, onTogglePin = ::togglePin,
         onExport = { _state.value.note?.let { n -> _state.update { it.copy(noteMenu = false) }; exporter.choose(n.path, n.title, n.body) } }, onExportFormat = exporter::start, onExportClose = exporter::close, onExportAgain = exporter::again,
-        onLoadOlder = ::loadOlder, onOffer = ::answerOffer, onScheduleOffer = ::scheduleOffer, onSlash = { name -> setDraft(if (name == "/topic") "/topic " else name) },
+        onLoadOlder = ::loadOlder, onOffer = ::answerOffer, onScheduleOffer = ::scheduleOffer, onFewer = { id -> tellHq(id, "fewer", R.string.chat_pill_fewer_done) }, onNever = { id -> tellHq(id, "never", R.string.chat_pill_never_done) },
+        onPinChat = ::pinChat, onSlash = { name -> setDraft(if (name == "/topic") "/topic " else name) },
     )
 
     init {
@@ -209,7 +217,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (fromComposer) { sentContexts[clientId] = sendContexts; sentFiles[clientId] = s.files }
         if (replaceFrom != null) sentReplace[clientId] = replaceFrom
         _state.update {
-            val sent = it.copy(messages = kept + UiMessage(clientId, Speaker.User, text, sending = true, files = sendFiles), failed = false, editing = null)
+            val sent = it.copy(messages = kept + UiMessage(clientId, Speaker.User, text, sending = true, files = sendFiles), failed = false, editing = null, offerResult = null)
             if (fromComposer) sent.copy(draft = "", contexts = emptyList(), files = emptyList()) else sent
         }
         if (fromComposer) drafts.edit().remove(draftKey(s.threadId)).apply()
@@ -229,7 +237,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val made = client.createThread(topic)
-                _state.update { ChatUiState(connected = it.connected, threadId = made.id, title = made.title.ifBlank { topic }, chats = it.chats, suggestions = it.suggestions) }
+                _state.update { ChatUiState(connected = it.connected, threadId = made.id, title = made.title.ifBlank { topic }, chats = it.chats, suggestions = it.suggestions, laterSupported = it.laterSupported, pillChoices = it.pillChoices, answeredOffers = it.answeredOffers, pillsCleared = it.pillsCleared) }
                 old?.let(::archive)
                 refreshChats()
             } catch (e: HqUnavailable) {
@@ -306,7 +314,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun newChat(keepSheet: Boolean = false) {
         _state.update {
-            ChatUiState(connected = it.connected, draft = drafts.getString(draftKey(null), "").orEmpty(), chats = it.chats, chatsOpen = keepSheet && it.chatsOpen)
+            ChatUiState(connected = it.connected, draft = drafts.getString(draftKey(null), "").orEmpty(), chats = it.chats, chatsOpen = keepSheet && it.chatsOpen, suggestions = it.suggestions, laterSupported = it.laterSupported, pillChoices = it.pillChoices, answeredOffers = it.answeredOffers, pillsCleared = it.pillsCleared)
         }
     }
 
@@ -314,12 +322,29 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val row = _state.value.chats.firstOrNull { it.id == id }
         _state.update {
             it.copy(threadId = id, title = row?.title ?: it.title, messages = emptyList(), live = null, failed = false, chatsOpen = false,
-                draft = drafts.getString(draftKey(id), "").orEmpty(), contexts = emptyList(), files = emptyList(), editing = null, pressed = null, hasOlder = false)
+                draft = drafts.getString(draftKey(id), "").orEmpty(), contexts = emptyList(), files = emptyList(), editing = null, pressed = null, hasOlder = false, offerResult = null)
         }
         viewModelScope.launch { loadMessages(id) }
     }
 
     /** Opens a chat a link names, but only one that is in the list: an unknown id would blank the open chat and send the next message to nothing. */
+    /** The open chat read again (answered offers stay gone, see [OfferFlow.strip]). */
+    fun reloadOpen() {
+        viewModelScope.launch {
+            refreshChats()
+            _state.value.threadId?.let { loadMessages(it) }
+        }
+    }
+
+    /** A Later offer was brought back to [threadId]: open that chat and read it fresh; with no id, read the open one again. */
+    fun showBroughtBack(threadId: String?) {
+        if (threadId == null) return reloadOpen()
+        viewModelScope.launch {
+            refreshChats()
+            openThread(threadId)
+        }
+    }
+
     fun focusComposer() = _state.update { it.copy(focusDraft = it.focusDraft + 1) }
 
     fun openLinked(id: String) {
@@ -331,8 +356,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun loadMessages(id: String) {
-        val page = try { client.messages(id) } catch (e: HqUnavailable) { return }
-        val shown = page.sortedBy { it.createdAt }.map(::toUi)
+        val page = try { client.messages(id) } catch (e: HqUnavailable) {
+            // HQ says the chat is gone: its pin goes too. Any other failure keeps everything as it was.
+            if (e.status == HTTP_NOT_FOUND) forgetPin(id)
+            return
+        }
+        val shown = OfferFlow.strip(page.sortedBy { it.createdAt }.map(::toUi), _state.value.answeredOffers)
         if (page.any { it.spoken }) SpokenThreads.mark(getApplication(), id)
         _state.update {
             if (it.threadId != id) return@update it
@@ -346,20 +375,79 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt, spoken = m.spoken, offer = m.offer)
 
-    /** Hides the line at once and tells HQ, which forgets the offer on that reply. Yes then sends its request, or puts it in the composer. */
-    private fun answerOffer(id: String, yes: Boolean) {
-        val offer = _state.value.messages.firstOrNull { it.id == id }?.offer ?: return
-        _state.update { s -> s.copy(messages = s.messages.map { if (it.id == id) it.copy(offer = null) else it }) }
+    /**
+     * Collapses the offer to its result line at once and tells HQ. Yes acts after HQ has taken the answer (or has no route for it),
+     * so a failure puts the offer back instead of sending twice. Not now and Later come back on a failure too.
+     */
+    private fun answerOffer(id: String, answer: OfferAnswer) {
+        if (!OfferFlow.canAnswer(_state.value, id)) return
+        val offer = _state.value.messages.first { it.id == id }.offer ?: return
+        _state.update { OfferFlow.answered(it, id, answer) }
+        if (answer != OfferAnswer.Yes) startResultTimer()
         viewModelScope.launch {
+            var status: Int? = null
             try {
-                client.postJson("/api/offers/answer", org.json.JSONObject().put("message_id", id).put("answer", if (yes) "yes" else "not_now"))
+                client.postJson("/api/offers/answer", org.json.JSONObject().put("message_id", id).put("answer", answer.wire))
             } catch (e: Exception) {
                 android.util.Log.w("ChatViewModel", "could not record the answer to an offer", e)
+                status = (e as? HqUnavailable)?.status ?: 0
+                _state.update { OfferFlow.failed(it, id, offer, answer, status, flowTexts()) }
+            }
+            if (answer == OfferAnswer.Yes && OfferFlow.yesProceeds(status)) {
+                val s = _state.value
+                if (offer.send && s.connected && !s.running) submit(offer.reply, replaceFrom = null, files = emptyList(), contexts = emptyList()) else setDraft(offer.reply)
             }
         }
-        if (!yes) return
-        val s = _state.value
-        if (offer.send && s.connected && !s.running) submit(offer.reply, replaceFrom = null, files = emptyList(), contexts = emptyList()) else setDraft(offer.reply)
+    }
+
+    private fun flowTexts() = getApplication<Application>().let { FlowTexts(it.getString(R.string.chat_send_retry), it.getString(R.string.chat_offer_gone)) }
+
+    /** The result line goes by itself, so the slot is free for the next thing. */
+    private fun startResultTimer() {
+        resultTimer?.cancel()
+        resultTimer = viewModelScope.launch { delay(RESULT_MS); _state.update { it.copy(offerResult = null) } }
+    }
+
+    /** Fewer like this and Never show this on a pill. The pill leaves at once; HQ's answer decides whether to announce it or put it back. */
+    private fun tellHq(capability: String, route: String, done: Int) {
+        if (capability.isBlank()) return
+        val before = _state.value
+        _state.update { PillFlow.removed(it, capability) }
+        viewModelScope.launch {
+            try {
+                client.postJson("/api/offers/$route", org.json.JSONObject().put("type", capability))
+                _state.update { PillFlow.confirmed(it, getApplication<Application>().getString(done)) }
+            } catch (e: Exception) {
+                android.util.Log.w("ChatViewModel", "could not tell HQ about a pill", e)
+                _state.update { PillFlow.failed(it, before, (e as? HqUnavailable)?.status ?: 0, flowTexts()) }
+            }
+        }
+    }
+
+    /** Pins or unpins a chat; the six pins are kept in this phone's preferences and nowhere else. */
+    private fun pinChat(id: String) {
+        val app = getApplication<Application>()
+        when (val change = Pins.toggle(Pins.parse(pins.getString(PIN_KEY, null)), id)) {
+            Pins.Change.Full -> _state.update { it.copy(notice = Notice(app.getString(R.string.chat_pin_full, Pins.MAX))) }
+            is Pins.Change.Done -> {
+                pins.edit().putString(PIN_KEY, Pins.encode(change.ids)).apply()
+                _state.update { it.copy(chats = Pins.apply(it.chats, change.ids), notice = Notice(app.getString(if (change.pinned) R.string.chat_pinned_done else R.string.chat_unpinned_done))) }
+            }
+        }
+    }
+
+    private fun forgetPin(id: String) {
+        val now = Pins.parse(pins.getString(PIN_KEY, null))
+        if (id !in now) return
+        val left = Pins.forget(now, id)
+        pins.edit().putString(PIN_KEY, Pins.encode(left)).apply()
+        _state.update { it.copy(chats = Pins.apply(it.chats, left)) }
+    }
+
+    /** The archive window closed without Undo (the notice went, or another archive began): the chat is gone for good, and so is its pin. */
+    private fun commitArchive() {
+        archiving?.first?.let(::forgetPin)
+        archiving = null
     }
 
     /** Hides the line at once; the person is told whether it was scheduled. */
@@ -376,6 +464,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(notice = Notice(if (saved) OFFER_SCHEDULED else OFFER_NOT_SCHEDULED)) }
         }
     }
+
 
     /** Fetches the note first and opens the sheet when it is in hand, so a chip can say "Opening…" and a missing note never flashes an empty sheet. */
     private fun openNote(path: String) {
@@ -470,7 +559,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** What the empty chat offers: HQ's own pick of what works here. Keeps the last answer when hq is not reachable. */
     private suspend fun refreshSuggestions() {
         val picked = try { client.capabilitySuggestions() } catch (e: HqUnavailable) { return }
-        _state.update { it.copy(suggestions = picked) }
+        _state.update { it.copy(suggestions = picked, pillsCleared = false) }
     }
 
     private suspend fun refreshChats() {
@@ -482,14 +571,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val spoken = t.id in spokenIds
             val body = if (group == Group.Today && snippet.isNotEmpty()) "${ChatTime.age(t.updatedAt)} · $snippet" else snippet
             val subtitle = if (spoken) listOf(getApplication<Application>().getString(R.string.chat_spoken), body).filter { it.isNotEmpty() }.joinToString(" · ") else body
-            ChatRow(t.id, t.title.ifBlank { ChatUiState.NEW_CHAT }, subtitle, group, t.id in list.running, t.unread > 0, spoken)
+            ChatRow(t.id, t.title.ifBlank { ChatUiState.NEW_CHAT }, subtitle, group, t.id in list.running, t.unread > 0, spoken, hasDraft = drafts.getString(draftKey(t.id), "").orEmpty().isNotBlank())
         }
-        _state.update { s -> s.copy(chats = rows.filter { it.id != archiving?.first }) }
+        val shown = Pins.apply(rows.filter { it.id != archiving?.first }, Pins.parse(pins.getString(PIN_KEY, null)))
+        _state.update { s -> s.copy(chats = shown) }
     }
 
     /** The server is told at once; Undo inside the window asks it to bring the chat back. */
     private fun archive(id: String) {
         archiving?.second?.cancel()
+        commitArchive()
         val app = getApplication<Application>()
         _state.update { it.copy(chats = it.chats.filter { row -> row.id != id }, notice = Notice(app.getString(R.string.undo_chat_archived), app.getString(R.string.undo))) }
         archiving = id to viewModelScope.launch {
@@ -518,6 +609,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val DRAFT_PREFS = "chat_drafts"
+        const val PIN_PREFS = "chat_pins"
+        const val PIN_KEY = "ids"
+        const val RESULT_MS = 6_000L
+        const val HTTP_NOT_FOUND = 404
         const val NEW_CHAT_KEY = "new"
         const val MAX_ATTACHED = 10
         const val NOTE_GONE = "That note is not in your Vault any more"

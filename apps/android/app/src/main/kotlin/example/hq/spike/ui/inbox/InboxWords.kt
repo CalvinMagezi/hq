@@ -66,6 +66,8 @@ data class InboxCard(
     val siteApprovals: Int? = null,
     /** The day's summary of helper finishes, which the Updates tab shows as one expandable row. */
     val digest: Boolean = false,
+    /** A Later offer's row: it can bring the offer back to its chat. Null on every other row. [openLabel] is HQ's word for the button. */
+    val openLabel: String? = null,
     /** Ids of updates folded into this one as the same event: clearing the row clears them too. */
     val alsoIds: List<String> = emptyList(),
 ) {
@@ -99,8 +101,12 @@ object InboxWords {
         c.copy(
             title = plainTitle(c.title), silenced = item.silenced, group = item.sourceGroup, ownerOnly = item.ownerOnly,
             expiredReason = item.expiredReason, siteApprovals = item.siteApprovals, digest = item.sourceTask == DIGEST_SOURCE,
+            openLabel = bringBackLabel(item),
         )
     }
+
+    /** The button of a row that can bring an offer back: HQ's word, or "" when it sends none (the screen then says "Bring it back"). Null when the row has no `open` action. */
+    fun bringBackLabel(item: InboxItem): String? = if ("open" in item.actions && item.state == "pending") item.openLabel?.trim().orEmpty() else null
 
     /** What HQ wants to do, in a sentence, for a tool name. A name this does not know gets the generic line, never the snake_case name. */
     fun toolSentence(tool: String): String = when (tool.trim()) {

@@ -25,8 +25,8 @@ data class ChatThread(
 /** A tool call a reply made, from the saved `meta.tool_steps` or from live `tool_start` and `tool_end` frames. */
 data class ToolStep(val id: String, val name: String, val args: String?, val result: String?, val durationMs: Long?)
 
-/** Something HQ offers to do under a reply (`meta.offer`), chosen on the device; the model never sees it. Yes sends [reply], or puts it in the composer when [send] is false. */
-data class Offer(val kind: String, val line: String, val reply: String, val send: Boolean) {
+/** Something HQ offers to do under a reply (`meta.offer`), chosen on the device; the model never sees it. Yes sends [reply], or puts it in the composer when [send] is false. [laterUsed]: it already came back from Later once, so Later is not shown again. */
+data class Offer(val kind: String, val line: String, val reply: String, val send: Boolean, val laterUsed: Boolean = false) {
     companion object {
         fun from(o: JSONObject?): Offer? {
             if (o == null) return null
@@ -34,7 +34,7 @@ data class Offer(val kind: String, val line: String, val reply: String, val send
             val line = o.optString("line", "")
             val reply = o.optString("reply", "")
             if (kind.isBlank() || line.isBlank() || reply.isBlank()) return null
-            return Offer(kind, line, reply, o.optBoolean("send", false))
+            return Offer(kind, line, reply, o.optBoolean("send", false), o.optBoolean("later_used", false))
         }
     }
 }

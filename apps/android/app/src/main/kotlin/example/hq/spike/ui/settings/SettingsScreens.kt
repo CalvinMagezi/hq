@@ -121,6 +121,7 @@ private fun icon(key: String): ImageVector = when (key) {
     "shield" -> HqIcons.Shield
     "gauge" -> HqIcons.Gauge
     HQ_CODER_ROW -> HqIcons.Code
+    SUGGESTS_ROW -> HqIcons.Spark
     WORK_TASKS_ROW -> HqIcons.Tasks
     WORK_HELPERS_ROW -> HqIcons.Helpers
     else -> HqIcons.Archive
@@ -159,6 +160,7 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.Assistant -> stringResource(R.string.assist_row_title)
     SettingsPage.Calendar -> stringResource(R.string.cal_row_title)
     SettingsPage.Contacts -> stringResource(R.string.contacts_row_title)
+    SettingsPage.Suggests -> stringResource(R.string.row_suggests)
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -200,6 +202,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Assistant -> AssistantPage(ui, actions)
                 SettingsPage.Calendar -> CalendarPage()
                 SettingsPage.Contacts -> ContactsPage()
+                SettingsPage.Suggests -> SuggestsPage()
                 SettingsPage.Noticed -> NoticedPage(Counters.get(androidx.compose.ui.platform.LocalContext.current))
                 SettingsPage.Origins -> ReadOnlyList(ui, stringResource(R.string.settings_none_origins)) { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
                 SettingsPage.ConnectedTools -> ReadOnlyList(ui, stringResource(R.string.settings_none_tools)) { Facts(SettingsWords.toolRows(example.hq.spike.ui.shell.rememberWords(), ui.snap.settings)) }

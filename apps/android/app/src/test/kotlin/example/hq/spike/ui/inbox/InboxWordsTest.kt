@@ -5,6 +5,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -21,6 +22,22 @@ class InboxWordsTest {
         ----- end session output -----
         Read it with `harness_session_logs`, answer with `harness_session_send`.
     """.trimIndent()
+
+    @Test fun aLaterOffersRowShowsTheServersWordForBringingItBack() {
+        val later = InboxItem("val_9", "fyi", "Still want to add this to your tasks?", "Open this to bring it back to your chat.", "pending", "2026-10-21T12:00:00+00:00", null, "scheduled-offer", null, listOf("open", "dismiss"), openLabel = "Bring it back")
+        assertEquals("Bring it back", InboxWords.card(later).openLabel)
+        assertEquals("Take it up again", InboxWords.card(later.copy(openLabel = "Take it up again")).openLabel)
+        // An HQ that sends no word still gets the button; the screen falls back to "Bring it back".
+        assertEquals("", InboxWords.card(later.copy(openLabel = null)).openLabel)
+    }
+
+    @Test fun everyOtherRowHasNoBringItBackButton() {
+        val plain = item("Backup finished", "All good.", actions = listOf("dismiss", "acknowledge"), kind = "fyi")
+        assertNull(InboxWords.card(plain).openLabel)
+        assertNull(InboxWords.card(item("HQ wants to run bash", "x")).openLabel)
+        val answered = InboxItem("val_9", "fyi", "t", "d", "dismissed", "2026-10-21T12:00:00+00:00", null, "scheduled-offer", null, emptyList(), openLabel = "Bring it back")
+        assertNull(InboxWords.card(answered).openLabel)
+    }
 
     @Test fun aHelperAtAPromptBecomesOneOkAndNamesTheSession() {
         val c = InboxWords.card(item("Harness session 'claude in hq-oss' is waiting for you", blocked, source = "session-supervisor"))

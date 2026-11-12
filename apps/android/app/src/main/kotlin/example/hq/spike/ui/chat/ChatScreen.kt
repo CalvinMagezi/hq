@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,6 +40,7 @@ import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -48,7 +51,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,17 +74,25 @@ fun ChatScreen(
     state: ChatUiState, actions: ChatActions, status: example.hq.spike.data.Connection = example.hq.spike.data.Connection.Connected, onStartHq: () -> Unit = {}, onAiKeys: () -> Unit = {},
     /** What this chat waits on the owner for, drawn between the conversation and the composer. */
     needs: @Composable () -> Unit = {},
+    /** True when [needs] draws an approval card; it then takes the slot, and an offer waits. */
+    hasNeeds: Boolean = false,
+    /** The composer's mic: opens the voice sheet, or the page that sets it up. */
+    onVoice: () -> Unit = {},
 ) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             example.hq.spike.ui.connection.ChatBanner(status, onStartHq, onAiKeys)
             NameRow(state.title, state.messages.any { it.spoken }, actions.onOpenChats)
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (state.messages.isEmpty() && state.live == null) EmptyChat(Suggestions.shown(state.suggestions), actions.onDraft) else Conversation(state, actions)
+                if (state.messages.isEmpty() && state.live == null) EmptyChat(Suggestions.visible(state.suggestions, state.pillsCleared), actions.onDraft, state.pillChoices, actions.onFewer, actions.onNever) else Conversation(state, actions)
                 SlashPalette(state.draft, actions.onSlash, Modifier.align(Alignment.BottomCenter))
             }
-            needs()
-            Composer(state, actions)
+            when (ChatSlot.pick(hasNeeds, state.offered?.offer, state.offerResult)) {
+                SlotItem.Approval -> needs()
+                SlotItem.Offer -> OfferSlot(state, actions)
+                SlotItem.None -> {}
+            }
+            Composer(state, actions, onVoice)
         }
     }
 }
@@ -182,9 +195,7 @@ private fun Conversation(state: ChatUiState, actions: ChatActions) {
                         onLongClickLabel = "Message actions", onClick = {}, onLongClick = { if (!m.sending) actions.onLongPress(m.id) },
                     ),
                 ) {
-                    // Only the newest reply carries its offer: one written to since has moved on.
-                    val answer = if (m === newestFirst.firstOrNull() && state.live == null) { yes: Boolean -> actions.onOffer(m.id, yes) } else null
-                    if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile, spoken = m.spoken) else ReplyBubble(m, blocks, onOffer = answer, onScheduleOffer = if (answer != null) { at: Long -> actions.onScheduleOffer(m.id, at) } else null)
+                    if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile, spoken = m.spoken) else ReplyBubble(m, blocks)
                 }
             }
         }
@@ -214,27 +225,52 @@ private fun iconFor(group: String): ImageVector = when (group) {
 }
 
 @Composable
-private fun EmptyChat(suggestions: List<Suggestion>, onPick: (String) -> Unit) {
+private fun EmptyChat(suggestions: List<Suggestion>, onPick: (String) -> Unit, choices: Boolean, onFewer: (String) -> Unit, onNever: (String) -> Unit) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom)) {
         Image(painterResource(R.drawable.hq_mark), null, Modifier.size(56.dp).alpha(0.8f), contentScale = ContentScale.Fit)
         Column {
             Text(stringResource(R.string.chat_what_would_you_like), style = HqType.H2, color = Mts.Ink)
             Text(stringResource(R.string.chat_hq_can_read_your), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 4.dp))
         }
-        suggestions.forEach { s -> SuggestionChip(iconFor(s.group), s.label) { onPick(s.text) } }
+        suggestions.take(Suggestions.MAX).forEach { s -> SuggestionChip(iconFor(s.group), Suggestions.cap(s.label), s.id.takeIf { choices && it.isNotEmpty() }, onFewer, onNever) { onPick(s.text) } }
     }
 }
 
+/** A pill fills the box when tapped. Press and hold (or TalkBack's actions) offers Fewer like this and Never show this. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SuggestionChip(icon: ImageVector, label: String, onClick: () -> Unit) {
+private fun SuggestionChip(icon: ImageVector, label: String, capability: String?, onFewer: (String) -> Unit, onNever: (String) -> Unit, onClick: () -> Unit) {
     val shape = RoundedCornerShape(16.dp)
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape)
-            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, Modifier.size(22.dp), tint = Mts.BrandBlue)
-        Text(label, style = HqType.ChipTitle, color = Mts.Ink)
+    var menu by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val fewer = stringResource(R.string.chat_pill_fewer)
+    val never = stringResource(R.string.chat_pill_never)
+    Box {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape)
+                .combinedClickable(
+                    role = Role.Button, onClick = onClick, onLongClickLabel = if (capability != null) stringResource(R.string.chat_pill_hold_hint) else null,
+                    onLongClick = if (capability != null) { { menu = true } } else null,
+                )
+                .then(
+                    if (capability == null) Modifier else Modifier.semantics {
+                        customActions = listOf(
+                            CustomAccessibilityAction(fewer) { onFewer(capability); true },
+                            CustomAccessibilityAction(never) { onNever(capability); true },
+                        )
+                    },
+                )
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, null, Modifier.size(22.dp), tint = Mts.BrandBlue)
+            Text(label, style = HqType.ChipTitle, color = Mts.Ink)
+        }
+        if (capability != null) {
+            DropdownMenu(menu, { menu = false }) {
+                DropdownMenuItem({ Text(fewer, style = HqType.Body, color = Mts.Ink) }, { menu = false; onFewer(capability) })
+                DropdownMenuItem({ Text(never, style = HqType.Body, color = Mts.Ink) }, { menu = false; onNever(capability) })
+            }
+        }
     }
 }
 
