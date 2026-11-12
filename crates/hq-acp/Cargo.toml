@@ -1,0 +1,16 @@
+[package]
+name = "hq-acp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Agent Client Protocol client for coding agents: tolerant wire parsing and a turn state tracker, synchronous and dependency-light"
+
+[dependencies]
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[[bin]]
+name = "fake-acp-agent"
+path = "tests/support/fake_agent.rs"
+test = false
+doc = false
