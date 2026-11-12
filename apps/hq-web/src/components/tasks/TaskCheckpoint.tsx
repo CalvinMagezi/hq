@@ -47,6 +47,16 @@ export function TaskCheckpoint({ task }: { task: TaskItem }) {
             </ul>
           </div>
         )}
+        {(checkpoint.suggested_skills?.length ?? 0) > 0 && (
+          <div className="a-drow l-tall l-col">
+            <div className="a-label">{t('task_cp_skills')}</div>
+            <ul className="a-cap l-break">
+              {checkpoint.suggested_skills?.map((name) => (
+                <li key={name}>{name}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         <p className="a-cap a-muted l-pad">
           {t('task_cp_left_by', { who: checkpoint.actor, when: formatLocalTime(checkpoint.created_at) })}
         </p>

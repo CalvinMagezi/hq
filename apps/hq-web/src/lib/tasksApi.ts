@@ -383,6 +383,8 @@ export interface TaskCheckpointItem {
   next_step: string
   open_questions: string
   files: string[]
+  /** Older checkpoints and older servers do not send it. */
+  suggested_skills?: string[]
   created_at: string
 }
 

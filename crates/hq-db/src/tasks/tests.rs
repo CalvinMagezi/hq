@@ -2955,6 +2955,7 @@ fn a_checkpoint_is_stored_cleaned_capped_and_the_latest_is_what_resumes() {
             .map(|n| format!("src/file{n}.rs"))
             .chain(["".to_string(), "bad\nname".to_string()])
             .collect(),
+        suggested_skills: vec![],
     };
     let stored = db
         .with_conn(|c| add_checkpoint(c, "tk-1", Some("ws-1"), "beta", &hostile))

@@ -702,6 +702,7 @@ fn a_task_with_linked_notes_produces_a_packet_that_cites_them() {
                 summary: "half done".into(),
                 next_step: "agree dates".into(),
                 open_questions: "Which quarter does the budget cover?".into(),
+                suggested_skills: vec![],
                 files: vec![],
             },
         )
