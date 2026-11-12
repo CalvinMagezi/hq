@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,7 +38,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,8 +75,13 @@ fun ChatsSheet(state: ChatUiState, actions: ChatActions) {
             example.hq.spike.ui.usage.BalanceRow()
             val shown = state.chats.filter { it.title.contains(state.chatSearch, true) || it.subtitle.contains(state.chatSearch, true) }
             LazyColumn(Modifier.fillMaxWidth()) {
+                val pinned = shown.filter { it.pinned }
+                if (pinned.isNotEmpty()) {
+                    item(key = "g-pinned") { GroupHeader(stringResource(R.string.chat_pinned_group)) }
+                    items(pinned, key = { "p-" + it.id }) { ChatRowItem(it, selected = it.id == state.threadId, actions) }
+                }
                 Group.entries.forEach { group ->
-                    val rows = shown.filter { it.group == group }
+                    val rows = shown.filter { it.group == group && !it.pinned }
                     if (rows.isNotEmpty()) {
                         item(key = "g-${group.name}") { GroupHeader(group.label) }
                         items(rows, key = { it.id }) { ChatRowItem(it, selected = it.id == state.threadId, actions) }
@@ -114,9 +123,10 @@ private fun GroupHeader(label: String) {
     Text(label.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 4.dp))
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun ChatRowItem(row: ChatRow, selected: Boolean, actions: ChatActions) {
+    val pinLabel = stringResource(if (row.pinned) R.string.chat_unpin else R.string.chat_pin)
     val swipe = rememberSwipeToDismissBoxState(confirmValueChange = {
         (it == SwipeToDismissBoxValue.EndToStart).also { archive -> if (archive) actions.onArchive(row.id) }
     })
@@ -136,7 +146,9 @@ private fun ChatRowItem(row: ChatRow, selected: Boolean, actions: ChatActions) {
     ) {
         Row(
             Modifier.padding(horizontal = 8.dp).fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp))
-                .background(if (selected) Mts.Surface200 else Mts.Surface100).clickable(role = Role.Button) { actions.onOpenChat(row.id) }
+                .background(if (selected) Mts.Surface200 else Mts.Surface100)
+                .combinedClickable(role = Role.Button, onLongClickLabel = pinLabel, onLongClick = { actions.onPinChat(row.id) }, onClick = { actions.onOpenChat(row.id) })
+                .semantics { customActions = listOf(CustomAccessibilityAction(pinLabel) { actions.onPinChat(row.id); true }) }
                 .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -146,7 +158,14 @@ private fun ChatRowItem(row: ChatRow, selected: Boolean, actions: ChatActions) {
             Column(Modifier.weight(1f)) {
                 Text(row.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val subtitle = if (row.running) stringResource(R.string.chat_row_working) else row.subtitle
-                if (subtitle.isNotEmpty()) Text(subtitle, style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val draft = row.hasDraft && !row.running
+                if (draft || subtitle.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // The warning amber the app already uses for a thing left undone; the word carries it, not the colour.
+                        if (draft) Text(stringResource(R.string.chat_draft_word), style = HqType.BodySmBold, color = Mts.Amber, maxLines = 1)
+                        if (subtitle.isNotEmpty()) Text(subtitle, style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    }
+                }
             }
             if (row.unread) Box(Modifier.size(10.dp).background(Mts.BrandBlue, CircleShape))
             ArchiveButton(row.title) { actions.onArchive(row.id) }

@@ -368,6 +368,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val expiredReason: String? = null,
         /** How many times the owner already allowed this site in a chat; 0 when HQ does not say. */
         val siteApprovals: Int? = null,
+        /** Set only on a Later offer's item: the item can bring the offer back (action `open`), and this is the button's word. */
+        val openLabel: String? = null,
     )
 
     /** What HQ says an approval is about: [tool] and [args] verbatim, [loses] and [verb] (one of [LOSING_VERBS]) decided by HQ, never by the card's words. */
@@ -415,7 +417,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
                         n.optJSONArray("actions").strings(), alertDialog(meta), approvalFacts(meta),
                         signInDevice(meta), n.optBoolean("silenced", false),
                         if (n.has("owner_only")) n.optBoolean("owner_only") else null, n.optStringOrNull("source_group"), n.optStringOrNull("expired_reason"),
-                        siteApprovals(n, meta),
+                        siteApprovals(n, meta), openLabel = extra?.optStringOrNull("open_label"),
                     )
                 },
                 o.optInt("unread_count", 0), o.optInt("pending_approvals_count", 0),

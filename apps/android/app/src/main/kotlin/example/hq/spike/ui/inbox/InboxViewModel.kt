@@ -96,6 +96,9 @@ class InboxActions(
     val onClearHelpers: () -> Unit = {},
     val onShowOwner: () -> Unit = {},
     val onRestore: (DoneEntry) -> Unit = {},
+    /** A Later row's button: asks HQ to bring the offer back, then [onBroughtBack] takes the person to the chat. */
+    val onBringBack: (InboxCard) -> Unit = {},
+    var onBroughtBack: (String?) -> Unit = {},
 )
 
 class InboxViewModel(app: Application) : AndroidViewModel(app) {
@@ -104,6 +107,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<InboxUi> = _state
     private val queue = ClearQueue({ id -> client.answerNotification(id, "dismiss") }, { id -> Undo.restore(ClientRestore(client), UndoKind.Notification, id) })
     private var frozen = false
+    private val bringing = BringBackGuard()
 
     val actions = InboxActions(
         onTab = { t -> _state.update { it.copy(tab = t) } }, onAllow = { answer(it, allow = true) }, onAllowSite = { answer(it, allow = true, wholeSite = true) }, onNotNow = { answer(it, allow = false) },
@@ -112,7 +116,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         onBannerNotNow = { NotifAccess.snooze(getApplication()); refreshBanner() },
         onKeepGoing = ::keepGoing, onAllowedDone = { _state.update { it.copy(allowed = null) } },
         onAskSignOut = { c -> _state.update { it.copy(askSignOut = c, signOutError = null) } }, onSignOutConfirm = ::signOut,
-        onClearHelpers = { clear(NeedsLayout.oldHelpers(_state.value.shownNeeds)) }, onShowOwner = { _state.update { it.copy(catchUpDismissed = true) } }, onRestore = ::restoreDone,
+        onClearHelpers = { clear(NeedsLayout.oldHelpers(_state.value.shownNeeds)) }, onShowOwner = { _state.update { it.copy(catchUpDismissed = true) } }, onRestore = ::restoreDone, onBringBack = ::bringBack,
     )
 
     init {
@@ -201,6 +205,23 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         val words = getApplication<Application>().getString(R.string.chat_approval_followup)
         val sent = HqServices.get(getApplication()).connection.sendChat(words, thread, VoiceTurn.newClientId(), source = StoredMessage.SPOKEN)
         if (sent) _state.update { it.copy(allowed = it.allowed?.copy(sent = true)) }
+    }
+
+    /** The server engages the row and puts the offer back at the end of its chat; a refusal says so in the line and leaves the row. */
+    private fun bringBack(card: InboxCard) {
+        if (!bringing.begin(card.id)) return
+        viewModelScope.launch {
+            try {
+                client.answerNotification(card.id, "open")
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(line = InboxLine(getApplication<Application>().getString(R.string.inbox_bring_back_failed))) }
+                return@launch
+            } finally {
+                bringing.end(card.id)
+            }
+            refresh()
+            actions.onBroughtBack(ChatLink.threadOf(card.link))
+        }
     }
 
     private fun answer(card: InboxCard, allow: Boolean, wholeSite: Boolean = false) {

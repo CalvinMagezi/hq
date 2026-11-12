@@ -56,6 +56,7 @@ import example.hq.spike.NotifOrigin
 import example.hq.spike.NoticeWords
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -482,6 +483,13 @@ private fun UpdateRow(card: InboxCard, actions: InboxActions) {
             Column(Modifier.weight(1f)) {
                 Text(card.title, style = HqType.BodyBold, color = Mts.Ink)
                 if (card.body.isNotBlank()) Text(card.body, style = HqType.BodySm, color = Mts.InkMuted, maxLines = if (open) Int.MAX_VALUE else UPDATE_BODY_LINES, overflow = TextOverflow.Ellipsis, onTextLayout = { if (!open && it.hasVisualOverflow) clipped = true })
+                card.openLabel?.let { label ->
+                    val word = label.ifBlank { stringResource(R.string.inbox_bring_back) }
+                    val named = stringResource(R.string.inbox_bring_back_named, word, card.title)
+                    Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = { actions.onBringBack(card) }).semantics { contentDescription = named }, contentAlignment = Alignment.CenterStart) {
+                        Text(word, style = HqType.BodySmBold, color = Mts.BrandBlue)
+                    }
+                }
             }
             Text(InboxWords.clock(card.createdAt), style = HqType.Caption.copy(lineHeight = 20.sp), color = Mts.InkMuted)
         }

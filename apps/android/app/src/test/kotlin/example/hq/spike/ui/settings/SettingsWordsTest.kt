@@ -224,7 +224,9 @@ class SettingsWordsTest {
         assertEquals(listOf(WORK_TASKS_ROW, WORK_HELPERS_ROW), groups[3].rows.map { it.key })
         assertEquals(listOf("AI service and keys", "Messaging apps", "Other devices", "GitHub"), groups[1].rows.map { it.title })
         assertEquals(SettingsWords.claudeViaLaptop(testWords()), groups[1].note)
-        assertEquals("Read only", groups[2].rows.single().status)
+        assertEquals(listOf(SettingsPage.Safety, SettingsPage.Suggests), groups[2].rows.map { it.page })
+        assertEquals("Read only", groups[2].rows.first().status)
+        assertEquals("What HQ suggests", groups[2].rows.last().title)
         assertNull(groups[0].rows.firstOrNull())
     }
 
@@ -294,7 +296,7 @@ class SettingsWordsTest {
     @Test fun theHomeListSaysItIsCheckingUntilItHasAskedAndNeverThenSaysNotAnswering() {
         val groups = SettingsWords.home(testWords(), SettingsSnapshot(), now, listOf(HomeRow(null, "background", "Background work", "On")), loaded = false)
         assertEquals("On", groups[0].rows.single().status)
-        assertTrue(groups.drop(1).flatMap { it.rows }.filter { it.page != SettingsPage.About && it.key != WORK_TASKS_ROW && it.key != WORK_HELPERS_ROW }.all { it.status == "Not read yet" })
+        assertTrue(groups.drop(1).flatMap { it.rows }.filter { it.page != SettingsPage.About && it.key != WORK_TASKS_ROW && it.key != WORK_HELPERS_ROW && it.key != SUGGESTS_ROW }.all { it.status == "Not read yet" })
         assertTrue(SettingsWords.home(testWords(), SettingsSnapshot(), now, emptyList(), loaded = true).drop(1).flatMap { it.rows }.any { it.status == "No answer yet" })
     }
 

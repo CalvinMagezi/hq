@@ -48,7 +48,7 @@ private val ChipShape = RoundedCornerShape(12.dp)
 
 /** The message box with Plus, Send and the chips above it. While HQ writes, Send turns into Stop in the same place. Enter adds a line; only the button sends. */
 @Composable
-fun Composer(state: ChatUiState, actions: ChatActions) {
+fun Composer(state: ChatUiState, actions: ChatActions, onVoice: () -> Unit = {}) {
     Column(
         Modifier.fillMaxWidth().background(Mts.Surface000).drawBehind { drawLine(Mts.Hairline, Offset.Zero, Offset(size.width, 0f), 1.dp.toPx()) }
             .padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 16.dp),
@@ -56,7 +56,7 @@ fun Composer(state: ChatUiState, actions: ChatActions) {
     ) {
         if (state.files.isNotEmpty()) FileChips(state.files, actions)
         if (state.contexts.isNotEmpty() || state.editing != null) ItemChips(state, actions)
-        MessageRow(state, actions)
+        MessageRow(state, actions, onVoice)
     }
 }
 
@@ -139,7 +139,7 @@ private fun sizeWords(size: Long): String = when {
 }
 
 @Composable
-private fun MessageRow(state: ChatUiState, actions: ChatActions) {
+private fun MessageRow(state: ChatUiState, actions: ChatActions, onVoice: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Bottom) {
         Box(Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClickLabel = "Add to this chat", onClick = actions.onOpenAdd).semantics { contentDescription = "Add to this chat" }, contentAlignment = Alignment.Center) {
             Icon(HqIcons.Plus, null, Modifier.size(24.dp), tint = Mts.Ink)
@@ -159,7 +159,12 @@ private fun MessageRow(state: ChatUiState, actions: ChatActions) {
                 }
             },
         )
-        if (state.running) StopButton(actions.onStop) else SendButton(state.canSend, actions.onSend)
+        // Three controls at rest: Plus, the field, and one button that is voice, send or stop.
+        when (ChatSlot.sendKey(state.running, state.draft, state.files.isNotEmpty() || state.editing != null)) {
+            SendKey.Stop -> StopButton(actions.onStop)
+            SendKey.Send -> SendButton(state.canSend, actions.onSend)
+            SendKey.Voice -> VoiceButton(onVoice)
+        }
     }
 }
 
@@ -189,6 +194,18 @@ private fun SendButton(enabled: Boolean, onSend: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Icon(HqIcons.Send, "Send", Modifier.size(24.dp), tint = if (enabled) Mts.OnGreen else Mts.InkMuted)
+    }
+}
+
+@Composable
+private fun VoiceButton(onVoice: () -> Unit) {
+    val label = stringResource(R.string.chat_voice)
+    Box(
+        Modifier.size(48.dp).clip(CircleShape).background(Mts.Surface200).border(1.dp, Mts.Line, CircleShape)
+            .clickable(role = Role.Button, onClickLabel = label, onClick = onVoice).semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(HqIcons.Mic, null, Modifier.size(24.dp), tint = Mts.Ink)
     }
 }
 

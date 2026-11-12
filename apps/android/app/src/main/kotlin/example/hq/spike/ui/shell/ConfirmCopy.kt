@@ -29,6 +29,9 @@ object ConfirmCopy {
         if (only) red(c, c.getString(R.string.remove_only_key_title), c.getString(R.string.remove_only_key_body) + if (unknown) " " + c.getString(R.string.remove_only_key_unknown) else "", c.getString(R.string.remove_key_keep), c.getString(R.string.remove_key_act), R.string.confirm_busy_removing, c.getString(R.string.remove_only_key_extra))
         else red(c, c.getString(R.string.remove_key_title, key), c.getString(R.string.remove_key_body), c.getString(R.string.remove_key_keep), c.getString(R.string.remove_key_act), R.string.confirm_busy_removing)
 
+    /** Forgetting what HQ remembers about its suggestions cannot be taken back, so it is a red confirm. */
+    fun clearOffers(c: Context) = red(c, c.getString(R.string.settings_suggests_clear_title), c.getString(R.string.settings_suggests_clear_body), c.getString(R.string.settings_suggests_clear_keep), c.getString(R.string.settings_suggests_clear_confirm), R.string.confirm_busy_working)
+
     fun leaveNote(c: Context, note: String) = red(c, c.getString(R.string.notes_save_your_changes), c.getString(R.string.leave_note_body, note), c.getString(R.string.notes_keep_editing), c.getString(R.string.notes_discard_changes), R.string.confirm_busy_working, c.getString(R.string.leave_note_save))
 
     private fun ask(c: Context, title: String, body: String, keep: String, act: String) = ConfirmWords(title, body, keep, act, c.getString(R.string.confirm_busy_working), ConfirmKind.Ask)

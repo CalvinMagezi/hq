@@ -52,7 +52,12 @@ data class LiveReply(val text: String = "", val steps: List<LiveStep> = emptyLis
 
 enum class Group(val label: String) { Today("Today"), Yesterday("Yesterday"), Week("Previous 7 days"), Older("Older") }
 
-data class ChatRow(val id: String, val title: String, val subtitle: String, val group: Group, val running: Boolean, val unread: Boolean, val spoken: Boolean = false)
+data class ChatRow(val id: String, val title: String, val subtitle: String, val group: Group, val running: Boolean, val unread: Boolean, val spoken: Boolean = false,
+    /** Pinned on this phone; the chats sheet lists these first. */
+    val pinned: Boolean = false,
+    /** A message is typed in this chat and not sent; the sheet says "Draft". */
+    val hasDraft: Boolean = false,
+)
 
 data class ChatUiState(
     val threadId: String? = null,
@@ -92,7 +97,20 @@ data class ChatUiState(
     val hasOlder: Boolean = false,
     val noteMenu: Boolean = false,
     val export: ExportState? = null,
+    /** What the answered offer says in the slot above the composer, until the next message or a few seconds pass. */
+    val offerResult: OfferResult? = null,
+    /** False once HQ has refused Later (an HQ without the route), so the slot stops offering it. */
+    val laterSupported: Boolean = true,
+    /** Replies whose offer the person answered; a reload never shows one of them again. */
+    val answeredOffers: Set<String> = emptySet(),
+    /** The last pill HQ chose was removed: show none (not the fixed three) until the next refresh. */
+    val pillsCleared: Boolean = false,
+    /** False once HQ has no fewer or never route, so a pill's long-press menu is not offered. */
+    val pillChoices: Boolean = true,
 ) {
+    /** The newest message when it is a finished reply carrying an offer that is still open. */
+    val offered: UiMessage? get() = messages.lastOrNull()?.takeIf { it.speaker == Speaker.Reply && it.offer != null && live == null && !failed }
+
     val running: Boolean get() = live != null
     val canSend: Boolean get() = (draft.isNotBlank() || files.isNotEmpty()) && connected && !running && files.all { it.status == FileStatus.Ready }
 

@@ -137,6 +137,20 @@ class ShellActivity : ComponentActivity() {
         search.actions.onOpen(searchSources(), start)
     }
 
+    /**
+     * The composer's mic. With the speech model on the phone it opens the assistant sheet in place (the same screen "Hey HQ"
+     * opens, with its own microphone ask); without it, Settings > Phone assistant, where the model is fetched.
+     */
+    private fun speakToHq() {
+        if (example.hq.spike.voice.VoiceModels(this).ready()) {
+            startActivity(example.hq.spike.voice.VoiceActivity.intent(this))
+            return
+        }
+        chat.actions.onNotice(getString(R.string.chat_voice_needs_model))
+        settings.actions.onOpen()
+        settings.actions.onPage(SettingsPage.Assistant)
+    }
+
     /** Which first-run screen opens, decided in onCreate before hq starts (its first answer would mark the app as used). */
     private var firstRunStep: Step? = null
     private val firstRun: FirstRunViewModel by viewModels {
@@ -167,6 +181,7 @@ class ShellActivity : ComponentActivity() {
 
     private fun rereadNotifications() {
         notifFacts = NotifAccess.read(this)
+        inbox.actions.onBroughtBack = { thread -> requested = Place.Chat; chat.showBroughtBack(thread) }
         inbox.actions.onServerOpen = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Notifications) }
         settings.actions.onCodeFromPhone = { helpers.actions.onGithubOpen() }
         settings.actions.onWork = { key -> requested = if (key == example.hq.spike.ui.settings.WORK_TASKS_ROW) Place.Tasks else Place.Helpers }
@@ -480,7 +495,7 @@ class ShellActivity : ComponentActivity() {
                     overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); CompositionLocalProvider(example.hq.spike.ui.shell.LocalCoversBar provides true) { SettingsHost(settingsState, settings.actions); SearchHost(searchState, shown); if (tasksState.away.open) AwayHost(tasksState); web?.let { page -> WebHostScreen(page, onClose = { web = null }, onStartHq = ::tryStartAgain, onNotes = { web = null; requested = Place.Notes }) } } },
                 ) { place ->
                     when (place) {
-                        Place.Chat -> ChatScreen(chatState, chat.actions, status = shown, onStartHq = ::tryStartAgain, onAiKeys = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Keys) }, needs = { ChatNeeds(needsOfChat(inboxState.shownNeeds, chatState.threadId), inboxState, inbox.actions) })
+                        Place.Chat -> ChatScreen(chatState, chat.actions, status = shown, onStartHq = ::tryStartAgain, onAiKeys = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Keys) }, needs = { ChatNeeds(needsOfChat(inboxState.shownNeeds, chatState.threadId), inboxState, inbox.actions) }, hasNeeds = needsOfChat(inboxState.shownNeeds, chatState.threadId).isNotEmpty(), onVoice = ::speakToHq)
                         Place.Notes -> NotesPlace(notesState)
                         Place.Inbox -> InboxPlace(inboxState)
                         Place.Tasks -> TasksPlace(tasksState)
