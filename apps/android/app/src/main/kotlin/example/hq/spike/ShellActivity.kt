@@ -93,6 +93,7 @@ import example.hq.spike.ui.startup.StartingScreen
 import example.hq.spike.ui.startup.StartupWords
 import example.hq.spike.ui.startup.Startup
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.ViewModelProvider
 import example.hq.spike.ui.firstrun.FirstRunHost
 import example.hq.spike.ui.firstrun.FirstRunLogic
@@ -400,7 +401,7 @@ class ShellActivity : ComponentActivity() {
             val searchState by search.state.collectAsStateWithLifecycle()
             val balance by usage.chip.collectAsStateWithLifecycle()
             val shown: Connection = if (fixture == null) status else Connection.Connected
-            searchSources = { example.hq.spike.ui.search.SearchSources(tasksState.tasks, chatState.chats, helpersState.cards, shown is Connection.ServerUnreachable || shown is Connection.ServerSignedOut) }
+            searchSources = { example.hq.spike.ui.search.SearchSources(tasksState.tasks, chatState.chats, helpersState.cards, shown is Connection.ServerUnreachable || shown is Connection.ServerSignedOut, (notesState.recent + notesState.pinned).flatMap { it.tags }.distinct()) }
             val startupFixture = when (fixtureName) { "x-starting" -> Startup.Starting; else -> null }
             val firstDone = remember(status) { FirstLaunch.isDone(this@ShellActivity) }
             val firstRunUi by firstRun.ui.collectAsStateWithLifecycle()
@@ -425,6 +426,17 @@ class ShellActivity : ComponentActivity() {
                 while (true) {
                     delay(CHAT_NEEDS_POLL_MS)
                     inbox.refreshNow()
+                }
+            }
+            // The quiet dot on Vault: HQ is asked now and then whether it filed something while the owner was elsewhere.
+            LaunchedEffect(shown is Connection.Connected) {
+                if (fixture != null || shown !is Connection.Connected) return@LaunchedEffect
+                // Only while the app is on screen, and only the cheap signals call: a closed app asks HQ for nothing.
+                lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                    while (true) {
+                        delay(VAULT_DOT_POLL_MS)
+                        notes.actions.onPoll()
+                    }
                 }
             }
             val savedAt = remember(status) { StartRules.lastAnswer(this@ShellActivity).takeIf { it > 0 } }
@@ -457,7 +469,7 @@ class ShellActivity : ComponentActivity() {
                             onNotNow = settings.actions.onUpdateNotNow,
                         )
                     },
-                    startAt = start, inboxBadge = if (badge > 0) badge else inboxState.badge, status = shown,
+                    startAt = start, inboxBadge = if (badge > 0) badge else inboxState.badge, notesDot = notesState.dot, status = shown,
                     onSearch = { openSearch(example.hq.spike.ui.search.SearchStart()) }, onOpenSearch = ::openSearch, onSettings = settings.actions.onOpen, updateDot = settingsState.updateDot,
                     subline = { place -> if (place == Place.Tasks && tasksState.tab == TaskTab.All) TaskFilterWords.bar(tasksState.scoped.count { TasksLogic.open(it) }) else null },
                     topActions = { place ->
@@ -516,7 +528,10 @@ class ShellActivity : ComponentActivity() {
     @androidx.compose.runtime.Composable
     private fun NotesPlace(notesState: NotesUi) {
         val go = LocalGoTo.current
-        NotesHome(notesState, notes.actions, onAskHq = { go(Place.Chat); chat.actions.onDraft("Write me a note about ") })
+        NotesHome(
+            notesState, notes.actions, onAskHq = { go(Place.Chat); chat.actions.onDraft("Write me a note about ") },
+            onImport = { uris -> go(Place.Chat); chat.actions.onFiles(uris); chat.addToDraft(getString(R.string.vault_import_draft)) },
+        )
     }
 
     /** Search sits over everything but a chosen result: the screen closes first, then the note, task or chat opens in its own place. */
@@ -627,6 +642,7 @@ class ShellActivity : ComponentActivity() {
         const val EXTRA_SHEET = "sheet"
         /** How often the inbox is read while a reply runs, so a request it stops for shows in the chat. */
         const val CHAT_NEEDS_POLL_MS = 4_000L
+        const val VAULT_DOT_POLL_MS = 120_000L
         const val STATE_WEB = "web"
         const val MODE_FILE_MAX = 64L
         const val TAIL_BYTES = 16_384L

@@ -112,16 +112,20 @@ fun NotesOverlays(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String
         NoteMenuSheet(
             ready.note,
             NoteMenuActions(
-                onClose = { actions.onMenu(false) }, onEdit = actions.onEdit, onTogglePin = actions.onTogglePin,
-                onAsk = { onAskHq(listOf(ready.note.path to ready.note.title)) }, onExport = actions.onExport, onNotice = actions.onNotice,
-                onDelete = actions.onDelete,
+                onClose = { actions.onMenu(false) }, onTogglePin = actions.onTogglePin, onAsk = null, onMakeTask = actions.onMakeTask,
+                onExport = actions.onExport, onNotice = actions.onNotice, onDelete = actions.onDelete,
             ),
         )
     }
     ui.export?.let { ExportOverlay(it, ExportActions(actions.onExportFormat, actions.onExportClose, actions.onExportAgain, actions.onNotice)) }
-    if (ui.undoDelete != null) {
+    val undoLine = when (ui.pending) {
+        PendingUndo.None -> null
+        is PendingUndo.TaskAdded -> stringResource(R.string.vault_task_added)
+        is PendingUndo.NoteDeleted -> stringResource(R.string.note_deleted)
+    }
+    if (undoLine != null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-            example.hq.spike.ui.shell.UndoSnackbar(ui.undoText ?: "", actions.onUndoDelete, Modifier.navigationBarsPadding(), actions.onUndoExpire)
+            example.hq.spike.ui.shell.UndoSnackbar(undoLine, actions.onUndoDelete, Modifier.navigationBarsPadding(), actions.onUndoExpire)
         }
     }
     ui.notice?.let { NotesSnack(it.text, actions.onDismissNotice, Modifier.fillMaxSize()) }
@@ -134,16 +138,31 @@ private fun NotesSnack(text: String, onDismiss: () -> Unit, modifier: Modifier) 
     }
 }
 
-/** Back, a title with a line of context under it, and whatever the page puts at the end. */
+/** Back, a title with a line of context under it, and whatever the page puts at the end. At large text the end moves under the title, so nothing is squeezed out. */
 @Composable
 private fun TopBar(title: String, crumb: String?, onBack: () -> Unit, trailing: @Composable () -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconAction(HqIcons.ArrowBack, stringResource(R.string.notify_back), iconSize = 24.dp, onClick = onBack)
-        Column(Modifier.weight(1f).padding(start = 4.dp)) {
-            Text(title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (!crumb.isNullOrBlank()) Text(crumb, style = HqType.Caption, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    val large = androidx.compose.ui.platform.LocalDensity.current.fontScale >= VaultRules.LARGE_TEXT_SCALE
+    @Composable
+    fun heading(modifier: Modifier) {
+        Column(modifier.padding(start = 4.dp)) {
+            Text(title, style = HqType.BodyBold, color = Mts.Ink, maxLines = if (large) 3 else 1, overflow = TextOverflow.Ellipsis)
+            if (!crumb.isNullOrBlank()) Text(crumb, style = HqType.Caption, color = Mts.InkMuted, maxLines = if (large) 2 else 1, overflow = TextOverflow.Ellipsis)
         }
-        trailing()
+    }
+    if (large) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconAction(HqIcons.ArrowBack, stringResource(R.string.notify_back), iconSize = 24.dp, onClick = onBack)
+                heading(Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) { trailing() }
+        }
+    } else {
+        Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconAction(HqIcons.ArrowBack, stringResource(R.string.notify_back), iconSize = 24.dp, onClick = onBack)
+            heading(Modifier.weight(1f))
+            trailing()
+        }
     }
 }
 
@@ -184,22 +203,46 @@ private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions, onAsk: 
             GreenPill(stringResource(R.string.note_editor_edit), Modifier.padding(end = 4.dp), onClick = actions.onEdit)
             IconAction(HqIcons.MoreVertical, stringResource(R.string.tasks_more), iconSize = 24.dp) { actions.onMenu(true) }
         }
-        ReaderChips(note, actions, onAsk)
+        if (VaultRules.markOf(note.review) == ReviewMark.Changed) ChangedBar(actions.onKeep)
+        ReaderHeader(note, onAsk)
         // Lazy, so a long note opens by drawing the screenful in view, not every block of it.
         SelectionContainer(Modifier.weight(1f)) { NoteBody(note.path, blocks, handlers, note.truncated, actions) }
     }
 }
 
-/** What can be done with the note it is showing, under the bar. The row scrolls, so a narrow phone cuts the last chip. */
+/**
+ * HQ changed this note and the owner has not looked: one thin bar, one answer. Keep accepts it. There is no Undo here:
+ * HQ keeps no earlier text a phone can ask for, so a button that does nothing would only mislead.
+ */
 @Composable
-private fun ReaderChips(note: example.hq.spike.ui.chat.NoteSheet, actions: NotesActions, onAsk: () -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val tooLong = stringResource(R.string.notes_too_long_share)
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ReaderChip(HqIcons.Spark, stringResource(R.string.notes_ask_hq), Mts.BrandBlue, onAsk)
-        ReaderChip(HqIcons.Tasks, stringResource(R.string.notes_make_task), Mts.Ink, actions.onMakeTask)
-        ReaderChip(HqIcons.Pin, stringResource(if (note.pinned) R.string.pin_unpin else R.string.notes_pin), Mts.Ink, actions.onTogglePin)
-        ReaderChip(HqIcons.Share, stringResource(R.string.notes_share), Mts.Ink) { if (note.truncated) actions.onNotice(tooLong) else example.hq.spike.ui.chat.shareText(context, note) }
+private fun ChangedBar(onKeep: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(Mts.Surface100).padding(start = 16.dp, end = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(stringResource(R.string.vault_hq_changed), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.weight(1f).padding(vertical = 8.dp))
+        Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onKeep).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+            Text(stringResource(R.string.vault_keep), style = HqType.BodySmBold, color = Mts.BrandBlue)
+        }
+    }
+}
+
+/** Under the bar: Ask HQ, the note's tags as read-only chips (each one starts a search with that tag), and the line that says why the note exists. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ReaderHeader(note: NoteSheet, onAsk: () -> Unit) {
+    val openSearch = example.hq.spike.ui.shell.LocalOpenSearch.current
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ReaderChip(HqIcons.Spark, stringResource(R.string.notes_ask_hq), Mts.BrandBlue, onAsk)
+            note.tags.forEach { tag ->
+                val label = "#" + tag.trimStart('#')
+                Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = stringResource(R.string.vault_search_tag, label)) { openSearch(example.hq.spike.ui.search.SearchStart(example.hq.spike.ui.search.SearchScope.Notes, null, tag.trimStart('#'), tag = tag.trimStart('#'))) }, contentAlignment = Alignment.Center) {
+                    Text(label, style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, modifier = Modifier.clip(CircleShape).background(Mts.Surface100).padding(horizontal = 12.dp, vertical = 6.dp))
+                }
+            }
+        }
+        note.why?.takeIf { it.isNotBlank() }?.let { Text(it, style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)) }
     }
 }
 
@@ -208,7 +251,7 @@ private fun ReaderChips(note: example.hq.spike.ui.chat.NoteSheet, actions: Notes
 private fun ReaderChip(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: Color, onClick: () -> Unit) {
     Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick), contentAlignment = Alignment.Center) {
         Row(
-            Modifier.height(40.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).padding(horizontal = 14.dp),
+            Modifier.heightIn(min = 40.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).padding(horizontal = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(icon, null, Modifier.size(18.dp), tint = tint)
@@ -262,11 +305,18 @@ private fun FolderPage(ui: NotesUi, actions: NotesActions) {
     val name = view.path.substringAfterLast('/')
     Column(Modifier.fillMaxSize()) {
         val parents = view.path.removePrefix("Notebooks/").substringBeforeLast('/', "")
-        TopBar(name, if (parents.isEmpty()) stringResource(R.string.place_notes) else stringResource(R.string.notes_crumb_in, parents.replace("/", " › ")), actions.onBack) {
-            IconAction(HqIcons.Search, stringResource(R.string.search_field_notes), iconSize = 24.dp, onClick = { openSearch(example.hq.spike.ui.search.SearchStart(example.hq.spike.ui.search.SearchScope.Notes, view.path.removePrefix("Notebooks/"))) })
-        }
+        TopBar(name, if (parents.isEmpty()) stringResource(R.string.place_notes) else stringResource(R.string.notes_crumb_in, parents.replace("/", " › ")), actions.onBack)
         Box(Modifier.weight(1f)) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp)) {
+                item {
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(role = Role.Button) { openSearch(example.hq.spike.ui.search.SearchStart(example.hq.spike.ui.search.SearchScope.Notes, view.path.removePrefix("Notebooks/"))) }.padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(HqIcons.Search, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+                        Text(stringResource(R.string.vault_search_in_folder), style = HqType.Body, color = Mts.InkMuted)
+                    }
+                }
                 if (view.folders.isNotEmpty()) { item { SectionLabel(stringResource(R.string.notes_folders), view.folders.size) }; item { SubFolders(view.folders, actions.onOpenFolder) } }
                 if (view.notes.isNotEmpty()) item { SectionLabel(stringResource(R.string.notes_a_to_z), view.notes.size) }
                 if (view.loading) item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { Spinner(28) } }
@@ -316,7 +366,7 @@ private fun TrashPage(ui: NotesUi, actions: NotesActions) {
                 val name = item.originalPath.substringAfterLast('/').removeSuffix(".md")
                 val trail = NoteRefs.folderTrail(item.originalPath).ifEmpty { stringResource(R.string.notes_your_notes) }
                 val left = if (item.daysLeft > 0) pluralStringResource(R.plurals.trash_days_left, item.daysLeft, item.daysLeft) else stringResource(R.string.trash_last_day)
-                val line = stringResource(R.string.trash_line, trail, item.trashedOn) + " · " + left
+                val line = stringResource(R.string.trash_line, trail, item.trashedOn) + " · " + left + if (item.byHq) " · " + stringResource(R.string.vault_trash_by_hq) else ""
                 val isOpen = item.trashPath in trash.open
                 val isBusy = item.trashPath in trash.busy
                 Column(

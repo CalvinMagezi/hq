@@ -9,12 +9,13 @@ import example.hq.spike.ui.tasks.TasksLogic
 enum class SearchScope { All, Notes, Tasks, Chats, Helpers }
 
 /** Where a search starts: the scope, a notes folder to stay in (under Notebooks, no leading slash) and the words already typed. */
-data class SearchStart(val scope: SearchScope = SearchScope.All, val folder: String? = null, val query: String = "")
+data class SearchStart(val scope: SearchScope = SearchScope.All, val folder: String? = null, val query: String = "", val tag: String? = null, val writtenByHq: Boolean = false)
 
 /** The matching done on the phone for tasks and chats: the lists are already here, so it works with HQ down. */
 object SearchMatch {
     const val MAX_PER_GROUP = 20
     const val RECENT_KEPT = 8
+    const val MAX_TAG_CHIPS = 8
 
     private fun words(q: String) = tidy(q).lowercase().split(' ').filter { it.isNotEmpty() }
 
@@ -44,6 +45,13 @@ object SearchMatch {
         if (t.isEmpty()) return recent
         return (listOf(t) + recent.filter { !it.equals(t, ignoreCase = true) }).distinct().take(RECENT_KEPT)
     }
+
+    /** HQ refuses a search with no word, so the Written by HQ and tag filters work only once a word is typed. */
+    fun canFilter(query: String): Boolean = tidy(query).isNotEmpty()
+
+    /** Tag chips offered in the search: the active one first, then the ones the phone knows, each once, at most [MAX_TAG_CHIPS]. */
+    fun tagChips(known: List<String>, active: String?): List<String> =
+        (listOfNotNull(active?.trimStart('#')) + known.map { it.trimStart('#') }).filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(MAX_TAG_CHIPS)
 
     /** The top folder of a note under Notebooks, "Projects" for Notebooks/Projects/Agent-HQ/x.md; blank for a note at the root. */
     fun folderOf(path: String): String = path.removePrefix("Notebooks/").substringBefore('/', "")
