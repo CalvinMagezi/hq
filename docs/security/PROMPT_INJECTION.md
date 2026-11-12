@@ -104,6 +104,8 @@ normal and the `BypassPermissions` paths.
      calendar (`calendar_list_events`) is itself an untrusted source, since titles and
      calendar names come from invitations and shared calendars: after a read, creating an
      event asks the owner.
+   - `contacts_search` (`CONTACTS.md`) is likewise an untrusted source: contact names and labels
+     can come from synced accounts and imports, so after a search a create asks the owner.
    - `calendar_update_event` and `calendar_delete_event`, which change or remove an event on
      the phone calendar. These ask in every turn, clean or tainted, in every permission mode but
      bypass (`always_ask_reason` in `tainted_calls.rs`): a deleted event cannot be recovered from

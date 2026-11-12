@@ -58,7 +58,7 @@ pub struct DeviceToolSpec {
 }
 
 /// Every domain's tools, in the order they are offered.
-const DOMAINS: &[&[DeviceToolSpec]] = &[crate::calendar::SPECS];
+const DOMAINS: &[&[DeviceToolSpec]] = &[crate::calendar::SPECS, crate::contacts::SPECS];
 
 /// Specs added at run time. Only tests use it, to prove a new domain needs no other edit.
 static EXTRA: Mutex<Vec<&'static DeviceToolSpec>> = Mutex::new(Vec::new());
