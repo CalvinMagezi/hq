@@ -26,3 +26,9 @@ https://github.com/mattpocock/skills, MIT License, Copyright (c) Matt Pocock:
 
   crates/hq-tools/assets/skills/hq-task-brief/SKILL.md
   packages/claude-plugin/skills/hq-task-brief/SKILL.md
+
+The hq-wayfinder skill is adapted from the wayfinder skill in
+https://github.com/mattpocock/skills, MIT License, Copyright (c) Matt Pocock:
+
+  crates/hq-tools/assets/skills/hq-wayfinder/SKILL.md
+  packages/claude-plugin/skills/hq-wayfinder/SKILL.md
