@@ -11,6 +11,6 @@ class NoteLinkTest {
     }
 
     @Test fun aPlainPathIsLeftReadable() {
-        assertEquals("hq://notes/Notebooks/Inbox/A.md", Links.noteLink("Notebooks/Inbox/A.md"))
+        assertEquals("hq://vault/Notebooks/Inbox/A.md", Links.noteLink("Notebooks/Inbox/A.md"))
     }
 }

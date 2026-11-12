@@ -3,7 +3,7 @@ package example.hq.spike.ui.firstrun
 /** Every string the first-run screens show. Short and plain; nothing here is ever built from a credential. */
 object FirstRunWords {
     const val WELCOME_TITLE = "Welcome to HQ"
-    const val WELCOME_BODY = "HQ is your own AI assistant that lives on this phone and keeps its notes, tasks and memory here."
+    const val WELCOME_BODY = "HQ is your own AI assistant that lives on this phone and keeps its Vault, tasks and memory here."
     const val SET_UP_NEW = "Set up a new HQ"
 
     const val MODEL_TITLE = "Your AI model"

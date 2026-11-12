@@ -44,4 +44,29 @@ class RestoreZipTest {
         assertTrue(r.exceptionOrNull() is java.io.IOException)
         assertFalse(File(into, "Notes/a.md").exists())
     }
+
+    @Test fun acceptsBothOldNotesAndNewVaultZipNames() {
+        val oldZip = tmp.newFile("HQ notes 2026-05-04 0907.zip").also { f ->
+            ZipOutputStream(f.outputStream()).use { z ->
+                z.putNextEntry(ZipEntry("Notes/old.md"))
+                z.write("from notes".toByteArray())
+                z.closeEntry()
+            }
+        }
+        val newZip = tmp.newFile("HQ Vault 2026-11-12 1700.zip").also { f ->
+            ZipOutputStream(f.outputStream()).use { z ->
+                z.putNextEntry(ZipEntry("Notes/new.md"))
+                z.write("from vault".toByteArray())
+                z.closeEntry()
+            }
+        }
+        assertTrue(RestoreLogic.isZip(oldZip))
+        assertTrue(RestoreLogic.isZip(newZip))
+        val intoOld = File(tmp.root, "out-old")
+        RestoreLogic.unzip(oldZip, intoOld)
+        assertEquals("from notes", File(intoOld, "Notes/old.md").readText())
+        val intoNew = File(tmp.root, "out-new")
+        RestoreLogic.unzip(newZip, intoNew)
+        assertEquals("from vault", File(intoNew, "Notes/new.md").readText())
+    }
 }

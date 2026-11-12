@@ -79,7 +79,7 @@ class NotesCopyTest {
     }
 
     @Test fun fileNameFollowsThePattern() {
-        assertEquals("HQ notes 2026-05-04 0907.zip", NotesCopy.fileName(LocalDateTime.of(2026, 5, 4, 9, 7)))
+        assertEquals("HQ Vault 2026-05-04 0907.zip", NotesCopy.fileName(LocalDateTime.of(2026, 5, 4, 9, 7)))
     }
 
     @Test fun zipHoldsEveryFileWithItsBytesAndPackedTypesAreStored() {

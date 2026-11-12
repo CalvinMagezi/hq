@@ -31,8 +31,8 @@ class SearchScreenTest {
     @Test fun theScopeChipsShowBeforeAnythingIsTypedAsTabs() {
         var scope: SearchScope? = null
         show(SearchUi(open = true, scope = SearchScope.Notes), SearchActions(onScope = { scope = it }))
-        listOf("All", "Notes", "Tasks", "Chats", "Helpers").forEach { rule.onNodeWithText(it).assertIsDisplayed() }
-        rule.onNodeWithText("Notes").assertIsSelected()
+        listOf("All", "Vault", "Tasks", "Chats", "Helpers").forEach { rule.onNodeWithText(it).assertIsDisplayed() }
+        rule.onNodeWithText("Vault").assertIsSelected()
         rule.onNodeWithText("Tasks").assertIsNotSelected()
         rule.onNodeWithText("Tasks").performClick()
         assertEquals(SearchScope.Tasks, scope)
@@ -40,7 +40,7 @@ class SearchScreenTest {
 
     @Test fun theFieldNamesWhereItLooks() {
         show(SearchUi(open = true, scope = SearchScope.Notes))
-        rule.onNodeWithText("Search notes").assertExists()
+        rule.onNodeWithText("Search the Vault").assertExists()
     }
 
     @Test fun askHqShowsOnNotesWhenNotesAreFoundAndAttachesThem() {
@@ -58,7 +58,7 @@ class SearchScreenTest {
     @Test fun aStoppedHqGivesTheFailureLineAndAStartButtonNotNothingMatches() {
         var started = 0
         show(SearchUi(open = true, query = "road", hqDown = true, notesFail = NotesFail.Stopped), goes = SearchGoes({}, {}, {}, {}, {}, { started++ }), stopped = true)
-        rule.onNodeWithText("Couldn't search your notes and chats. HQ has stopped. It will try again when HQ is back.").assertIsDisplayed()
+        rule.onNodeWithText("Couldn't search your Vault and chats. HQ has stopped. It will try again when HQ is back.").assertIsDisplayed()
         rule.onNodeWithText("Nothing matches that.").assertDoesNotExist()
         rule.onNodeWithText("Start HQ").performClick()
         assertEquals(1, started)

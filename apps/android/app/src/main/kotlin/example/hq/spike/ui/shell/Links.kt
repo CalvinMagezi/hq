@@ -18,7 +18,7 @@ data class LinkTarget(
     val search: SearchScope? = null,
     /** hq://tasks/away: the While you were away page. */
     val away: Boolean = false,
-    /** hq://notes/n/{id}: a note by its id, the web's "Copy link" form. */
+    /** hq://vault/n/{id} or hq://notes/n/{id}: a note by its id, the web's "Copy link" form. */
     val noteId: String? = null,
     /** A web page the app shows in its own screen, by [example.hq.spike.ui.webhost.WebPage.slug]. */
     val web: String? = null,
@@ -28,7 +28,7 @@ data class LinkTarget(
     val github: Boolean = false,
 )
 
-/** The links of the design's "Navigation and Back" table: hq://chat/{id}, inbox/{id}, tasks/{id}, notes/{path}, notes/n/{id}, tasks/away, helpers[/{id}], helpers/github, settings/{screen}, search[/{scope}]. hq://web/{usage|board|timeline} opens a web page in the app's own screen; hq://web/home and vault open Notes. */
+/** The links of the design's "Navigation and Back" table: hq://chat/{id}, inbox/{id}, tasks/{id}, vault/{path}, vault/n/{id}, notes/{path}, notes/n/{id}, tasks/away, helpers[/{id}], helpers/github, settings/{screen}, search[/{scope}]. hq://web/{usage|board|timeline} opens a web page in the app's own screen; hq://web/home and vault open Vault. */
 object Links {
     const val SCHEME = "hq"
     const val EXTRA = "link"
@@ -49,7 +49,7 @@ object Links {
             "inbox" -> LinkTarget(Place.Inbox, id = id(rest))
             "tasks" -> if (rest == "away") LinkTarget(Place.Tasks, away = true) else LinkTarget(Place.Tasks, id = id(rest))
             "helpers" -> if (rest == "github") LinkTarget(Place.Helpers, github = true) else LinkTarget(Place.Helpers, id = id(rest))
-            "notes" -> if (rest.startsWith("n/")) LinkTarget(Place.Notes, noteId = id(rest.removePrefix("n/"))) else LinkTarget(Place.Notes, path = notePath(rest))
+            "notes", "vault" -> if (rest.startsWith("n/")) LinkTarget(Place.Notes, noteId = id(rest.removePrefix("n/"))) else LinkTarget(Place.Notes, path = notePath(rest))
             "settings" -> rest.lowercase().ifEmpty { "home" }.takeIf { it in SETTINGS_SCREENS }?.let { LinkTarget(Place.Chat, screen = it) }
             "search" -> LinkTarget(Place.Notes, search = SearchScope.entries.firstOrNull { it.name.equals(rest, true) } ?: SearchScope.All)
             "web" -> if (rest.lowercase() in RETIRED_HOME) LinkTarget(Place.Notes) else webPage(rest, u.query)?.let { LinkTarget(Place.Chat, web = it.slug) }
@@ -58,9 +58,9 @@ object Links {
     }
 
     /** The link to a vault note. Each part of the path is percent-encoded, since a title with a space or a # would not parse as a link otherwise. */
-    fun noteLink(path: String): String = "$SCHEME://notes/" + path.split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+    fun noteLink(path: String): String = "$SCHEME://vault/" + path.split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
 
-    /** The web Home is retired: its links open Notes. */
+    /** The web Home is retired: its links open Vault. */
     private val RETIRED_HOME = setOf("home", "vault")
 
     /** Only the three pages the host shows: hq://web/usage, board, timeline (and /tasks?view= as the web app spells them). */

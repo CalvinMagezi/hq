@@ -69,7 +69,7 @@ class BackupFactsTest {
         assertEquals(BackupWords.Tone.Warn, c.tone)
         assertEquals("Backups are only on this phone", c.title)
         assertTrue(c.actions.contains(BackupWords.Action.SaveCopy))
-        assertEquals("The copy is not locked with a password. Anyone with the file can read your notes. Your keys are not in it.", c.lock)
+        assertEquals("The copy is not locked with a password. Anyone with the file can read your Vault. Your keys are not in it.", c.lock)
     }
 
     @Test fun withSaveCopySwitchedOffTheCardIsGreyHasNoCopyButtonAndGotItIsShownOnce() {
@@ -156,10 +156,10 @@ class BackupFactsTest {
         assertEquals("Backups run on your server HQ", home(f))
         assertFalse(BackupWords.warns(f, now))
         assertTrue(card(f).actions.isEmpty())
-        assertEquals("Your notes are kept on your server HQ, hq.example.com. This phone cannot see its backups yet.", card(f).body)
+        assertEquals("Your Vault is kept on your server HQ, hq.example.com. This phone cannot see its backups yet.", card(f).body)
         val said = f.copy(serverReport = HqClient.ServerBackup(true, hoursAgo(3), false, false, 24))
-        assertEquals("Your notes are kept on your server HQ, hq.example.com. Last backup 3 h ago.", card(said).body)
-        assertEquals("Your notes are kept on your server HQ, hq.example.com. Its last backup did not finish.", card(said.copy(serverReport = HqClient.ServerBackup(true, null, true, false, 24))).body)
+        assertEquals("Your Vault is kept on your server HQ, hq.example.com. Last backup 3 h ago.", card(said).body)
+        assertEquals("Your Vault is kept on your server HQ, hq.example.com. Its last backup did not finish.", card(said.copy(serverReport = HqClient.ServerBackup(true, null, true, false, 24))).body)
         assertEquals(BackupWords.Tone.Good, card(said).tone)
     }
 
