@@ -1,0 +1,8 @@
+{"dir":"out","msg":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"hq-spike","version":"0"}}}}
+{"dir":"in","msg":{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":true},"promptCapabilities":{"embeddedContext":true,"image":true},"sessionCapabilities":{"close":{},"fork":{},"list":{},"resume":{}}},"authMethods":[],"agentInfo":{"name":"OpenCode","version":"1.18.34"}}}}
+{"dir":"out","msg":{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/work","mcpServers":[]}}}
+{"dir":"in","msg":{"jsonrpc":"2.0","id":2,"result":{"sessionId":"ses_e2fe1877cffek2Q6BgOBUyjyzR","configOptions":[]}}}
+{"dir":"in","msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_e2fe1877cffek2Q6BgOBUyjyzR","update":{"sessionUpdate":"available_commands_update","availableCommands":[]}}}}
+{"dir":"out","msg":{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"ses_e2fe1877cffek2Q6BgOBUyjyzR","prompt":[{"type":"text","text":"Create a file hello.txt containing the word hi, then reply DONE_SPIKE."}]}}}
+{"dir":"in","msg":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_e2fe1877cffek2Q6BgOBUyjyzR","update":{"sessionUpdate":"usage_update","used":0,"size":262144,"cost":{"amount":0,"currency":"USD"}}}}}
+{"dir":"in","msg":{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Internal error: Your current subscription does not have access to Kimi Code right now. Upgrade your plan to keep coding with Kimi Code: https://www.kimi.com/code/#pricing","data":{"service":"session","errorName":"APIError"}}}}

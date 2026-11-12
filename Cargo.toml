@@ -24,6 +24,7 @@ members = [
     "crates/hq-update",
     "crates/hq-backup",
     "crates/hq-host",
+    "crates/hq-acp",
     "crates/hq-sandbox",
     "crates/hq-desktop",
 ]

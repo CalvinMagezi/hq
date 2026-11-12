@@ -3351,6 +3351,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hq-acp"
+version = "0.9.1"
+dependencies = [
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "hq-agent"
 version = "0.9.1"
 dependencies = [
