@@ -3,6 +3,7 @@ use crate::skills::{list_skills, parse_skill, security_flags, validate_skill, va
 
 const NAME: &str = "edge-coding-worker";
 const ACTIVE_NOW: &[&str] = &[NAME];
+const BRIEF: &str = "hq-task-brief";
 const CALENDAR: &str = CALENDAR_CREATION_SKILL;
 const READING: &str = CALENDAR_READING_SKILL;
 const EDITING: &str = CALENDAR_EDITING_SKILL;
@@ -89,16 +90,16 @@ fn every_shipped_skill_is_valid_clean_and_marked_as_hq_s() {
 fn a_built_in_is_active_unless_it_is_turned_off() {
     assert_eq!(
         active_for(&config_with(&[], &[])),
-        [NAME, CALENDAR, READING, EDITING],
+        [NAME, BRIEF, CALENDAR, READING, EDITING],
         "GitHub can be connected after start, with no repos listed"
     );
     assert_eq!(
         active_for(&config_with(&["o/r"], &[])),
-        [NAME, CALENDAR, READING, EDITING]
+        [NAME, BRIEF, CALENDAR, READING, EDITING]
     );
     assert_eq!(
         active_for(&config_with(&["o/r"], &["EDGE-CODING-WORKER"])),
-        [CALENDAR, READING, EDITING]
+        [BRIEF, CALENDAR, READING, EDITING]
     );
     assert_eq!(
         unknown_off(&config_with(&[], &["edge-coding-wroker"])),
@@ -511,4 +512,31 @@ fn calendar_editing_ships_with_a_hash_and_fails_closed_when_off() {
     let _off = set_active_for_this_thread(Some(&[]));
     assert!(!is_active(EDITING));
     assert!(shipped_hash(EDITING).is_none());
+}
+
+/// The text after the frontmatter block.
+fn body_of(text: &str) -> &str {
+    let rest = text
+        .strip_prefix("---\n")
+        .expect("frontmatter opens the file");
+    rest.split_once("\n---\n").expect("frontmatter closes").1
+}
+
+#[test]
+fn the_plugin_copy_of_the_task_brief_skill_has_the_same_body() {
+    let plugin = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packages/claude-plugin/skills/hq-task-brief/SKILL.md");
+    let plugin =
+        fs::read_to_string(&plugin).unwrap_or_else(|e| panic!("{}: {e}", plugin.display()));
+    let shipped = BUILTIN_SKILLS
+        .iter()
+        .find(|s| s.name == BRIEF)
+        .and_then(|s| s.files.iter().find(|(f, _)| *f == SKILL_FILE))
+        .map(|(_, t)| *t)
+        .unwrap();
+    assert_eq!(
+        body_of(&plugin),
+        body_of(shipped),
+        "packages/claude-plugin/skills/hq-task-brief must match the built-in skill body"
+    );
 }
