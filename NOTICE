@@ -32,3 +32,9 @@ https://github.com/mattpocock/skills, MIT License, Copyright (c) Matt Pocock:
 
   crates/hq-tools/assets/skills/hq-wayfinder/SKILL.md
   packages/claude-plugin/skills/hq-wayfinder/SKILL.md
+
+The hq-engineering-core skill is adapted from the tdd, implement and code-review skills in
+https://github.com/mattpocock/skills, MIT License, Copyright (c) Matt Pocock:
+
+  crates/hq-tools/assets/skills/hq-engineering-core/SKILL.md
+  packages/claude-plugin/skills/hq-engineering-core/SKILL.md
