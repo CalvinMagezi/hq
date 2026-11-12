@@ -649,8 +649,14 @@ impl HostBackend for NativeBackend {
         self.call("agent.prompt", json!({ "name": target, "text": text }))?;
         // Over the protocol the prompt is delivered, not typed: there is no echo to wait for and no
         // Enter to press again, and a turn that is queued behind another is still accepted.
-        let info = self.call("agent.get", json!({ "name": target }))?;
-        if info.get("rule").and_then(Value::as_str) == Some(ACP_RULE) {
+        // A failed lookup only means the terminal checks below run, as before.
+        let info = self.call("agent.get", json!({ "name": target })).ok();
+        if info
+            .as_ref()
+            .and_then(|i| i.get("rule"))
+            .and_then(Value::as_str)
+            == Some(ACP_RULE)
+        {
             return Ok(PromptOutcome::Submitted);
         }
         // Let the echo of the typed text land, so only output after it counts as a reaction.
