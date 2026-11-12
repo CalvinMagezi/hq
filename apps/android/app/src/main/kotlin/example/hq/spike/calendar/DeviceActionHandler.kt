@@ -29,13 +29,14 @@ class HqDeviceActionLink(private val client: HqClient) : DeviceActionLink {
 }
 
 /**
- * Runs `calendar.create` and `calendar.list` device actions. It lives on the process scope next to the chat socket, so an action is handled
+ * Runs `calendar.create`, `calendar.list`, `calendar.update` and `calendar.delete` device actions. It lives on the process scope next to the chat socket, so an action is handled
  * whenever the socket is up, with or without a screen open. Only ids, phases and outcome codes are logged.
  */
 class DeviceActionHandler(
     private val link: DeviceActionLink,
     private val creator: CalendarCreator,
     private val lister: CalendarLister,
+    private val modifier: CalendarModifier,
     private val now: () -> Instant = Instant::now,
     private val log: (String) -> Unit = { Log.i(TAG, it) },
 ) {
@@ -73,8 +74,17 @@ class DeviceActionHandler(
         post(action.actionId, outcome.toJson())
     }
 
-    private fun run(action: ChatEvent.DeviceAction): CalendarOutcome =
-        if (action.name == CalendarLimits.LIST_ACTION_NAME) runList(action) else runCreate(action)
+    private fun run(action: ChatEvent.DeviceAction): CalendarOutcome = when (action.name) {
+        CalendarLimits.LIST_ACTION_NAME -> runList(action)
+        CalendarModifyLimits.UPDATE_ACTION_NAME -> runModify(CalendarModifyRequests.parseUpdate(action.payload), modifier::update)
+        CalendarModifyLimits.DELETE_ACTION_NAME -> runModify(CalendarModifyRequests.parseDelete(action.payload), modifier::delete)
+        else -> runCreate(action)
+    }
+
+    private fun runModify(parsed: ParsedModify, act: (ModifyRequest) -> CalendarOutcome): CalendarOutcome = when (parsed) {
+        is ParsedModify.Bad -> parsed.outcome
+        is ParsedModify.Ok -> act(parsed.request)
+    }
 
     private fun runCreate(action: ChatEvent.DeviceAction): CalendarOutcome = when (val parsed = CalendarRequests.parse(action.payload)) {
         is ParsedRequest.Bad -> parsed.outcome
@@ -113,6 +123,6 @@ class DeviceActionHandler(
 
     private companion object {
         const val TAG = "DeviceAction"
-        val HANDLED = setOf(CalendarLimits.ACTION_NAME, CalendarLimits.LIST_ACTION_NAME)
+        val HANDLED = setOf(CalendarLimits.ACTION_NAME, CalendarLimits.LIST_ACTION_NAME, CalendarModifyLimits.UPDATE_ACTION_NAME, CalendarModifyLimits.DELETE_ACTION_NAME)
     }
 }
