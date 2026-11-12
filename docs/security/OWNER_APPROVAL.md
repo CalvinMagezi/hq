@@ -45,6 +45,14 @@ off everywhere.
 - other machines and agents: `host_add`, `host_send`, `agent_send_message`, and starting a coding agent (`harness_session_spawn`, `harness_session_handoff`, `agent_delegate`), which is as strong as `bash`. Steering an agent already started (`harness_session_send`, `harness_session_answer`) does not ask in a clean session; see below for a tainted one
 - exports to a path: `convert_from_markdown`, `vault_export` and `vault_export_pdf` when given `output`
 - the owner's other accounts: `google_workspace` and every remote MCP server (`remote_mcp:`)
+- the owner's phone calendar: `calendar_update_event` and `calendar_delete_event`. Unlike the rest of
+  this list they ask in every permission mode but bypass, and a clean chat is no exception
+  (`always_ask_reason` in `tainted_calls.rs`, wording from `hq_tools::calendar::describe_modification`).
+  The card shows the exact arguments (the event link, its title and start as listed, the new
+  values) and a line such as "If approved, it would change the event "Dentist" on the owner's phone
+  calendar: start to 2026-02-11T16:00." The digest covers every argument, so an approval is for this
+  event and this change only. With no approval store they do not run. Creating an event
+  (`calendar_create_event`) still asks only once the turn is tainted.
 
 Reads never ask, and neither do notes and tasks, which the owner can undo from the vault and the
 task history.

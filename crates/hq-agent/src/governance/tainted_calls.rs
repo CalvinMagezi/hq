@@ -26,6 +26,12 @@ const MAX_UNASKED_URL_DATA_BYTES: usize = 200;
 /// box rarely passes 100; a longer query is more likely text the model is carrying.
 const MAX_UNASKED_QUERY_CHARS: usize = 150;
 
+/// Why this call needs the owner whether or not the session is tainted, or `None`. Changing or
+/// deleting an event is not something the owner can undo from their notes, so it always asks.
+pub(super) fn always_ask_reason(tool: &str, args: &Value) -> Option<String> {
+    hq_tools::calendar::describe_modification(tool, args)
+}
+
 /// Why this call from a tainted session needs the owner although the same call from a clean
 /// session would not, or `None`. Says nothing about a clean session.
 pub(super) fn tainted_reason(tool: &str, args: &Value, taint: &TaintTracker) -> Option<String> {
@@ -107,6 +113,13 @@ pub(super) fn unasked_denial(
     taint: &TaintTracker,
     needs_owner: bool,
 ) -> Option<String> {
+    if let Some(why) = always_ask_reason(tool, args) {
+        return Some(format!(
+            "Not run: '{tool}' {why}, and nobody is here to approve it. It was left for the \
+             owner: say what you wanted to change and why, and they can ask you again from \
+             their chat."
+        ));
+    }
     let source = taint.source()?;
     let hands_work_over = NO_ASK_DENIED_TOOLS.contains(&tool)
         || (tool == hq_tools::github::coder::CODER_TOOL && coder_write(args));
@@ -182,6 +195,28 @@ mod tests {
         unattended.set_unattended();
         assert!(unasked_denial(tool, &args, &unattended, false).is_some());
         assert_eq!(unasked_denial(tool, &args, &tainted(), false), None);
+    }
+
+    #[test]
+    fn changing_or_deleting_a_calendar_event_asks_even_when_clean_and_never_runs_unasked() {
+        let args = json!({"title": "Dentist", "open_link": "l", "start_local": "s"});
+        for tool in [
+            hq_tools::calendar::UPDATE_TOOL_NAME,
+            hq_tools::calendar::DELETE_TOOL_NAME,
+        ] {
+            let reason = always_ask_reason(tool, &args).expect(tool);
+            assert!(reason.contains("\"Dentist\""), "{reason}");
+            // Taint changes nothing: it is asked clean, tainted and unattended alike.
+            assert_eq!(tainted_reason(tool, &args, &TaintTracker::new()), None);
+            let denial = unasked_denial(tool, &args, &TaintTracker::new(), false).expect(tool);
+            assert!(denial.contains("nobody is here to approve"), "{denial}");
+            assert!(unasked_denial(tool, &args, &tainted(), false).is_some());
+        }
+        assert_eq!(
+            always_ask_reason(hq_tools::calendar::TOOL_NAME, &args),
+            None
+        );
+        assert_eq!(always_ask_reason("calendar_list_events", &args), None);
     }
 
     #[test]

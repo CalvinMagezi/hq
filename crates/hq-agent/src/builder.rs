@@ -428,7 +428,7 @@ impl SessionBuilder {
         self
     }
 
-    /// Offers `calendar_create_event` and `calendar_list_events` in this session. Only a chat turn that came from the
+    /// Offers the four `calendar_*_event(s)` tools in this session. Only a chat turn that came from the
     /// owner's phone has a link to give; every other session never calls this.
     pub fn device_calendar(
         mut self,
@@ -436,6 +436,12 @@ impl SessionBuilder {
     ) -> Self {
         self.extra_tools.push(Box::new(
             crate::calendar_tool::CalendarCreateEventTool::new(device.clone()),
+        ));
+        self.extra_tools.push(Box::new(
+            crate::calendar_tool::CalendarUpdateEventTool::new(device.clone()),
+        ));
+        self.extra_tools.push(Box::new(
+            crate::calendar_tool::CalendarDeleteEventTool::new(device.clone()),
         ));
         self.extra_tools
             .push(Box::new(crate::calendar_tool::CalendarListEventsTool::new(

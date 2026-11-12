@@ -51,13 +51,13 @@ pub struct Checked {
     pub duration_defaulted: bool,
 }
 
-enum Local {
+pub(super) enum Local {
     At(DateTime<Tz>),
     Gap,
     Overlap,
 }
 
-fn resolve(zone: Tz, naive: NaiveDateTime) -> Local {
+pub(super) fn resolve(zone: Tz, naive: NaiveDateTime) -> Local {
     match zone.from_local_datetime(&naive) {
         LocalResult::Single(t) => Local::At(t),
         LocalResult::Ambiguous(..) => Local::Overlap,
@@ -117,7 +117,7 @@ fn reject_fields(map: &Map<String, Value>) -> Result<(), Value> {
 }
 
 /// An optional or required trimmed string within `max` characters. Empty counts as absent.
-fn text(
+pub(super) fn text(
     map: &Map<String, Value>,
     key: &str,
     max: usize,
@@ -190,14 +190,7 @@ fn timed_span(
     if end <= start {
         return Err(invalid("end_not_after_start", Some("end_local")));
     }
-    if start.with_timezone(&Utc) < now - TimeDelta::minutes(PAST_TOLERANCE_MINUTES) {
-        return Err(clarification(
-            "start_in_past",
-            "That start time has already passed. Which date and time did you mean?",
-            &[],
-        ));
-    }
-    too_far(start.with_timezone(&Utc), now)?;
+    check_timed_start(start.with_timezone(&Utc), now)?;
     Ok((
         start.format(TIMED_FORMAT).to_string(),
         end.format(TIMED_FORMAT).to_string(),
@@ -226,17 +219,38 @@ fn all_day_span(
     if end < start {
         return Err(invalid("end_not_after_start", Some("end_local")));
     }
-    let midnight = start.and_hms_opt(0, 0, 0).unwrap_or_default();
-    let start_utc = zone
-        .from_local_datetime(&midnight)
-        .earliest()
-        .map_or_else(|| midnight.and_utc(), |t| t.with_timezone(&Utc));
-    too_far(start_utc, now)?;
+    check_all_day_start(start, now, zone)?;
     Ok((
         start.format(DATE_FORMAT).to_string(),
         end.format(DATE_FORMAT).to_string(),
         false,
     ))
+}
+
+/// A new timed start may not be in the past (beyond the tolerance) or years away.
+pub(super) fn check_timed_start(start: DateTime<Utc>, now: DateTime<Utc>) -> Result<(), Value> {
+    if start < now - TimeDelta::minutes(PAST_TOLERANCE_MINUTES) {
+        return Err(clarification(
+            "start_in_past",
+            "That start time has already passed. Which date and time did you mean?",
+            &[],
+        ));
+    }
+    too_far(start, now)
+}
+
+/// An all-day start has no past check, only the horizon, judged at local midnight.
+pub(super) fn check_all_day_start(
+    start: NaiveDate,
+    now: DateTime<Utc>,
+    zone: Tz,
+) -> Result<(), Value> {
+    let midnight = start.and_hms_opt(0, 0, 0).unwrap_or_default();
+    let start_utc = zone
+        .from_local_datetime(&midnight)
+        .earliest()
+        .map_or_else(|| midnight.and_utc(), |t| t.with_timezone(&Utc));
+    too_far(start_utc, now)
 }
 
 fn too_far(start: DateTime<Utc>, now: DateTime<Utc>) -> Result<(), Value> {
@@ -253,7 +267,7 @@ fn too_far(start: DateTime<Utc>, now: DateTime<Utc>) -> Result<(), Value> {
     Ok(())
 }
 
-fn overlap_question(local: &str) -> Value {
+pub(super) fn overlap_question(local: &str) -> Value {
     clarification(
         "ambiguous_local_time",
         &format!(

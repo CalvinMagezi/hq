@@ -9,6 +9,10 @@ pub fn for_call(tool: &str, args: &Value) -> Option<String> {
     match tool {
         #[cfg(unix)]
         "host_add" => crate::agent_host::pairing::describe_add(args),
+        crate::calendar::UPDATE_TOOL_NAME | crate::calendar::DELETE_TOOL_NAME => {
+            crate::calendar::describe_modification(tool, args)
+                .map(|d| format!("If approved, it {d}."))
+        }
         _ => {
             let _ = args;
             None

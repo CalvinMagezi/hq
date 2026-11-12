@@ -668,6 +668,58 @@ async fn default_mode_waits_for_the_owner_only_where_a_chat_can_ask() {
     assert_eq!(run_bash(PermissionMode::AcceptEdits, true).await, "ran");
 }
 
+/// Changing or deleting a calendar event asks the owner every time, in a clean chat too, in every
+/// mode but bypass, and does not run where nobody can be asked.
+#[tokio::test]
+async fn a_calendar_change_always_asks_the_owner_and_never_runs_unasked() {
+    let args = serde_json::json!({"open_link": "hq://calendar/event/1?begin=1&end=2",
+        "title": "Dentist", "start_local": "2026-02-10T15:00"});
+    for tool in ["calendar_delete_event", "calendar_update_event"] {
+        for mode in [PermissionMode::Default, PermissionMode::AcceptEdits] {
+            let mut guardian = ToolGuardian::new(
+                vec![std::env::temp_dir()],
+                SecurityProfile::Guarded,
+                mode.clone(),
+            );
+            let db = Arc::new(hq_db::Database::open_memory().unwrap());
+            guardian.set_owner_approval(Some(OwnerApproval::new(db, "web:t1")));
+            let governed = guardian.govern(Box::new(NamedTool(tool)));
+            let out = governed.execute("1", args.clone()).await.unwrap();
+            let text = out
+                .content
+                .first()
+                .map(|c| c.text.clone())
+                .unwrap_or_default();
+            assert!(
+                text.contains("Waiting for the owner"),
+                "{tool} {mode:?}: {text}"
+            );
+        }
+        for mode in [
+            PermissionMode::Default,
+            PermissionMode::AcceptEdits,
+            PermissionMode::BypassPermissions,
+        ] {
+            let guardian = ToolGuardian::new(
+                vec![std::env::temp_dir()],
+                SecurityProfile::Guarded,
+                mode.clone(),
+            );
+            let governed = guardian.govern(Box::new(NamedTool(tool)));
+            let out = governed.execute("1", args.clone()).await.unwrap();
+            let text = out
+                .content
+                .first()
+                .map(|c| c.text.clone())
+                .unwrap_or_default();
+            assert!(
+                text.contains("nobody is here to approve"),
+                "{tool} {mode:?}: {text}"
+            );
+        }
+    }
+}
+
 /// A do-nothing tool under a real tool's name, so governance applies that tool's rules.
 struct NamedTool(&'static str);
 

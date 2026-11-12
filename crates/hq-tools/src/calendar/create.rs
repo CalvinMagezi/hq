@@ -229,6 +229,8 @@ pub fn result_is_acceptable_for(name: &str, body: &Value) -> bool {
     match name {
         store::ACTION_NAME => result_is_acceptable(body),
         store::LIST_ACTION_NAME => outcome_is_known(body, outcome::LIST_PHONE_OUTCOMES),
+        store::UPDATE_ACTION_NAME => outcome_is_known(body, outcome::UPDATE_PHONE_OUTCOMES),
+        store::DELETE_ACTION_NAME => outcome_is_known(body, outcome::DELETE_PHONE_OUTCOMES),
         _ => false,
     }
 }
@@ -237,6 +239,8 @@ pub fn result_is_acceptable_for(name: &str, body: &Value) -> bool {
 pub fn finalize_for(name: &str, body: &Value, payload: &Value) -> Value {
     match name {
         store::LIST_ACTION_NAME => super::list::finalize_list(body, payload),
+        store::UPDATE_ACTION_NAME => super::update::finalize_update(body, payload),
+        store::DELETE_ACTION_NAME => super::delete::finalize_delete(body, payload),
         _ => finalize(body, payload),
     }
 }
