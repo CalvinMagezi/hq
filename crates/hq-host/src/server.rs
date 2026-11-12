@@ -700,7 +700,12 @@ impl Conn {
             "agent.resume" => {
                 let p: ResumeParams = parse(params)?;
                 let env = p.env.into_iter().collect();
-                Ok(info_json(&host.resume(&p.name, env).map_err(host_err)?))
+                let mcp = p.mcp.map(|m| McpEndpoint {
+                    url: m.url,
+                    token: m.token,
+                });
+                let resumed = host.resume_with(&p.name, env, mcp);
+                Ok(info_json(&resumed.map_err(host_err)?))
             }
             "agent.get" => {
                 let p: Named = parse(params)?;
@@ -1019,6 +1024,9 @@ struct ResumeParams {
     name: String,
     #[serde(default)]
     env: std::collections::BTreeMap<String, String>,
+    /// HQ's MCP address and the session's token, for an ACP agent being brought back.
+    #[serde(default)]
+    mcp: Option<McpParams>,
 }
 
 #[derive(Deserialize, Default, Clone, Copy)]

@@ -129,7 +129,7 @@ impl AcpPane {
                 let servers = mcp_servers(l.mcp.as_ref(), &caps);
                 let cwd = l.cwd.to_string_lossy();
                 match &l.resume_session {
-                    Some(id) if !caps.load_session => {
+                    Some(_) if !caps.load_session => {
                         Err(hq_acp::ClientError::Protocol(NO_LOAD_SESSION))
                     }
                     Some(id) => conn
@@ -469,6 +469,7 @@ impl Driver {
         }
         if wire_seq != synced.wire_seq {
             synced.wire_seq = wire_seq;
+            v.facts = facts_of(t);
             let state = host_state(t.state());
             let open = t.pending().map(|p| (p.seq, open_dialog(&p.dialog)));
             let seq = match &open {

@@ -88,7 +88,7 @@ fn a_restarted_host_gets_each_agents_env_back_from_hq() {
     rows.sort_by_key(|r| r.host == "native");
 
     let backend: HostHandle = Arc::new(NativeBackend::new(&second_dir));
-    resume_awaiting(&rows, &backend);
+    resume_awaiting(&Arc::new(db.clone()), &rows, &backend);
 
     let deadline = Instant::now() + WAIT;
     let screen = loop {

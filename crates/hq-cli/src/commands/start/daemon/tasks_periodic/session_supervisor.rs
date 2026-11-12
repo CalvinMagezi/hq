@@ -104,6 +104,7 @@ struct HostPhase {
 /// so it runs on the blocking pool, and it finishes inside `budget` even when a
 /// host never answers; sessions it could not reach are treated as unknown.
 fn gather_hosts(
+    db: &Arc<Database>,
     rows: &[registry::HarnessSessionRow],
     resolve: &HostResolver,
     budget: Duration,
@@ -117,7 +118,7 @@ fn gather_hosts(
     hosts.dedup();
     for name in hosts {
         if let Ok(host) = (resolve.as_ref())(name) {
-            hq_tools::harness_session::resume_awaiting(rows, &host);
+            hq_tools::harness_session::resume_awaiting(db, rows, &host);
         }
     }
     let within_budget = move |host: Host| {
@@ -535,9 +536,11 @@ async fn supervise(
         .filter(|r| checkout::tracked(&db_arc, &r.id))
         .map(|r| r.id.clone())
         .collect();
-    let phase =
-        tokio::task::spawn_blocking(move || gather_hosts(&rows, &resolver, host_budget, &tracked))
-            .await?;
+    let sweep_db = Arc::new(db.clone());
+    let phase = tokio::task::spawn_blocking(move || {
+        gather_hosts(&sweep_db, &rows, &resolver, host_budget, &tracked)
+    })
+    .await?;
     hosts::watch_hosts(
         db,
         &phase.polled,

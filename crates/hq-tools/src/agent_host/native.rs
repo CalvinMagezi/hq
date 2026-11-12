@@ -402,7 +402,7 @@ const CLAUDE_KIND: &str = "claude";
 fn older_host_hint(error: AgentHostError, host: String) -> AgentHostError {
     match &error {
         AgentHostError::Api { code, message }
-            if code == "invalid_params" && message.contains("transport") =>
+            if code == "invalid_params" && message.contains("unknown field `transport`") =>
         {
             let hint = format!(
                 "host '{host}' runs an hq-host without ACP support: update it, or run this agent in a terminal"
@@ -427,12 +427,18 @@ fn acp_spawn_params(
         .iter()
         .map(|(k, v)| (k.clone(), Value::String(v.clone())))
         .collect();
-    json!({
+    let mut params = json!({
         "name": req.name, "argv": argv, "cwd": req.cwd, "agent": req.kind, "env": env,
         "sandbox": sandbox, "idle_ttl_secs": idle_ttl_secs, "transport": "acp",
-        "mcp": req.mcp.as_ref().map(|m| json!({ "url": m.url, "token": m.token })),
-        "model": req.acp_model,
-    })
+    });
+    // Only what is set is sent: a host that predates a field rejects the key even when it is null.
+    if let Some(m) = &req.mcp {
+        params["mcp"] = json!({ "url": m.url, "token": m.token });
+    }
+    if let Some(model) = &req.acp_model {
+        params["model"] = json!(model);
+    }
+    params
 }
 
 /// The program and arguments to start. A wrapper command runs through a shell,
@@ -932,13 +938,17 @@ impl HostBackend for NativeBackend {
         &self,
         name: &str,
         env: Vec<(String, String)>,
+        mcp: Option<crate::agent_host::McpAccess>,
     ) -> Result<(), AgentHostError> {
         let env: serde_json::Map<String, Value> = env
             .into_iter()
             .map(|(k, v)| (k, Value::String(v)))
             .collect();
-        self.call("agent.resume", json!({ "name": name, "env": env }))
-            .map(|_| ())
+        let mut params = json!({ "name": name, "env": env });
+        if let Some(m) = mcp {
+            params["mcp"] = json!({ "url": m.url, "token": m.token });
+        }
+        self.call("agent.resume", params).map(|_| ())
     }
 
     fn with_launch_bound_dyn(&self, bound: Duration) -> Host {
@@ -1014,7 +1024,7 @@ mod tests {
         assert_eq!(p["agent"], "opencode");
         assert!(p.get("resume_argv").is_none() && p.get("rows").is_none());
         assert_eq!(p["idle_ttl_secs"], 60);
-        assert!(p["mcp"].is_null() && p["model"].is_null());
+        assert!(p.get("mcp").is_none() && p.get("model").is_none());
         let mut with_model = req("opencode", None);
         with_model.acp_model = Some("m".into());
         let p = acp_spawn_params(&with_model, &["opencode".to_string()], &None, None);

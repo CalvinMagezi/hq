@@ -1008,6 +1008,14 @@ impl Host {
                     report.skipped.push((name, e.to_string()));
                     lock(&self.awaiting).insert(rec.name.clone(), rec);
                 }
+                // An ACP agent that would not load (a login that ran out, a busy machine) keeps its
+                // record, so resuming it later still finds the session.
+                Err(e) if rec.acp_session.is_some() => {
+                    report
+                        .skipped
+                        .push((name, format!("{e} (kept: resume it once that is fixed)")));
+                    lock(&self.awaiting).insert(rec.name.clone(), rec);
+                }
                 Err(e) => report.skipped.push((name, e.to_string())),
             }
         }
@@ -1034,6 +1042,17 @@ impl Host {
     /// Starts a waiting agent with the environment its starter supplies again.
     /// It stays waiting if a variable is missing or the start fails.
     pub fn resume(&self, name: &str, env: Vec<(String, String)>) -> Result<PaneInfo, HostError> {
+        self.resume_with(name, env, None)
+    }
+
+    /// `resume`, also giving an ACP agent HQ's MCP connection in its session. The endpoint is never
+    /// stored, so a restored agent has none until the caller supplies it here.
+    pub fn resume_with(
+        &self,
+        name: &str,
+        env: Vec<(String, String)>,
+        mcp: Option<McpEndpoint>,
+    ) -> Result<PaneInfo, HostError> {
         let rec = lock(&self.awaiting)
             .get(name)
             .cloned()
@@ -1060,7 +1079,11 @@ impl Host {
             return Err(locked);
         }
         lock(&self.awaiting).remove(name);
-        let started = self.start(spec_of(rec.clone(), env)).and_then(|info| {
+        let mut spec = spec_of(rec.clone(), env);
+        if spec.transport == Transport::Acp {
+            spec.mcp = mcp;
+        }
+        let started = self.start(spec).and_then(|info| {
             self.undo_if_locked(&info.name)?;
             Ok(info)
         });

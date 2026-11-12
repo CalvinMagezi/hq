@@ -59,6 +59,22 @@ pub struct ModelMenu {
     pub choice: ModelChoice,
 }
 
+/// The values of a config option's choices, whether they are listed flat or in named groups.
+fn option_values(list: Option<&Value>) -> Vec<String> {
+    let items = list.and_then(Value::as_array).into_iter().flatten();
+    items
+        .flat_map(|item| match item.get("options") {
+            Some(group) => option_values(Some(group)),
+            None => item
+                .get("value")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .into_iter()
+                .collect(),
+        })
+        .collect()
+}
+
 /// Reads the model menu out of a `session/new` result, in either of the two shapes agents use.
 pub fn parse_model_menu(result: &Value) -> Option<ModelMenu> {
     let strings = |list: Option<&Value>, key: &str| -> Vec<String> {
@@ -83,7 +99,7 @@ pub fn parse_model_menu(result: &Value) -> Option<ModelMenu> {
         o.get("category").and_then(Value::as_str) == Some("model")
             || o.get("id").and_then(Value::as_str) == Some("model")
     })?;
-    let available = strings(model.get("options"), "value");
+    let available = option_values(model.get("options"));
     (!available.is_empty()).then(|| ModelMenu {
         current: model
             .get("currentValue")
@@ -483,6 +499,12 @@ mod tests {
             ModelChoice::ConfigOption {
                 config_id: "model".into()
             }
+        );
+        let grouped = json!({"configOptions": [{"id": "model", "category": "model", "currentValue": "a",
+            "options": [{"group": "g1", "name": "G1", "options": [{"value": "a"}]}, {"value": "b"}]}]});
+        assert_eq!(
+            parse_model_menu(&grouped).unwrap().available,
+            vec!["a", "b"]
         );
         assert_eq!(parse_model_menu(&json!({"sessionId": "s"})), None);
     }

@@ -3,7 +3,7 @@
 //! for them like a terminal agent does.
 #![cfg(unix)]
 
-use hq_host::{Host, ReadSource, SpawnSpec, Transport};
+use hq_host::{Host, McpEndpoint, ReadSource, SpawnSpec, Transport};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -124,4 +124,41 @@ fn a_session_the_agent_no_longer_has_fails_the_restore_with_its_words() {
     assert!(report.restored.is_empty());
     let why = &report.skipped.first().expect("skipped").1;
     assert!(why.contains("session not found"), "{why}");
+    assert!(why.contains("kept"), "{why}");
+    assert_eq!(
+        host.awaiting().len(),
+        1,
+        "the record stays so a later resume can retry it"
+    );
+}
+
+#[test]
+fn a_restored_agent_gets_hqs_mcp_again_when_the_caller_supplies_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (before, after) = (tmp.path().join("before"), tmp.path().join("after"));
+    let first = Host::new().with_state_dir(&before);
+    let mut s = spec("back5", "mcp");
+    s.env.push(("HQ_SESSION_ID".into(), "hs-1".into()));
+    first.spawn(s).unwrap();
+    crash_copy(&before, &after);
+    first.kill("back5").unwrap();
+
+    let second = Host::new().with_state_dir(&after);
+    assert!(second.restore().restored.is_empty());
+    let env = vec![("HQ_SESSION_ID".to_string(), "hs-1".to_string())];
+    let mcp = McpEndpoint {
+        url: "http://127.0.0.1:47480/mcp".into(),
+        token: "fresh-token".into(),
+    };
+    second.resume_with("back5", env, Some(mcp)).unwrap();
+    second.prompt("back5", "say").unwrap();
+    until("the turn", || second.info("back5").unwrap().done);
+    let text = second.read("back5", ReadSource::Recent, 0).unwrap();
+    assert!(
+        text.contains("Bearer fresh-token") && text.contains("agent-hq"),
+        "{text}"
+    );
+    let stored = std::fs::read_to_string(after.join("session.json")).unwrap();
+    assert!(!stored.contains("fresh-token"), "the token is never stored");
+    second.kill("back5").unwrap();
 }

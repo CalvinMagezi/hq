@@ -90,7 +90,7 @@ pub(super) fn session_port(session_id: &str) -> u16 {
 /// Starts the agents a restarted built-in host (local or remote) is holding for
 /// their env, matching them to the sessions placed on that host.
 /// Best effort: one that cannot be resumed stays held and is tried next sweep.
-pub fn resume_awaiting(rows: &[HarnessSessionRow], host: &Host) {
+pub fn resume_awaiting(db: &Arc<Database>, rows: &[HarnessSessionRow], host: &Host) {
     let Ok(waiting) = host.awaiting() else { return };
     for agent in waiting {
         let on_host = |r: &&HarnessSessionRow| r.host == host.name() && r.agent_name == agent.name;
@@ -101,7 +101,12 @@ pub fn resume_awaiting(rows: &[HarnessSessionRow], host: &Host) {
             continue;
         };
         let env = launch_env(&harness, &row.id);
-        if let Err(e) = host.resume_awaiting(&agent.name, env) {
+        // The host does not keep the MCP token, so an ACP agent that asked for it gets a fresh one.
+        let mcp = harness
+            .gives_hq_mcp()
+            .then(|| mcp_access(db, host, &harness, &row.id))
+            .flatten();
+        if let Err(e) = host.resume_awaiting(&agent.name, env, mcp) {
             tracing::warn!(session = %row.id, error = %e, "could not resume a held agent");
         }
     }
