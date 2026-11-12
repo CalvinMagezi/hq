@@ -276,6 +276,7 @@ pub async fn run_session_supervisor(db: &Database, config: &HqConfig) -> Result<
             host_budget: HOST_SWEEP_BUDGET,
             unreachable_after: config.agent_host.unreachable_alert_after(),
             driver_grace: config.agent_host.driver_grace(),
+            fleet: FleetQuiet::from_config(&config.inbox.fleet),
         },
     )
     .await
@@ -289,6 +290,8 @@ struct Sweep {
     unreachable_after: Option<Duration>,
     /// How long a block handed to a driving chat may stand before the owner hears of it.
     driver_grace: Duration,
+    /// The quiet-fleet rules; `FleetQuiet::off()` keeps an item for every prompt and finish.
+    fleet: FleetQuiet,
 }
 
 impl Sweep {
@@ -298,6 +301,7 @@ impl Sweep {
             host_budget,
             unreachable_after: None,
             driver_grace: Duration::ZERO,
+            fleet: FleetQuiet::off(),
         }
     }
 }
@@ -327,6 +331,7 @@ fn sweep_alive(
     seen: Seen<'_>,
     resolve: &HostResolver,
     driver_grace: Duration,
+    fleet: &FleetQuiet,
 ) {
     let Seen {
         agent,
@@ -367,8 +372,11 @@ fn sweep_alive(
         // Only the survey's own block is silenced. A finished turn always alerts: it carries
         // the driver's wake, and a state change after the keypress must not lose it.
         AgentStatus::Blocked if dismissed => {}
-        AgentStatus::Blocked => alert_blocked(db, row, agent, screen, resolve, driver_grace),
-        AgentStatus::Done => alert_finished(db, row, agent, screen, head),
+        AgentStatus::Blocked => {
+            let rule = fleet.block_rule(db, row, driver_grace);
+            alert_blocked(db, row, agent, screen, resolve, rule)
+        }
+        AgentStatus::Done => alert_finished(db, row, agent, screen, head, fleet),
         _ => {}
     }
 }
@@ -566,7 +574,7 @@ async fn supervise(
                     dismissed,
                     head,
                 };
-                sweep_alive(db, &row, seen, &resolve, sweep.driver_grace);
+                sweep_alive(db, &row, seen, &resolve, sweep.driver_grace, &sweep.fleet);
                 keep_resume_current(db, &row, &agent, &resolve).await;
                 alive.push((row, *agent));
                 continue;
@@ -696,6 +704,12 @@ async fn supervise(
             },
             row.id
         );
+        let failed = exit_code.is_some_and(|code| code != 0);
+        if sweep.fleet.digest_on() && !failed && !exit_interrupts(link.as_ref()) {
+            // A quiet exit is counted in the day's digest, not given a row of its own.
+            refresh_digest(db);
+            continue;
+        }
         // An exit that left its task blocked needs the owner; any other exit is news.
         let kind = if exit_interrupts(link.as_ref()) {
             ValueKind::ActionNeeded
@@ -715,6 +729,8 @@ async fn supervise(
     for (row, agent) in &alive {
         deliver_messages(db, row, agent).await;
     }
+    // The registry's `last_seen_at` is fresh now, which is what the inbox tidy waits for.
+    hq_db::inbox_tidy::mark_supervisor_swept();
     Ok(())
 }
 

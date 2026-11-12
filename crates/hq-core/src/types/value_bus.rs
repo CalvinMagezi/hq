@@ -98,6 +98,10 @@ pub struct ValueItem {
     /// A page of the web app this item opens, a same-origin path such as `/tasks`.
     #[serde(default)]
     pub link: Option<String>,
+    /// Only the owner can decide it (sign-in, connector, owner approval, escalation, data loss).
+    /// Set by the runtime that raises the item, never from a tool argument.
+    #[serde(default)]
+    pub owner_only: bool,
 }
 
 const DEFAULT_TTL_DAYS: i64 = 7;
@@ -116,7 +120,10 @@ pub const ADOPTION_DIGEST_SOURCE: &str = "adoption_digest";
 pub const COLLECTION_TIP_SOURCE: &str = "collection_tip";
 /// Source name of the item that says a step the owner scheduled is back in their chat.
 pub const SCHEDULED_OFFER_SOURCE: &str = "scheduled_offer";
+/// Source of the one rolling item per day that counts finished and stopped helpers.
+pub const FLEET_DIGEST_SOURCE: &str = "fleet-digest";
 pub const DEVICE_ONLY_SOURCES: &[&str] = &[
+    FLEET_DIGEST_SOURCE,
     ADOPTION_DIGEST_SOURCE,
     COLLECTION_TIP_SOURCE,
     SCHEDULED_OFFER_SOURCE,
@@ -147,11 +154,19 @@ impl ValueItem {
             expires_at: Some(now + Duration::days(DEFAULT_TTL_DAYS)),
             engagement: None,
             link: None,
+            // An owner's own agent proposing something is the owner's to answer.
+            owner_only: kind == ValueKind::Proposal,
         }
     }
 
     pub fn with_dedup_key(mut self, key: impl Into<String>) -> Self {
         self.dedup_key = Some(key.into());
+        self
+    }
+
+    /// Marks the item as one only the owner can decide. For runtime code, not tool input.
+    pub fn owner_only(mut self, owner_only: bool) -> Self {
+        self.owner_only = owner_only;
         self
     }
 

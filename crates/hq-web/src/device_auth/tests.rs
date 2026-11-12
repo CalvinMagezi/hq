@@ -613,6 +613,41 @@ fn device_row(listed: &serde_json::Value, current: bool) -> &serde_json::Value {
 }
 
 #[tokio::test]
+async fn a_sign_in_that_lapsed_from_needs_you_leaves_the_device_unconfirmed() {
+    let _serial = SERIAL.lock().await;
+    let (app, state, _vault) = router_with_state(Some(TOKEN));
+    let firefox = sign_in_as(&app, FIREFOX_ON_WINDOWS, true).await;
+    state
+        .db
+        .with_conn(|c| {
+            c.execute(
+                "UPDATE value_items SET state = 'expired', expired_reason = 'auto_tidy:signin_ttl', \
+                 expired_at = datetime('now') WHERE source_task = 'device-sign-in'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let (_, listed) = list_devices(&app, &firefox).await;
+    assert_eq!(
+        device_row(&listed, true)["new"],
+        true,
+        "the item left Needs you, the device is still not confirmed"
+    );
+    let id = device_row(&listed, true)["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    settle_sign_in_item(&state.db, &id);
+    let (_, listed) = list_devices(&app, &firefox).await;
+    assert_eq!(
+        device_row(&listed, true)["new"],
+        false,
+        "confirming clears it"
+    );
+}
+
+#[tokio::test]
 async fn a_new_sign_in_is_named_by_browser_and_waits_in_needs_you() {
     let _serial = SERIAL.lock().await;
     let (app, state, _vault) = router_with_state(Some(TOKEN));

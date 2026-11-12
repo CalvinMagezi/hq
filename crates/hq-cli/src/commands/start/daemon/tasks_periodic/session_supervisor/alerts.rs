@@ -1,4 +1,111 @@
 use super::*;
+use hq_core::config::{FleetInboxConfig, HelperPolicy};
+
+/// The quiet-fleet rules (`inbox.fleet`) as the sweep applies them. See `docs/plans/quiet-fleet.md`.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct FleetQuiet {
+    enabled: bool,
+    digest: bool,
+    grace: Duration,
+    policy: HelperPolicy,
+}
+
+impl FleetQuiet {
+    pub(super) fn from_config(c: &FleetInboxConfig) -> Self {
+        Self {
+            enabled: c.enabled,
+            digest: c.enabled && c.digest,
+            grace: c.grace(),
+            policy: c.helper_policy,
+        }
+    }
+
+    /// Today's behaviour: every prompt and every finish becomes an item.
+    #[cfg(test)]
+    pub(super) fn off() -> Self {
+        Self {
+            enabled: false,
+            digest: false,
+            grace: Duration::ZERO,
+            policy: HelperPolicy::Everything,
+        }
+    }
+
+    /// Whether a session's finishes and quiet exits fold into the day's digest.
+    pub(super) fn digest_on(&self) -> bool {
+        self.digest
+    }
+
+    /// Someone other than the owner answers for this session: a command policy, a driving or
+    /// watching chat, the session it was started for, or the task it works on.
+    fn owns(db: &Database, row: &registry::HarnessSessionRow) -> bool {
+        row.owner_thread.is_some()
+            || row.parent_session_id.is_some()
+            || row.mission_id.is_some()
+            || hq_tools::harness_session::policy::of(&Arc::new(db.clone()), &row.id).is_some()
+    }
+
+    /// How a block of `row` is treated. `driver_grace` is the old wait for a driving chat.
+    pub(super) fn block_rule(
+        &self,
+        db: &Database,
+        row: &registry::HarnessSessionRow,
+        driver_grace: Duration,
+    ) -> BlockRule {
+        let owned = Self::owns(db, row);
+        let quiet = self.enabled
+            && owned
+            && self.policy != HelperPolicy::Everything
+            && !self.grace.is_zero();
+        BlockRule {
+            grace: if quiet { self.grace } else { driver_grace },
+            quiet,
+            owned,
+            policy: if self.enabled {
+                self.policy
+            } else {
+                HelperPolicy::Everything
+            },
+        }
+    }
+}
+
+/// What the quiet rules say about one session's blocks.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct BlockRule {
+    /// How long a block may stand before the owner is told.
+    pub(super) grace: Duration,
+    quiet: bool,
+    owned: bool,
+    policy: HelperPolicy,
+}
+
+impl BlockRule {
+    /// Nobody tells the owner yet: the fleet answers first and `raise_unanswered` speaks after
+    /// `grace`. A policy escalation always speaks at once, and so does a prompt that loses
+    /// work when the owner asked for those.
+    fn waits(&self, escalated: bool, loses: bool) -> bool {
+        self.quiet && !escalated && !(self.policy == HelperPolicy::LosesWork && loses)
+    }
+
+    /// The owner is told at once, even when a chat drives the session: a policy escalation, or
+    /// a prompt that loses work when the owner asked to hear about those.
+    fn asks_now(&self, escalated: bool, loses: bool) -> bool {
+        escalated || (self.policy == HelperPolicy::LosesWork && loses)
+    }
+
+    /// Only the owner can decide it, so it counts on the badge.
+    fn owner_only(&self, escalated: bool, loses: bool) -> bool {
+        !self.owned || escalated || loses || self.policy == HelperPolicy::Everything
+    }
+}
+
+fn loses_work(agent: &AgentInfo) -> bool {
+    agent
+        .pending
+        .as_deref()
+        .is_some_and(|d| d.losing_verb().is_some())
+}
 
 /// Fixed text, never screen text: the harness keeps showing a prompt HQ keeps dismissing.
 pub(super) fn notify_dismiss_cap(db: &Database, row: &registry::HarnessSessionRow, why: &str) {
@@ -27,6 +134,7 @@ pub(super) fn alert_finished(
     agent: &AgentInfo,
     screen: &str,
     head: Option<&GitHead>,
+    fleet: &FleetQuiet,
 ) {
     let (id, seq) = (row.id.clone(), agent.state_change_seq);
     match db.with_conn(move |c| registry::claim_state_alert(c, &id, seq)) {
@@ -57,6 +165,13 @@ pub(super) fn alert_finished(
     if hand_to_chat(db, row, WAKE_FINISHED) {
         return;
     }
+    if fleet.digest_on() {
+        // One rolling item for the day instead of a row per helper; its counts come from the
+        // event log written above.
+        refresh_digest(db);
+        tracing::info!(session = %row.id, host = %row.host, "session-supervisor: agent finished, counted in the digest");
+        return;
+    }
     let label = session_label(row);
     let task_line = task_line(link.as_ref());
     let commit_line = commit
@@ -77,6 +192,13 @@ pub(super) fn alert_finished(
     .with_dedup_key(format!("session-finished-{}", row.id));
     let _ = hq_db::value_items::emit(db, &item);
     tracing::info!(session = %row.id, host = %row.host, "session-supervisor: agent finished, alert sent");
+}
+
+/// Rewrites today's fleet digest. Logged, never raised.
+pub(super) fn refresh_digest(db: &Database) {
+    if let Err(e) = hq_db::fleet_digest::refresh(db, chrono::Local::now()) {
+        tracing::warn!(error = %e, "session-supervisor: fleet digest not updated");
+    }
 }
 
 /// Tells the monitors and reviewers watching this session what happened. A
@@ -105,23 +227,23 @@ pub(super) fn alert_blocked(
     agent: &AgentInfo,
     screen: &str,
     resolve: &HostResolver,
-    grace: Duration,
+    rule: BlockRule,
 ) {
     let (id, seq) = (row.id.clone(), agent.state_change_seq);
     match db.with_conn(move |c| registry::claim_state_alert(c, &id, seq)) {
         Ok(true) => {}
         _ => {
-            raise_unanswered(db, row, agent, screen, grace);
+            raise_unanswered(db, row, agent, screen, rule);
             return;
         }
     }
     record_block(db, row, agent);
-    let note = match by_policy(db, row, agent, screen, resolve, grace) {
+    let note = match by_policy(db, row, agent, screen, resolve, rule) {
         PolicyStep::Answering => return,
         PolicyStep::Escalated(note) => Some(note),
         PolicyStep::NotJudged => None,
     };
-    raise_blocked(db, row, agent, screen, note.as_deref(), grace);
+    raise_blocked(db, row, agent, screen, note.as_deref(), rule);
 }
 
 /// The key every alert about one block of a session carries: one per `state_change_seq`.
@@ -142,14 +264,19 @@ fn raise_unanswered(
     row: &registry::HarnessSessionRow,
     agent: &AgentInfo,
     screen: &str,
-    grace: Duration,
+    rule: BlockRule,
 ) {
+    let grace = rule.grace;
     if grace.is_zero() {
         return;
     }
     let seq = agent.state_change_seq;
     if !matches!(
-        hq_db::value_items::any_with_dedup(db, &blocked_key(&row.id, seq)),
+        hq_db::value_items::any_with_dedup_from(
+            db,
+            &blocked_key(&row.id, seq),
+            &[SUPERVISOR_SOURCE, WEB_INBOX_SOURCE]
+        ),
         Ok(false)
     ) {
         return;
@@ -164,13 +291,33 @@ fn raise_unanswered(
         return;
     }
     tracing::info!(session = %row.id, "session-supervisor: block not cleared by its driver, telling the owner");
+    // The escalation is in the event log, so a re-raise keeps what the first raise knew.
+    let owner_only = rule.owner_only(last_block_escalated(db, &row.id), loses_work(agent));
     if row.owner_thread.is_some() {
-        badge_web_inbox(db, row, seq);
+        badge_web_inbox(db, row, seq, owner_only);
     } else {
         let link = record_on_task(db, row, Event::Blocked);
-        raise_to_owner(db, row, agent, screen, None, link.as_ref());
+        raise_to_owner(db, row, agent, screen, None, link.as_ref(), owner_only);
     }
 }
+
+/// Whether the command policy left the session's latest block to the owner: its newest
+/// block-related event is the `escalation` that `record_escalation` writes after `record_block`.
+fn last_block_escalated(db: &Database, session_id: &str) -> bool {
+    let id = session_id.to_string();
+    db.with_conn(move |c| registry::list_events(c, &id, 200))
+        .ok()
+        .and_then(|events| {
+            events
+                .into_iter()
+                .rev()
+                .find(|e| matches!(e.kind.as_str(), "blocked" | "question" | "escalation"))
+        })
+        .is_some_and(|e| e.kind == "escalation")
+}
+
+/// Source of the supervisor's own inbox items.
+const SUPERVISOR_SOURCE: &str = "session-supervisor";
 
 /// A session that is no longer blocked asks nothing: its waiting "needs an answer" items leave
 /// the inbox, however the block was cleared (keys from a chat, the agent's own page, a timeout).
@@ -204,7 +351,7 @@ fn by_policy(
     agent: &AgentInfo,
     screen: &str,
     resolve: &HostResolver,
-    grace: Duration,
+    rule: BlockRule,
 ) -> PolicyStep {
     use hq_core::command_policy::Decision;
     use hq_tools::harness_session::policy;
@@ -249,12 +396,12 @@ fn by_policy(
                     "Its '{}' command policy could not settle this: {reason}.",
                     rules.name
                 );
-                raise_blocked(&db2, &row2, &agent2, &screen2, Some(&note), grace);
+                raise_blocked(&db2, &row2, &agent2, &screen2, Some(&note), rule);
             }
             Some(acted) => {
                 tracing::info!(session = %row2.id, ?acted, "session-supervisor: dialog answered by the command policy");
             }
-            None => raise_blocked(&db2, &row2, &agent2, &screen2, None, grace),
+            None => raise_blocked(&db2, &row2, &agent2, &screen2, None, rule),
         }
     });
     PolicyStep::Answering
@@ -268,9 +415,11 @@ fn raise_blocked(
     agent: &AgentInfo,
     screen: &str,
     note: Option<&str>,
-    grace: Duration,
+    rule: BlockRule,
 ) {
     let seq = agent.state_change_seq;
+    let (escalated, loses) = (note.is_some(), loses_work(agent));
+    let owner_only = rule.owner_only(escalated, loses);
     let link = record_on_task(db, row, Event::Blocked);
     // A monitor hears about the block too; it can tell whoever can answer it.
     report_to_observers(
@@ -285,12 +434,19 @@ fn raise_blocked(
         // their inbox when the answer is theirs to give. The owner hears about the block only
         // if it is still there after `grace` (`raise_unanswered`). A chat that only watches
         // cannot answer, so its owner is told at once.
-        if !row.drive || grace.is_zero() {
-            badge_web_inbox(db, row, seq);
+        if rule.asks_now(escalated, loses) {
+            // Only the owner can allow it: the chat does not get to sit on it for the grace.
+            raise_to_owner(db, row, agent, screen, note, link.as_ref(), true);
+        } else if !row.drive || rule.grace.is_zero() {
+            badge_web_inbox(db, row, seq, owner_only);
         }
         return;
     }
-    raise_to_owner(db, row, agent, screen, note, link.as_ref());
+    if rule.waits(escalated, loses) {
+        // The fleet answers first. `raise_unanswered` makes the one item if it does not.
+        return;
+    }
+    raise_to_owner(db, row, agent, screen, note, link.as_ref(), owner_only);
 }
 
 /// The inbox item for a block the owner has to answer.
@@ -301,6 +457,7 @@ fn raise_to_owner(
     screen: &str,
     note: Option<&str>,
     link: Option<&mission::TaskLink>,
+    owner_only: bool,
 ) {
     let seq = agent.state_change_seq;
     let label = session_label(row);
@@ -317,7 +474,8 @@ fn raise_to_owner(
         ),
     )
     .with_dedup_key(blocked_key(&row.id, seq))
-    .with_link(session_page(&row.id));
+    .with_link(session_page(&row.id))
+    .owner_only(owner_only);
     let fresh = item.dedup_key.as_deref().is_some_and(|key| {
         matches!(
             hq_db::value_items::find_active_by_dedup(db, item.kind, key),
@@ -398,7 +556,12 @@ pub(super) fn hand_to_chat(db: &Database, row: &registry::HarnessSessionRow, rea
 
 /// A chat-watched session that blocks may sit unseen in a chat no one has
 /// open, so it also gets a web-only inbox item, which badges the app.
-pub(super) fn badge_web_inbox(db: &Database, row: &registry::HarnessSessionRow, seq: u64) {
+pub(super) fn badge_web_inbox(
+    db: &Database,
+    row: &registry::HarnessSessionRow,
+    seq: u64,
+    owner_only: bool,
+) {
     let item = ValueItem::new(
         WEB_INBOX_SOURCE,
         ValueKind::ActionNeeded,
@@ -409,7 +572,8 @@ pub(super) fn badge_web_inbox(db: &Database, row: &registry::HarnessSessionRow, 
         ),
     )
     .with_dedup_key(blocked_key(&row.id, seq))
-    .with_link(session_page(&row.id));
+    .with_link(session_page(&row.id))
+    .owner_only(owner_only);
     let _ = hq_db::value_items::emit(db, &item);
 }
 

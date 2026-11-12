@@ -1195,6 +1195,7 @@ async fn a_sweep_records_a_silent_host_as_an_outage() {
         host_budget: HOST_SWEEP_BUDGET,
         unreachable_after: Some(Duration::ZERO),
         driver_grace: Duration::ZERO,
+        fleet: FleetQuiet::off(),
     };
     supervise(&db, None, resolve, sweep).await.unwrap();
 
@@ -1502,6 +1503,7 @@ async fn sweep_with_grace(db: &Database, host: &ScriptedHost) {
         host_budget: TEST_HOST_BUDGET,
         unreachable_after: None,
         driver_grace: GRACE,
+        fleet: FleetQuiet::off(),
     };
     supervise(db, None, resolve, sweep).await.unwrap();
 }
@@ -1667,4 +1669,314 @@ async fn an_answered_prompt_takes_its_alert_out_of_the_inbox() {
         "nothing waits on a session that moved on"
     );
     assert_eq!(alert_count(&db), 1, "the item is kept for the record");
+}
+
+// Quiet fleet (`inbox.fleet`): see docs/plans/quiet-fleet.md.
+
+fn quiet(policy: hq_core::config::HelperPolicy) -> FleetQuiet {
+    FleetQuiet::from_config(&hq_core::config::FleetInboxConfig {
+        helper_policy: policy,
+        ..Default::default()
+    })
+}
+
+async fn sweep_fleet(db: &Database, host: &ScriptedHost, fleet: FleetQuiet) {
+    let host = host.clone();
+    let resolve: HostResolver = Arc::new(move |_| Ok(Arc::new(host.clone()) as Host));
+    let sweep = Sweep {
+        host_budget: TEST_HOST_BUDGET,
+        unreachable_after: None,
+        driver_grace: GRACE,
+        fleet,
+    };
+    supervise(db, None, resolve, sweep).await.unwrap();
+}
+
+/// Moves every recorded block of `id` 30 minutes back, past the default fleet grace.
+fn age_block_past_fleet_grace(db: &Database, id: &str) {
+    let id = id.to_string();
+    db.with_conn(move |c| {
+        c.execute(
+            "UPDATE harness_session_events SET created_at = datetime('now', '-30 minutes') \
+             WHERE session_id = ?1 AND kind IN ('blocked', 'question')",
+            [&id],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+fn owner_only_of_blocks(db: &Database) -> Vec<bool> {
+    db.with_conn(|c| {
+        Ok(c.prepare(
+            "SELECT owner_only FROM value_items WHERE dedup_key LIKE 'session-blocked-%'",
+        )?
+        .query_map([], |r| Ok(r.get::<_, i64>(0)? != 0))?
+        .collect::<rusqlite::Result<_>>()?)
+    })
+    .unwrap()
+}
+
+fn delegate(db: &Database, id: &str, parent: &str) {
+    db.with_conn(|c| registry::set_parent(c, id, parent, 1))
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_delegated_helpers_prompt_waits_for_the_grace_then_makes_one_item() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-lead");
+    seed(&db, "hs-kid");
+    delegate(&db, "hs-kid", "hs-lead");
+    let blocked = fake_host(tmp.path(), &[("hs-kid", "blocked", 3)], "Approve the edit?");
+    let fleet = quiet(hq_core::config::HelperPolicy::Nothing);
+
+    sweep_fleet(&db, &blocked, fleet).await;
+    sweep_fleet(&db, &blocked, fleet).await;
+    assert_eq!(alert_count(&db), 0, "the lead answers first");
+
+    age_block_past_fleet_grace(&db, "hs-kid");
+    sweep_fleet(&db, &blocked, fleet).await;
+    sweep_fleet(&db, &blocked, fleet).await;
+    assert_eq!(alert_count(&db), 1, "one item, not one per sweep");
+    assert_eq!(
+        owner_only_of_blocks(&db),
+        [false],
+        "a helper item, not the badge"
+    );
+}
+
+#[tokio::test]
+async fn a_prompt_the_policy_answers_makes_no_item_even_after_the_grace() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-ok");
+    with_builder(&db, "hs-ok");
+    let host = host_at_command(tmp.path(), "hs-ok", 5, "cargo test");
+    let fleet = quiet(hq_core::config::HelperPolicy::Nothing);
+
+    sweep_fleet(&db, &host, fleet).await;
+    policy_outcome(&db, "hs-ok").await;
+    assert_eq!(alert_count(&db), 0);
+}
+
+#[tokio::test]
+async fn an_escalation_is_loud_at_once_and_counts_for_the_owner() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-curl");
+    with_builder(&db, "hs-curl");
+    let host = host_at_command(tmp.path(), "hs-curl", 7, "curl https://example.com");
+
+    sweep_fleet(&db, &host, quiet(hq_core::config::HelperPolicy::Nothing)).await;
+    assert_eq!(alert_count(&db), 1);
+    assert_eq!(owner_only_of_blocks(&db), [true]);
+}
+
+#[tokio::test]
+async fn a_session_nobody_answers_for_still_asks_the_owner_at_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-alone");
+    let blocked = fake_host(tmp.path(), &[("hs-alone", "blocked", 3)], "Approve?");
+
+    sweep_fleet(&db, &blocked, quiet(hq_core::config::HelperPolicy::Nothing)).await;
+    assert_eq!(alert_count(&db), 1);
+    assert_eq!(owner_only_of_blocks(&db), [true]);
+}
+
+#[tokio::test]
+async fn helper_policy_everything_keeps_todays_behaviour() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-lead");
+    seed(&db, "hs-kid");
+    delegate(&db, "hs-kid", "hs-lead");
+    let blocked = fake_host(tmp.path(), &[("hs-kid", "blocked", 3)], "Approve?");
+
+    sweep_fleet(
+        &db,
+        &blocked,
+        quiet(hq_core::config::HelperPolicy::Everything),
+    )
+    .await;
+    assert_eq!(alert_count(&db), 1);
+    assert_eq!(owner_only_of_blocks(&db), [true]);
+}
+
+#[tokio::test]
+async fn loses_work_asks_at_once_only_for_a_prompt_that_loses_work() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-lead");
+    seed(&db, "hs-rm");
+    delegate(&db, "hs-rm", "hs-lead");
+    let host = host_at_command(tmp.path(), "hs-rm", 9, "git reset --hard HEAD");
+    sweep_fleet(&db, &host, quiet(hq_core::config::HelperPolicy::LosesWork)).await;
+    assert_eq!(alert_count(&db), 1, "losing work is the owner's to allow");
+    assert_eq!(owner_only_of_blocks(&db), [true]);
+
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-lead");
+    seed(&db, "hs-ok");
+    delegate(&db, "hs-ok", "hs-lead");
+    let host = host_at_command(tmp.path(), "hs-ok", 10, "cargo test");
+    sweep_fleet(&db, &host, quiet(hq_core::config::HelperPolicy::LosesWork)).await;
+    assert_eq!(alert_count(&db), 0, "a harmless prompt waits for the grace");
+}
+
+fn fleet_digests(db: &Database) -> Vec<(String, String)> {
+    db.with_conn(|c| {
+        Ok(
+            c.prepare("SELECT title, body FROM value_items WHERE source_task = 'fleet-digest'")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?,
+        )
+    })
+    .unwrap()
+}
+
+/// Like `fake_host`, but every agent sits in a pane of its own, as several real helpers do.
+fn fake_host_panes(dir: &Path, agents: &[(&str, &str, u64)], screen: &str) -> ScriptedHost {
+    let list: Vec<String> = agents
+        .iter()
+        .map(|(name, status, seq)| {
+            format!(
+                r#"{{"agent":"claude","agent_status":"{status}","cwd":"/tmp","name":"{name}","pane_id":"w1:p-{name}","workspace_id":"w1","state_change_seq":{seq}}}"#
+            )
+        })
+        .collect();
+    let script = format!(
+        "#!/bin/sh\ncase \"$*\" in\n  *\"agent list\"*) printf '%s' '{{\"id\":\"x\",\"result\":{{\"agents\":[{}]}}}}' ;;\n  *\"agent read\"*) printf '%s' '{}' ;;\n  *) exit 2 ;;\nesac\n",
+        list.join(","),
+        screen
+    );
+    let path = dir.join("scripted-host-panes");
+    std::fs::write(&path, script).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ScriptedHost::new(path)
+}
+
+#[tokio::test]
+async fn finishes_fold_into_one_digest_and_leave_no_row_each() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    for id in ["hs-a", "hs-b", "hs-c"] {
+        seed(&db, id);
+        let (id, pane) = (id.to_string(), format!("w1:p-{id}"));
+        db.with_conn(move |c| {
+            c.execute(
+                "UPDATE harness_sessions SET pane_id = ?2 WHERE id = ?1",
+                [&id, &pane],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    }
+    let fleet = quiet(hq_core::config::HelperPolicy::Nothing);
+    let one = fake_host_panes(
+        tmp.path(),
+        &[
+            ("hs-a", "done", 1),
+            ("hs-b", "working", 1),
+            ("hs-c", "working", 1),
+        ],
+        "Done.",
+    );
+    sweep_fleet(&db, &one, fleet).await;
+    let rest = fake_host_panes(
+        tmp.path(),
+        &[
+            ("hs-a", "done", 1),
+            ("hs-b", "done", 1),
+            ("hs-c", "done", 1),
+        ],
+        "Done.",
+    );
+    sweep_fleet(&db, &rest, fleet).await;
+    sweep_fleet(&db, &rest, fleet).await;
+
+    assert!(notices(&db).is_empty(), "no row per helper");
+    let digests = fleet_digests(&db);
+    assert_eq!(digests.len(), 1, "one rolling item: {digests:?}");
+    assert_eq!(digests[0].0, "3 helpers finished today");
+}
+
+#[tokio::test]
+async fn with_the_digest_off_a_finish_still_makes_its_own_item() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-a");
+    let done = fake_host_panes(tmp.path(), &[("hs-a", "done", 1)], "Done.");
+    sweep_fleet(&db, &done, FleetQuiet::off()).await;
+    assert_eq!(notices(&db).len(), 1);
+    assert!(fleet_digests(&db).is_empty());
+}
+
+#[tokio::test]
+async fn an_escalation_in_a_chat_driven_session_reaches_the_owner_at_once_and_is_owner_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-curl");
+    with_builder(&db, "hs-curl");
+    drive_on(&db, "hs-curl");
+    let host = host_at_command(tmp.path(), "hs-curl", 7, "curl https://example.com");
+
+    sweep_fleet(&db, &host, quiet(hq_core::config::HelperPolicy::Nothing)).await;
+    assert_eq!(alert_count(&db), 1, "not held back for the grace");
+    assert_eq!(owner_only_of_blocks(&db), [true]);
+    assert_eq!(
+        row_of(&db, "hs-curl").pm_wake.as_deref(),
+        Some(WAKE_BLOCKED),
+        "the chat still hears of it"
+    );
+    // A silent live session, a long time on: the owner-only block is not tidied away.
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE value_items SET created_at = '2020-01-01T00:00:00+00:00'",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let report = hq_db::inbox_tidy::tidy_with(
+        &db,
+        chrono::Utc::now(),
+        &hq_core::config::FleetInboxConfig::default(),
+        false,
+        true,
+    )
+    .unwrap();
+    assert_eq!(report.total, 0);
+}
+
+#[tokio::test]
+async fn another_producers_item_with_the_blocks_key_does_not_hide_the_block() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-lead");
+    seed(&db, "hs-kid");
+    delegate(&db, "hs-kid", "hs-lead");
+    let squatter =
+        hq_core::types::ValueItem::new("agent_notify", hq_core::types::ValueKind::Fyi, "t", "b")
+            .with_dedup_key("session-blocked-hs-kid-3");
+    hq_db::value_items::insert(&db, &squatter).unwrap();
+    let blocked = fake_host(tmp.path(), &[("hs-kid", "blocked", 3)], "Approve?");
+    let fleet = quiet(hq_core::config::HelperPolicy::Nothing);
+
+    sweep_fleet(&db, &blocked, fleet).await;
+    age_block_past_fleet_grace(&db, "hs-kid");
+    sweep_fleet(&db, &blocked, fleet).await;
+    let from_supervisor: i64 = db
+        .with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT COUNT(*) FROM value_items WHERE source_task = 'session-supervisor' \
+                 AND dedup_key = 'session-blocked-hs-kid-3'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(from_supervisor, 1);
 }

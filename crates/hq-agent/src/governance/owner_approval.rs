@@ -246,7 +246,8 @@ impl OwnerApproval {
                     .unwrap_or_default()
             ),
         )
-        .with_dedup_key(key.to_string());
+        .with_dedup_key(key.to_string())
+        .owner_only(true);
         item.expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(APPROVAL_TTL_HOURS));
         // The call first: an item the apps can see always has its call to quote.
         hq_db::owner_approvals::record(&self.db, &item.id, tool, &held)

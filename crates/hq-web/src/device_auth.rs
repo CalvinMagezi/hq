@@ -291,19 +291,23 @@ fn ask_owner_about(
             at.format("%Y-%m-%d %H:%M")
         ),
     )
-    .with_dedup_key(format!("{SIGN_IN_ITEM_PREFIX}{device_id}"));
+    .with_dedup_key(format!("{SIGN_IN_ITEM_PREFIX}{device_id}"))
+    .owner_only(true);
     if let Err(e) = hq_db::value_items::insert(&state.db, &item) {
         tracing::warn!("web: the new sign-in was not put in the inbox: {e:#}");
     }
 }
 
-/// Answers the new sign-in item of `device_id`, if it still waits: the device was signed out.
+/// Answers the new sign-in item of `device_id`, if it still waits (or the tidy let it lapse):
+/// the owner signed the device out or confirmed it.
 pub(crate) fn settle_sign_in_item(db: &hq_db::Database, device_id: &str) {
     let key = format!("{SIGN_IN_ITEM_PREFIX}{device_id}");
     let settled = db.with_conn(|c| {
         Ok(c.execute(
             "UPDATE value_items SET state='dismissed', engagement='dismissed', engaged_at=datetime('now') \
-             WHERE dedup_key = ?1 AND source_task = ?2 AND state IN ('pending', 'delivered', 'routed')",
+             WHERE dedup_key = ?1 AND source_task = ?2 \
+               AND (state IN ('pending', 'delivered', 'routed') \
+                    OR (state = 'expired' AND expired_reason LIKE 'auto_tidy:signin%'))",
             [key.as_str(), DEVICE_SIGN_IN_SOURCE],
         )?)
     });

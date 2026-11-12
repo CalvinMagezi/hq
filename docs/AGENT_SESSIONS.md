@@ -1111,3 +1111,29 @@ machine as you, scoped to the host's own API and to one source address. Conseque
 | Spawned Claude replies `Login expired` | The user account on that host is not logged in to that CLI. |
 | A stack specialist starts nothing | `hq stack list` shows its `problem` (a coding harness, an unknown purpose, a profile without `one_shot_args`), its queue is empty (`task_next` for that name, less code-shaped work), a run is up, or its `runs_per_day` budget is spent. A task whose run could not start is left a comment and tried again after 30 minutes. |
 | A stack run ended and its task is blocked | The process exited non-zero (a crash or a refused login). Its last screen is in `harness_session_logs`; fix the cause, then assign the task to the specialist again or `hq stack run <name> <task>`. |
+
+## A quiet inbox: `inbox.fleet`
+
+Helpers do not fill the Inbox. A prompt from a session that has a command policy, a chat, a
+parent session or a task waits `inbox.fleet.grace_minutes` (default 15) for them to answer it,
+and only then becomes one item. A finished or stopped helper is counted in one rolling "N helpers
+finished today" item that is never pushed. Sign-ins, connector and chat approvals, escalations
+and prompts that lose work are owner-only: they come at once and are the only ones the phone
+badge counts. A daily task (`inbox-tidy`, off with `daemon.inbox_tidy: false`) moves requests
+from ended or silent sessions out of Needs you into Done as "No longer waiting"; `hq inbox tidy`
+shows what it would move, and `hq inbox restore --since 1d` brings items back.
+
+```yaml
+inbox:
+  fleet:
+    enabled: true            # false: an item for every prompt and every finish, as before
+    grace_minutes: 15        # wait for the fleet to answer before telling the owner
+    ttl_hours: 24            # a helper request older than this leaves Needs you
+    signin_ttl_hours: 24     # a new-device sign-in request older than this leaves Needs you
+    digest: true             # one rolling item per day instead of a row per finished helper
+    helper_policy: nothing   # nothing | loses_work | everything
+```
+
+Every key also reads from the environment, for example `HQ_INBOX__FLEET__GRACE_MINUTES=30`. The
+rules and the reasons behind them: `docs/plans/quiet-fleet.md`.
+
