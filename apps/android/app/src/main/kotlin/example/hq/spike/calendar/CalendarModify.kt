@@ -69,7 +69,7 @@ interface CalendarEditor {
 }
 
 /** One calendar.update or calendar.delete request, already checked. [changes] is null for a delete. */
-data class ModifyRequest(val requestId: String, val eventId: Long, val beginMs: Long, val expectedTitle: String, val zone: String, val changes: EventWrite?)
+data class ModifyRequest(val requestId: String, val eventId: Long, val beginMs: Long, val expectedTitle: String, val zone: String, val changes: EventWrite?, val allDay: Boolean? = null)
 
 sealed interface ParsedModify {
     data class Ok(val request: ModifyRequest) : ParsedModify
@@ -85,7 +85,7 @@ object CalendarModifyRequests {
     fun parseUpdate(payload: JSONObject): ParsedModify = parse(payload, withChanges = true)
 
     private fun parse(payload: JSONObject, withChanges: Boolean): ParsedModify {
-        val known = if (withChanges) KNOWN_DELETE + "changes" else KNOWN_DELETE
+        val known = if (withChanges) KNOWN_DELETE + "changes" + "all_day" else KNOWN_DELETE
         val unknown = payload.keys().asSequence().firstOrNull { it !in known }
         if (unknown != null) return bad("unknown_field", unknown)
         val requestId = payload.optString("request_id")
@@ -98,13 +98,14 @@ object CalendarModifyRequests {
         val zone = payload.optString("zone")
         try { ZoneId.of(zone) } catch (e: DateTimeException) { return bad("invalid_time_zone", "zone") }
         var changes: EventWrite? = null
+        val allDay = if (withChanges && payload.has("all_day")) payload.optBoolean("all_day") else null
         if (withChanges) {
             when (val c = parseChanges(payload.optJSONObject("changes"))) {
                 is ParsedChanges.Bad -> return c.bad
                 is ParsedChanges.Ok -> changes = c.write
             }
         }
-        return ParsedModify.Ok(ModifyRequest(requestId, eventId, beginMs, payload.optString("expected_title"), zone, changes))
+        return ParsedModify.Ok(ModifyRequest(requestId, eventId, beginMs, payload.optString("expected_title"), zone, changes, allDay))
     }
 
     private sealed interface ParsedChanges {
@@ -187,6 +188,7 @@ class CalendarModifier(private val editor: CalendarEditor, private val ledger: C
             is Gate.Stop -> return g.outcome
             is Gate.Go -> g.row
         }
+        if (request.allDay != null && request.allDay != row.allDay) return CalendarOutcome.InvalidEvent("kind_change", "start_local")
         val write = when (val p = plan(row, changes)) {
             is Plan.Bad -> return p.outcome
             is Plan.Ok -> p.write

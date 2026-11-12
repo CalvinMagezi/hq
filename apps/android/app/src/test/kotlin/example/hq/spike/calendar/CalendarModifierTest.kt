@@ -95,6 +95,23 @@ class CalendarModifierTest {
         assertEquals(Updated("5"), modifier.update(req(begin = d + 5 * hour)))
     }
 
+    @Test fun anUpdateWithTheAllDayFlagParsesAndAKindMismatchIsRejected() {
+        val payload = JSONObject()
+            .put("request_id", rid).put("event_id", 5).put("begin_ms", start).put("expected_title", "Dentist").put("zone", "Europe/London")
+            .put("all_day", true).put("changes", JSONObject().put("title", "Dentist 2"))
+        val parsed = CalendarModifyRequests.parseUpdate(payload) as ParsedModify.Ok
+        assertEquals(true, parsed.request.allDay)
+        assertEquals(CalendarOutcome.InvalidEvent("kind_change", "start_local"), modifier.update(parsed.request))
+        assertEquals(0, editor.writes)
+    }
+
+    @Test fun aDeleteStillRejectsTheAllDayField() {
+        val payload = JSONObject()
+            .put("request_id", rid).put("event_id", 5).put("begin_ms", start).put("expected_title", "Dentist").put("zone", "Europe/London")
+            .put("all_day", false)
+        assertTrue(CalendarModifyRequests.parseDelete(payload) is ParsedModify.Bad)
+    }
+
     @Test fun deletes() {
         assertEquals(Deleted("5"), modifier.delete(req(changes = null)))
         assertEquals(1, editor.deletes)
