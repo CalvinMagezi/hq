@@ -430,6 +430,7 @@ fn acp_spawn_params(
     json!({
         "name": req.name, "argv": argv, "cwd": req.cwd, "agent": req.kind, "env": env,
         "sandbox": sandbox, "idle_ttl_secs": idle_ttl_secs, "transport": "acp",
+        "mcp": req.mcp.as_ref().map(|m| json!({ "url": m.url, "token": m.token })),
     })
 }
 
@@ -1011,6 +1012,19 @@ mod tests {
         assert_eq!(p["agent"], "opencode");
         assert!(p.get("resume_argv").is_none() && p.get("rows").is_none());
         assert_eq!(p["idle_ttl_secs"], 60);
+        assert!(p["mcp"].is_null());
+    }
+
+    #[test]
+    fn an_acp_spawn_carries_the_session_mcp_access_when_it_has_any() {
+        let mut r = req("opencode", None);
+        r.mcp = Some(crate::agent_host::McpAccess {
+            url: "http://127.0.0.1:1/mcp".into(),
+            token: "tok".into(),
+        });
+        let p = acp_spawn_params(&r, &["opencode".to_string()], &None, None);
+        assert_eq!(p["mcp"]["url"], "http://127.0.0.1:1/mcp");
+        assert_eq!(p["mcp"]["token"], "tok");
     }
 
     #[test]

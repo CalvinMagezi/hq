@@ -97,8 +97,8 @@ pub use hooks::{
 };
 #[cfg(unix)]
 pub use host::{
-    AcpFacts, Answered, AwaitingInfo, BurstLimit, Host, PANE_TOKEN_ENV, PaneInfo, PaneStatus,
-    RUN_DIR_ENV, ReadSource, RestoreReport, SpawnSpec, Transport, valid_name,
+    AcpFacts, Answered, AwaitingInfo, BurstLimit, Host, McpEndpoint, PANE_TOKEN_ENV, PaneInfo,
+    PaneStatus, RUN_DIR_ENV, ReadSource, RestoreReport, SpawnSpec, Transport, valid_name,
 };
 #[cfg(unix)]
 pub use keys::encode_key;

@@ -342,7 +342,8 @@ fn mcp_access(
         let _ = db.with_conn(move |c| hq_db::session_tokens::revoke(c, &id));
         return None;
     };
-    if !host.accepts_mcp() || harness.spec.kind != "claude" {
+    let wants = harness.spec.kind == "claude" || harness.gives_hq_mcp();
+    if !host.accepts_mcp() || !wants {
         return None;
     }
     let id = session_id.to_string();
@@ -379,11 +380,8 @@ pub(super) async fn run_launch(
     l: Launch<'_>,
 ) -> Result<Value> {
     preflight::require_binary(&l.host, harness)?;
-    // An ACP agent is not given HQ's MCP connection, so no session token is minted for it.
-    let mcp = match harness.transport() {
-        spec::Transport::Pty => mcp_access(db, &l.host, harness, l.session_id),
-        spec::Transport::Acp => None,
-    };
+    // An ACP agent gets a session token only when its profile asks for HQ's MCP connection.
+    let mcp = mcp_access(db, &l.host, harness, l.session_id);
     let minted = mcp.is_some();
     let session_id = l.session_id.to_string();
     let launched = launch_with(db, harness, l, mcp).await;

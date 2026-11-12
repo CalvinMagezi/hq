@@ -410,6 +410,11 @@ pub struct HarnessProfileConfig {
     #[serde(default)]
     pub acp_args: Option<Vec<String>>,
 
+    /// Gives an ACP agent HQ's MCP connection, with a token of its own for the session, so it can
+    /// use HQ's tools (tasks, vault, handing work on). Off unless true. Only with `transport: acp`.
+    #[serde(default)]
+    pub hq_mcp: Option<bool>,
+
     /// Environment for the pane's shell, and so for the launched CLI.
     #[serde(default)]
     pub env: BTreeMap<String, String>,

@@ -414,6 +414,12 @@ impl Harness {
         if acp { Transport::Acp } else { Transport::Pty }
     }
 
+    /// Whether the session is given HQ's MCP connection: an ACP profile that asks for it.
+    pub fn gives_hq_mcp(&self) -> bool {
+        let asked = self.profile.as_ref().and_then(|p| p.hq_mcp) == Some(true);
+        asked && self.transport() == Transport::Acp
+    }
+
     /// The program and arguments that start the agent's ACP server.
     pub fn acp_command(&self) -> Result<Vec<String>> {
         let own = self.profile.as_ref().and_then(|p| p.acp_args.clone());
@@ -492,8 +498,8 @@ fn check_transport(name: &str, profile: &HarnessProfileConfig) -> Result<()> {
         Some(other) => bail!("harness profile '{name}': transport '{other}' is not 'pty' or 'acp'"),
     };
     if !acp {
-        if profile.acp_args.is_some() {
-            bail!("harness profile '{name}': acp_args only applies with transport: acp");
+        if profile.acp_args.is_some() || profile.hq_mcp.is_some() {
+            bail!("harness profile '{name}': acp_args and hq_mcp only apply with transport: acp");
         }
         return Ok(());
     }
@@ -604,6 +610,17 @@ mod tests {
         let mut stray = acp_profile("opencode", "pty");
         stray.harness_profiles.get_mut("p").unwrap().acp_args = Some(vec!["acp".into()]);
         assert!(resolve_in(&stray, "p").is_err());
+    }
+
+    #[test]
+    fn hq_mcp_is_given_only_to_an_acp_profile_that_asks_for_it() {
+        let mut cfg = acp_profile("opencode", "acp");
+        assert!(!resolve_in(&cfg, "p").unwrap().gives_hq_mcp());
+        cfg.harness_profiles.get_mut("p").unwrap().hq_mcp = Some(true);
+        assert!(resolve_in(&cfg, "p").unwrap().gives_hq_mcp());
+        let mut pty = acp_profile("opencode", "pty");
+        pty.harness_profiles.get_mut("p").unwrap().hq_mcp = Some(true);
+        assert!(resolve_in(&pty, "p").is_err());
     }
 
     #[test]

@@ -95,6 +95,24 @@ pub struct SpawnSpec {
     pub idle_ttl: Option<Duration>,
     /// A terminal by default. Over ACP the host needs no screen rules and types no keys.
     pub transport: Transport,
+    /// HQ's MCP address and this session's token, for an ACP agent to be given in its session.
+    pub mcp: Option<McpEndpoint>,
+}
+
+/// An MCP address and the token that goes with it. The token never shows in debug output.
+#[derive(Clone)]
+pub struct McpEndpoint {
+    pub url: String,
+    pub token: String,
+}
+
+impl std::fmt::Debug for McpEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpEndpoint")
+            .field("url", &self.url)
+            .field("token", &"<redacted>")
+            .finish()
+    }
 }
 
 impl SpawnSpec {
@@ -112,6 +130,7 @@ impl SpawnSpec {
             sandbox: None,
             idle_ttl: None,
             transport: Transport::Pty,
+            mcp: None,
         }
     }
 }
@@ -564,6 +583,11 @@ impl Host {
         if spec.transport == Transport::Acp {
             return self.start_acp(spec);
         }
+        if spec.mcp.is_some() {
+            return Err(HostError::Unsupported(
+                "mcp is given to an ACP agent in its session; a terminal agent gets it from agent.mcp_config",
+            ));
+        }
         if !valid_name(&spec.name) {
             return Err(HostError::InvalidName(spec.name));
         }
@@ -696,6 +720,12 @@ impl Host {
                 "this host only starts sandboxed agents; the machine's owner can start it with --allow-unsandboxed".into(),
             ));
         }
+        let too_big = |m: &McpEndpoint| {
+            m.url.len() > MAX_MCP_URL_BYTES || m.token.len() > MAX_MCP_TOKEN_BYTES
+        };
+        if spec.mcp.as_ref().is_some_and(too_big) {
+            return Err(HostError::TooLarge("the MCP address or token"));
+        }
         if spec.argv.is_empty() || spec.argv.iter().map(String::len).sum::<usize>() > MAX_ARGV_BYTES
         {
             return Err(HostError::TooLarge("the command line"));
@@ -743,6 +773,7 @@ impl Host {
             cwd: spec.cwd,
             sandbox: spec.sandbox,
             idle_ttl: spec.idle_ttl,
+            mcp: spec.mcp,
             events: self.events.clone(),
             on_exit: self.exit_hook(&spec.name, egress_port),
         });

@@ -947,8 +947,10 @@ agent_host:
 
 Built-in ACP commands: `opencode acp`, `agy acp`, `cursor-agent acp`, `kimi acp`, `hermes acp`,
 `copilot --acp --stdio`. A base without one (or a different command) sets `acp_args`. Not supported over
-ACP: a wrapper `command`, `model` (set it in the agent's own config), one-shot runs, HQ's MCP
-connection and command-policy hooks, and coming back after a host restart. A message sent while a turn
+ACP: a wrapper `command`, `model` (set it in the agent's own config), one-shot runs, command-policy
+hooks, and coming back after a host restart. `hq_mcp: true` on the profile gives the agent HQ's MCP
+connection (tasks, vault, handing work on) in its session, with a token of its own, if the agent says
+it can use an HTTP MCP server; without it the agent gets none. A message sent while a turn
 runs waits for it to end; `esc` stops the turn. Hermes over ACP is not confined by the process sandbox
 (its gateway daemon runs the tools), so keep it on the terminal where a sandbox is required.
 A finished turn adds the files the agent's edit tools reported, and its token use, to the task comment
