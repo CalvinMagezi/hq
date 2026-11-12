@@ -30,11 +30,16 @@ class HqServices private constructor(private val app: Context) {
     /** Saves calendar events HQ asks for; it listens on the same socket for as long as the process lives. */
     private val calendarPrefs = example.hq.spike.calendar.CalendarPrefs(app)
     val calendarStore = example.hq.spike.calendar.AndroidCalendarStore(app)
-    private val deviceActions = example.hq.spike.calendar.DeviceActionHandler(
-        example.hq.spike.calendar.HqDeviceActionLink(client),
-        example.hq.spike.calendar.CalendarCreator(calendarStore, calendarPrefs, calendarPrefs),
-        example.hq.spike.calendar.CalendarLister(example.hq.spike.calendar.AndroidCalendarReader(app)),
-        example.hq.spike.calendar.CalendarModifier(example.hq.spike.calendar.AndroidCalendarEditor(app), calendarPrefs),
+    private val deviceActionModules = listOf<example.hq.spike.deviceactions.DeviceActionModule>(
+        example.hq.spike.calendar.CalendarModule(
+            example.hq.spike.calendar.CalendarCreator(calendarStore, calendarPrefs, calendarPrefs),
+            example.hq.spike.calendar.CalendarLister(example.hq.spike.calendar.AndroidCalendarReader(app)),
+            example.hq.spike.calendar.CalendarModifier(example.hq.spike.calendar.AndroidCalendarEditor(app), calendarPrefs),
+        ),
+    )
+    private val deviceActions = example.hq.spike.deviceactions.DeviceActionHandler(
+        example.hq.spike.deviceactions.HqDeviceActionLink(client),
+        example.hq.spike.deviceactions.DeviceActionRegistry(deviceActionModules),
     )
 
     private val _status = MutableStateFlow<Connection>(Connection.Starting(0, 0, null))

@@ -1,5 +1,7 @@
 package example.hq.spike.calendar
 
+import example.hq.spike.deviceactions.RequestLedger
+
 /** One calendar the owner can save to. [label] is what the owner sees; it is never logged. */
 data class WritableCalendar(val id: Long, val displayName: String, val accountLabel: String) {
     val label: String get() = if (accountLabel.isBlank()) displayName else "$displayName ($accountLabel)"
@@ -22,11 +24,7 @@ interface CalendarStore {
 
 class CalendarStoreException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
-/** request_id to the provider's event id, kept in app storage so a retry never inserts twice. */
-interface CalendarLedger {
-    fun get(requestId: String): Long?
-    fun put(requestId: String, eventId: Long)
-}
+typealias CalendarLedger = RequestLedger
 
 /** The owner's chosen calendar, by id. */
 interface PreferredCalendar {
