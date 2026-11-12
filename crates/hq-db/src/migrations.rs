@@ -458,6 +458,11 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "125_quiet_fleet",
         include_str!("../sql/125_quiet_fleet.sql"),
     ),
+    ("126_note_seen", include_str!("../sql/126_note_seen.sql")),
+    (
+        "127_site_allowed_once",
+        include_str!("../sql/127_site_allowed_once.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

@@ -52,6 +52,30 @@ pub struct TrashedNote {
 pub struct RestoredNote {
     pub original_path: String,
     pub path: String,
+    /// Where it went back to; a folder the owner removed is not recreated.
+    pub restored_to: RestoredTo,
+}
+
+/// Where a restored note went.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RestoredTo {
+    /// Its own folder.
+    Original,
+    /// Its folder is gone but a parent folder survives: the nearest one under `Notebooks/`.
+    Folder,
+    /// No folder of its path survives: the top of the notes (`Notebooks/`).
+    Vault,
+}
+
+impl RestoredTo {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Original => "original",
+            Self::Folder => "folder",
+            Self::Vault => "vault",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -367,12 +391,48 @@ fn free_restore_path(vault_path: &Path, rel: &str) -> String {
     candidate
 }
 
+/// Where a note whose path was `original` goes back to: its folder if it exists, else the nearest
+/// surviving folder below `Notebooks/`, else the top of the notes.
+fn restore_target(vault_path: &Path, original: &str) -> (String, RestoredTo) {
+    let original_path = Path::new(original);
+    let Some(name) = original_path.file_name() else {
+        return (original.to_string(), RestoredTo::Original);
+    };
+    let notes_root = Path::new(TRASHED_NOTES_ROOT);
+    let mut folder = original_path.parent();
+    let mut first = true;
+    while let Some(dir) = folder {
+        if dir == notes_root || dir.as_os_str().is_empty() {
+            break;
+        }
+        if vault_path.join(dir).is_dir() {
+            let kind = if first {
+                RestoredTo::Original
+            } else {
+                RestoredTo::Folder
+            };
+            let path = dir.join(name).to_string_lossy().replace('\\', "/");
+            return (path, kind);
+        }
+        first = false;
+        folder = dir.parent();
+    }
+    if original_path.parent() == Some(notes_root) {
+        return (original.to_string(), RestoredTo::Original);
+    }
+    (
+        format!("{TRASHED_NOTES_ROOT}/{}", name.to_string_lossy()),
+        RestoredTo::Vault,
+    )
+}
+
 /// Put a trashed note back where it was.
 pub(crate) fn restore_note(vault_path: &Path, trash_rel: &str) -> Result<RestoredNote> {
     let (normalized, day, inner) = checked_trash_path(vault_path, trash_rel)?;
     let day_dir = vault_path.join(TRASH_DIR).join(day);
     let original = guard_rel_path(&original_of(&day_dir, &inner))?;
-    let dest_rel = free_restore_path(vault_path, &original);
+    let (wanted, restored_to) = restore_target(vault_path, &original);
+    let dest_rel = free_restore_path(vault_path, &wanted);
     let dest = vault_path.join(&dest_rel);
     require_safe_parent(vault_path, &dest)?;
     if let Some(parent) = dest.parent() {
@@ -382,6 +442,7 @@ pub(crate) fn restore_note(vault_path: &Path, trash_rel: &str) -> Result<Restore
     Ok(RestoredNote {
         original_path: original,
         path: dest_rel,
+        restored_to,
     })
 }
 
@@ -635,6 +696,41 @@ mod tests {
             "a new note took the name"
         );
         assert!(list_trash(tmp.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn restore_goes_to_the_top_of_the_notes_when_its_folder_is_gone() {
+        let tmp = setup();
+        let trash = trash_note(tmp.path(), "Notebooks/Projects/Beta.md", false).unwrap();
+        std::fs::remove_dir_all(tmp.path().join("Notebooks/Projects")).unwrap();
+        let back = restore_note(tmp.path(), &trash).unwrap();
+        assert_eq!(back.restored_to, RestoredTo::Vault);
+        assert_eq!(back.path, "Notebooks/Beta.md");
+        assert_eq!(back.original_path, "Notebooks/Projects/Beta.md");
+        assert!(tmp.path().join("Notebooks/Beta.md").is_file());
+        assert!(!tmp.path().join("Notebooks/Projects").exists());
+    }
+
+    #[test]
+    fn restore_goes_to_the_nearest_surviving_folder() {
+        let tmp = setup();
+        write(tmp.path(), "Notebooks/Area/Deep/Gamma.md", "g");
+        let trash = trash_note(tmp.path(), "Notebooks/Area/Deep/Gamma.md", false).unwrap();
+        std::fs::remove_dir_all(tmp.path().join("Notebooks/Area/Deep")).unwrap();
+        let back = restore_note(tmp.path(), &trash).unwrap();
+        assert_eq!(back.restored_to, RestoredTo::Folder);
+        assert_eq!(back.path, "Notebooks/Area/Gamma.md");
+        assert_eq!(back.original_path, "Notebooks/Area/Deep/Gamma.md");
+        assert!(!tmp.path().join("Notebooks/Area/Deep").exists());
+    }
+
+    #[test]
+    fn restore_to_a_folder_that_exists_says_so() {
+        let tmp = setup();
+        let trash = trash_note(tmp.path(), "Notebooks/Projects/Beta.md", false).unwrap();
+        let back = restore_note(tmp.path(), &trash).unwrap();
+        assert_eq!(back.restored_to, RestoredTo::Original);
+        assert_eq!(back.path, "Notebooks/Projects/Beta.md");
     }
 
     #[test]

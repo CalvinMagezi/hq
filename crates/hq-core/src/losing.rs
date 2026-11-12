@@ -58,6 +58,50 @@ pub fn tool_verb(tool: &str, args: &Value) -> Option<&'static str> {
         .find_map(name_verb)
 }
 
+/// Sentences fixed per tool name. The tool's name is the runtime's own category; nothing the
+/// model wrote in the arguments picks one.
+const TOOL_SENTENCES: &[(&str, &str)] = &[
+    (
+        "vault_delete",
+        "HQ will move a note to the Trash. You can restore it for 30 days.",
+    ),
+    (
+        "task_delete",
+        "HQ will delete a task. This cannot be undone.",
+    ),
+];
+
+/// One plain sentence on what allowing this call will do, or `None` when HQ cannot say it truly
+/// (the card then shows the request itself). It follows the tool's name, the host the runtime
+/// parsed from a fetch (`site`) or, for a shell command, the verb HQ finds in the command it is
+/// asked to run; never an `action` or `tool` argument the model supplied.
+pub fn consequence(tool: &str, args: &Value, site: Option<&str>) -> Option<String> {
+    if let Some(host) = site {
+        return Some(format!("HQ will open {host} and read the page."));
+    }
+    if let Some((_, sentence)) = TOOL_SENTENCES.iter().find(|(name, _)| *name == tool) {
+        return Some((*sentence).to_string());
+    }
+    if SHELL_TOOLS.contains(&tool) {
+        let verb = args
+            .get("command")
+            .and_then(Value::as_str)
+            .and_then(crate::command_policy::losing_verb)?;
+        return Some(shell_sentence(verb));
+    }
+    None
+}
+
+fn shell_sentence(verb: &str) -> String {
+    match verb {
+        "stop" => "HQ will run a command that stops a program on this computer.".into(),
+        "sign out" => "HQ will run a command that signs an account out.".into(),
+        "disconnect" => "HQ will run a command that disconnects something.".into(),
+        "revoke" => "HQ will run a command that takes access away. This cannot be undone.".into(),
+        verb => format!("HQ will run a command that will {verb} data. This cannot be undone."),
+    }
+}
+
 /// The verb for a helper's dialog: a command dialog is judged as the command line it shows.
 pub fn dialog_verb(kind: &str, command: Option<&str>) -> Option<&'static str> {
     match kind {
@@ -243,5 +287,37 @@ mod tests {
             let verb = crate::command_policy::losing_verb(cmd).unwrap();
             assert!(VERBS.contains(&verb), "{cmd}: {verb}");
         }
+    }
+
+    #[test]
+    fn the_consequence_follows_the_tool_never_the_models_arguments() {
+        let fetch = json!({"url": "https://example.com/a"});
+        assert_eq!(
+            consequence("web_fetch", &fetch, Some("example.com")).as_deref(),
+            Some("HQ will open example.com and read the page.")
+        );
+        assert_eq!(
+            consequence("vault_delete", &json!({"path": "Notebooks/a.md"}), None).as_deref(),
+            Some("HQ will move a note to the Trash. You can restore it for 30 days.")
+        );
+        assert_eq!(
+            consequence("task_delete", &json!({"id": "t1"}), None).as_deref(),
+            Some("HQ will delete a task. This cannot be undone.")
+        );
+        let shell = consequence("bash", &json!({"command": "rm -rf build"}), None).unwrap();
+        assert!(
+            shell.contains("delete") && shell.contains("cannot be undone"),
+            "{shell}"
+        );
+        // A model-chosen action or inner tool name says nothing the runtime can vouch for.
+        for (tool, args) in [
+            ("skill_manage", json!({"action": "delete"})),
+            ("write_file", json!({"path": "a", "action": "delete"})),
+            ("remote_call", json!({"tool": "drop_table"})),
+            ("bash", json!({"command": "ls"})),
+        ] {
+            assert_eq!(consequence(tool, &args, None), None, "{tool}");
+        }
+        assert!(!shell.contains("something"));
     }
 }

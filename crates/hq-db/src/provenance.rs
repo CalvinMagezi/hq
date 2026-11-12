@@ -136,6 +136,13 @@ impl Provenance {
 const COLS: &str = "id, path, content_hash, actor_id, source_kind, session_id, task_id, written_at, \
     review_state, reviewed_by, reviewed_at, review_reason, recorded_late, redacted, deleted_at";
 
+/// Paths with a live record written by HQ itself (an agent, a generated note or a daemon job).
+/// A superset for a filter that must apply before a limit: the caller confirms the version on
+/// disk with `note_marks::mark`.
+pub const HQ_WRITTEN_PATHS_SQL: &str = "SELECT p.path FROM note_provenance p
+      WHERE p.redacted = 0 AND p.deleted_at IS NULL
+        AND p.source_kind IN ('agent','generated','system')";
+
 fn from_row(row: &Row<'_>) -> rusqlite::Result<Provenance> {
     let kind: String = row.get(4)?;
     let state: String = row.get(8)?;
@@ -372,6 +379,11 @@ pub fn carry_version(
            FROM note_provenance WHERE path = ?1 AND content_hash = ?2",
         params![path, from_hash, to_hash],
     )?;
+    // Opening follows the note: a copy that only gained an id is the version the owner saw.
+    conn.execute(
+        "UPDATE note_seen SET content_hash = ?3 WHERE path = ?1 AND content_hash = ?2",
+        params![path, from_hash, to_hash],
+    )?;
     Ok(carried > 0)
 }
 
@@ -386,6 +398,12 @@ pub fn move_path(conn: &Connection, from: &str, to: &str) -> Result<usize> {
         [from, to],
     )?;
     conn.execute("DELETE FROM note_provenance WHERE path = ?1", [from])?;
+    conn.execute(
+        "INSERT OR REPLACE INTO note_seen (path, content_hash, seen_at)
+         SELECT ?2, content_hash, seen_at FROM note_seen WHERE path = ?1",
+        [from, to],
+    )?;
+    conn.execute("DELETE FROM note_seen WHERE path = ?1", [from])?;
     Ok(moved)
 }
 
@@ -409,10 +427,15 @@ pub fn clear_deleted(conn: &Connection, path: &str) -> Result<usize> {
 /// Remove records of notes deleted more than `days` ago. Returns how many.
 pub fn purge_deleted(conn: &Connection, days: i64) -> Result<usize> {
     let cutoff = (Utc::now() - chrono::Duration::days(days)).to_rfc3339();
-    Ok(conn.execute(
+    let purged = conn.execute(
         "DELETE FROM note_provenance WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
         [cutoff],
-    )?)
+    )?;
+    conn.execute(
+        "DELETE FROM note_seen WHERE path NOT IN (SELECT path FROM note_provenance)",
+        [],
+    )?;
+    Ok(purged)
 }
 
 /// Remove who wrote a version from the record, on request (a privacy or retention rule), without

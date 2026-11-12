@@ -13,6 +13,7 @@ const CHATS_FOR_TRUST: i64 = 3;
 
 /// Records one approved fetch. True when the site is now allowed throughout this chat.
 pub fn record_approval(conn: &Connection, host: &str, scope: &str) -> Result<bool> {
+    count_allowed_once(conn, host)?;
     conn.execute(
         "INSERT INTO fetch_site_grants (host, scope, approvals, updated_at) VALUES (?1, ?2, 1, ?3)
          ON CONFLICT(host, scope) DO UPDATE SET approvals = approvals + 1,
@@ -48,6 +49,30 @@ fn whole_site(conn: &Connection, host: &str, scope: &str) -> rusqlite::Result<bo
         )
         .optional()?
         == Some(1))
+}
+
+/// How many times the owner answered "Allow once" for `host`, in every chat. "Allow all" and a
+/// decline never change it, and only the owner's inbox answers write it, so a helper's own
+/// prompts never count. The apps offer "Allow all for this site" once it reaches two; the server
+/// does not enforce that (`approve_site` works at any count).
+pub fn allowed_once_for_host(conn: &Connection, host: &str) -> Result<i64> {
+    Ok(conn
+        .query_row(
+            "SELECT count FROM site_allowed_once WHERE host = ?1",
+            params![host],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or(0))
+}
+
+fn count_allowed_once(conn: &Connection, host: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO site_allowed_once (host, count) VALUES (?1, 1)
+         ON CONFLICT(host) DO UPDATE SET count = count + 1",
+        params![host],
+    )?;
+    Ok(())
 }
 
 /// A declined fetch undoes what this chat had earned for the site.
@@ -110,6 +135,27 @@ mod tests {
             assert!(is_allowed(c, "a.example", "chat-1")?);
             assert!(!is_allowed(c, "a.example", "chat-2")?);
             assert!(!is_allowed(c, "b.example", "chat-1")?);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn allowed_once_counts_only_plain_answers_and_a_decline_or_allow_all_never_change_it() {
+        with_db(|c| {
+            assert_eq!(allowed_once_for_host(c, "a.example")?, 0);
+            record_approval(c, "a.example", "chat-1")?;
+            record_approval(c, "a.example", "chat-1")?;
+            assert_eq!(allowed_once_for_host(c, "a.example")?, 2);
+            // A decline clears the chat's grant, not what the owner already allowed.
+            forget_in_chat(c, "a.example", "chat-1")?;
+            assert_eq!(allowed_once_for_host(c, "a.example")?, 2);
+            // "Allow all" in another chat is not an allow-once answer.
+            allow_whole_site(c, "a.example", "chat-2")?;
+            assert_eq!(allowed_once_for_host(c, "a.example")?, 2);
+            allow_whole_site(c, "b.example", "chat-A")?;
+            assert_eq!(allowed_once_for_host(c, "b.example")?, 0);
+            record_approval(c, "a.example", "chat-3")?;
+            assert_eq!(allowed_once_for_host(c, "a.example")?, 3);
             Ok(())
         });
     }

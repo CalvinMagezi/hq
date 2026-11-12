@@ -23,6 +23,7 @@ pub mod link_captures;
 pub mod mcp_connector;
 pub mod migrations;
 pub mod moved;
+pub mod note_marks;
 pub mod offers;
 pub mod owner_approvals;
 pub mod pool;

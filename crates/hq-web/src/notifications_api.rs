@@ -67,6 +67,7 @@ fn approval_from_row(row: &rusqlite::Row) -> rusqlite::Result<Option<serde_json:
         .unwrap_or_default();
     let verb = hq_core::losing::tool_verb(&tool, &args);
     let site = hq_agent::governance::fetch_site(&tool, &args);
+    let consequence = hq_core::losing::consequence(&tool, &args, site.as_deref());
     let thread_id = row
         .get::<_, Option<String>>(18)?
         .as_deref()
@@ -79,6 +80,7 @@ fn approval_from_row(row: &rusqlite::Row) -> rusqlite::Result<Option<serde_json:
         "verb": verb,
         "thread_id": thread_id,
         "site": site,
+        "consequence": consequence,
     })))
 }
 
@@ -313,8 +315,29 @@ pub(crate) fn scan_value_items(
         let items = stmt
             .query_map([], notification_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(items)
+        Ok(items
+            .into_iter()
+            .map(|item| with_site_approvals(conn, item))
+            .collect())
     })
+}
+
+/// Adds `site_approvals` to an approval item that names a site: how many times the owner
+/// answered "Allow once" for that site (display only: `approve_site` works at any count). A read that fails leaves the item without the field.
+fn with_site_approvals(
+    conn: &rusqlite::Connection,
+    mut item: NotificationItem,
+) -> NotificationItem {
+    let Some(approval) = item.metadata.approval.as_mut() else {
+        return item;
+    };
+    let Some(site) = approval["site"].as_str().map(str::to_string) else {
+        return item;
+    };
+    if let Ok(n) = hq_db::fetch_sites::allowed_once_for_host(conn, &site) {
+        approval["site_approvals"] = n.into();
+    }
+    item
 }
 
 /// Aggregate all notifications matching filters.
@@ -1220,6 +1243,93 @@ mod tests {
         record_action(&db, &third, ENGAGEMENT_APPROVED).unwrap();
         note_site_answer(&db, &third, ENGAGEMENT_APPROVED, false).unwrap();
         assert!(!still_waiting(&db, &waiting));
+    }
+
+    fn site_approvals_of(db: &hq_db::Database, id: &str) -> Option<i64> {
+        let items = scan_value_items(db, Some("pending")).unwrap();
+        let item = items.iter().find(|i| i.id == format!("val_{id}"))?;
+        item.metadata.approval.as_ref()?["site_approvals"].as_i64()
+    }
+
+    fn answer(db: &hq_db::Database, id: &str, engagement: &str, whole_site: bool) {
+        record_action(db, id, engagement).unwrap();
+        note_site_answer(db, id, engagement, whole_site).unwrap();
+    }
+
+    #[test]
+    fn a_fetch_card_carries_how_often_its_site_was_allowed_once() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let first = fetch_request(&db, "web:t1", "https://a.example/0", "d0");
+        assert_eq!(site_approvals_of(&db, &first), Some(0));
+        for n in 1..=2 {
+            let url = format!("https://a.example/{n}");
+            let id = fetch_request(&db, "web:t1", &url, &format!("d{n}"));
+            answer(&db, &id, ENGAGEMENT_APPROVED, false);
+            let next = fetch_request(&db, "web:t1", "https://a.example/n", &format!("n{n}"));
+            assert_eq!(site_approvals_of(&db, &next), Some(n), "after {n}");
+        }
+    }
+
+    #[test]
+    fn a_decline_and_allow_all_elsewhere_do_not_change_the_count() {
+        let db = hq_db::Database::open_memory().unwrap();
+        for n in 1..=2 {
+            let id = fetch_request(
+                &db,
+                "web:t1",
+                &format!("https://a.example/{n}"),
+                &format!("d{n}"),
+            );
+            answer(&db, &id, ENGAGEMENT_APPROVED, false);
+        }
+        // A decline in the same chat does not lower it.
+        let declined = fetch_request(&db, "web:t1", "https://a.example/no", "dn");
+        answer(&db, &declined, "dismissed", false);
+        // "Allow all" in another chat is not an allow-once answer.
+        let all = fetch_request(&db, "web:t2", "https://b.example/x", "da");
+        answer(&db, &all, ENGAGEMENT_APPROVED, true);
+        let next_a = fetch_request(&db, "web:t3", "https://a.example/y", "dy");
+        let next_b = fetch_request(&db, "web:t3", "https://b.example/y", "dz");
+        assert_eq!(site_approvals_of(&db, &next_a), Some(2));
+        assert_eq!(site_approvals_of(&db, &next_b), Some(0));
+    }
+
+    #[test]
+    fn a_helpers_dialog_never_counts_even_when_it_is_answered_like_an_approval() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let helper = hq_core::types::ValueItem::new(
+            "session-supervisor",
+            hq_core::types::ValueKind::ActionNeeded,
+            "waiting",
+            "blocked",
+        );
+        hq_db::value_items::insert(&db, &helper).unwrap();
+        answer(&db, &helper.id, ENGAGEMENT_APPROVED, false);
+        let count: i64 = db
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT COALESCE(SUM(count),0) FROM site_allowed_once",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(site_approvals_of(&db, &helper.id), None);
+    }
+
+    #[test]
+    fn an_approval_item_carries_the_runtime_consequence_sentence() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let id = fetch_request(&db, "web:t1", "https://a.example/x", "d1");
+        let items = scan_value_items(&db, Some("pending")).unwrap();
+        let item = items.iter().find(|i| i.id == format!("val_{id}")).unwrap();
+        let approval = item.metadata.approval.as_ref().unwrap();
+        assert_eq!(
+            approval["consequence"],
+            "HQ will open a.example and read the page."
+        );
+        assert_eq!(approval["loses"], false);
     }
 
     /// Only HQ's own sign-in item is shown as a new sign-in; an item from another source with the
