@@ -1,4 +1,19 @@
-package example.hq.spike.calendar
+package example.hq.spike.deviceactions
+
+import example.hq.spike.calendar.CalendarCreator
+import example.hq.spike.calendar.CalendarEditor
+import example.hq.spike.calendar.CalendarInstance
+import example.hq.spike.calendar.CalendarLister
+import example.hq.spike.calendar.CalendarModifier
+import example.hq.spike.calendar.CalendarModule
+import example.hq.spike.calendar.CalendarReader
+import example.hq.spike.calendar.CalendarRequest
+import example.hq.spike.calendar.CalendarStore
+import example.hq.spike.calendar.EventRow
+import example.hq.spike.calendar.EventWrite
+import example.hq.spike.calendar.PreferredCalendar
+import example.hq.spike.calendar.StoredEvent
+import example.hq.spike.calendar.WritableCalendar
 
 import example.hq.spike.data.ChatEvent
 import example.hq.spike.data.HqUnavailable
@@ -30,7 +45,7 @@ class DeviceActionHandlerTest {
         override fun read(eventId: Long): StoredEvent? = null
     }
 
-    private val ledger = object : CalendarLedger { override fun get(requestId: String): Long? = null; override fun put(requestId: String, eventId: Long) {} }
+    private val ledger = object : RequestLedger { override fun get(requestId: String): Long? = null; override fun put(requestId: String, eventId: Long) {} }
     private val none = object : PreferredCalendar { override fun get(): Long? = null }
     private class FakeReader(var allowed: Boolean = true, val rows: List<CalendarInstance> = emptyList()) : CalendarReader {
         override fun hasPermission() = allowed
@@ -50,7 +65,7 @@ class DeviceActionHandlerTest {
     }
     private val editor = FakeEditor()
     private val logs = mutableListOf<String>()
-    private fun handler(link: Link, now: Instant = Instant.parse("2026-11-10T00:00:00Z")) = DeviceActionHandler(link, CalendarCreator(Denied(), ledger, none), CalendarLister(reader), CalendarModifier(editor, ledger), { now }, { logs += it })
+    private fun handler(link: Link, now: Instant = Instant.parse("2026-11-10T00:00:00Z")) = DeviceActionHandler(link, DeviceActionRegistry(listOf(CalendarModule(CalendarCreator(Denied(), ledger, none), CalendarLister(reader), CalendarModifier(editor, ledger)))), { now }, { logs += it })
 
     private fun action(id: String = "a1", expires: String? = "2026-11-10T01:00:00Z", name: String = "calendar.create") = ChatEvent.DeviceAction(
         id, "t1", name, 1,

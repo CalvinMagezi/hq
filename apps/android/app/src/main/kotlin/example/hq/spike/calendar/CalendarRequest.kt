@@ -7,6 +7,7 @@ import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeParseException
 import java.util.UUID
+import example.hq.spike.deviceactions.DeviceOutcome
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -46,9 +47,9 @@ sealed interface ParsedRequest {
 }
 
 /** What the phone reports back; the shapes are the contract's, so HQ can pass them on unchanged. */
-sealed interface CalendarOutcome {
-    val code: String
-    fun toJson(): JSONObject = JSONObject().put("v", CalendarLimits.WIRE_VERSION).put("outcome", code).also { fill(it) }
+sealed interface CalendarOutcome : DeviceOutcome {
+    override val code: String
+    override fun toJson(): JSONObject = JSONObject().put("v", CalendarLimits.WIRE_VERSION).put("outcome", code).also { fill(it) }
     fun fill(o: JSONObject)
 
     data class Created(val eventRef: String, val title: String, val startLocal: String, val endLocal: String, val timeZone: String, val calendarLabel: String, val durationDefaulted: Boolean) : CalendarOutcome {
