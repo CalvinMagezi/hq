@@ -37,8 +37,20 @@ class DeviceActionHandlerTest {
         override fun instances(fromMs: Long, toMs: Long) = rows.filter { it.beginMs < toMs && it.endMs > fromMs }
     }
     private var reader = FakeReader()
+    private class FakeEditor : CalendarEditor {
+        var rows = mutableMapOf<Long, EventRow>()
+        override fun hasPermission() = true
+        override fun row(eventId: Long) = rows[eventId]
+        override fun update(eventId: Long, write: EventWrite): Boolean {
+            val r = rows[eventId] ?: return false
+            rows[eventId] = r.copy(title = write.title ?: r.title)
+            return true
+        }
+        override fun delete(eventId: Long) = rows.remove(eventId) != null
+    }
+    private val editor = FakeEditor()
     private val logs = mutableListOf<String>()
-    private fun handler(link: Link, now: Instant = Instant.parse("2026-11-10T00:00:00Z")) = DeviceActionHandler(link, CalendarCreator(Denied(), ledger, none), CalendarLister(reader), { now }, { logs += it })
+    private fun handler(link: Link, now: Instant = Instant.parse("2026-11-10T00:00:00Z")) = DeviceActionHandler(link, CalendarCreator(Denied(), ledger, none), CalendarLister(reader), CalendarModifier(editor, ledger), { now }, { logs += it })
 
     private fun action(id: String = "a1", expires: String? = "2026-11-10T01:00:00Z", name: String = "calendar.create") = ChatEvent.DeviceAction(
         id, "t1", name, 1,
@@ -119,6 +131,39 @@ class DeviceActionHandlerTest {
         val link = Link()
         val bad = listAction().let { it.copy(payload = JSONObject(it.payload.toString()).put("location", "x")) }
         handler(link).handle(bad)
+        assertEquals("invalid_event", link.results.single().second.getString("outcome"))
+    }
+
+    private fun modifyAction(name: String, id: String, requestId: String, changes: JSONObject?) = ChatEvent.DeviceAction(
+        id, "t1", name, 1,
+        JSONObject().put("request_id", requestId).put("event_id", 7).put("begin_ms", 1000L).put("expected_title", "Secret title").put("zone", "Europe/London")
+            .also { if (changes != null) it.put("changes", changes) },
+        "2026-11-10T01:00:00Z",
+    )
+
+    private fun seedEvent() { editor.rows[7] = EventRow(1, "Secret title", 1000L, 2000L, false, "", "", "", null, false, 700) }
+
+    @Test fun anUpdateActionIsAckedAnsweredAndNotLogged() = runBlocking {
+        seedEvent()
+        val link = Link()
+        handler(link).handle(modifyAction("calendar.update", "u1", "3f2b8a52-6f0e-4d3e-9a55-0d0c3c1f7a31", JSONObject().put("title", "Renamed secret")))
+        assertEquals(listOf("u1"), link.acks)
+        assertEquals("updated", link.results.single().second.getString("outcome"))
+        assertEquals("Renamed secret", editor.rows[7]!!.title)
+        assertTrue(logs.none { it.contains("secret", ignoreCase = true) })
+    }
+
+    @Test fun aDeleteActionIsAckedAndAnswered() = runBlocking {
+        seedEvent()
+        val link = Link()
+        handler(link).handle(modifyAction("calendar.delete", "d1", "3f2b8a52-6f0e-4d3e-9a55-0d0c3c1f7a32", null))
+        assertEquals("deleted", link.results.single().second.getString("outcome"))
+        assertTrue(editor.rows.isEmpty())
+    }
+
+    @Test fun aBadModifyPayloadIsInvalidEvent() = runBlocking {
+        val link = Link()
+        handler(link).handle(modifyAction("calendar.delete", "d2", "3f2b8a52-6f0e-4d3e-9a55-0d0c3c1f7a33", JSONObject().put("title", "x")))
         assertEquals("invalid_event", link.results.single().second.getString("outcome"))
     }
 }

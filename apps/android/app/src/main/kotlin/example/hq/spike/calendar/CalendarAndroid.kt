@@ -123,6 +123,80 @@ class AndroidCalendarReader(context: Context) : CalendarReader {
     }
 }
 
+/** Edit and delete through the content resolver. Only the columns the edit checks need are read; callers use a background thread. */
+class AndroidCalendarEditor(context: Context) : CalendarEditor {
+    private val app = context.applicationContext
+
+    override fun hasPermission(): Boolean = AndroidCalendarStore.hasPermission(app)
+
+    override fun row(eventId: Long): EventRow? = guarded("read") {
+        app.contentResolver.query(
+            ContentUris.withAppendedId(Events.CONTENT_URI, eventId),
+            arrayOf(
+                Events.CALENDAR_ID, Events.TITLE, Events.DTSTART, Events.DTEND, Events.ALL_DAY, Events.RRULE, Events.RDATE,
+                Events.ORIGINAL_ID, Events.ORIGINAL_INSTANCE_TIME, Events.DELETED,
+            ),
+            null, null, null,
+        )?.use { c ->
+            if (!c.moveToFirst()) return@use null
+            val start = c.getLong(COL_START)
+            EventRow(
+                calendarId = c.getLong(COL_CALENDAR),
+                title = c.getString(COL_TITLE).orEmpty(),
+                startMs = start,
+                endMs = if (c.isNull(COL_END)) start else c.getLong(COL_END),
+                allDay = c.getInt(COL_ALL_DAY) == 1,
+                rrule = c.getString(COL_RRULE).orEmpty(),
+                rdate = c.getString(COL_RDATE).orEmpty(),
+                originalId = c.getString(COL_ORIGINAL_ID).orEmpty(),
+                originalInstanceTime = if (c.isNull(COL_ORIGINAL_TIME)) null else c.getLong(COL_ORIGINAL_TIME),
+                deleted = c.getInt(COL_DELETED) == 1,
+                accessLevel = accessLevel(c.getLong(COL_CALENDAR)),
+            )
+        }
+    }
+
+    /** Zero when the calendar is gone, which the caller treats as read-only. */
+    private fun accessLevel(calendarId: Long): Int = app.contentResolver.query(
+        ContentUris.withAppendedId(Calendars.CONTENT_URI, calendarId),
+        arrayOf(Calendars.CALENDAR_ACCESS_LEVEL), null, null, null,
+    )?.use { if (it.moveToFirst()) it.getInt(0) else 0 } ?: 0
+
+    override fun update(eventId: Long, write: EventWrite): Boolean = guarded("update") {
+        val values = ContentValues().apply {
+            write.title?.let { put(Events.TITLE, it) }
+            write.startMs?.let { put(Events.DTSTART, it) }
+            write.endMs?.let { put(Events.DTEND, it) }
+        }
+        app.contentResolver.update(ContentUris.withAppendedId(Events.CONTENT_URI, eventId), values, null, null) > 0
+    }
+
+    override fun delete(eventId: Long): Boolean = guarded("delete") {
+        app.contentResolver.delete(ContentUris.withAppendedId(Events.CONTENT_URI, eventId), null, null) > 0
+    }
+
+    private fun <T> guarded(what: String, block: () -> T): T = try {
+        block()
+    } catch (e: SecurityException) {
+        throw CalendarStoreException("$what not allowed", e)
+    } catch (e: IllegalArgumentException) {
+        throw CalendarStoreException("$what rejected", e)
+    }
+
+    private companion object {
+        const val COL_CALENDAR = 0
+        const val COL_TITLE = 1
+        const val COL_START = 2
+        const val COL_END = 3
+        const val COL_ALL_DAY = 4
+        const val COL_RRULE = 5
+        const val COL_RDATE = 6
+        const val COL_ORIGINAL_ID = 7
+        const val COL_ORIGINAL_TIME = 8
+        const val COL_DELETED = 9
+    }
+}
+
 /** Small private stores: the ledger and the preferred calendar, in app-private preferences like the app's other small stores. */
 class CalendarPrefs(context: Context) : CalendarLedger, PreferredCalendar {
     private val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
