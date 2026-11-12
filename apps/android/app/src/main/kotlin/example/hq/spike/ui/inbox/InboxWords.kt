@@ -56,7 +56,32 @@ data class InboxCard(
     val deviceLabel: String? = null,
     /** Its topic is silenced: it waits in the list without counting on the badge. */
     val silenced: Boolean = false,
-)
+    /** From HQ's `source_group`: `you`, `helpers` or `system`. Null from an HQ that does not say, which keeps the list as it was. */
+    val group: String? = null,
+    /** HQ's word that only the owner can decide it. Null when HQ does not say. */
+    val ownerOnly: Boolean? = null,
+    /** Why HQ moved it out of Needs you by itself; set only on tidied items, which Done lists as "No longer waiting". */
+    val expiredReason: String? = null,
+    /** How many times this site was already allowed in a chat; the "Allow all for this site" offer needs [SITE_ASKS_BEFORE_OFFER]. */
+    val siteApprovals: Int? = null,
+    /** The day's summary of helper finishes, which the Updates tab shows as one expandable row. */
+    val digest: Boolean = false,
+    /** Ids of updates folded into this one as the same event: clearing the row clears them too. */
+    val alsoIds: List<String> = emptyList(),
+) {
+    val ids: List<String> get() = listOf(id) + alsoIds
+
+    /** The whole-site offer: with no count from HQ (an older one) as before; with a count, only from the third ask. */
+    val offersWholeSite: Boolean get() = site != null && (siteApprovals == null || siteApprovals >= SITE_ASKS_BEFORE_OFFER)
+
+    /** A request from a helper the owner's agents are handling: it never takes the hero place and never counts on the badge. */
+    val fromHelpers: Boolean get() = group == GROUP_HELPERS && ownerOnly == false
+}
+
+const val GROUP_HELPERS = "helpers"
+
+/** The third ask: the whole-site offer shows from the third approval of one site, so after two. */
+const val SITE_ASKS_BEFORE_OFFER = 2
 
 /** Turns what the server stores into the plain titles, bodies and buttons of the Inbox board. */
 object InboxWords {
@@ -67,7 +92,31 @@ object InboxWords {
     private const val MAX_BODY = 160
     private const val APPROVAL_BODY = 400
 
-    fun card(item: InboxItem): InboxCard = worded(item).copy(silenced = item.silenced)
+    private const val DIGEST_SOURCE = "fleet-digest"
+    private val RUN_TITLE = Regex("^HQ wants to run (\\S+)$")
+
+    fun card(item: InboxItem): InboxCard = worded(item).let { c ->
+        c.copy(
+            title = plainTitle(c.title), silenced = item.silenced, group = item.sourceGroup, ownerOnly = item.ownerOnly,
+            expiredReason = item.expiredReason, siteApprovals = item.siteApprovals, digest = item.sourceTask == DIGEST_SOURCE,
+        )
+    }
+
+    /** What HQ wants to do, in a sentence, for a tool name. A name this does not know gets the generic line, never the snake_case name. */
+    fun toolSentence(tool: String): String = when (tool.trim()) {
+        "calendar_delete_event" -> "HQ wants to delete a calendar event"
+        "calendar_create_event" -> "HQ wants to add a calendar event"
+        "calendar_update_event" -> "HQ wants to change a calendar event"
+        "calendar_list_events" -> "HQ wants to look at your calendar"
+        "contacts_search" -> "HQ wants to look up a contact"
+        "bash" -> "HQ wants to run a command"
+        "web_fetch" -> "HQ wants to open a web page"
+        "task_delete" -> "HQ wants to delete a task"
+        else -> "HQ wants to use a tool"
+    }
+
+    /** "HQ wants to run calendar_delete_event" becomes a sentence; any other title is left alone. */
+    fun plainTitle(title: String): String = RUN_TITLE.matchEntire(title.trim())?.let { toolSentence(it.groupValues[1]) } ?: title
 
     private fun worded(item: InboxItem): InboxCard {
         val helper = HELPER_TITLE.matchEntire(item.title.trim())

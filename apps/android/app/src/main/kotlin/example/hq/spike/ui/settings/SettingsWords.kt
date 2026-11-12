@@ -196,6 +196,19 @@ object SettingsWords {
 
     enum class SafetyTab(@androidx.annotation.StringRes val label: Int) { Safety(R.string.settings_tab_safety), Time(R.string.settings_tab_time), Helpers(R.string.place_helpers), Tools(R.string.settings_tab_tools) }
 
+    /** `inbox.fleet.helper_policy`: what helpers may ask the owner. [id] is HQ's word for it. */
+    enum class HelperPolicy(val id: String, @androidx.annotation.StringRes val title: Int, @androidx.annotation.StringRes val about: Int) {
+        Nothing("nothing", R.string.settings_helper_policy_nothing, R.string.settings_helper_policy_nothing_about),
+        LosesWork("loses_work", R.string.settings_helper_policy_loses, R.string.settings_helper_policy_loses_about),
+        Everything("everything", R.string.settings_helper_policy_everything, R.string.settings_helper_policy_everything_about),
+    }
+
+    /** The standing rule as HQ reports it; null when HQ does not say or names one this app does not know. */
+    fun helperPolicy(s: JSONObject?): HelperPolicy? {
+        val id = s?.optJSONObject("inbox")?.optJSONObject("fleet")?.optString("helper_policy", "").orEmpty()
+        return HelperPolicy.entries.firstOrNull { it.id == id }
+    }
+
     private fun secs(w: Words, v: Int): String = when {
         v <= 0 -> w.s(R.string.settings_update_toggle_off)
         v % 3600 == 0 -> w.s(R.string.settings_hours_n, v / 3600)

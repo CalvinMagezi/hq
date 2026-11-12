@@ -37,6 +37,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -56,6 +58,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,7 +75,7 @@ import kotlinx.coroutines.delay
 private val SmallText = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp)
 private const val LINE_MS = 4_000L
 private const val BODY_LINES = 4
-private const val UPDATE_BODY_LINES = 3
+private const val UPDATE_BODY_LINES = 1
 
 private fun CardIcon.vector(): ImageVector = when (this) {
     CardIcon.Sparkle -> HqIcons.Spark
@@ -92,7 +95,7 @@ fun InboxScreen(ui: InboxUi, actions: InboxActions, onTakeLook: (InboxCard) -> U
             when (ui.tab) {
                 InboxTab.Needs -> NeedsFeed(ui, actions, onTakeLook)
                 InboxTab.Updates -> UpdatesFeed(ui, actions)
-                InboxTab.Done -> DoneFeed(ui)
+                InboxTab.Done -> DoneFeed(ui, actions)
             }
             ui.line?.let { Snack(it, actions, Modifier.align(Alignment.BottomCenter)) }
         }
@@ -134,11 +137,93 @@ private fun NeedsFeed(ui: InboxUi, actions: InboxActions, onTakeLook: (InboxCard
         return
     }
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    val state = rememberNeedsState()
     example.hq.spike.ui.shell.ReselectEffect(example.hq.spike.ui.shell.Place.Inbox, list)
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         ui.banner?.let { b -> item(key = "notif-banner") { NotifBanner(b, actions) } }
         if (ui.offline) item { Text(if (cards.isEmpty()) "HQ hasn't answered yet, so what is waiting on you cannot be shown." else "HQ has stopped. These are the last things it asked.", style = HqType.BodySm, color = Mts.Amber) }
-        items(cards, key = { it.id }) { card -> NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook) }
+        if (!NeedsLayout.grouped(cards)) {
+            items(cards, key = { it.id }) { card -> NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook) }
+            return@LazyColumn
+        }
+        groupedNeeds(state, ui, cards, actions, onTakeLook)
+    }
+}
+
+/** Decisions only the owner can make first (the oldest in full), then the helper requests folded into one row. */
+private fun androidx.compose.foundation.lazy.LazyListScope.groupedNeeds(state: NeedsState, ui: InboxUi, cards: List<InboxCard>, actions: InboxActions, onTakeLook: (InboxCard) -> Unit) {
+    val layout = NeedsLayout.of(cards, state.focus, state.showAll)
+    if (ui.catchUp) item(key = "catch-up") { CatchUpCard(cards.size, NeedsLayout.oldHelpers(cards).size, cards.count { !it.fromHelpers }, actions) }
+    layout.hero?.let { hero -> item(key = "hero-${hero.id}") { NeedCard(hero, ui.answering[hero.id], ui.offline, actions, onTakeLook) } }
+    items(layout.rows, key = { "row-${it.id}" }) { card -> NeedRow(card, onOpen = { state.focus = card.id }) }
+    if (layout.folded > 0) item(key = "folded") { FoldedRow(layout.folded) { state.showAll = true } }
+    if (layout.helpers.isNotEmpty()) {
+        item(key = "helper-group") { HelperGroupRow(layout.helpers.size, NeedsLayout.oldHelpers(layout.helpers).isNotEmpty(), state.helpersOpen, onOpen = { state.helpersOpen = !state.helpersOpen }, onClear = actions.onClearHelpers) }
+        if (state.helpersOpen) items(layout.helpers, key = { "helper-${it.id}" }) { card -> NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook) }
+    }
+}
+
+/** What the grouped Needs tab remembers while it is open: the row opened in place, whether every row shows, whether the helper group is open. */
+private class NeedsState(focus: androidx.compose.runtime.MutableState<String?>, showAll: androidx.compose.runtime.MutableState<Boolean>, helpersOpen: androidx.compose.runtime.MutableState<Boolean>) {
+    var focus by focus
+    var showAll by showAll
+    var helpersOpen by helpersOpen
+}
+
+@Composable
+private fun rememberNeedsState() = NeedsState(
+    androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) },
+    androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) },
+    androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) },
+)
+
+/** The one card at the top while a pile of helper requests waits: clear the old ones, or look at the decisions. */
+@Composable
+private fun CatchUpCard(total: Int, old: Int, mine: Int, actions: InboxActions) {
+    val shape = RoundedCornerShape(16.dp)
+    Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(pluralStringResource(R.plurals.inbox_catch_up_body, old, total, old), style = HqType.BodySm.copy(fontSize = 15.sp, lineHeight = 22.sp), color = Mts.Ink)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            PrimaryButton(stringResource(R.string.inbox_catch_up_clear), Modifier.fillMaxWidth(), onClick = actions.onClearHelpers)
+            if (mine > 0) example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.inbox_catch_up_show, mine), Modifier.fillMaxWidth(), onClick = actions.onShowOwner)
+        }
+    }
+}
+
+/** A decision that is not the hero: who and what, how long ago, and a tap that opens it in place. */
+@Composable
+private fun NeedRow(card: InboxCard, onOpen: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape)
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.inbox_row_open), onClick = onOpen).padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(card.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(listOf(card.where, InboxWords.ago(card.createdAt)).filter { it.isNotBlank() }.joinToString(" · "), style = SmallText, color = Mts.InkMuted, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun FoldedRow(n: Int, onShow: () -> Unit) {
+    Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onShow), contentAlignment = Alignment.Center) {
+        Text(stringResource(R.string.needs_folded, n), style = HqType.BodySmBold, color = Mts.BrandBlue)
+    }
+}
+
+/** The helper requests, folded: how many, with Open to list them and Clear to put them away (undoable). */
+@Composable
+private fun HelperGroupRow(n: Int, canClear: Boolean, open: Boolean, onOpen: () -> Unit, onClear: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(start = 16.dp, end = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(stringResource(R.string.inbox_helpers_group, n), style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
+        TextButton(stringResource(if (open) R.string.inbox_helpers_hide else R.string.inbox_helpers_open), onClick = onOpen)
+        if (canClear) TextButton(stringResource(R.string.inbox_helpers_clear), onClick = onClear)
     }
 }
 
@@ -204,16 +289,25 @@ private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions
 @Composable
 private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit, modifier: Modifier = Modifier, onDetailsPage: Boolean = false) {
     val sending = answer == Answer.Sending
-    val wholeSite = card.site?.takeIf { card.canAllow || onDetailsPage }
+    val wholeSite = card.site?.takeIf { (card.canAllow || onDetailsPage) && card.offersWholeSite }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
     wholeSite?.let { site -> example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.approval_allow_site, site), Modifier.fillMaxWidth(), enabled = !sending && !offline) { actions.onAllowSite(card) } }
+    val pair = card.kind != CardKind.SignIn && (card.canAllow || (onDetailsPage && card.kind == CardKind.Approval))
+    if (pair && AnswerLayout.stacked(androidx.compose.ui.platform.LocalDensity.current.fontScale)) {
+        // Large text: one button per line, the safe answer first, labels wrapping rather than clipping.
+        val label = if (card.allowLabel == "Allow") "Allow once" else card.allowLabel
+        example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.inbox_decline), Modifier.fillMaxWidth(), enabled = !sending && !offline, maxLines = Int.MAX_VALUE) { actions.onNotNow(card) }
+        if (NoticeWords.losing(card)) DangerButton(if (sending) stringResource(R.string.approval_answering) else card.verb?.let { stringResource(R.string.approval_allow_verb, it) } ?: stringResource(R.string.inbox_allow), Modifier.fillMaxWidth(), enabled = !sending && !offline, maxLines = Int.MAX_VALUE) { actions.onAllow(card) }
+        else PrimaryButton(if (sending) "Answering…" else label, Modifier.fillMaxWidth(), enabled = !sending && !offline, maxLines = Int.MAX_VALUE) { actions.onAllow(card) }
+    } else
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         if (card.kind == CardKind.SignIn) {
             // It was me answers it; Sign it out asks first, then signs the device out, which answers it too.
             example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.it_was_me), Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
             DangerButton(stringResource(R.string.sign_it_out), Modifier.weight(1f), enabled = !sending && !offline) { actions.onAskSignOut(card) }
         } else if (card.canAllow || (onDetailsPage && card.kind == CardKind.Approval)) {
-            TextButton(stringResource(R.string.inbox_decline), enabled = !sending && !offline) { actions.onNotNow(card) }
+            // Same width as the yes beside it, and the safe answer first.
+            example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.inbox_decline), Modifier.weight(1f), enabled = !sending && !offline) { actions.onNotNow(card) }
             val label = if (card.allowLabel == "Allow") "Allow once" else card.allowLabel
             if (NoticeWords.losing(card)) DangerButton(if (sending) stringResource(R.string.approval_answering) else card.verb?.let { stringResource(R.string.approval_allow_verb, it) } ?: stringResource(R.string.inbox_allow), Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
             else PrimaryButton(if (sending) "Answering…" else label, Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
@@ -231,20 +325,20 @@ private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, action
 }
 
 @Composable
-internal fun PrimaryButton(label: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun PrimaryButton(label: String, modifier: Modifier = Modifier, enabled: Boolean = true, maxLines: Int = 1, onClick: () -> Unit) {
     Box(
         modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).alpha(if (enabled) 1f else 0.5f).clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 24.dp),
         contentAlignment = Alignment.Center,
-    ) { Text(label, style = HqType.BodySmBold, color = Mts.OnGreen, maxLines = 1) }
+    ) { Text(label, style = HqType.BodySmBold, color = Mts.OnGreen, maxLines = maxLines) }
 }
 
 /** The one red button: it answers yes to a request that deletes or loses something. */
 @Composable
-internal fun DangerButton(label: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun DangerButton(label: String, modifier: Modifier = Modifier, enabled: Boolean = true, maxLines: Int = 1, onClick: () -> Unit) {
     Box(
         modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Danger).alpha(if (enabled) 1f else 0.5f).clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 24.dp),
         contentAlignment = Alignment.Center,
-    ) { Text(label, style = HqType.BodySmBold, color = Mts.OnDanger, maxLines = 1) }
+    ) { Text(label, style = HqType.BodySmBold, color = Mts.OnDanger, maxLines = maxLines) }
 }
 
 /** Shown on the Needs tab while notifications cannot reach the owner, with Turn on and a seven-day Not now. */
@@ -306,31 +400,34 @@ private fun CaughtUp(ui: InboxUi, actions: InboxActions) {
         }
         if (today.isNotEmpty()) {
             item { Text("You decided today".uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(bottom = 6.dp)) }
-            item { DoneList(today) }
+            item { DoneList(today, actions, ui.restoring) }
         }
     }
 }
 
 @Composable
-private fun DoneList(entries: List<DoneEntry>) {
+private fun DoneList(entries: List<DoneEntry>, actions: InboxActions, restoring: Set<String> = emptySet()) {
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100)) {
         entries.forEachIndexed { i, e ->
-            Column(Modifier.fillMaxWidth().heightIn(min = 64.dp).drawBehind { if (i > 0) drawLine(Mts.Hairline, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.Center) {
-                Text(e.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(InboxWords.clock(e.createdAt), style = HqType.BodySm, color = Mts.InkMuted)
+            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).drawBehind { if (i > 0) drawLine(Mts.Hairline, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                    Text(e.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(if (e.expired) stringResource(R.string.inbox_no_longer_waiting) + " · " + InboxWords.clock(e.createdAt) else InboxWords.clock(e.createdAt), style = HqType.BodySm, color = Mts.InkMuted)
+                }
+                if (e.expired) example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.inbox_restore), enabled = e.id !in restoring) { actions.onRestore(e) }
             }
         }
     }
 }
 
 @Composable
-private fun DoneFeed(ui: InboxUi) {
+private fun DoneFeed(ui: InboxUi, actions: InboxActions) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
         if (ui.done.isEmpty()) item { Text(stringResource(R.string.inbox_nothing_decided_yet), style = HqType.BodySm, color = Mts.InkMuted) }
         else ui.done.groupBy { InboxWords.dayLabel(it.createdAt) }.forEach { (day, entries) ->
             item(key = "d-$day") { Text(day.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)) }
-            item(key = "l-$day") { DoneList(entries) }
+            item(key = "l-$day") { DoneList(entries, actions, ui.restoring) }
         }
     }
 }
@@ -356,6 +453,8 @@ private fun UpdatesFeed(ui: InboxUi, actions: InboxActions) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun UpdateRow(card: InboxCard, actions: InboxActions) {
+    var open by androidx.compose.runtime.saveable.rememberSaveable(card.id) { androidx.compose.runtime.mutableStateOf(false) }
+    var clipped by androidx.compose.runtime.saveable.rememberSaveable(card.id) { androidx.compose.runtime.mutableStateOf(false) }
     val swipe = rememberSwipeToDismissBoxState(confirmValueChange = { (it == SwipeToDismissBoxValue.EndToStart).also { clear -> if (clear) actions.onClear(card) } })
     SwipeToDismissBox(
         swipe, enableDismissFromStartToEnd = false,
@@ -370,15 +469,19 @@ private fun UpdateRow(card: InboxCard, actions: InboxActions) {
             }
         },
     ) {
+        // One row per event: the title and one line of what happened, opened in place for the rest (a digest opens to its helpers).
+        val expandedWord = stringResource(if (open) R.string.inbox_update_expanded else R.string.inbox_update_collapsed)
+        val more = UpdateRows.expandable(card.body, clipped)
         Row(
             Modifier.fillMaxWidth().background(Mts.Surface000).drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }
+                .then(if (more) Modifier.semantics { stateDescription = expandedWord }.clickable(role = Role.Button, onClickLabel = stringResource(if (open) R.string.inbox_digest_hide else R.string.inbox_digest_show)) { open = !open } else Modifier)
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top,
         ) {
             Avatar(card.icon.vector())
             Column(Modifier.weight(1f)) {
                 Text(card.title, style = HqType.BodyBold, color = Mts.Ink)
-                if (card.body.isNotBlank()) Text(card.body, style = HqType.BodySm, color = Mts.InkMuted, maxLines = UPDATE_BODY_LINES, overflow = TextOverflow.Ellipsis)
+                if (card.body.isNotBlank()) Text(card.body, style = HqType.BodySm, color = Mts.InkMuted, maxLines = if (open) Int.MAX_VALUE else UPDATE_BODY_LINES, overflow = TextOverflow.Ellipsis, onTextLayout = { if (!open && it.hasVisualOverflow) clipped = true })
             }
             Text(InboxWords.clock(card.createdAt), style = HqType.Caption.copy(lineHeight = 20.sp), color = Mts.InkMuted)
         }

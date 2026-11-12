@@ -367,8 +367,36 @@ private fun Safety(ui: SettingsUi, actions: SettingsActions) {
             val rows = SettingsWords.safetyRows(w, ui.snap.settings, ui.safetyTab)
             Box(Modifier.padding(top = 12.dp)) { if (rows.isEmpty()) Unanswered(ui, "settings", false) else Facts(rows, actions.onPage) }
             if (ui.safetyTab == SettingsWords.SafetyTab.Safety && ui.trustedSites.isNotEmpty()) TrustedSites(ui.trustedSites, actions.onForgetSite)
+            if (ui.safetyTab == SettingsWords.SafetyTab.Helpers && rows.isNotEmpty()) HelperPolicy(SettingsWords.helperPolicy(ui.snap.settings))
         }
     }
+}
+
+/** Which helper questions reach the owner: three choices, the current one marked. Read only until the app can write HQ's settings. */
+@Composable
+private fun HelperPolicy(current: SettingsWords.HelperPolicy?) {
+    Label(stringResource(R.string.settings_helper_policy_title))
+    Text(stringResource(R.string.settings_helper_policy_intro), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 4.dp, end = 20.dp, bottom = 8.dp))
+    Group {
+        SettingsWords.HelperPolicy.entries.forEachIndexed { i, choice ->
+            if (i > 0) Divider()
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 64.dp).selectable(selected = choice == current, enabled = false, role = Role.RadioButton, onClick = {}).padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.RadioButton(
+                    selected = choice == current, onClick = null,
+                    colors = androidx.compose.material3.RadioButtonDefaults.colors(selectedColor = Mts.BrandGreen, unselectedColor = Mts.Line, disabledSelectedColor = Mts.BrandGreen, disabledUnselectedColor = Mts.Line),
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(choice.title), style = HqType.BodyBold, color = Mts.Ink)
+                    Text(stringResource(choice.about), style = HqType.BodySm, color = Mts.InkMuted)
+                }
+            }
+        }
+    }
+    if (current == null) Text(stringResource(R.string.settings_helper_policy_unknown), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
+    Text(stringResource(R.string.settings_helper_policy_note), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
 }
 
 @Composable
@@ -869,6 +897,8 @@ private const val PAUSE_NIGHT_MINUTES = 8 * 60
 
 private val SILENCE_TOPICS = listOf(
     Triple("helpers", R.string.topic_helpers, R.string.topic_helpers_about),
+    // Shown only when HQ lists this topic; an HQ that folds finishes into "helpers" has no row for it.
+    Triple("helpers_finishing", R.string.topic_helpers_finishing, R.string.topic_helpers_finishing_about),
     Triple("tasks", R.string.topic_tasks, R.string.topic_tasks_about),
     Triple("tips", R.string.topic_tips, R.string.topic_tips_about),
     Triple("upkeep", R.string.topic_upkeep, R.string.topic_upkeep_about),

@@ -180,11 +180,11 @@ private const val SWEEP_MS = 1_600
 private const val SWEEP_SHARE = 0.4f
 
 @Composable
-internal fun OutlineButton(label: String, modifier: Modifier = Modifier, enabled: Boolean = true, color: Color = Mts.Ink, onClick: () -> Unit) {
+internal fun OutlineButton(label: String, modifier: Modifier = Modifier, enabled: Boolean = true, color: Color = Mts.Ink, maxLines: Int = 1, onClick: () -> Unit) {
     Box(
         modifier.heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 24.dp),
         contentAlignment = Alignment.Center,
-    ) { Text(label, style = HqType.BodySmBold, color = color, maxLines = 1) }
+    ) { Text(label, style = HqType.BodySmBold, color = color, maxLines = maxLines) }
 }
 
 @Composable
