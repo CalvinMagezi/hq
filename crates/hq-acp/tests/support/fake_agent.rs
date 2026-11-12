@@ -134,6 +134,19 @@ fn main() {
                 mcp_seen = m["params"]["mcpServers"].to_string();
                 reply(&id, json!({"sessionId": "fake-1"}))
             }
+            Some("session/load") if m["params"]["sessionId"] != "fake-1" => {
+                fail(&id, -32602, "session not found")
+            }
+            Some("session/load") => {
+                // A real agent replays the stored conversation before it answers.
+                chunk("REPLAYED");
+                update(
+                    json!({"sessionUpdate": "tool_call", "toolCallId": "old", "kind": "edit",
+                    "title": "Old edit", "locations": [{"path": "/old/file"}]}),
+                );
+                mcp_seen = m["params"]["mcpServers"].to_string();
+                reply(&id, json!({}))
+            }
             Some("session/prompt") => prompt_turn(&scenario, &mcp_seen, &id, &mut lines),
             _ => {}
         }

@@ -228,6 +228,26 @@ impl Connection {
         Ok(id.to_owned())
     }
 
+    /// Opens a stored session again. The agent replays its history before it answers; that replay
+    /// is ignored, so only new work shows in the transcript and the edited files.
+    pub fn load_session(
+        &mut self,
+        session_id: &str,
+        cwd: &str,
+        mcp_servers: Value,
+        timeout: Duration,
+    ) -> Result<(), ClientError> {
+        let params = json!({"sessionId": session_id, "cwd": cwd, "mcpServers": mcp_servers});
+        self.tracker.set_replaying(true);
+        let loaded = self.call("session/load", params, timeout);
+        self.tracker.set_replaying(false);
+        loaded?;
+        self.session_id = Some(session_id.to_owned());
+        self.tracker.set_cwd(cwd);
+        self.tracker.record_restored(session_id);
+        Ok(())
+    }
+
     /// Sends a prompt and returns at once; follow the turn with `pump` and the tracker.
     pub fn prompt(&mut self, text: &str) -> Result<u64, ClientError> {
         let session = self.session_id.clone().ok_or(ClientError::NoSession)?;

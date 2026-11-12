@@ -48,7 +48,6 @@ trimmed) replayed through the tracker, including cancel and a provider error.
 1. `hq doctor` runs `initialize` for each ACP agent.
 2. HQ MCP injection through `mcpServers`, and edited files into task activity.
 3. Move the lanes over one at a time, keeping the pty path as the fallback.
-4. Bring ACP agents back after a host restart with the protocol's session resume.
 
 ## Host pane kind (second slice)
 
@@ -111,3 +110,13 @@ HTTP server named `agent-hq` with an `Authorization: Bearer` header, only when t
 is limited in size and never printed (`McpEndpoint` redacts it in debug output). Hermes and agy do not
 advertise HTTP MCP, so they get none until that changes. Cost to watch: Copilot already reported a
 large static context with its own tools, so turn this on per lane, not by default.
+
+## Coming back after a restart (sixth slice)
+
+An ACP agent is written to `session.json` with its server command, its sandbox, the names of the
+variables it started with (never their values) and the session id. After a restart `restore` starts the
+command again and sends `session/load`; an agent started with variables waits for them like a terminal
+agent does. The agent replays its stored conversation while loading; the tracker ignores that replay, so
+old edits are not reported as new work, and the transcript starts with `restored session <id>`. An agent
+that cannot load sessions, or no longer has the session, fails the restore with its own message. HQ's MCP
+token is not stored, so a restored agent gets none until it is started again.

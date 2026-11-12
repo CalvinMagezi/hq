@@ -41,6 +41,10 @@ pub struct PaneRecord {
     /// Seconds of idleness after which the host stops the agent.
     #[serde(default)]
     pub idle_ttl_secs: Option<u64>,
+    /// Set for an agent driven over ACP: `resume_argv` is then its server command and this is the
+    /// session the protocol loads again.
+    #[serde(default)]
+    pub acp_session: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -147,6 +151,7 @@ mod tests {
             scrollback_rows: 1000,
             sandbox: None,
             idle_ttl_secs: None,
+            acp_session: None,
         }
     }
 
