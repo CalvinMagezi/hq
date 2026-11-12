@@ -372,6 +372,7 @@ fn open_questions_and_blockers_appear_only_when_someone_recorded_them() {
                     summary: "half way".into(),
                     next_step: "finish the import".into(),
                     open_questions: "Which tax year?".into(),
+                    suggested_skills: vec![],
                     files: vec![],
                 },
             )

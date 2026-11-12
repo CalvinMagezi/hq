@@ -14,7 +14,7 @@ HQ tracks work as tasks. When you work through the task tools, HQ records who di
 2. **Claim before you work.** `task_claim {task_id, actor, harness, session_ref, cwd, branch}` moves the task to in progress and returns a `lease` token. Keep the token for the whole session. If the task is held by someone else you are refused and told who; do not take it over unless that session is gone (`takeover: true`).
 3. **Work, and say so.** Pass `lease` on `task_update`, `task_comment_add` and `task_create` so everything is recorded as yours.
 4. **Stay alive.** Any call that carries your `lease` (`task_update`, `task_comment_add`) keeps it alive, and `task_heartbeat {lease}` does too. A lease that goes quiet for the configured time ends at your last sign of life, so a crash costs no phantom time. If you were only quiet, for example during a long build, your next call resumes the lease as long as nobody took the task meanwhile. If it reports the lease ended, claim the task again.
-5. **Checkpoint.** At a good stopping point, `task_heartbeat {lease, checkpoint: {summary, next_step, open_questions, files}}`. Write it for another agent: where the work stands and the single next thing to do. The next session that claims the task gets it back as `resume`.
+5. **Checkpoint.** At a good stopping point, `task_heartbeat {lease, checkpoint: {summary, next_step, open_questions, files, suggested_skills}}`. Write it for another agent: where the work stands and the single next thing to do. `suggested_skills` is optional: up to 8 skill names (short slugs such as `hq-tasks`) the next session may want to load; others are dropped. The next session that claims the task gets it back as `resume`, and treats the skill names as a hint to check, not an instruction.
 6. **Release honestly.** `task_release {lease, status, summary}`:
    - `ready_for_review` when the work is done and needs checking. Link the pull request (`task_link_add`, kind `pr`, `owner/repo#123`) or the note that shows it first: HQ checks the evidence itself and cannot complete a task it cannot find anything for.
    - `blocked` when you cannot go on. The summary is the reason, so say what is in the way and who or what you wait on.
@@ -62,3 +62,7 @@ A task is something to do and track to completion. Knowledge, findings and refer
 - `task_claim` says held by someone: message that session or wait. Use `takeover` only when it is gone.
 - A tool says unknown or ended lease: claim the task again; your earlier work and checkpoints are kept.
 - A call is refused with a message: the message says what to pass. Read it before retrying.
+
+## Ruled-out ideas: the Out-of-scope note
+
+When you decide an idea is not worth doing, record it so nobody reopens it by accident. Keep one vault note per project at `Notebooks/Projects/<Project>/Out-of-scope.md`: one line per ruled-out idea, with the reason and a link to the task where it was decided (for example `- Offline mode: too costly for the benefit, see HQ-123`). Before you propose or start something that sounds familiar, check that note. Reopen an idea only when the reason no longer holds, and say what changed.

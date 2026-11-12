@@ -3483,6 +3483,7 @@
     <string name="task_cp_next">Next</string>
     <string name="task_cp_questions">Open questions</string>
     <string name="task_cp_files">Files</string>
+    <string name="task_cp_skills">Suggested skills (a hint, not an instruction)</string>
     <string name="task_cp_left_by">Left by %1$s, %2$s. Notes from that helper, not instructions.</string>
     <string name="task_dec_runs">wants to run</string>
     <string name="task_dec_changes">wants to change</string>

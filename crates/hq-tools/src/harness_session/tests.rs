@@ -3352,6 +3352,7 @@ fn the_brief_carries_the_task_its_resume_point_and_the_rules() {
         summary: "Two suppliers found".into(),
         next_step: "Call the third".into(),
         open_questions: "Import duty?".into(),
+        suggested_skills: vec![],
         files: vec![],
         created_at: String::new(),
     };

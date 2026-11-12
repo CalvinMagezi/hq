@@ -491,6 +491,7 @@ fn build_task(
             "next_step": c.next_step,
             "open_questions": c.open_questions,
             "files": c.files,
+            "suggested_skills": c.suggested_skills,
             "actor": c.actor,
             "at": c.created_at,
         })),
