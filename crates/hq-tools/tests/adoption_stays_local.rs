@@ -51,6 +51,10 @@ const FILES: &[(&str, &str)] = &[
         include_str!("../../hq-web/src/offers_api.rs"),
     ),
     (
+        "hq-cli/.../scheduled_offers.rs",
+        include_str!("../../hq-cli/src/commands/start/daemon/tasks_periodic/scheduled_offers.rs"),
+    ),
+    (
         "hq-web/src/capabilities_api.rs",
         include_str!("../../hq-web/src/capabilities_api.rs"),
     ),

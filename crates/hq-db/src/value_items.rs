@@ -52,33 +52,36 @@ fn row_to_item(r: &Row) -> rusqlite::Result<ValueItem> {
 
 /// Raw insert. Prefer `emit` which applies dedup.
 pub fn insert(db: &Database, item: &ValueItem) -> Result<()> {
-    db.with_conn(|c| {
-        c.execute(
-            "INSERT INTO value_items (id, source_task, kind, title, body, artifact_path, score, \
-             dedup_key, state, created_at, routed_at, delivered_at, engaged_at, expires_at, engagement, link, owner_only) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
-            params![
-                item.id,
-                item.source_task,
-                item.kind.as_str(),
-                item.title,
-                item.body,
-                item.artifact_path,
-                item.score,
-                item.dedup_key,
-                item.state.as_str(),
-                ts(&item.created_at),
-                opt_ts(&item.routed_at),
-                opt_ts(&item.delivered_at),
-                opt_ts(&item.engaged_at),
-                opt_ts(&item.expires_at),
-                item.engagement,
-                item.link,
-                item.owner_only,
-            ],
-        )?;
-        Ok(())
-    })
+    db.with_conn(|c| insert_on(c, item))
+}
+
+/// [`insert`] on a connection the caller holds, so it can share a transaction.
+pub fn insert_on(c: &rusqlite::Connection, item: &ValueItem) -> Result<()> {
+    c.execute(
+        "INSERT INTO value_items (id, source_task, kind, title, body, artifact_path, score, \
+         dedup_key, state, created_at, routed_at, delivered_at, engaged_at, expires_at, engagement, link, owner_only) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+        params![
+            item.id,
+            item.source_task,
+            item.kind.as_str(),
+            item.title,
+            item.body,
+            item.artifact_path,
+            item.score,
+            item.dedup_key,
+            item.state.as_str(),
+            ts(&item.created_at),
+            opt_ts(&item.routed_at),
+            opt_ts(&item.delivered_at),
+            opt_ts(&item.engaged_at),
+            opt_ts(&item.expires_at),
+            item.engagement,
+            item.link,
+            item.owner_only,
+        ],
+    )?;
+    Ok(())
 }
 
 /// Return an active (pending/routed/delivered) item sharing (kind, dedup_key), if any.

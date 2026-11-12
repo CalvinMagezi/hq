@@ -232,10 +232,7 @@ mod tests {
         let (says, after) = r.first_value.clone().unwrap();
         assert!(says.starts_with("Keep a thought"));
         assert_eq!(after, 180);
-        assert_eq!(
-            r.used_this_week,
-            vec!["Find something you wrote down earlier"]
-        );
+        assert_eq!(r.used_this_week, vec!["Find something you wrote earlier"]);
         assert_eq!(r.used_last_week, 1);
         assert_eq!(r.first_month_distinct, 2);
         assert!(r.first_month_over);

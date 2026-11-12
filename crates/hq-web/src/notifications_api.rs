@@ -243,8 +243,14 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
         .filter(|_| source_task == crate::device_auth::DEVICE_SIGN_IN_SOURCE)
         .and_then(|k| k.strip_prefix(crate::device_auth::SIGN_IN_ITEM_PREFIX))
         .map(|device_id| serde_json::json!({ "device_id": device_id }));
+    // A Later offer's item can bring the offer back; no other update has an `open` action.
+    let later_offer = source_task == hq_core::types::SCHEDULED_OFFER_SOURCE
+        && dedup_key
+            .as_deref()
+            .is_some_and(|k| k.starts_with(hq_db::offers::LATER_ITEM_PREFIX));
     let actions: &[&str] = match (state == NotificationState::Pending, needs_answer) {
         (false, _) => &[],
+        (true, false) if later_offer => &["open", "dismiss"],
         (true, true) if notice => &["dismiss"],
         (true, true) => &["approve", "reject"],
         (true, false) => &["dismiss", "acknowledge"],
@@ -252,10 +258,13 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
     let topic = hq_db::inbox_prefs::Topic::of_source(&source_task).as_str();
     let source_for_group = source_task.clone();
     let owner_only = row.get::<_, i64>(22)? != 0;
-    let extra = BTreeMap::from([
+    let mut extra = BTreeMap::from([
         ("source_task".to_string(), source_task),
         ("val_kind".to_string(), kind_str),
     ]);
+    if later_offer {
+        extra.insert("open_label".to_string(), LATER_OPEN_LABEL.to_string());
+    }
     let dialog = dialog_from_row(row, &id)?;
     // A question from an agent is answered through its dialog, never by approving the notice.
     let awaits_dialog = dialog
@@ -400,6 +409,10 @@ fn restorable_expired_count(db: &hq_db::Database) -> Result<usize, anyhow::Error
 }
 
 const ALLOW_SITE_ACTION: &str = "approve_site";
+/// The action on a Later offer's inbox item that brings the offer back to its chat.
+const OPEN_ACTION: &str = "open";
+/// What the apps write on that action's button.
+const LATER_OPEN_LABEL: &str = "Bring it back";
 const ENGAGEMENT_APPROVED: &str = "approved";
 
 /// What the owner's answer to a fetch request means for its site. When the site is now allowed
@@ -467,7 +480,7 @@ fn note_first_task_answer(
 /// Maps a client action to the value item's engagement.
 pub(crate) fn action_outcome(action: &str) -> Option<&'static str> {
     match action {
-        "approve" | "engage" | ALLOW_SITE_ACTION => Some("approved"),
+        "approve" | "engage" | OPEN_ACTION | ALLOW_SITE_ACTION => Some("approved"),
         "dismiss" | "reject" => Some("dismissed"),
         _ => None,
     }
@@ -609,6 +622,15 @@ pub(crate) async fn notification_action_handler(
     if let Err(e) = refuse_unanswered_dialog(&state.db, val_id, &body.action) {
         return e.into_response();
     }
+    // `open` is only for the item of a Later offer: on anything else it would be an approval.
+    if body.action == OPEN_ACTION
+        && !state
+            .db
+            .with_conn(|c| hq_db::offers::is_later_item(c, val_id))
+            .unwrap_or(false)
+    {
+        return ApiError::bad_request("open is only for an offer you set aside").into_response();
+    }
     use hq_db::value_items::Answered;
     let answer = record_action(&state.db, val_id, engagement);
     // A repeat of an answer already given must not count as another approval.
@@ -631,6 +653,13 @@ pub(crate) async fn notification_action_handler(
         }
         if let Err(e) = note_first_task_answer(&state.db, val_id, engagement) {
             warn!(id = %id, error = %e, "recording the first coding task's yes failed");
+        }
+    }
+    if first_answer && body.action == OPEN_ACTION {
+        // Bring the offer back now; the daemon pass would find nothing left to do.
+        let now = chrono::Utc::now().timestamp();
+        if let Err(e) = state.db.with_conn(|c| hq_db::offers::deliver_later(c, now)) {
+            warn!(id = %id, error = %e, "bringing a Later offer back failed; the daemon will retry");
         }
     }
     info!(id = %id, action = %body.action, new_state = engagement, "notification action executed");

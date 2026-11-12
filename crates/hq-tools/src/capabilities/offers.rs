@@ -540,6 +540,38 @@ pub(super) fn line_for(says: &str) -> String {
     format!("I can also {lowered}.")
 }
 
+/// Offers allowed in one hour, across every type.
+pub const MAX_OFFERS_PER_HOUR: usize = 2;
+const HOUR_SECS: i64 = 3600;
+/// A client id with this prefix marks a message sent from a voice turn.
+pub const VOICE_CLIENT_PREFIX: &str = "voice-";
+
+/// Whether a message was sent from a voice turn: its client id starts with [`VOICE_CLIENT_PREFIX`].
+pub fn is_voice_client_id(client_id: Option<&str>) -> bool {
+    client_id.is_some_and(|id| id.starts_with(VOICE_CLIENT_PREFIX))
+}
+
+/// What is going on around a reply that decides whether it may carry an offer at all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TurnState {
+    /// The turn is part of a voice conversation.
+    pub voice: bool,
+    /// An owner approval is waiting in this chat.
+    pub approval_pending: bool,
+    /// The turn failed or the chat shows an error.
+    pub errored: bool,
+}
+
+/// The cooldowns that come before any choosing: none in a voice turn, none while an approval is
+/// pending or an error shows, and at most [`MAX_OFFERS_PER_HOUR`] an hour. (One offer per reply
+/// is the shape of the chooser: it returns at most one.)
+pub fn may_offer(conn: &Connection, state: TurnState, now: i64) -> Result<bool> {
+    if state.voice || state.approval_pending || state.errored {
+        return Ok(false);
+    }
+    Ok(hq_db::offers::shown_since(conn, now - HOUR_SECS)? < MAX_OFFERS_PER_HOUR)
+}
+
 /// Chooses the offer for a reply, deterministically: the detectors on the person's message and
 /// their two weeks of questions, less what is muted, not ready, too soon or already done this
 /// turn. The model takes no part, and no part of this reaches it.
@@ -561,7 +593,7 @@ pub fn for_turn(conn: &Connection, input: &TurnInput) -> Result<Option<TurnOffer
         .ready
         .iter()
         .copied()
-        .filter(|d| !muted.contains(d.as_str()))
+        .filter(|d| !muted.contains(d.as_str()) && !muted.contains(d.capability()))
         .collect();
     let pacing = Pacing::from_last_shown(&hq_db::offers::last_shown(conn)?);
     let done = |d: Detector| d.done_by().iter().any(|t| input.turn_tools.contains(t));
@@ -586,8 +618,9 @@ pub fn for_turn(conn: &Connection, input: &TurnInput) -> Result<Option<TurnOffer
 
 /// How a report names a kind of offer: its capability in the catalog's words.
 pub fn offer_says(kind: &str) -> String {
-    Detector::parse(kind)
-        .map(Detector::capability)
+    Some(kind)
+        .filter(|k| super::catalog().iter().any(|c| c.id == *k))
+        .or_else(|| Detector::parse(kind).map(Detector::capability))
         .or_else(|| super::next_step::capability_of(kind))
         .and_then(|id| super::catalog().iter().find(|c| c.id == id))
         .map(|c| c.says.clone())
@@ -1078,10 +1111,7 @@ mod tests {
             let text = "Remind me to pay rent on Friday";
             let o = for_turn(c, &input(text, &[]))?.expect("an offer");
             assert_eq!(o.kind, "dated_todo");
-            assert_eq!(
-                o.line,
-                "I can also keep a list of things to do, with the day each one is due."
-            );
+            assert_eq!(o.line, "I can also keep a to-do list with due days.");
             assert_eq!(o.reply, "Make that a task due on Friday 6 November 2026.");
             assert!(o.send);
             let made = ["task_create".to_string()];
@@ -1107,16 +1137,109 @@ mod tests {
             assert!(!print.send, "which note to export is the person's to say");
             hq_db::offers::record_shown(c, "m2", "send_or_print", NOW - 10 * DAY_SECS)?;
             hq_db::offers::record_shown(c, "m3", "send_or_print", NOW - 9 * DAY_SECS)?;
-            hq_db::offers::answer(c, "m2", hq_db::offers::Answer::NotNow, NOW - 10 * DAY_SECS)?;
-            hq_db::offers::answer(c, "m3", hq_db::offers::Answer::NotNow, NOW - 9 * DAY_SECS)?;
+            hq_db::offers::answer(c, "m2", hq_db::offers::Answer::NotNow, NOW - 2 * DAY_SECS)?;
+            hq_db::offers::answer(c, "m3", hq_db::offers::Answer::NotNow, NOW - DAY_SECS)?;
             assert_eq!(
                 for_turn(c, &input("Can you make it a PDF to print?", &[]))?,
                 None,
-                "Not now twice mutes it"
+                "Not now hides it for a week"
             );
             Ok(())
         })
         .unwrap();
+    }
+
+    #[test]
+    fn a_never_or_hidden_capability_id_keeps_its_offer_out_and_a_reply_gets_one_offer() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            let both = "Remind me to pay rent on Friday.\nThings for Saturday:\n- buy cement\n- pay the fundi\n- call the landlord";
+            assert!(for_turn(c, &input(both, &[]))?.is_some());
+            hq_db::offers::set_never(c, "track-todo", NOW)?;
+            let o = for_turn(c, &input("Remind me to pay rent on Friday", &[]))?;
+            assert_eq!(o, None, "a pill's capability id also keeps its offer out");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn the_kind_capability_table_agrees_with_the_detectors_and_next_steps() {
+        for (kind, capability) in hq_db::offers::KIND_CAPABILITY {
+            let own = Detector::parse(kind)
+                .map(Detector::capability)
+                .or_else(|| crate::capabilities::next_step::capability_of(kind));
+            assert_eq!(own, Some(*capability), "{kind}");
+            assert!(
+                crate::capabilities::catalog()
+                    .iter()
+                    .any(|c| c.id == *capability),
+                "{capability}"
+            );
+        }
+        for d in Detector::ALL {
+            assert!(
+                hq_db::offers::KIND_CAPABILITY
+                    .iter()
+                    .any(|(k, c)| *k == d.as_str() && *c == d.capability()),
+                "{} is missing from the table",
+                d.as_str()
+            );
+        }
+        assert_eq!(offer_says("track-todo"), offer_says("dated_todo"));
+    }
+
+    fn shown(c: &Connection, id: &str, at: i64) {
+        hq_db::offers::record_shown(c, id, "dated_todo", at).unwrap();
+    }
+
+    #[test]
+    fn at_most_two_offers_an_hour() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            let calm = TurnState::default();
+            assert!(may_offer(c, calm, NOW)?);
+            shown(c, "a", NOW - 3000);
+            assert!(may_offer(c, calm, NOW)?, "one this hour");
+            shown(c, "b", NOW - 100);
+            assert!(!may_offer(c, calm, NOW)?, "two this hour");
+            assert!(
+                !may_offer(c, calm, NOW + 500)?,
+                "the first is still inside the hour"
+            );
+            assert!(may_offer(c, calm, NOW + 601)?, "the first is past an hour");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn no_offer_in_a_voice_turn_while_an_approval_waits_or_after_an_error() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            for state in [
+                TurnState {
+                    voice: true,
+                    ..Default::default()
+                },
+                TurnState {
+                    approval_pending: true,
+                    ..Default::default()
+                },
+                TurnState {
+                    errored: true,
+                    ..Default::default()
+                },
+            ] {
+                assert!(!may_offer(c, state, NOW)?, "{state:?}");
+            }
+            assert!(may_offer(c, TurnState::default(), NOW)?);
+            Ok(())
+        })
+        .unwrap();
+        assert!(is_voice_client_id(Some("voice-1a2b")));
+        assert!(!is_voice_client_id(Some("c-voice-1")));
+        assert!(!is_voice_client_id(None));
     }
 
     #[test]
