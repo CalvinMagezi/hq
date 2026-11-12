@@ -36,9 +36,18 @@ fn next_line(lines: &mut impl Iterator<Item = String>) -> Option<Value> {
     lines.next().and_then(|l| serde_json::from_str(&l).ok())
 }
 
-fn prompt_turn(scenario: &str, id: &Value, lines: &mut impl Iterator<Item = String>) {
+fn prompt_turn(
+    scenario: &str,
+    mcp_seen: &str,
+    id: &Value,
+    lines: &mut impl Iterator<Item = String>,
+) {
     let end_turn = json!({"stopReason": "end_turn", "usage": {"inputTokens": 5, "outputTokens": 2, "totalTokens": 7}});
     match scenario {
+        "mcp" | "mcp-no-http" => {
+            chunk(&format!("MCP:{mcp_seen}"));
+            reply(id, end_turn);
+        }
         "error" => fail(
             id,
             -32603,
@@ -104,13 +113,15 @@ fn main() {
         println!("welcome to a chatty agent");
     }
     let mut lines = stdin().lock().lines().map_while(Result::ok);
+    let mut mcp_seen = String::new();
     while let Some(m) = next_line(&mut lines) {
         let id = m.get("id").cloned().unwrap_or(Value::Null);
         match m["method"].as_str() {
             Some("initialize") => reply(
                 &id,
                 json!({"protocolVersion": 1,
-                "agentCapabilities": {"loadSession": true, "sessionCapabilities": {"resume": {}}},
+                "agentCapabilities": {"loadSession": true, "sessionCapabilities": {"resume": {}},
+                    "mcpCapabilities": {"http": scenario == "mcp"}},
                 "agentInfo": {"name": "fake", "version": "0"}}),
             ),
             Some("session/new") if scenario == "auth" => {
@@ -120,9 +131,10 @@ fn main() {
                 if scenario == "fork" {
                     leave_a_child_behind();
                 }
+                mcp_seen = m["params"]["mcpServers"].to_string();
                 reply(&id, json!({"sessionId": "fake-1"}))
             }
-            Some("session/prompt") => prompt_turn(&scenario, &id, &mut lines),
+            Some("session/prompt") => prompt_turn(&scenario, &mcp_seen, &id, &mut lines),
             _ => {}
         }
     }

@@ -29,6 +29,7 @@ const STOP_GRACE: Duration = Duration::from_secs(2);
 const MAX_QUEUED_PROMPTS: usize = 16;
 const RULE: &str = "acp";
 const CLIENT_NAME: &str = "agent-hq-host";
+const MCP_SERVER_NAME: &str = "agent-hq";
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -45,6 +46,7 @@ pub(crate) struct AcpLaunch {
     pub cwd: PathBuf,
     pub sandbox: Option<SandboxSpec>,
     pub idle_ttl: Option<Duration>,
+    pub mcp: Option<crate::host::McpEndpoint>,
     pub events: Arc<EventLog>,
     pub on_exit: ExitHook,
 }
@@ -110,7 +112,10 @@ impl AcpPane {
         let mut conn = Connection::spawn(cmd).map_err(|e| spawn_error(e.to_string()))?;
         let started = conn
             .initialize(CLIENT_NAME, HANDSHAKE_TIMEOUT)
-            .and_then(|_| conn.new_session(&l.cwd.to_string_lossy(), json!([]), HANDSHAKE_TIMEOUT));
+            .and_then(|caps| {
+                let servers = mcp_servers(l.mcp.as_ref(), &caps);
+                conn.new_session(&l.cwd.to_string_lossy(), servers, HANDSHAKE_TIMEOUT)
+            });
         let session_id = started.map_err(|e| spawn_error(with_stderr(&e.to_string(), &conn)))?;
         let pid = conn.pid();
         let now = Instant::now();
@@ -452,6 +457,23 @@ impl Driver {
             v.pending = None;
         }
         (self.on_exit)();
+    }
+}
+
+/// The MCP servers to hand the agent in its session: HQ's, when it was asked for and the agent
+/// says it can reach an HTTP server. Otherwise none, rather than a server it would ignore.
+fn mcp_servers(
+    mcp: Option<&crate::host::McpEndpoint>,
+    caps: &hq_acp::Capabilities,
+) -> serde_json::Value {
+    match mcp {
+        Some(m) if caps.mcp_http => json!([{
+            "type": "http",
+            "name": MCP_SERVER_NAME,
+            "url": m.url,
+            "headers": [{ "name": "Authorization", "value": format!("Bearer {}", m.token) }],
+        }]),
+        _ => json!([]),
     }
 }
 

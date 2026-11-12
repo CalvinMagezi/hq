@@ -101,3 +101,13 @@ presses Enter a second time: the prompt is delivered, not typed.
 When the session supervisor sees a turn finish it adds a note to the comment the task already gets:
 the files (at most twelve, one line each, shortened) and the tokens, worded as the agent's own account
 to check against `git diff`. A terminal agent has no such report and is unchanged.
+
+## HQ's MCP in the session (fifth slice)
+
+A profile with `hq_mcp: true` (ACP only) gets a session token the way a Claude Code session does, and
+`agent.spawn` carries `mcp: {url, token}`. The host hands the agent `mcpServers` in `session/new`: one
+HTTP server named `agent-hq` with an `Authorization: Bearer` header, only when the agent said at
+`initialize` that it supports HTTP MCP servers (otherwise none, and no token reaches it). The token
+is limited in size and never printed (`McpEndpoint` redacts it in debug output). Hermes and agy do not
+advertise HTTP MCP, so they get none until that changes. Cost to watch: Copilot already reported a
+large static context with its own tools, so turn this on per lane, not by default.

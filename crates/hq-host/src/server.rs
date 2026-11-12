@@ -4,7 +4,7 @@
 
 use crate::detect::{AgentState, Dialog};
 use crate::error::HostError;
-use crate::host::{Host, PaneInfo, PaneStatus, ReadSource, SpawnSpec, Transport};
+use crate::host::{Host, McpEndpoint, PaneInfo, PaneStatus, ReadSource, SpawnSpec, Transport};
 use crate::proto::{ErrorBody, MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};
 use crate::token;
 use serde::Deserialize;
@@ -630,6 +630,10 @@ impl Conn {
                 spec.sandbox = p.sandbox;
                 spec.idle_ttl = p.idle_ttl_secs.map(Duration::from_secs);
                 spec.transport = Transport::parse(p.transport.as_deref()).map_err(host_err)?;
+                spec.mcp = p.mcp.map(|m| McpEndpoint {
+                    url: m.url,
+                    token: m.token,
+                });
                 Ok(info_json(&host.spawn(spec).map_err(host_err)?))
             }
             "agent.egress" => {
@@ -910,6 +914,15 @@ struct SpawnParams {
     idle_ttl_secs: Option<u64>,
     /// `pty` (the default) or `acp`.
     transport: Option<String>,
+    /// HQ's MCP address and the session's token, for an ACP agent.
+    mcp: Option<McpParams>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct McpParams {
+    url: String,
+    token: String,
 }
 
 #[derive(Deserialize)]
