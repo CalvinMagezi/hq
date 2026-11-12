@@ -5,6 +5,7 @@ const NAME: &str = "edge-coding-worker";
 const ACTIVE_NOW: &[&str] = &[NAME];
 const BRIEF: &str = "hq-task-brief";
 const WAYFINDER: &str = "hq-wayfinder";
+const DIAGNOSE: &str = "hq-diagnose";
 const ENGINEERING: &str = "hq-engineering-core";
 const EDGE_ENGINEERING: &str = "hq-engineering-edge";
 const CALENDAR: &str = CALENDAR_CREATION_SKILL;
@@ -99,6 +100,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             ENGINEERING,
             EDGE_ENGINEERING,
             WAYFINDER,
+            DIAGNOSE,
             CALENDAR,
             READING,
             EDITING
@@ -113,6 +115,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             ENGINEERING,
             EDGE_ENGINEERING,
             WAYFINDER,
+            DIAGNOSE,
             CALENDAR,
             READING,
             EDITING
@@ -125,6 +128,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             ENGINEERING,
             EDGE_ENGINEERING,
             WAYFINDER,
+            DIAGNOSE,
             CALENDAR,
             READING,
             EDITING
@@ -599,4 +603,9 @@ fn the_plugin_copy_of_the_wayfinder_skill_has_the_same_body() {
 #[test]
 fn the_plugin_copy_of_the_engineering_core_skill_has_the_same_body() {
     assert_plugin_mirror(ENGINEERING);
+}
+
+#[test]
+fn the_plugin_copy_of_the_diagnose_skill_has_the_same_body() {
+    assert_plugin_mirror(DIAGNOSE);
 }

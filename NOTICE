@@ -38,3 +38,9 @@ https://github.com/mattpocock/skills, MIT License, Copyright (c) Matt Pocock:
 
   crates/hq-tools/assets/skills/hq-engineering-core/SKILL.md
   packages/claude-plugin/skills/hq-engineering-core/SKILL.md
+
+The hq-diagnose skill is adapted from the diagnosing-bugs skill in
+https://github.com/mattpocock/skills, MIT License, Copyright (c) Matt Pocock:
+
+  crates/hq-tools/assets/skills/hq-diagnose/SKILL.md
+  packages/claude-plugin/skills/hq-diagnose/SKILL.md
