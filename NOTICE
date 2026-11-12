@@ -20,3 +20,9 @@ licensed under the Apache License, Version 2.0:
   apps/site/public/fonts/ClearSans-Regular.woff2
   apps/site/public/fonts/ClearSans-Bold.woff2
   apps/site/public/fonts/ClearSans-Italic.woff2
+
+The hq-task-brief skill is adapted from the to-tickets and triage/AGENT-BRIEF skills in
+https://github.com/mattpocock/skills, MIT License, Copyright (c) Matt Pocock:
+
+  crates/hq-tools/assets/skills/hq-task-brief/SKILL.md
+  packages/claude-plugin/skills/hq-task-brief/SKILL.md

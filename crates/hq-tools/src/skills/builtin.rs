@@ -58,6 +58,14 @@ pub const BUILTIN_SKILLS: &[Shipped] = &[
         applies: every_install,
     },
     Shipped {
+        name: "hq-task-brief",
+        files: &[(
+            SKILL_FILE,
+            include_str!("../../assets/skills/hq-task-brief/SKILL.md"),
+        )],
+        applies: every_install,
+    },
+    Shipped {
         name: CALENDAR_CREATION_SKILL,
         files: &[(
             SKILL_FILE,
