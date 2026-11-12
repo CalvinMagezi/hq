@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 
 const PROTOCOL_VERSION: u32 = 1;
 const STDERR_TAIL_LINES: usize = 50;
+const STOP_POLL: Duration = Duration::from_millis(25);
+const SIGNAL_EXIT_BASE: i32 = 128;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -92,6 +94,9 @@ impl Connection {
     /// Starts `cmd` with piped stdio. The caller sets program, arguments, working folder and the
     /// environment, which is also where a process sandbox wraps it.
     pub fn spawn(mut cmd: Command) -> Result<Self, ClientError> {
+        // The agent leads a process group of its own, so everything it starts can be stopped with it.
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
         let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -142,6 +147,45 @@ impl Connection {
         })
     }
 
+    /// The process id, which the host uses to stop the agent's whole process group.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// The exit code once the process has ended (128 plus the signal after a signal), `None`
+    /// while it runs.
+    pub fn exit_code(&mut self) -> Option<i32> {
+        let status = self.child.try_wait().ok().flatten()?;
+        Some(exit_code_of(status))
+    }
+
+    /// Stops the agent and everything it started: the group is asked to end, given `grace` for the
+    /// agent itself to do so, then killed. Returns the exit code.
+    #[cfg(unix)]
+    pub fn stop_group(&mut self, grace: Duration) -> i32 {
+        self.signal_group(nix::sys::signal::Signal::SIGTERM);
+        let deadline = Instant::now() + grace;
+        while Instant::now() < deadline && self.exit_code().is_none() {
+            thread::sleep(STOP_POLL);
+        }
+        self.kill_group()
+    }
+
+    /// Kills whatever is left of the agent's process group and reaps the agent.
+    #[cfg(unix)]
+    pub fn kill_group(&mut self) -> i32 {
+        self.signal_group(nix::sys::signal::Signal::SIGKILL);
+        let _ = self.child.kill();
+        self.child.wait().map_or(1, exit_code_of)
+    }
+
+    #[cfg(unix)]
+    fn signal_group(&self, signal: nix::sys::signal::Signal) {
+        // The group id is the agent's pid because `spawn` made it the leader.
+        let group = nix::unistd::Pid::from_raw(self.child.id() as i32);
+        let _ = nix::sys::signal::killpg(group, signal);
+    }
+
     pub fn session_id(&self) -> Option<&str> {
         self.session_id.as_deref()
     }
@@ -189,6 +233,7 @@ impl Connection {
         let session = self.session_id.clone().ok_or(ClientError::NoSession)?;
         let params = json!({"sessionId": session, "prompt": [{"type": "text", "text": text}]});
         let id = self.take_id();
+        self.tracker.record_prompt(text);
         self.tracker.start_prompt(id);
         self.write(&request(id, "session/prompt", params))?;
         Ok(id)
@@ -271,12 +316,23 @@ fn answer_error(e: AnswerError) -> ClientError {
     }
 }
 
+fn exit_code_of(status: std::process::ExitStatus) -> i32 {
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
+        return SIGNAL_EXIT_BASE + signal;
+    }
+    status.code().unwrap_or(1)
+}
+
 impl Drop for Connection {
     fn drop(&mut self) {
-        // The agent may run children of its own; ending the process is the host's job to widen
-        // to a group once a connection lives inside a pane.
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        #[cfg(unix)]
+        self.kill_group();
+        #[cfg(not(unix))]
+        {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
     }
 }
 

@@ -89,6 +89,15 @@ fn prompt_turn(scenario: &str, id: &Value, lines: &mut impl Iterator<Item = Stri
     }
 }
 
+/// Starts a long sleep that ignores nothing but outlives the agent unless the whole process group
+/// is stopped, and writes its pid to the file named by FAKE_CHILD_PID_FILE.
+fn leave_a_child_behind() {
+    let child = std::process::Command::new("sleep").arg("300").spawn();
+    if let (Ok(child), Ok(path)) = (child, std::env::var("FAKE_CHILD_PID_FILE")) {
+        let _ = std::fs::write(path, child.id().to_string());
+    }
+}
+
 fn main() {
     let scenario = std::env::args().nth(1).unwrap_or_else(|| "turn".into());
     if scenario == "noise" {
@@ -107,7 +116,12 @@ fn main() {
             Some("session/new") if scenario == "auth" => {
                 fail(&id, -32000, "Authentication required")
             }
-            Some("session/new") => reply(&id, json!({"sessionId": "fake-1"})),
+            Some("session/new") => {
+                if scenario == "fork" {
+                    leave_a_child_behind();
+                }
+                reply(&id, json!({"sessionId": "fake-1"}))
+            }
             Some("session/prompt") => prompt_turn(&scenario, &id, &mut lines),
             _ => {}
         }

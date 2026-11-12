@@ -4,7 +4,7 @@
 
 use crate::detect::{AgentState, Dialog};
 use crate::error::HostError;
-use crate::host::{Host, PaneInfo, PaneStatus, ReadSource, SpawnSpec};
+use crate::host::{Host, PaneInfo, PaneStatus, ReadSource, SpawnSpec, Transport};
 use crate::proto::{ErrorBody, MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};
 use crate::token;
 use serde::Deserialize;
@@ -629,6 +629,7 @@ impl Conn {
                 spec.scrollback_rows = p.scrollback_rows.unwrap_or(spec.scrollback_rows);
                 spec.sandbox = p.sandbox;
                 spec.idle_ttl = p.idle_ttl_secs.map(Duration::from_secs);
+                spec.transport = Transport::parse(p.transport.as_deref()).map_err(host_err)?;
                 Ok(info_json(&host.spawn(spec).map_err(host_err)?))
             }
             "agent.egress" => {
@@ -905,6 +906,8 @@ struct SpawnParams {
     scrollback_rows: Option<usize>,
     sandbox: Option<crate::sandbox::SandboxSpec>,
     idle_ttl_secs: Option<u64>,
+    /// `pty` (the default) or `acp`.
+    transport: Option<String>,
 }
 
 #[derive(Deserialize)]

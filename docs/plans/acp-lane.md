@@ -45,8 +45,41 @@ trimmed) replayed through the tracker, including cancel and a provider error.
 
 ## Next
 
-1. A pane kind in `hq-host` that owns a `Connection` under the process sandbox and answers the same
-   `agent.*` calls as a pty pane.
-2. A transport field on harness specs and profiles; `hq doctor` runs `initialize` only.
-3. HQ MCP injection through `mcpServers`, and edited files into task activity.
-4. Move the lanes over one at a time, keeping the pty path as the fallback.
+1. A transport field on harness specs and profiles in `hq-tools`; `hq doctor` runs `initialize` only.
+2. HQ MCP injection through `mcpServers`, and edited files into task activity.
+3. Move the lanes over one at a time, keeping the pty path as the fallback.
+4. Bring ACP agents back after a host restart with the protocol's session resume.
+
+## Host pane kind (second slice)
+
+`hq-host` can now start an agent with `transport: "acp"` (`agent.spawn`, `SpawnSpec::transport`). It
+answers the same calls as a terminal agent, so nothing above the host changes:
+
+- `state`, `done`, `state_seq`, `pending`, `pending_seq` and `agent_session_id` come from the
+  protocol. Every state change is an event in the same log, so `events.poll` and the supervisor see
+  ACP agents like any other. The rule reads `acp`.
+- A permission request is a dialog: options numbered from 1, `remember` set for "always" kinds, and
+  `decline` picks the agent's reject option (or cancels). The owner-only rule for remember options
+  applies unchanged.
+- `read` and `read_since` serve a transcript: the agent's text, `> prompt`, `tool: ...`, `ask: ...`
+  and `end: ...` lines. Cursors work the same way.
+- `prompt` queues behind a running turn (an ACP agent takes one prompt at a time) and is refused at a
+  dialog. `esc` or `ctrl+c` cancel the turn; any other raw input is `unsupported`.
+- The process runs under the same sandbox as a terminal agent, with pipes instead of a pty, in its own
+  process group so stopping it stops what it started. A failed start returns the agent's own words
+  (`Authentication required`, a provider error) with the stderr line that explains it.
+- Not done: an ACP agent is not brought back after a host restart (the protocol's session resume is
+  not wired), and the harness specs in `hq-tools` do not select the transport yet.
+
+### Findings from running real agents through it
+
+Under the open sandbox profile agy and Copilot CLI complete a turn (agent kinds `antigravity` and
+`copilot` give them their state folders); Hermes completes one unsandboxed. Hermes does not work
+under the sandbox, and the reason matters for the design: `hermes acp` is a thin client of a Hermes
+gateway daemon (a websocket on a unix socket under `~/.hermes`) that it starts detached when none is
+running, and the gateway, not the client, runs the tools. The sandbox stops the start, and a gateway
+that already runs outside it would run the tools outside it. So Hermes over ACP is for hosts that do
+not require a sandbox, and Hermes stays on the terminal transport where one is required.
+
+Run a real agent through the host with `HQ_ACP_LIVE="<command>" cargo test -p hq-host --test
+acp_live -- --ignored --nocapture` (see the file header for the sandbox switches).
