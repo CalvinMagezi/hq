@@ -10,6 +10,11 @@ object Counts {
     fun progress(w: Words, done: Int, total: Int, subTasks: Boolean = true): String =
         w.s(if (subTasks) R.string.count_progress_sub else R.string.count_progress, done, total)
 
+    private const val NAV_BADGE_MAX = 9
+
+    /** The bottom bar's number: "9+" from ten up, so a pile reads as a pile and not as a precise count. */
+    fun navBadge(n: Int): String = if (n > NAV_BADGE_MAX) "9+" else n.toString()
+
     fun badge(n: Int): String = if (n > BADGE_MAX) "99+" else n.toString()
 
     fun tasks(w: Words, n: Int): String = w.n(R.plurals.count_tasks, n, n)

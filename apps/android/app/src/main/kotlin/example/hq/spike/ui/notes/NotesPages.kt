@@ -121,7 +121,7 @@ fun NotesOverlays(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String
     ui.export?.let { ExportOverlay(it, ExportActions(actions.onExportFormat, actions.onExportClose, actions.onExportAgain, actions.onNotice)) }
     if (ui.undoDelete != null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-            example.hq.spike.ui.shell.UndoSnackbar(ui.undoText ?: "", actions.onUndoDelete, Modifier.navigationBarsPadding())
+            example.hq.spike.ui.shell.UndoSnackbar(ui.undoText ?: "", actions.onUndoDelete, Modifier.navigationBarsPadding(), actions.onUndoExpire)
         }
     }
     ui.notice?.let { NotesSnack(it.text, actions.onDismissNotice, Modifier.fillMaxSize()) }
@@ -129,12 +129,8 @@ fun NotesOverlays(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String
 
 @Composable
 private fun NotesSnack(text: String, onDismiss: () -> Unit, modifier: Modifier) {
-    LaunchedEffect(text) { delay(NOTICE_MS); onDismiss() }
-    Box(modifier, contentAlignment = Alignment.BottomCenter) {
-        Row(
-            Modifier.navigationBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp).fillMaxWidth().heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) { Text(text, style = HqType.BodySm, color = Mts.Surface100) }
+    example.hq.spike.ui.shell.AttentionOrInline(example.hq.spike.ui.shell.AttentionKind.Snackbar, example.hq.spike.ui.shell.rememberAttentionKey(), modifier, onDismiss, restartOn = text) { m ->
+        Box(m, contentAlignment = Alignment.BottomCenter) { example.hq.spike.ui.shell.SnackbarRow(text, null, {}, Modifier.navigationBarsPadding()) }
     }
 }
 

@@ -60,6 +60,7 @@ class NotesActions(
     val onToggleTrashed: (String) -> Unit = {},
     val onRestore: (String) -> Unit = {},
     val onUndoDelete: () -> Unit = {},
+    val onUndoExpire: () -> Unit = {},
     /** The note page being left reports how far it was scrolled (first visible item, offset), so Back can return to the same place. */
     val onScrolled: (String, Int, Int) -> Unit = { _, _, _ -> },
     val scrollOf: (String) -> Pair<Int, Int>? = { null },
@@ -90,7 +91,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         onChooseFolder = { open -> edit { it.copy(chooser = open) } },
         onPickFolder = { f -> edit { it.copy(folder = f, chooser = false) } },
         onSave = ::save, onSeeTheirs = ::seeTheirs, onKeepBoth = ::keepBoth, onLeave = ::leave, onKeepEditing = { edit { it.copy(leaving = false) } }, onDiscard = ::discard,
-        onDelete = ::deleteNote, onOpenTrash = ::openTrash, onToggleTrashed = ::toggleTrashed, onRestore = ::restoreTrashed, onUndoDelete = ::undoDelete,
+        onDelete = ::deleteNote, onOpenTrash = ::openTrash, onToggleTrashed = ::toggleTrashed, onRestore = ::restoreTrashed, onUndoDelete = ::undoDelete, onUndoExpire = { _state.update { it.copy(undoDelete = null, undoText = null) } },
         onScrolled = scrolls::save, scrollOf = scrolls::restore,
     )
 
@@ -252,10 +253,6 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(undoDelete = trashPath, undoText = app.getString(R.string.note_deleted)) }
                 popNow()
                 reloadBehind()
-                undoJob = viewModelScope.launch {
-                    delay(Undo.millis(app))
-                    _state.update { it.copy(undoDelete = null, undoText = null) }
-                }
             } catch (e: HqUnavailable) {
                 _state.update { it.copy(notice = Notice(app.getString(R.string.note_delete_failed))) }
             }

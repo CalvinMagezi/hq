@@ -1,5 +1,9 @@
 package example.hq.spike.ui.helpers
 
+import example.hq.spike.ui.shell.AttentionKind
+import example.hq.spike.ui.shell.AttentionOrInline
+import example.hq.spike.ui.shell.SnackbarRow
+import example.hq.spike.ui.shell.rememberAttentionKey
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Offset
@@ -236,9 +240,5 @@ private fun StartButton(modifier: Modifier, onClick: () -> Unit) {
 
 @Composable
 internal fun Snack(line: HelperLine, onDismiss: () -> Unit, modifier: Modifier) {
-    LaunchedEffect(line) { delay(LINE_MS); onDismiss() }
-    Row(
-        modifier.padding(horizontal = 8.dp, vertical = 8.dp).fillMaxWidth().heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite },
-        verticalAlignment = Alignment.CenterVertically,
-    ) { Text(line.text, style = HqType.BodySm, color = Mts.Surface100) }
+    AttentionOrInline(AttentionKind.Snackbar, rememberAttentionKey(), modifier, onDismiss, restartOn = line) { m -> SnackbarRow(line.text, null, {}, m) }
 }

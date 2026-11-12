@@ -1,5 +1,9 @@
 package example.hq.spike.ui.chat
 
+import example.hq.spike.ui.shell.AttentionKind
+import example.hq.spike.ui.shell.AttentionOrInline
+import example.hq.spike.ui.shell.SnackbarRow
+import example.hq.spike.ui.shell.rememberAttentionKey
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -129,7 +133,11 @@ fun ChatOverlays(state: ChatUiState, actions: ChatActions, onOpenInNotes: (Strin
         if (state.addOpen) AddSheet(actions, pickers)
         state.picker?.let { PickerSheet(it, actions) }
         state.pressed?.let { id -> state.messages.firstOrNull { it.id == id }?.let { MessageActionsSheet(state, it, blocks, actions) } }
-        state.notice?.let { Snack(it, actions, Modifier.align(Alignment.BottomCenter)) }
+        // A page, a sheet or the picker hides the bar, so a notice from here sits at the screen edge, not over the bar.
+        val coversBar = state.page != null || state.note != null || state.export != null || state.chatsOpen || state.addOpen || state.picker != null || state.pressed != null
+        androidx.compose.runtime.CompositionLocalProvider(example.hq.spike.ui.shell.LocalCoversBar provides coversBar) {
+            state.notice?.let { Snack(it, actions, Modifier.align(Alignment.BottomCenter)) }
+        }
     }
 }
 
@@ -230,24 +238,9 @@ private fun SuggestionChip(icon: ImageVector, label: String, onClick: () -> Unit
     }
 }
 
-/** One line at the bottom: what just happened, and sometimes a word to undo it. Gone after five seconds. */
+/** One line at the bottom: what just happened, and sometimes a word to undo it. The shell closes it. */
 @Composable
 private fun Snack(notice: Notice, actions: ChatActions, modifier: Modifier) {
-    LaunchedEffect(notice) {
-        delay(NOTICE_MS)
-        actions.onDismissNotice()
-    }
-    Row(
-        modifier.navigationBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp).fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }.heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(start = 16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(notice.text, style = HqType.BodySm, color = Mts.Surface100, modifier = Modifier.weight(1f))
-        notice.action?.let {
-            Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onUndo).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-                Text(it, style = HqType.BodySmBold, color = Mts.UndoBlue)
-            }
-        }
-    }
+    AttentionOrInline(if (notice.action != null) AttentionKind.UndoSnackbar else AttentionKind.Snackbar, rememberAttentionKey(), modifier.navigationBarsPadding(), actions.onDismissNotice, restartOn = notice) { m -> SnackbarRow(notice.text, notice.action, actions.onUndo, m) }
 }
 
-private const val NOTICE_MS = 5_000L

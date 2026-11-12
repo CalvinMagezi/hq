@@ -90,13 +90,18 @@ internal fun UpdateCard(ui: SettingsUi, actions: SettingsActions) {
 @Composable
 fun UpdateLine(ui: SettingsUi, onUpdate: () -> Unit, onNotNow: () -> Unit) {
     val m = readyManifest(ui) ?: return
+    example.hq.spike.ui.shell.AttentionOrInline(example.hq.spike.ui.shell.AttentionKind.UpdateLine, "update") { mod -> UpdateRow(m.version, onUpdate, onNotNow, mod) }
+}
+
+@Composable
+private fun UpdateRow(version: String, onUpdate: () -> Unit, onNotNow: () -> Unit, modifier: Modifier) {
     Row(
-        Modifier.fillMaxWidth().background(Mts.Surface100).padding(start = 16.dp, end = 4.dp).heightIn(min = 48.dp),
+        modifier.fillMaxWidth().background(Mts.Surface100).padding(start = 16.dp, end = 4.dp).heightIn(min = 48.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(8.dp).background(Mts.BrandBlue, CircleShape))
         Text(
-            stringResource(R.string.upd_line_ready, m.version), style = HqType.BodySm, color = Mts.Ink,
+            stringResource(R.string.upd_line_ready, version), style = HqType.BodySm, color = Mts.Ink,
             maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 8.dp),
         )
         LineButton(stringResource(R.string.confirm_not_now), Mts.InkMuted, onNotNow)

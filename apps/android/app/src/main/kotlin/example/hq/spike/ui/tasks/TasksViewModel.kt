@@ -188,7 +188,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     val actions = TasksActions(
         onTab = ::chooseTab, onRefresh = { viewModelScope.launch { refresh() } },
         onToggleGroup = { k -> _state.update { it.copy(expanded = if (k in it.expanded) it.expanded - k else it.expanded + k) } },
-        onDone = ::done, onTomorrow = ::tomorrow, onUndo = ::undoLast, onDismissLine = { _state.update { it.copy(line = null) } },
+        onDone = ::done, onTomorrow = ::tomorrow, onUndo = ::undoLast, onDismissLine = { _state.update { it.copy(line = null) }; undo = null },
         onOpen = ::open, onClose = { _state.update { it.copy(detail = null) } }, onMarkDone = { _state.value.detail?.task?.let(::done); _state.update { it.copy(detail = null) } },
         onPrompt = { p -> detail { it.copy(prompt = p) } },
         onDraft = { d -> detail { it.copy(drafts = it.drafts + ((it.prompt ?: COMMENT_DRAFT) to d)) } }, onSendBack = ::sendBack,
@@ -454,9 +454,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun say(text: String, action: String? = null, undoWith: (suspend () -> Unit)? = null) {
         undo = undoWith
-        lineJob?.cancel()
         _state.update { it.copy(line = TaskLine(text, action)) }
-        lineJob = viewModelScope.launch { delay(Undo.millis(getApplication())); _state.update { it.copy(line = null) }; undo = null }
     }
 
     /** Finishes a task at once and offers Undo; a 409 says it changed meanwhile and reloads. */

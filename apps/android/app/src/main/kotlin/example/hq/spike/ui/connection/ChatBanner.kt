@@ -18,6 +18,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import example.hq.spike.R
 import example.hq.spike.data.Connection
+import example.hq.spike.ui.shell.AttentionKind
+import example.hq.spike.ui.shell.AttentionOrInline
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -40,8 +42,14 @@ object ChatBanner {
 @Composable
 fun ChatBanner(status: Connection, onStartHq: () -> Unit, onAiKeys: () -> Unit) {
     val words = ChatBanner.words(status) ?: return
+    // Its words differ from the strip's on other places, so a place change must not read it out again; the top bar status announces changes.
+    AttentionOrInline(AttentionKind.ConnectionBanner, "connection", announce = false) { m -> ChatBannerRow(status, words, onStartHq, onAiKeys, m) }
+}
+
+@Composable
+private fun ChatBannerRow(status: Connection, @StringRes words: Int, onStartHq: () -> Unit, onAiKeys: () -> Unit, modifier: Modifier) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).background(Mts.Surface100).padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier.fillMaxWidth().heightIn(min = 48.dp).background(Mts.Surface100).padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         val icon = when (status) { is Connection.Stopped -> HqIcons.Stop; is Connection.Offline -> HqIcons.WifiOff; else -> HqIcons.Warning }

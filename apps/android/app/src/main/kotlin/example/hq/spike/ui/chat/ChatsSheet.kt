@@ -68,6 +68,7 @@ fun ChatsSheet(state: ChatUiState, actions: ChatActions) {
                 NewChatButton(actions.onNewChat)
             }
             SearchField(state.chatSearch, actions.onSearchChats)
+            example.hq.spike.ui.usage.BalanceRow()
             val shown = state.chats.filter { it.title.contains(state.chatSearch, true) || it.subtitle.contains(state.chatSearch, true) }
             LazyColumn(Modifier.fillMaxWidth()) {
                 Group.entries.forEach { group ->

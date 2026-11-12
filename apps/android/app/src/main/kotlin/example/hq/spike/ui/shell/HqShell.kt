@@ -3,9 +3,6 @@ package example.hq.spike.ui.shell
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
-import example.hq.spike.ui.usage.ChipTone
-import example.hq.spike.ui.usage.ChipTarget
-import example.hq.spike.ui.usage.BalanceChip
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -55,7 +52,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -121,9 +120,10 @@ fun HqShell(
     /** What a place adds to the bar: a line in front of the status ("43 active") and buttons between search and settings. */
     subline: (Place) -> String? = { null },
     topActions: @Composable (Place) -> Unit = {},
-    balance: BalanceChip? = null,
-    onBalance: (ChipTarget) -> Unit = {},
     updateDot: Boolean = false,
+    /** A quiet dot on the Notes place when HQ filed something new; data comes later. */
+    notesDot: Boolean = false,
+    attention: AttentionBudget = remember { AttentionBudget() },
     request: Place? = null,
     onRequestHandled: () -> Unit = {},
     aboveBar: @Composable BoxScope.(Place) -> Unit = {},
@@ -137,15 +137,20 @@ fun HqShell(
     val statusText = stringResource(words.res, *words.args.toTypedArray())
     val statusColor = when (words.tone) { ConnectionTone.Quiet -> Mts.InkMuted; ConnectionTone.Working -> Mts.BrandBlue; ConnectionTone.Warn -> Mts.Amber }
     val bus = remember { ReselectBus() }
-    CompositionLocalProvider(LocalGoTo provides { current = it }, LocalReselect provides bus.taps, LocalOpenSearch provides onOpenSearch) {
+    CompositionLocalProvider(LocalGoTo provides { current = it }, LocalReselect provides bus.taps, LocalOpenSearch provides onOpenSearch, LocalAttention provides attention) {
         Box(Modifier.fillMaxSize().background(Mts.Surface000)) {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                TopBar(title = current.label, status = subline(current)?.let { "$it \u00b7 $statusText" } ?: statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings, balance = balance.takeIf { status is Connection.Connected }, onBalance = onBalance, updateDot = updateDot, actions = { topActions(current) }, stopped = status is Connection.Stopped, onStatus = onStatus)
+                TopBar(title = current.label, status = subline(current)?.let { "$it \u00b7 $statusText" } ?: statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings, showSearch = current in SEARCH_PLACES, updateDot = updateDot, actions = { topActions(current) }, stopped = status is Connection.Stopped, onStatus = onStatus)
                 strip(current)
+                BannerSlot(attention)
                 Box(Modifier.weight(1f).fillMaxWidth().imePadding()) { content(current); aboveBar(current) }
-                if (!WindowInsets.isImeVisible) BottomBar(current, inboxBadge) { if (it == current) bus.tap(it) else current = it }
+                if (!WindowInsets.isImeVisible) BottomBar(current, inboxBadge, notesDot) { if (it == current) bus.tap(it) else current = it }
             }
             overlay()
+            // Above the overlays, so an Undo from a page that covers the bar still shows; lifted over the bar while it is there.
+            val navInset = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
+            val lift = if (WindowInsets.isImeVisible) 0.dp else BarContentHeight + maxOf(BarMinBottom, navInset)
+            SnackbarSlot(attention, aboveBar = lift, belowBar = 0.dp, Modifier.align(Alignment.BottomCenter).imePadding())
         }
     }
 }
@@ -161,22 +166,25 @@ fun NotBuilt(place: Place) {
 }
 
 @Composable
-fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Unit, onSettings: () -> Unit, balance: BalanceChip? = null, onBalance: (ChipTarget) -> Unit = {}, updateDot: Boolean = false, actions: @Composable () -> Unit = {}, stopped: Boolean = false, onStatus: () -> Unit = {}) {
+fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Unit, onSettings: () -> Unit, showSearch: Boolean = true, updateDot: Boolean = false, actions: @Composable () -> Unit = {}, stopped: Boolean = false, onStatus: () -> Unit = {}) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = TopBarHeight).background(Mts.Surface000).padding(start = 16.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f).heightIn(min = TouchTarget).clickable(role = Role.Button, onClickLabel = stringResource(R.string.conn_open_label), onClick = onStatus), verticalArrangement = Arrangement.Center) {
-            Text(title, style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                if (stopped) Icon(HqIcons.Stop, null, Modifier.size(12.dp), tint = statusColor) else Box(Modifier.size(8.dp).background(statusColor, CircleShape))
-                Text(status, style = HqType.Caption, color = if (stopped) statusColor else Mts.InkMuted)
-            }
-        }
-        balance?.let { BalancePill(it) { onBalance(it.target) } }
-        IconButton(onSearch, Modifier.size(TouchTarget)) { Icon(HqIcons.Search, "Search", Modifier.size(24.dp), tint = Mts.Ink) }
+        val open = Modifier.weight(1f).heightIn(min = TouchTarget).clickable(role = Role.Button, onClickLabel = stringResource(R.string.conn_open_label), onClick = onStatus)
+        TitleAndStatus(
+            open,
+            title = { Text(title, style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            status = {
+                // The word says what HQ is doing, so it is read out when it changes; the dot alone would say nothing.
+                Row(Modifier.semantics { liveRegion = LiveRegionMode.Polite }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (stopped) Icon(HqIcons.Stop, null, Modifier.size(12.dp), tint = statusColor) else Box(Modifier.size(8.dp).background(statusColor, CircleShape))
+                    Text(status, style = HqType.Caption, color = if (stopped) statusColor else Mts.InkMuted)
+                }
+            },
+        )
+        // Search is on Notes and Chat only (owner decision: the other places have their own find or filter); the gear is everywhere.
+        if (showSearch) IconButton(onSearch, Modifier.size(TouchTarget)) { Icon(HqIcons.Search, "Search", Modifier.size(24.dp), tint = Mts.Ink) }
         actions()
         val gearWords = stringResource(if (updateDot) R.string.upd_gear_dot else R.string.settings_title)
         IconButton(onSettings, Modifier.size(TouchTarget)) {
@@ -188,25 +196,11 @@ fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Un
     }
 }
 
-/** What is left on the AI service in use, or the budget that needs attention; tapping it opens the page that explains it. */
-@Composable
-private fun BalancePill(chip: BalanceChip, onClick: () -> Unit) {
-    val tint = when (chip.tone) { ChipTone.Normal -> Mts.InkMuted; ChipTone.Warning -> Mts.Amber; ChipTone.Exceeded -> Mts.DangerText }
-    Box(
-        Modifier.widthIn(max = PillMaxWidth).heightIn(min = TouchTarget).clickable(role = Role.Button, onClickLabel = "Open", onClick = onClick).semantics { contentDescription = chip.title },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            chip.label, style = HqType.Caption, color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.border(1.dp, if (chip.tone == ChipTone.Normal) Mts.Hairline else tint, CircleShape).padding(horizontal = 10.dp, vertical = 5.dp),
-        )
-    }
-}
-
-private val PillMaxWidth = 156.dp
+/** Search is on the places that hold things to look through: Notes and Chat. The gear is on every place. */
+private val SEARCH_PLACES = setOf(Place.Notes, Place.Chat)
 
 @Composable
-fun BottomBar(current: Place, inboxBadge: Int, onSelect: (Place) -> Unit) {
+fun BottomBar(current: Place, inboxBadge: Int, notesDot: Boolean = false, onSelect: (Place) -> Unit) {
     val navInset = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
     Row(
         Modifier.fillMaxWidth().background(Mts.Surface100)
@@ -219,7 +213,7 @@ fun BottomBar(current: Place, inboxBadge: Int, onSelect: (Place) -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = if (place == Place.Chat) Arrangement.Top else Arrangement.Center,
             ) {
-                if (place == Place.Chat) RaisedChat(selected) else PlaceIcon(place, selected, if (place == Place.Inbox) inboxBadge else 0)
+                if (place == Place.Chat) RaisedChat(selected) else PlaceIcon(place, selected, if (place == Place.Inbox) inboxBadge else 0, place == Place.Notes && notesDot)
                 Box(Modifier.height(4.dp))
                 Text(place.label, style = HqType.NavLabel, color = if (selected) Mts.Ink else Mts.InkMuted, maxLines = 1)
             }
@@ -228,7 +222,8 @@ fun BottomBar(current: Place, inboxBadge: Int, onSelect: (Place) -> Unit) {
 }
 
 @Composable
-private fun PlaceIcon(place: Place, selected: Boolean, badge: Int) {
+private fun PlaceIcon(place: Place, selected: Boolean, badge: Int, dot: Boolean = false) {
+    val notesDotWords = stringResource(R.string.notes_dot_new)
     Box(Modifier.size(width = 64.dp, height = 32.dp)) {
         Box(
             Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).background(if (selected) Mts.Surface200 else Color.Transparent),
@@ -236,10 +231,11 @@ private fun PlaceIcon(place: Place, selected: Boolean, badge: Int) {
         ) {
             Icon(place.icon!!, null, Modifier.size(24.dp), tint = if (selected) Mts.BrandGreen else Mts.InkMuted)
         }
+        if (dot && badge == 0) Box(Modifier.align(Alignment.TopEnd).offset(x = (-14).dp, y = 2.dp).size(8.dp).background(Mts.BrandGreen, CircleShape).testTag("notes-dot").semantics { contentDescription = notesDotWords })
         if (badge > 0) {
             // The design puts the badge 4 dp above the pill and 10 dp in from its right edge.
             Text(
-                Counts.badge(badge), style = HqType.Badge, color = Mts.OnGreen, textAlign = TextAlign.Center,
+                Counts.navBadge(badge), style = HqType.Badge, color = Mts.OnGreen, textAlign = TextAlign.Center,
                 modifier = Modifier.align(Alignment.TopEnd).offset(x = (-10).dp, y = (-4).dp)
                     .widthIn(min = 16.dp).heightIn(min = 16.dp).background(Mts.BrandGreen, RoundedCornerShape(8.dp))
                     .padding(horizontal = 4.dp),
@@ -266,4 +262,35 @@ private fun Modifier.negativeTop(amount: Dp) = layout { measurable, constraints 
     val p = measurable.measure(constraints)
     val up = amount.roundToPx()
     layout(p.width, p.height - up) { p.place(0, -up) }
+}
+
+private val TitleMinWidth = 72.dp
+private val TitleStatusGap = 12.dp
+
+/**
+ * The title and its status word. The status has priority: it takes the width it needs and the title gets the rest, cut
+ * with an ellipsis. When the title could not keep [TitleMinWidth] beside it, the status goes under the title instead (and
+ * wraps if it must), at any text size, so the word that matters (Offline, Starting, Stopped) is never the one cut.
+ */
+@Composable
+private fun TitleAndStatus(modifier: Modifier, title: @Composable () -> Unit, status: @Composable () -> Unit) {
+    androidx.compose.ui.layout.Layout({ Box { title() }; Box { status() } }, modifier) { measurables, constraints ->
+        val (titleM, statusM) = measurables
+        val gap = TitleStatusGap.roundToPx()
+        val max = constraints.maxWidth
+        val statusNatural = statusM.maxIntrinsicWidth(Int.MAX_VALUE)
+        val titleMin = minOf(titleM.maxIntrinsicWidth(Int.MAX_VALUE), TitleMinWidth.roundToPx())
+        if (statusNatural + gap + titleMin <= max) {
+            val s = statusM.measure(androidx.compose.ui.unit.Constraints(maxWidth = statusNatural))
+            val t = titleM.measure(androidx.compose.ui.unit.Constraints(maxWidth = max - gap - s.width))
+            val h = maxOf(t.height, s.height, constraints.minHeight)
+            layout(max, h) { t.placeRelative(0, (h - t.height) / 2); s.placeRelative(t.width + gap, (h - s.height) / 2) }
+        } else {
+            val t = titleM.measure(androidx.compose.ui.unit.Constraints(maxWidth = max))
+            val s = statusM.measure(androidx.compose.ui.unit.Constraints(maxWidth = max))
+            val h = maxOf(t.height + s.height, constraints.minHeight)
+            val top = (h - t.height - s.height) / 2
+            layout(max, h) { t.placeRelative(0, top); s.placeRelative(0, top + t.height) }
+        }
+    }
 }

@@ -83,16 +83,23 @@ object Undo {
         if (result == UndoResult.TooLate) context.getString(R.string.fail_undo_too_late) else null
 }
 
-/** The one Undo snackbar: what happened, then Undo. The owner of [text] decides when it closes (see [Undo.millis]). */
+/** The one Undo snackbar: what happened, then Undo. The shell closes it after [AttentionBudget.UNDO_SNACKBAR_MS] (longer with the phone's accessibility timeout, see [Undo.millis]) and tells the poster through [onExpire]. Goes through the shell's attention budget. */
 @Composable
-fun UndoSnackbar(text: String, onUndo: () -> Unit, modifier: Modifier = Modifier) {
+fun UndoSnackbar(text: String, onUndo: () -> Unit, modifier: Modifier = Modifier, onExpire: () -> Unit = {}) {
+    val label = stringResource(R.string.undo)
+    AttentionOrInline(AttentionKind.UndoSnackbar, rememberAttentionKey(), modifier, onExpire, restartOn = text) { m -> SnackbarRow(text, label, onUndo, m) }
+}
+
+/** The dark one-line snackbar every screen uses: [text], and a word to act on when [action] is set. */
+@Composable
+fun SnackbarRow(text: String, action: String?, onAction: () -> Unit, modifier: Modifier = Modifier) {
     Row(
-        modifier.padding(8.dp).fillMaxWidth().heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(start = 16.dp).semantics { liveRegion = LiveRegionMode.Polite },
+        modifier.padding(8.dp).fillMaxWidth().heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(start = 16.dp, end = if (action == null) 16.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text, style = HqType.BodySm, color = Mts.Surface100, modifier = Modifier.weight(1f))
-        Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onUndo).padding(horizontal = 16.dp).testTag("undo"), contentAlignment = Alignment.Center) {
-            Text(stringResource(R.string.undo), style = HqType.BodySmBold, color = Mts.UndoBlue)
+        if (action != null) Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onAction).padding(horizontal = 16.dp).testTag("undo"), contentAlignment = Alignment.Center) {
+            Text(action, style = HqType.BodySmBold, color = Mts.UndoBlue)
         }
     }
 }

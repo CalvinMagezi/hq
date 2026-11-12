@@ -1,5 +1,9 @@
 package example.hq.spike.ui.settings
 
+import example.hq.spike.ui.shell.AttentionKind
+import example.hq.spike.ui.shell.AttentionOrInline
+import example.hq.spike.ui.shell.SnackbarRow
+import example.hq.spike.ui.shell.rememberAttentionKey
 import example.hq.spike.R
 import example.hq.spike.ui.firstrun.FirstRunWords
 import example.hq.spike.ui.firstrun.StoredKeysPage
@@ -218,18 +222,15 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
             val w = SettingsWords.restartWords(example.hq.spike.ui.shell.rememberWords())
             ConfirmDialog(ConfirmCopy.restart(context, w.title, w.body), { actions.onRestart(false) }, actions.onRestartConfirm)
         }
-        ui.undoLine?.let { UndoSnackbar(it, actions.onUndoDiscard, Modifier.align(Alignment.BottomCenter)) }
+        ui.undoLine?.let { UndoSnackbar(it, actions.onUndoDiscard, Modifier.align(Alignment.BottomCenter), actions.onUndoExpire) }
         ui.line?.let { Snack(it, actions.onDismissLine, Modifier.align(Alignment.BottomCenter)) }
-        ui.dlUndo?.let { UndoSnackbar(stringResource(if (it == DlUndo.Forget) R.string.dl_set_forgot else R.string.dl_set_removed), actions.onDlUndo, Modifier.align(Alignment.BottomCenter)) }
+        ui.dlUndo?.let { UndoSnackbar(stringResource(if (it == DlUndo.Forget) R.string.dl_set_forgot else R.string.dl_set_removed), actions.onDlUndo, Modifier.align(Alignment.BottomCenter), actions.onDlUndoExpire) }
     }
 }
 
 @Composable
 internal fun Snack(text: String, onDismiss: () -> Unit, modifier: Modifier) {
-    LaunchedEffect(text) { delay(LINE_MS); onDismiss() }
-    Row(modifier.padding(8.dp).fillMaxWidth().heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite }, verticalAlignment = Alignment.CenterVertically) {
-        Text(text, style = HqType.BodySm, color = Mts.Surface100)
-    }
+    AttentionOrInline(AttentionKind.Snackbar, rememberAttentionKey(), modifier, onDismiss, restartOn = text) { m -> SnackbarRow(text, null, {}, m) }
 }
 
 /** A row that opens one of the app's own full screens (pairing). */
@@ -1281,6 +1282,7 @@ private fun Technical(ui: SettingsUi, actions: SettingsActions) {
 internal fun CopyDetailsSheet(text: String, onClose: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val copied = stringResource(R.string.copy_details_copied)
+    val attention = example.hq.spike.ui.shell.LocalAttention.current
     BackHandler(onBack = onClose)
     Sheet(onClose) {
         Text(stringResource(R.string.copy_details_title), style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(bottom = 8.dp))
@@ -1292,7 +1294,7 @@ internal fun CopyDetailsSheet(text: String, onClose: () -> Unit) {
             DialogButton(stringResource(R.string.copy_details_not_now), onClose)
             DialogButton(stringResource(R.string.copy_details_copy)) {
                 context.getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("HQ details", text))
-                android.widget.Toast.makeText(context, copied, android.widget.Toast.LENGTH_SHORT).show()
+                attention?.say(copied)
                 onClose()
             }
         }

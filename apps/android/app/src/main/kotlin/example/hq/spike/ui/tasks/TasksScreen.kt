@@ -1,5 +1,9 @@
 package example.hq.spike.ui.tasks
 
+import example.hq.spike.ui.shell.AttentionKind
+import example.hq.spike.ui.shell.AttentionOrInline
+import example.hq.spike.ui.shell.SnackbarRow
+import example.hq.spike.ui.shell.rememberAttentionKey
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -353,12 +357,5 @@ private fun NewTaskButton(modifier: Modifier, onClick: () -> Unit) {
 
 @Composable
 internal fun Snack(line: TaskLine, actions: TasksActions, modifier: Modifier) {
-    LaunchedEffect(line) { delay(LINE_MS); actions.onDismissLine() }
-    Row(
-        modifier.padding(horizontal = 8.dp, vertical = 8.dp).fillMaxWidth().heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(start = 16.dp).semantics { liveRegion = LiveRegionMode.Polite },
-        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(line.text, style = HqType.BodySm, color = Mts.Surface100, modifier = Modifier.weight(1f))
-        line.action?.let { Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onUndo).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text(it, style = HqType.BodySmBold, color = Mts.UndoBlue) } }
-    }
+    AttentionOrInline(if (line.action != null) AttentionKind.UndoSnackbar else AttentionKind.Snackbar, rememberAttentionKey(), modifier, actions.onDismissLine, restartOn = line) { m -> SnackbarRow(line.text, line.action, actions.onUndo, m) }
 }

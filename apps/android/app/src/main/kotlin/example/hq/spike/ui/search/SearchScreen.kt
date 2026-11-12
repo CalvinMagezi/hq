@@ -77,7 +77,6 @@ class SearchGoes(
     val onStartHq: () -> Unit,
 )
 
-private const val UNDO_MS = 10_000L
 
 /** One search over notes, tasks, chats and helpers, opened from any magnifier or pill. */
 @Composable
@@ -254,10 +253,10 @@ private fun AskPill(label: String, onClick: () -> Unit) {
 /** "Recent searches cleared" with Undo, for 10 s or until the screen leaves. */
 @Composable
 private fun ClearedSnack(actions: SearchActions) {
-    LaunchedEffect(Unit) { delay(UNDO_MS); actions.onClearedShown() }
-    Row(Modifier.padding(8.dp).fillMaxWidth().heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(start = 16.dp).semantics { liveRegion = LiveRegionMode.Polite }, verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.search_recent_cleared), style = HqType.BodySm, color = Mts.Surface100, modifier = Modifier.weight(1f))
-        Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onUndoClear).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.search_undo), style = HqType.BodySmBold, color = Mts.Surface000) }
+    val text = stringResource(R.string.search_recent_cleared)
+    val undo = stringResource(R.string.search_undo)
+    example.hq.spike.ui.shell.AttentionOrInline(example.hq.spike.ui.shell.AttentionKind.UndoSnackbar, example.hq.spike.ui.shell.rememberAttentionKey(), Modifier, actions.onClearedShown) { m ->
+        example.hq.spike.ui.shell.SnackbarRow(text, undo, actions.onUndoClear, m)
     }
 }
 

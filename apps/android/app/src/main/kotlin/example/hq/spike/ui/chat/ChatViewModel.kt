@@ -111,7 +111,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         onDraft = ::setDraft, onSend = ::send, onStop = ::stop, onRetry = ::retry,
         onOpenChats = ::openChats, onCloseChats = { _state.update { it.copy(chatsOpen = false) } }, onNewChat = { newChat() },
         onOpenChat = ::openThread, onSearchChats = { q -> _state.update { it.copy(chatSearch = q) } },
-        onArchive = ::archive, onUndo = ::undoArchive, onDismissNotice = { _state.update { it.copy(notice = null) } },
+        onArchive = ::archive, onUndo = ::undoArchive, onDismissNotice = { archiving = null; _state.update { it.copy(notice = null) } },
         onNotice = { text -> _state.update { it.copy(notice = Notice(text)) } },
         onOpenNote = ::openNote, onCloseNote = { _state.update { it.copy(note = null) } }, onAskAboutNote = ::askAbout,
         onOpenChart = { spec -> _state.update { it.copy(page = Page.Chart(spec)) } }, onOpenTable = ::openTable,
@@ -500,9 +500,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             if (_state.value.threadId == id) newChat(keepSheet = true)
-            delay(Undo.millis(app))
-            archiving = null
-            _state.update { it.copy(notice = null) }
         }
     }
 

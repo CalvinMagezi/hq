@@ -181,6 +181,9 @@ class SettingsActions(
     val onSignOutConfirm: () -> Unit = {},
     val onAskServerDisconnect: (Boolean) -> Unit = {},
     val onUndoDiscard: () -> Unit = {},
+    /** The Undo line closed by itself: a discarded capture is deleted for good. */
+    val onUndoExpire: () -> Unit = {},
+    val onDlUndoExpire: () -> Unit = {},
     val onSignOutAll: (Boolean) -> Unit = {},
     val onSignOutAllConfirm: () -> Unit = {},
     val onCopy: (String) -> Unit = {},
@@ -256,7 +259,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onAskSignOut = { d -> _state.update { it.copy(askSignOut = d, signOutError = null) } },
         onSignOutConfirm = ::signOutDevice,
         onAskServerDisconnect = { ask -> _state.update { it.copy(askServerDisconnect = ask) } },
-        onUndoDiscard = ::undoDiscard,
+        onUndoDiscard = ::undoDiscard, onUndoExpire = ::flushDiscard,
+        onDlUndoExpire = { _state.update { it.copy(dlUndo = null) } },
         onSignOutAll = { ask -> _state.update { if (it.restarting) it else it.copy(askSignOutAll = ask) } },
         onSignOutAllConfirm = ::signOutAll,
         onCopy = { text -> copyText(text) },
@@ -685,10 +689,6 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val kind = Outbox.of(ctx()).all().firstOrNull { it.id == id }
         val text = ctx().getString(if (kind?.isNote == true) R.string.undo_note_discarded else R.string.undo_task_discarded)
         _state.update { it.copy(hiddenCaptures = it.hiddenCaptures + id, undoLine = text) }
-        discarding = viewModelScope.launch {
-            delay(Undo.millis(ctx()))
-            flushDiscard()
-        }
     }
 
     private fun flushDiscard() {

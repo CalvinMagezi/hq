@@ -96,7 +96,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
     val actions = InboxActions(
         onTab = { t -> _state.update { it.copy(tab = t) } }, onAllow = { answer(it, allow = true) }, onAllowSite = { answer(it, allow = true, wholeSite = true) }, onNotNow = { answer(it, allow = false) },
         onDetails = { c -> _state.update { it.copy(details = c) } }, onClear = { clear(listOf(it), getApplication<Application>().getString(R.string.undo_update_cleared)) },
-        onClearAll = { clear(_state.value.shownUpdates, "") }, onUndo = ::undo, onDismissLine = { _state.update { it.copy(line = null) } },
+        onClearAll = { clear(_state.value.shownUpdates, "") }, onUndo = ::undo, onDismissLine = { lastCleared = emptyList(); _state.update { it.copy(line = null) } },
         onBannerNotNow = { NotifAccess.snooze(getApplication()); refreshBanner() },
         onKeepGoing = ::keepGoing, onAllowedDone = { _state.update { it.copy(allowed = null) } },
         onAskSignOut = { c -> _state.update { it.copy(askSignOut = c, signOutError = null) } }, onSignOutConfirm = ::signOut,
@@ -252,9 +252,6 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         lastCleared = cards
         clearing = viewModelScope.launch {
             ids.forEach { id -> try { client.answerNotification(id, "dismiss") } catch (e: HqUnavailable) { /* it shows again on the next refresh */ } }
-            delay(Undo.millis(app))
-            lastCleared = emptyList()
-            _state.update { it.copy(line = null) }
         }
     }
 

@@ -3798,4 +3798,6 @@
     <string name="trail_github_reconnect">Needs reconnecting</string>
     <string name="trail_work_tasks">What HQ is tracking and doing</string>
     <string name="trail_work_helpers">The agents HQ runs, and starting one</string>
+    <string name="balance_open">Open spending details</string>
+    <string name="notes_dot_new">New in your Vault</string>
 </resources>
