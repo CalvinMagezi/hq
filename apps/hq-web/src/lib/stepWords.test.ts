@@ -23,7 +23,7 @@ describe('what a reply did, in plain words', () => {
   })
 
   test('a tool no table names falls back by family, then to its own name, never "Did a step"', () => {
-    expect(say('vault_something_new')).toBe('Worked with your notes')
+    expect(say('vault_something_new')).toBe('Worked with your Vault')
     expect(say('harness_session_peek')).toBe('Checked on a helper')
     expect(say('system_clock')).toBe('Used system clock')
   })

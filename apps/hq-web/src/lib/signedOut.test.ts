@@ -22,7 +22,7 @@ describe('refusedNow', () => {
 
 describe('signedOutTitle', () => {
   test('names the place', () => {
-    expect(signedOutTitle('/notes/x')).toBe('Sign in to see your notes')
+    expect(signedOutTitle('/notes/x')).toBe('Sign in to see your Vault')
     expect(signedOutTitle('/chat')).toBe('Sign in to see your chats')
     expect(signedOutTitle('/inbox')).toBe('Sign in to see what needs you')
     expect(signedOutTitle('/settings/devices')).toBe('Sign in to see your settings')
