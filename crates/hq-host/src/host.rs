@@ -439,6 +439,9 @@ impl Host {
         for pane in panes {
             pane.kill_now();
         }
+        for pane in lock(&self.acp).values() {
+            pane.kill();
+        }
         lock(&self.awaiting).clear();
         self.save();
         held
@@ -452,6 +455,9 @@ impl Host {
         };
         if let Some(pane) = lock(&self.panes).remove(name) {
             pane.kill_now();
+        }
+        if let Some(pane) = lock(&self.acp).remove(name) {
+            pane.kill();
         }
         lock(&self.pane_tokens).remove(name);
         self.save();
@@ -640,7 +646,7 @@ impl Host {
         };
         let pane = Arc::new(pane);
         let mut panes = lock(&self.panes);
-        if panes.contains_key(&spec.name) {
+        if panes.contains_key(&spec.name) || lock(&self.acp).contains_key(&spec.name) {
             pane.kill();
             return Err(HostError::NameTaken(spec.name));
         }
@@ -729,11 +735,14 @@ impl Host {
                 return Err(e);
             }
         };
+        // Same lock order as a terminal start (panes, then acp), so two starts of one name cannot both win.
+        let panes = lock(&self.panes);
         let mut acp = lock(&self.acp);
-        if acp.contains_key(&spec.name) {
+        if panes.contains_key(&spec.name) || acp.contains_key(&spec.name) {
             pane.kill();
             return Err(HostError::NameTaken(spec.name));
         }
+        drop(panes);
         acp.insert(spec.name.clone(), pane.clone());
         drop(acp);
         self.events.push(&spec.name, EventKind::Spawned, None, None);
@@ -818,6 +827,7 @@ impl Host {
         };
         let mut known: Vec<String> = lock(&self.panes).keys().cloned().collect();
         known.extend(lock(&self.awaiting).keys().cloned());
+        known.extend(lock(&self.acp).keys().cloned());
         crate::hooks::sweep_agent_files(&dir, &known);
     }
 
@@ -1163,6 +1173,11 @@ impl Host {
         notification_type: Option<&str>,
         session_id: Option<String>,
     ) -> Result<(), HostError> {
+        if self.acp_pane(name).is_some() {
+            return Err(HostError::Unsupported(
+                "an ACP agent reports its own state; there are no hooks to report from",
+            ));
+        }
         let pane = self.pane(name)?;
         // An id that is not a plain token is dropped, not stored: it ends up in
         // the agent's restart command line.
@@ -1288,6 +1303,7 @@ impl Host {
     pub fn remove(&self, name: &str) -> Result<(), HostError> {
         if let Some(acp) = lock(&self.acp).remove(name) {
             acp.kill();
+            self.forget_files(name);
             self.events.push(name, EventKind::Removed, None, None);
             return Ok(());
         }
@@ -1528,7 +1544,8 @@ impl Host {
                 }
                 _ => since = None,
             }
-            if info.status != PaneStatus::Running && info.state.is_none() {
+            let over = info.state.is_none() || self.acp_pane(name).is_some();
+            if info.status != PaneStatus::Running && over {
                 return Err(HostError::Exited(name.to_string()));
             }
             if Instant::now() >= deadline {

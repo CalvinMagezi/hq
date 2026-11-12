@@ -23,6 +23,8 @@ const TICK: Duration = Duration::from_millis(50);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 const COMMAND_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 const STOP_GRACE: Duration = Duration::from_secs(2);
+/// Prompts held back while a turn runs; more are refused so a runaway caller cannot grow memory.
+const MAX_QUEUED_PROMPTS: usize = 16;
 const RULE: &str = "acp";
 const CLIENT_NAME: &str = "agent-hq-host";
 
@@ -60,7 +62,7 @@ struct View {
     state_seq: u64,
     done: bool,
     pending: Option<OpenDialog>,
-    lines: Vec<String>,
+    lines: VecDeque<String>,
     dropped: u64,
     partial: String,
     status: PaneStatus,
@@ -102,7 +104,6 @@ impl AcpPane {
             .env_clear()
             .envs(l.env.iter().cloned())
             .current_dir(&l.cwd);
-        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
         let mut conn = Connection::spawn(cmd).map_err(|e| spawn_error(e.to_string()))?;
         let started = conn
             .initialize(CLIENT_NAME, HANDSHAKE_TIMEOUT)
@@ -115,7 +116,7 @@ impl AcpPane {
             state_seq: 0,
             done: false,
             pending: None,
-            lines: Vec::new(),
+            lines: VecDeque::new(),
             dropped: 0,
             partial: String::new(),
             status: PaneStatus::Running,
@@ -195,7 +196,11 @@ impl AcpPane {
     /// were dropped.
     pub(crate) fn transcript(&self) -> (Vec<String>, String, u64) {
         let v = lock(&self.view);
-        (v.lines.clone(), v.partial.clone(), v.dropped)
+        (
+            v.lines.iter().cloned().collect(),
+            v.partial.clone(),
+            v.dropped,
+        )
     }
 
     /// Sends a prompt. A turn already running keeps going: the prompt waits its turn, because an
@@ -236,7 +241,17 @@ impl AcpPane {
             };
             (open.wire_seq, choice)
         };
-        self.command(name, |ack| Cmd::Answer(wire_seq, choice, ack))
+        match self.command(name, |ack| Cmd::Answer(wire_seq, choice, ack)) {
+            // The dialog moved on between our read and the driver's turn: say which one is open now.
+            Err(HostError::Io(_)) => match lock(&self.view).pending.as_ref() {
+                Some(open) => Err(HostError::StaleDialog {
+                    name: name.to_string(),
+                    current: open.host_seq,
+                }),
+                None => Err(HostError::NoDialog(name.to_string())),
+            },
+            other => other,
+        }
     }
 
     /// Stops the agent and everything it started. Returns at once; the driver finishes the job.
@@ -315,7 +330,7 @@ impl Driver {
             }
             let heard = match self.conn.pump(TICK) {
                 Ok(heard) => heard,
-                Err(_) => break self.conn.exit_code().map_or(1, |c| c as u32),
+                Err(_) => break self.conn.kill_group() as u32,
             };
             self.send_next_prompt(&mut queue);
             self.sync(&mut synced, heard);
@@ -327,6 +342,10 @@ impl Driver {
     fn take_commands(&mut self, queue: &mut VecDeque<String>) -> bool {
         loop {
             match self.cmds.try_recv() {
+                Ok(Cmd::Prompt(text, ack)) if queue.len() >= MAX_QUEUED_PROMPTS => {
+                    let _ = ack.send(Err("too many prompts are waiting for this agent".into()));
+                    drop(text);
+                }
                 Ok(Cmd::Prompt(text, ack)) => {
                     let _ = ack.send(Ok(()));
                     queue.push_back(text);
@@ -350,8 +369,12 @@ impl Driver {
         if self.conn.tracker.state() != WireState::Idle {
             return;
         }
-        if let Some(text) = queue.pop_front() {
-            let _ = self.conn.prompt(&text);
+        if let Some(text) = queue.pop_front()
+            && let Err(e) = self.conn.prompt(&text)
+        {
+            self.conn
+                .tracker
+                .record_failure(&format!("prompt not sent: {e}"));
         }
     }
 
@@ -388,6 +411,14 @@ impl Driver {
         }
         let (n, dropped, partial) = (t.lines().len(), t.dropped(), t.partial().len());
         if (n, dropped, partial) != (synced.lines, synced.dropped, synced.partial) {
+            // Lines are numbered from the start of the session; only the ones not mirrored yet
+            // are copied, and the mirror is trimmed to the tracker's window.
+            let mirrored_total = synced.dropped + synced.lines as u64;
+            let first_new = mirrored_total.saturating_sub(dropped) as usize;
+            v.lines.extend(t.lines().iter().skip(first_new).cloned());
+            while v.lines.len() > n {
+                v.lines.pop_front();
+            }
             *synced = Synced {
                 wire_seq,
                 lines: n,
@@ -395,7 +426,6 @@ impl Driver {
                 partial,
             };
             v.bytes += 1;
-            v.lines = t.lines().iter().cloned().collect();
             v.partial = t.partial().to_string();
             v.dropped = dropped;
         }
@@ -403,23 +433,18 @@ impl Driver {
 
     /// Ends the process group: asks politely, then insists.
     fn stop(&mut self) -> u32 {
-        use nix::sys::signal::{Signal, killpg};
-        use nix::unistd::Pid;
-        let group = Pid::from_raw(self.conn.pid() as i32);
-        let _ = killpg(group, Signal::SIGTERM);
-        let deadline = Instant::now() + STOP_GRACE;
-        while Instant::now() < deadline {
-            if let Some(code) = self.conn.exit_code() {
-                return code as u32;
-            }
-            std::thread::sleep(TICK);
-        }
-        let _ = killpg(group, Signal::SIGKILL);
-        self.conn.exit_code().map_or(137, |c| c as u32)
+        self.conn.stop_group(STOP_GRACE) as u32
     }
 
+    /// The process is gone: nothing it started outlives it, the state no longer claims it is
+    /// working or at a dialog, and the exit is announced once.
     fn finish(&mut self, code: u32) {
-        lock(&self.view).status = PaneStatus::Exited { code };
+        {
+            let mut v = lock(&self.view);
+            v.status = PaneStatus::Exited { code };
+            v.state = AgentState::Unknown;
+            v.pending = None;
+        }
         (self.on_exit)();
     }
 }

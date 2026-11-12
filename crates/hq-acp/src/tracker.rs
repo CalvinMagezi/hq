@@ -13,6 +13,10 @@ const UPDATE_METHOD: &str = "session/update";
 const AUTH_CODE: i64 = -32000;
 /// Lines of transcript kept; older ones are dropped and counted.
 const TRANSCRIPT_MAX_LINES: usize = 5000;
+/// Longest unfinished line and longest per-turn text kept, so an agent that streams without
+/// newlines cannot grow memory without bound.
+const MAX_PARTIAL_BYTES: usize = 64 * 1024;
+const MAX_TURN_TEXT_BYTES: usize = 1024 * 1024;
 const BILLING_WORDS: [&str; 5] = ["subscription", "quota", "billing", "rate limit", "credit"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,6 +184,11 @@ impl Tracker {
         self.dropped
     }
 
+    /// Records that something went wrong outside a turn, such as a prompt that could not be sent.
+    pub fn record_failure(&mut self, why: &str) {
+        self.note(format!("failed: {why}"));
+    }
+
     /// Records a prompt that was sent, so the transcript reads as a conversation.
     pub fn record_prompt(&mut self, text: &str) {
         let first = text.lines().next().unwrap_or("");
@@ -278,7 +287,9 @@ impl Tracker {
         match update {
             Update::AgentText(t) => {
                 self.say(&t);
-                self.text.push_str(&t);
+                if self.text.len() < MAX_TURN_TEXT_BYTES {
+                    self.text.push_str(&t);
+                }
             }
             Update::ToolStart(call) => {
                 if !call.title.is_empty() {
@@ -355,6 +366,10 @@ impl Tracker {
             let done = std::mem::take(&mut self.partial);
             self.push_line(done);
             self.partial.push_str(piece);
+        }
+        if self.partial.len() > MAX_PARTIAL_BYTES {
+            let long = std::mem::take(&mut self.partial);
+            self.push_line(long);
         }
     }
 

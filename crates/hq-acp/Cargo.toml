@@ -9,6 +9,12 @@ description = "Agent Client Protocol client for coding agents: tolerant wire par
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.28", default-features = false, features = ["signal"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [[bin]]
 name = "fake-acp-agent"
 path = "tests/support/fake_agent.rs"
