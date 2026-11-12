@@ -11,6 +11,7 @@ const EDGE_ENGINEERING: &str = "hq-engineering-edge";
 const CALENDAR: &str = CALENDAR_CREATION_SKILL;
 const READING: &str = CALENDAR_READING_SKILL;
 const EDITING: &str = CALENDAR_EDITING_SKILL;
+const CONTACTS: &str = CONTACTS_LOOKUP_SKILL;
 
 fn assets_dir() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/skills")
@@ -103,7 +104,8 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             DIAGNOSE,
             CALENDAR,
             READING,
-            EDITING
+            EDITING,
+            CONTACTS
         ],
         "GitHub can be connected after start, with no repos listed"
     );
@@ -118,7 +120,8 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             DIAGNOSE,
             CALENDAR,
             READING,
-            EDITING
+            EDITING,
+            CONTACTS
         ]
     );
     assert_eq!(
@@ -131,7 +134,8 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             DIAGNOSE,
             CALENDAR,
             READING,
-            EDITING
+            EDITING,
+            CONTACTS
         ]
     );
     assert_eq!(
@@ -608,4 +612,25 @@ fn the_plugin_copy_of_the_engineering_core_skill_has_the_same_body() {
 #[test]
 fn the_plugin_copy_of_the_diagnose_skill_has_the_same_body() {
     assert_plugin_mirror(DIAGNOSE);
+}
+
+#[test]
+fn contacts_lookup_ships_with_a_hash_and_fails_closed_when_off() {
+    let _now = set_active_for_this_thread(Some(&[CONTACTS]));
+    assert!(is_active(CONTACTS));
+    assert_eq!(shipped_hash(CONTACTS).unwrap().len(), 64);
+    assert!(
+        shipped_file(CONTACTS, SKILL_FILE)
+            .unwrap()
+            .contains("contacts_search")
+    );
+    assert!(
+        active_for(&config_with(&[], &["contacts-lookup"]))
+            .iter()
+            .all(|n| *n != CONTACTS)
+    );
+    drop(_now);
+    let _off = set_active_for_this_thread(Some(&[]));
+    assert!(!is_active(CONTACTS));
+    assert!(shipped_hash(CONTACTS).is_none());
 }

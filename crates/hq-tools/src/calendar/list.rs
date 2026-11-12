@@ -19,7 +19,7 @@ pub const CALENDAR_LIST_MAX_EVENTS: usize = 50;
 /// Rows read from a phone's answer before the cap, so a hostile reply stays cheap.
 const MAX_ROWS_READ: usize = CALENDAR_LIST_MAX_EVENTS * 4;
 /// Longest run of digits taken as an event id.
-pub(super) const ID_MAX_DIGITS: usize = 18;
+pub(crate) const ID_MAX_DIGITS: usize = 18;
 /// A local time that never happened is moved forward in steps of this many minutes.
 const GAP_STEP_MINUTES: i64 = 30;
 const GAP_MAX_STEPS: i64 = 8;
@@ -183,7 +183,7 @@ pub async fn run_list(link: &DeviceLink, tool_call_id: &str, args: &Value) -> Va
 
 /// An event id the phone may name: ASCII digits only, so a link built from it can only
 /// ever point at a row in the calendar provider.
-fn numeric_id(v: &Value) -> Option<String> {
+pub(crate) fn numeric_id(v: &Value) -> Option<String> {
     let id = match v {
         Value::String(s) => s.clone(),
         Value::Number(n) => n.as_u64()?.to_string(),

@@ -1,9 +1,9 @@
 # Device actions: asking the owner's phone to do something
 
 A device action is a request HQ sends to the owner's phone and waits for: put an event on the
-calendar, read the day's events, later look up a contact or send a message. The calendar is the
-first domain. This page is the platform they share and how to add the next one. What the calendar
-does with it is in `CALENDAR_CREATION.md`.
+calendar, read the day's events, look up a contact, later send a message. The calendar is the
+first domain and contacts the second. This page is the platform they share and how to add the
+next one. What each does with it is in `CALENDAR_CREATION.md` and `CONTACTS.md`.
 
 ## The pieces
 
@@ -12,10 +12,17 @@ does with it is in `CALENDAR_CREATION.md`.
 | Store | `crates/hq-tools/src/device_actions/store.rs` | Open actions in memory: random single-use ids, ack and result windows, replay of a repeated request id, a cap on waiting actions per chat. |
 | Link | `device_actions/link.rs` | One chat turn's connection to its phone: the phone's clock and zone, the way to push a frame, and the open, wait, settle round trip. |
 | Spec table | `device_actions/spec.rs` | One `DeviceToolSpec` per tool, with its risk class, and the lookups governance and the result route use. |
-| Domain | `crates/hq-tools/src/calendar/` | Validators, payload builder, result filter, outcome vocabulary and the specs. |
+| Domain | `crates/hq-tools/src/calendar/`, `contacts/` | Validators, payload builder, result filter, outcome vocabulary and the specs. |
 | Routes | `crates/hq-web/src/device_actions_api.rs` | `POST /api/device-actions/{id}/ack`, `.../result` and `GET /api/device-actions/pending`. Domain-blind: they judge a result by its spec. |
 | Agent wrapper | `crates/hq-agent/src/device_tool.rs` | One `DeviceActionTool` that turns any spec into an `AgentTool`. |
 | Phone | `apps/android/` | One module per domain that answers a `device_action` frame by its `name`. |
+
+Domains today:
+
+| Domain | Tools | Wire actions | Risk | Skill | Page |
+|--------|-------|--------------|------|-------|------|
+| Calendar | `calendar_create_event`, `calendar_update_event`, `calendar_delete_event`, `calendar_list_events` | `calendar.create`, `.update`, `.delete`, `.list` | Create, Modify, Destructive, Read | `calendar-creation`, `calendar-editing`, `calendar-reading` | `CALENDAR_CREATION.md` |
+| Contacts | `contacts_search` | `contacts.search` | Read | `contacts-lookup` | `CONTACTS.md` |
 
 ## Risk classes
 

@@ -231,6 +231,22 @@ mod tests {
     }
 
     #[test]
+    fn searching_contacts_taints_by_its_risk_class_alone() {
+        use crate::governance::taint::is_untrusted_source;
+        let read = hq_tools::contacts::SEARCH_TOOL_NAME;
+        assert!(is_untrusted_source(read, "device"));
+        let args = json!({"query": "Alex"});
+        assert_eq!(always_ask_reason(read, &args), None);
+        assert_eq!(tainted_reason(read, &args, &tainted()), None);
+        let taint = TaintTracker::new();
+        let create = json!({"title": "x", "start_local": "2030-01-01T10:00"});
+        let create_tool = hq_tools::calendar::TOOL_NAME;
+        assert_eq!(tainted_reason(create_tool, &create, &taint), None);
+        taint.mark(read);
+        assert!(tainted_reason(create_tool, &create, &taint).is_some());
+    }
+
+    #[test]
     fn a_tainted_session_needs_the_owner_to_start_a_job_but_not_to_read_one() {
         let taint = tainted();
         let start = json!({"action": "start", "repo": "o/r", "job": "x"});

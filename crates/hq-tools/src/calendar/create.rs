@@ -138,12 +138,12 @@ pub fn finalize(body: &Value, payload: &Value) -> Value {
 
 /// Longest phone-supplied string the model is shown. Calendar names and accounts can be set by
 /// whoever shared a calendar, so they are bounded and stripped of line breaks before any model sees them.
-pub(super) const PHONE_TEXT_MAX_CHARS: usize = 200;
+pub(crate) const PHONE_TEXT_MAX_CHARS: usize = 200;
 /// Most calendars offered as choices in one question.
 const MAX_CHOICES: usize = 8;
 
 /// One line, no control characters, at most `max` characters.
-pub(super) fn clean(raw: &str, max: usize) -> String {
+pub(crate) fn clean(raw: &str, max: usize) -> String {
     let one_line: String = raw
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
@@ -157,7 +157,7 @@ pub(super) fn clean(raw: &str, max: usize) -> String {
         .collect()
 }
 
-pub(super) fn pass_through(code: &str, body: &Value) -> Value {
+pub(crate) fn pass_through(code: &str, body: &Value) -> Value {
     let keep: &[&str] = match code {
         outcome::CLARIFICATION_REQUIRED => &["reason", "ask", "choices"],
         outcome::PERMISSION_DENIED => &["missing", "next_step"],

@@ -35,7 +35,7 @@ fn phone_answers(store: &Arc<DeviceActionStore>, frame: &Value, body: Value) {
 }
 
 #[test]
-fn the_calendar_fills_the_table_one_entry_per_tool_in_offer_order() {
+fn the_domains_fill_the_table_one_entry_per_tool_in_offer_order() {
     let table: Vec<(&str, &str, RiskClass)> =
         offered().map(|s| (s.name, s.wire_action, s.risk)).collect();
     assert_eq!(
@@ -57,6 +57,7 @@ fn the_calendar_fills_the_table_one_entry_per_tool_in_offer_order() {
                 RiskClass::Destructive
             ),
             ("calendar_list_events", "calendar.list", RiskClass::Read),
+            ("contacts_search", "contacts.search", RiskClass::Read),
         ]
     );
     for spec in offered() {
