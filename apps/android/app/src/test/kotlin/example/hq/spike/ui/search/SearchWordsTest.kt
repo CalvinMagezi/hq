@@ -20,13 +20,13 @@ class SearchWordsTest {
 
     @Test fun chipsNameTheScopeBeforeAnythingIsTyped() {
         SearchScope.entries.forEach { assertEquals(SearchWords.scope(w, it), SearchWords.chip(w, SearchUi(), it)) }
-        assertEquals(listOf("All", "Notes", "Tasks", "Chats", "Helpers"), SearchScope.entries.map { SearchWords.scope(w, it) })
+        assertEquals(listOf("All", "Vault", "Tasks", "Chats", "Helpers"), SearchScope.entries.map { SearchWords.scope(w, it) })
     }
 
     @Test fun typedChipsCountEveryKindAndShowZero() {
         val ui = SearchUi(query = "a", notes = listOf(hit("A/x"), hit("B/y")), helpers = listOf(helper("t")))
         assertEquals("All 3", SearchWords.chip(w, ui, SearchScope.All))
-        assertEquals("Notes 2", SearchWords.chip(w, ui, SearchScope.Notes))
+        assertEquals("Vault 2", SearchWords.chip(w, ui, SearchScope.Notes))
         assertEquals("Tasks 0", SearchWords.chip(w, ui, SearchScope.Tasks))
         assertEquals("Chats 0", SearchWords.chip(w, ui, SearchScope.Chats))
         assertEquals("Helpers 1", SearchWords.chip(w, ui, SearchScope.Helpers))
@@ -34,14 +34,14 @@ class SearchWordsTest {
 
     @Test fun notesAndChatsShowNoNumberWhenHqCouldNotBeAsked() {
         val ui = SearchUi(query = "a", hqDown = true, notesFail = NotesFail.Stopped)
-        assertEquals("Notes", SearchWords.chip(w, ui, SearchScope.Notes))
+        assertEquals("Vault", SearchWords.chip(w, ui, SearchScope.Notes))
         assertEquals("Chats", SearchWords.chip(w, ui, SearchScope.Chats))
         assertEquals("Tasks 0", SearchWords.chip(w, ui, SearchScope.Tasks))
     }
 
     @Test fun aFullPageOfNotesIsShownAsAtLeast() {
         val ui = SearchUi(query = "a", notes = (1..SearchViewModel.NOTE_HITS).map { hit("F/n$it") })
-        assertEquals("Notes 30+", SearchWords.chip(w, ui, SearchScope.Notes))
+        assertEquals("Vault 30+", SearchWords.chip(w, ui, SearchScope.Notes))
     }
 
     @Test fun aFailedAskOfNotesIsNeverNothingMatchesThat() {

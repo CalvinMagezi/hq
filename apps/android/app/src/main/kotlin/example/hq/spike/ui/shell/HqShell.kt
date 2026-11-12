@@ -69,12 +69,12 @@ import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 
 /**
- * Every place the shell can show. Three are on the bar, left to right: Notes, Chat, Inbox. Tasks and Helpers are where HQ
+ * Every place the shell can show. Three are on the bar, left to right: Vault, Chat, Inbox. Tasks and Helpers are where HQ
  * and its agents work: they keep their pages and open from an Inbox item, a chat card, search, a link or Settings, never
  * from the bar.
  */
 enum class Place(val label: String, val icon: ImageVector?, val onBar: Boolean = true) {
-    Notes("Notes", HqIcons.Notes),
+    Notes("Vault", HqIcons.Notes),
     Tasks("Tasks", HqIcons.Tasks, onBar = false),
     Chat("Chat", null),
     Helpers("Helpers", HqIcons.Helpers, onBar = false),
@@ -98,7 +98,7 @@ private val RaisedLift = 10.dp
  * The same two bars on every main screen. Each place keeps where the user was; Back from any other
  * place goes to Chat, and Back from Chat leaves the app. The bottom bar steps aside while the keyboard is up.
  */
-/** Lets a screen or an overlay send the shell to another place, such as a note card going to Notes. */
+/** Lets a screen or an overlay send the shell to another place, such as a note card going to Vault. */
 /** Opens the one search where a pill, a magnifier or a missing note asks to start. */
 val LocalOpenSearch = staticCompositionLocalOf<(example.hq.spike.ui.search.SearchStart) -> Unit> { {} }
 

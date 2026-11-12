@@ -85,7 +85,7 @@ turned on for the browser or file manager; the app asks once for its own updates
 ## The native shell (in progress)
 
 `ShellActivity` is the Kotlin and Jetpack Compose app described by the mobile design (page 3): the same
-two bars on every main screen, three places on the bar (Notes, a raised Chat button, Inbox; Tasks and Helpers
+two bars on every main screen, three places on the bar (Vault, a raised Chat button, Inbox; Tasks and Helpers
 open from Settings, an Inbox item, search or a link), Back
 from any place to Chat and then out. It is the launcher screen. The WebView app (`MainActivity`) stays as a
 fallback that only adb can open: `adb shell am start -n online.agenthq.app/.MainActivity`. Open the shell on

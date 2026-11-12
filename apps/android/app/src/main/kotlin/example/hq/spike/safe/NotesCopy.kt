@@ -57,7 +57,7 @@ object NotesCopy {
     class Cancelled : Exception()
 
     /** The file name offered to the picker, from the spec's pattern. */
-    fun fileName(time: LocalDateTime): String = "HQ notes ${NAME_FORMAT.format(time)}.zip"
+    fun fileName(time: LocalDateTime): String = "HQ Vault ${NAME_FORMAT.format(time)}.zip"
 
     /**
      * True for what never goes in: logs, HQ's lock files, backups, restore work folders, the config, the bridge key, and the keys HQ keeps in

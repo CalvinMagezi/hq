@@ -36,7 +36,7 @@ class ConnectionSheetTest {
         show(Connection.Starting(2, 19, 25L), ConnectionFacts(savedAt = "2:32 PM"))
         rule.onNodeWithText("HQ is starting").assertIsDisplayed()
         rule.onNodeWithText("Step 3 of 4 \u00b7 19 s", substring = true).assertExists()
-        rule.onNodeWithContentDescription("Step 3 of 4, Opening your notes and tasks").assertExists()
+        rule.onNodeWithContentDescription("Step 3 of 4, Opening your Vault and tasks").assertExists()
         rule.onNodeWithText("Usually about 25 s").assertExists()
         rule.onNodeWithText("2:32 PM").assertExists()
         rule.onAllNodesWithText("Taking longer than usual. HQ is still starting.").assertCountEquals(0)
@@ -57,7 +57,7 @@ class ConnectionSheetTest {
         var closed = 0
         var restarted = 0
         show(Connection.Starting(2, 72, 40L), actions = ConnectionActions(onRestart = { restarted++ }), onClose = { closed++ })
-        rule.onNodeWithText("HQ is still opening your notes. Restarting starts over.").assertExists()
+        rule.onNodeWithText("HQ is still opening your Vault. Restarting starts over.").assertExists()
         rule.onNodeWithText("Keep waiting").performScrollTo().performClick()
         assertEquals(1, closed)
         rule.onNodeWithText("Restart").performScrollTo().performClick()
@@ -81,11 +81,11 @@ class ConnectionSheetTest {
             ConnectionActions(onStartHq = { seen += "start" }, onSaveCopy = { seen += "copy" }, onCopyDetails = { seen += "details" }),
         )
         rule.onNodeWithText("HQ has stopped").assertIsDisplayed()
-        rule.onNodeWithText("Opening your notes and tasks").assertExists()
+        rule.onNodeWithText("Opening your Vault and tasks").assertExists()
         rule.onNodeWithText("Then set Battery to Unrestricted.").assertExists()
         rule.onNodeWithText("Health check timed out after 60 s.").assertExists()
         rule.onNodeWithText("Start HQ").performScrollTo().performClick()
-        rule.onNodeWithText("Save a copy of my notes").performScrollTo().performClick()
+        rule.onNodeWithText("Save a copy of my Vault").performScrollTo().performClick()
         rule.onNodeWithText("Copy details").performScrollTo().performClick()
         assertEquals(listOf("start", "copy", "details"), seen)
     }

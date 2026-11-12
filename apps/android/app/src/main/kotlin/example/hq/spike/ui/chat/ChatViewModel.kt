@@ -409,7 +409,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 client.setPinned(sheet.path, pin)
-                _state.update { s -> s.copy(note = s.note?.takeIf { it.path == sheet.path }?.copy(pinned = pin) ?: s.note, notice = Notice(if (pin) "Pinned to the top of Notes" else "Unpinned")) }
+                _state.update { s -> s.copy(note = s.note?.takeIf { it.path == sheet.path }?.copy(pinned = pin) ?: s.note, notice = Notice(if (pin) "Pinned to the top of the Vault" else "Unpinned")) }
             } catch (e: HqUnavailable) {
                 _state.update { it.copy(notice = Notice("Couldn\'t change the pin. HQ didn\'t answer in time. Try again.")) }
             }
@@ -521,7 +521,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         const val DRAFT_PREFS = "chat_drafts"
         const val NEW_CHAT_KEY = "new"
         const val MAX_ATTACHED = 10
-        const val NOTE_GONE = "That note is not in your notes any more"
+        const val NOTE_GONE = "That note is not in your Vault any more"
         const val OFFER_SCHEDULED = "I will bring this back then."
         const val OFFER_NOT_SCHEDULED = "Could not schedule that. Try again."
         const val CHAT_GONE = "That chat is not in your list"

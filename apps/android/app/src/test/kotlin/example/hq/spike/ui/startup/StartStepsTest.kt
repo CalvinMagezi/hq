@@ -29,7 +29,7 @@ class StartStepsTest {
         rule.onNodeWithText("Starting HQ").assertExists()
         rule.onNodeWithText("Step 3 of 4 \u00b7 12 s").assertExists()
         rule.onNodeWithContentDescription("Step 1 of 4, Starting on this phone").assertExists()
-        rule.onNodeWithContentDescription("Step 3 of 4, Opening your notes and tasks").assertExists()
+        rule.onNodeWithContentDescription("Step 3 of 4, Opening your Vault and tasks").assertExists()
         rule.onNodeWithContentDescription("Step 4 of 4, Almost ready").assertExists()
         rule.onNodeWithText("Capture").performClick()
         assertEquals(1, captured)

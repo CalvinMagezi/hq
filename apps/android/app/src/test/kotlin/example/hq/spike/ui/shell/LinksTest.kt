@@ -20,6 +20,8 @@ class LinksTest {
         assertEquals(LinkTarget(Place.Helpers, id = "s-42"), parse("hq://helpers/s-42"))
         assertEquals(LinkTarget(Place.Helpers, github = true), parse("hq://helpers/github"))
         assertEquals(LinkTarget(Place.Chat), parse("hq://chat"))
+        assertEquals(LinkTarget(Place.Notes), parse("hq://vault"))
+        assertEquals(LinkTarget(Place.Notes), parse("hq://notes"))
     }
 
     @Test fun theAssistantPageAndTheComposerHaveLinks() {
@@ -41,16 +43,20 @@ class LinksTest {
     }
 
     @Test fun aNoteLinkCarriesItsPathDecoded() {
+        assertEquals("Notebooks/Projects/Agent-HQ/Mobile-First-Roadmap-2026-10-20.md", parse("hq://vault/Notebooks/Projects/Agent-HQ/Mobile-First-Roadmap-2026-10-20.md").path)
         assertEquals("Notebooks/Projects/Agent-HQ/Mobile-First-Roadmap-2026-10-20.md", parse("hq://notes/Notebooks/Projects/Agent-HQ/Mobile-First-Roadmap-2026-10-20.md").path)
+        assertEquals("Notebooks/Projects/Samsung battery steps.md", parse("hq://vault/Notebooks/Projects/Samsung%20battery%20steps.md").path)
         assertEquals("Notebooks/Projects/Samsung battery steps.md", parse("hq://notes/Notebooks/Projects/Samsung%20battery%20steps.md").path)
     }
 
     @Test fun aPathThatLeavesTheVaultIsDropped() {
-        for (bad in listOf("hq://notes/../etc/passwd", "hq://notes/Notebooks/../../x", "hq://notes//abs", "hq://notes/a/./b", "hq://notes/a%00b", "hq://notes/a%5Cb")) {
+        for (bad in listOf("hq://vault/../etc/passwd", "hq://notes/../etc/passwd", "hq://vault/Notebooks/../../x", "hq://notes/Notebooks/../../x", "hq://vault//abs", "hq://notes//abs", "hq://vault/a/./b", "hq://notes/a/./b", "hq://vault/a%00b", "hq://notes/a%00b", "hq://vault/a%5Cb", "hq://notes/a%5Cb")) {
             assertNull(bad, parse(bad).path)
             assertEquals(bad, Place.Notes, parse(bad).place)
         }
+        assertNull(parse("hq://vault/" + "a".repeat(600)).path)
         assertNull(parse("hq://notes/" + "a".repeat(600)).path)
+        assertNull(parse("hq://vault").path)
         assertNull(parse("hq://notes").path)
     }
 
@@ -77,7 +83,10 @@ class LinksTest {
 
     @Test fun theAwayPageAndANoteByIdHaveLinks() {
         assertEquals(LinkTarget(Place.Tasks, away = true), parse("hq://tasks/away"))
+        assertEquals(LinkTarget(Place.Notes, noteId = "abc123"), parse("hq://vault/n/abc123"))
         assertEquals(LinkTarget(Place.Notes, noteId = "abc123"), parse("hq://notes/n/abc123"))
+        assertNull(Links.parse("hq://vault/n/a b")?.noteId)
+        assertNull(Links.parse("hq://vault/n/..")?.noteId)
         assertNull(Links.parse("hq://notes/n/a b")?.noteId)
         assertNull(Links.parse("hq://notes/n/..")?.noteId)
     }

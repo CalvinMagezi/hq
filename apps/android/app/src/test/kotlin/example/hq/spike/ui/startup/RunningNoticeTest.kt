@@ -26,7 +26,7 @@ class RunningNoticeTest {
     @Test fun startingNamesTheStepAndNeverTheSeconds() {
         val a = RunningNotice.of(w, Connection.Starting(2, 12, null), true)
         assertEquals("HQ is starting", a.title)
-        assertEquals("Step 3 of 4 \u00b7 Opening your notes and tasks", a.body)
+        assertEquals("Step 3 of 4 \u00b7 Opening your Vault and tasks", a.body)
         assertEquals(RunningNotice.key(w, Connection.Starting(2, 12, null), true), RunningNotice.key(w, Connection.Starting(2, 40, 25L), true))
         assertFalse(RunningNotice.key(w, Connection.Starting(2, 12, null), true) == RunningNotice.key(w, Connection.Starting(3, 12, null), true))
     }
