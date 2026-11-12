@@ -13,6 +13,7 @@ mod disk_watchdog;
 mod github_write;
 mod governance;
 mod harness;
+mod inbox;
 mod instance;
 mod llm;
 mod mcp_connector;
@@ -59,6 +60,7 @@ pub use disk_watchdog::DiskWatchdogConfig;
 pub use github_write::GithubWriteConfig;
 pub use governance::*;
 pub use harness::*;
+pub use inbox::{FleetInboxConfig, HelperPolicy, InboxConfig};
 pub use instance::*;
 pub use llm::*;
 pub use mcp_connector::{
@@ -285,6 +287,10 @@ pub struct HqConfig {
     /// disk-watchdog.sh)
     #[serde(default)]
     pub disk_watchdog: DiskWatchdogConfig,
+
+    /// How quiet the Inbox is about helper sessions (`inbox.fleet`).
+    #[serde(default)]
+    pub inbox: InboxConfig,
 
     /// Scheduled encrypted backups of the vault and database. Off by default. See `docs/BACKUP.md`.
     #[serde(default)]
@@ -525,6 +531,7 @@ impl Default for HqConfig {
             backends: BackendsConfig::default(),
             self_update: SelfUpdateConfig::default(),
             disk_watchdog: DiskWatchdogConfig::default(),
+            inbox: InboxConfig::default(),
             backup: BackupConfig::default(),
             vault_watch: VaultWatchConfig::default(),
             context_fold: ContextFoldConfig::default(),

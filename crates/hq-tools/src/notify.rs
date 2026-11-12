@@ -25,7 +25,15 @@ const MAX_DEDUP_CHARS: usize = 200;
 /// Dedup keys HQ's own items use and the inbox reads meaning from: a new device's sign-in item is
 /// `device-sign-in:<device id>` (`hq_web::device_auth`), shown with It was me and Sign it out.
 /// An agent's notification may not take one, so it cannot pass as that card.
-pub const RESERVED_DEDUP_PREFIXES: &[&str] = &["device-sign-in:", "edge-worker-dispatch"];
+/// The session supervisor's block alerts, finish notices and day digest are reserved too, so a
+/// model cannot take a key and suppress the alert HQ raises for a blocked helper.
+pub const RESERVED_DEDUP_PREFIXES: &[&str] = &[
+    "device-sign-in:",
+    "edge-worker-dispatch",
+    "session-blocked-",
+    "session-finished-",
+    "fleet-digest-",
+];
 
 pub fn create_notify_tools(
     db: Arc<Database>,
@@ -258,6 +266,36 @@ mod tests {
         assert_eq!(items[0].source_task, NOTIFY_SOURCE);
         assert_eq!(items[0].title, "Deploy finished");
         assert_eq!(items[0].link.as_deref(), Some("/tasks"));
+    }
+
+    #[tokio::test]
+    async fn a_tool_cannot_mark_its_item_owner_only() {
+        let (tool, db) = tool(5);
+        tool.execute(json!({
+            "title": "Please look", "body": "b", "owner_only": true, "_hq_owner_only": true,
+            "source_group": "you", "kind": "proposal"
+        }))
+        .await
+        .unwrap();
+        let items = inbox(&db);
+        assert_eq!(items.len(), 1);
+        assert!(!items[0].owner_only, "only the runtime sets owner_only");
+    }
+
+    #[tokio::test]
+    async fn a_model_cannot_take_the_key_of_a_block_alert_or_a_digest() {
+        for key in [
+            "session-blocked-hs-1-3",
+            "Session-Finished-x",
+            "fleet-digest-2026-11-12",
+        ] {
+            let (tool, db) = tool(5);
+            let out = tool
+                .execute(json!({"title": "t", "body": "b", "dedup_key": key}))
+                .await;
+            assert!(out.is_err(), "{key} must be refused");
+            assert!(inbox(&db).is_empty());
+        }
     }
 
     #[tokio::test]

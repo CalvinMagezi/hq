@@ -454,6 +454,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "124_checkpoint_suggested_skills",
         include_str!("../sql/124_checkpoint_suggested_skills.sql"),
     ),
+    (
+        "125_quiet_fleet",
+        include_str!("../sql/125_quiet_fleet.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

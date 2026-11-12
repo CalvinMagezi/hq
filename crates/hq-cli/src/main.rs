@@ -659,6 +659,11 @@ enum Commands {
         site: Option<String>,
     },
 
+    /// Tidy the inbox: `hq inbox tidy` counts (and with --apply moves) stale helper requests,
+    /// `hq inbox restore` brings them back
+    #[command(subcommand)]
+    Inbox(commands::inbox::InboxAction),
+
     /// How HQ is used on this machine: capabilities, corrections, return visits (counts only)
     Adoption {
         /// Print JSON
@@ -1336,6 +1341,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Bridge(action) => commands::bridge::run(config, action).await,
         #[cfg(all(unix, feature = "bridge"))]
         Commands::Claude(action) => commands::claude::run(config, action),
+        Commands::Inbox(action) => commands::inbox::run(config, action),
         Commands::Adoption { json } => commands::adoption::run_adoption(config, json),
         Commands::Offers(action) => commands::adoption::run_offers(config, action),
         Commands::Decisions { days, site } => {

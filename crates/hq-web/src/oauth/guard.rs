@@ -318,7 +318,8 @@ fn ask_owner(
             grant.label, call.tool
         ),
     )
-    .with_dedup_key(key.to_string());
+    .with_dedup_key(key.to_string())
+    .owner_only(true);
     item.expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(APPROVAL_TTL_HOURS));
     value_items::insert(&state.db, &item).map_err(|_| lookup_failed())?;
     Ok(())

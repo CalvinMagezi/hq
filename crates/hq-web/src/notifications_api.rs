@@ -107,6 +107,15 @@ pub(crate) struct NotificationItem {
     pub(crate) topic: String,
     /// Its topic is silenced: it is listed, but nothing alerts and the badge does not count it.
     pub(crate) silenced: bool,
+    /// Only the owner can decide it (sign-in, connector, owner approval, escalation, data loss).
+    /// Set by the runtime that raised the item; the phone badge counts only these.
+    pub(crate) owner_only: bool,
+    /// Who it is from: `you`, `helpers` or `system`.
+    pub(crate) source_group: String,
+    /// Why it left Needs you by itself (`auto_tidy:<rule>`), for the Done list's "No longer
+    /// waiting". Absent for every other item.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) expired_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -116,6 +125,12 @@ pub(crate) struct NotificationsResponse {
     pub(crate) pending_approvals_count: usize,
     /// Updates that arrived since the owner last read them, silenced topics left out.
     pub(crate) unread_updates_count: usize,
+    /// Waiting decisions only the owner can make; what the phone badge counts.
+    pub(crate) needs_you_owner_only: usize,
+    /// Waiting requests from helpers that the owner's agents are handling.
+    pub(crate) needs_you_helpers: usize,
+    /// Items the tidy moved out of Needs you that can still be restored.
+    pub(crate) expired_count: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,7 +155,7 @@ pub(crate) struct NotificationActionResponse {
 /// Each item with the dialog it is about, when it is a blocked session's alert (`dialog_alerts`).
 const VALUE_ITEM_COLUMNS: &str = "SELECT v.id, v.source_task, v.kind, v.title, v.body, v.artifact_path, v.score, v.state, v.created_at, v.link, \
      d.session_id, d.pending_seq, d.kind, d.question, d.command, d.options, d.approve_option, d.answered_at IS NOT NULL, \
-     v.dedup_key, o.tool, o.args, v.read_at IS NOT NULL \
+     v.dedup_key, o.tool, o.args, v.read_at IS NOT NULL, v.owner_only, v.expired_reason \
      FROM value_items v LEFT JOIN dialog_alerts d ON d.item_id = v.id \
      LEFT JOIN owner_approvals o ON o.item_id = v.id";
 
@@ -233,6 +248,8 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
         (true, false) => &["dismiss", "acknowledge"],
     };
     let topic = hq_db::inbox_prefs::Topic::of_source(&source_task).as_str();
+    let source_for_group = source_task.clone();
+    let owner_only = row.get::<_, i64>(22)? != 0;
     let extra = BTreeMap::from([
         ("source_task".to_string(), source_task),
         ("val_kind".to_string(), kind_str),
@@ -272,6 +289,9 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
         read: row.get(21)?,
         topic: topic.to_string(),
         silenced: false,
+        owner_only,
+        source_group: hq_db::inbox_prefs::source_group(&source_for_group, owner_only).to_string(),
+        expired_reason: row.get(23)?,
     })
 }
 
@@ -323,6 +343,11 @@ pub(crate) fn aggregate_notifications(
         .filter(|n| n.kind == NotificationKind::ValueItem && !n.read && !n.silenced)
         .count();
     let unread_count = pending().count();
+    let waiting_decisions =
+        || pending().filter(|n| n.kind == NotificationKind::ActionNeeded && !n.silenced);
+    let needs_you_owner_only = waiting_decisions().filter(|n| n.owner_only).count();
+    let needs_you_helpers = waiting_decisions().filter(|n| !n.owner_only).count();
+    let expired_count = restorable_expired_count(db)?;
     all.truncate(limit);
 
     Ok(NotificationsResponse {
@@ -330,6 +355,24 @@ pub(crate) fn aggregate_notifications(
         unread_count,
         pending_approvals_count,
         unread_updates_count,
+        needs_you_owner_only,
+        needs_you_helpers,
+        expired_count,
+    })
+}
+
+/// Items the tidy expired within the restore window and the owner has not cleared.
+fn restorable_expired_count(db: &hq_db::Database) -> Result<usize, anyhow::Error> {
+    let floor =
+        (Utc::now() - chrono::Duration::days(hq_db::inbox_tidy::RESTORE_WINDOW_DAYS)).to_rfc3339();
+    db.with_conn(|c| {
+        let n: i64 = c.query_row(
+            "SELECT COUNT(*) FROM value_items WHERE state = 'expired' AND expired_reason IS NOT NULL \
+             AND cleared_at IS NULL AND expired_at >= ?1",
+            [floor],
+            |r| r.get(0),
+        )?;
+        Ok(usize::try_from(n).unwrap_or(0))
     })
 }
 
@@ -979,6 +1022,50 @@ mod tests {
             None
         );
         assert_eq!(web_chat_of("disk-watchdog-2026-11-05"), None);
+    }
+
+    #[test]
+    fn counts_split_owner_only_decisions_from_helper_requests_and_list_the_tidied() {
+        use hq_core::types::{ValueItem, ValueKind};
+        let db = hq_db::Database::open_memory().unwrap();
+        let put = |source: &str, key: &str, owner_only: bool| {
+            let item = ValueItem::new(source, ValueKind::ActionNeeded, "t", "b")
+                .with_dedup_key(key)
+                .owner_only(owner_only);
+            hq_db::value_items::insert(&db, &item).unwrap();
+            item.id
+        };
+        put("device-sign-in", "sign-in-1", true);
+        put("session-supervisor", "session-blocked-hs-1-1", false);
+        put("session-supervisor", "session-blocked-hs-2-1", false);
+        let gone = put("session-supervisor", "session-blocked-hs-3-1", false);
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE value_items SET state = 'expired', expired_reason = 'auto_tidy:session_ended', \
+                 expired_at = ?2 WHERE id = ?1",
+                rusqlite::params![gone, Utc::now().to_rfc3339()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let res = aggregate_notifications(&db, None, None, 50).unwrap();
+        assert_eq!(res.needs_you_owner_only, 1);
+        assert_eq!(res.needs_you_helpers, 2);
+        assert_eq!(res.pending_approvals_count, 3, "the old count is unchanged");
+        assert_eq!(res.expired_count, 1);
+        let tidied = res
+            .notifications
+            .iter()
+            .find(|n| n.id == format!("val_{gone}"))
+            .unwrap();
+        assert_eq!(
+            tidied.expired_reason.as_deref(),
+            Some("auto_tidy:session_ended")
+        );
+        assert_eq!(tidied.source_group, "helpers");
+        let sign_in = res.notifications.iter().find(|n| n.owner_only).unwrap();
+        assert_eq!(sign_in.source_group, "you");
     }
 
     #[test]

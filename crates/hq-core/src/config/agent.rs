@@ -57,6 +57,10 @@ pub struct DaemonConfig {
     /// Reads local chat and tool records only.
     #[serde(default = "default_true")]
     pub adoption_digest: bool,
+
+    /// A daily tidy that moves stale helper requests out of Needs you (restorable for 30 days).
+    #[serde(default = "default_true")]
+    pub inbox_tidy: bool,
 }
 
 /// How chat turns are turned into memories.
@@ -103,6 +107,7 @@ impl Default for DaemonConfig {
             link_capture: true,
             tool_failure_digest: true,
             adoption_digest: true,
+            inbox_tidy: true,
         }
     }
 }

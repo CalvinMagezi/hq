@@ -6,7 +6,7 @@ use rusqlite::{OptionalExtension, Row, params};
 use crate::Database;
 
 const COLS: &str = "id, source_task, kind, title, body, artifact_path, score, dedup_key, \
-                    state, created_at, routed_at, delivered_at, engaged_at, expires_at, engagement, link";
+                    state, created_at, routed_at, delivered_at, engaged_at, expires_at, engagement, link, owner_only";
 
 fn ts(dt: &DateTime<Utc>) -> String {
     dt.to_rfc3339()
@@ -46,6 +46,7 @@ fn row_to_item(r: &Row) -> rusqlite::Result<ValueItem> {
         expires_at: parse_opt_ts(r.get::<_, Option<String>>(13)?),
         engagement: r.get(14)?,
         link: r.get(15)?,
+        owner_only: r.get::<_, i64>(16)? != 0,
     })
 }
 
@@ -54,8 +55,8 @@ pub fn insert(db: &Database, item: &ValueItem) -> Result<()> {
     db.with_conn(|c| {
         c.execute(
             "INSERT INTO value_items (id, source_task, kind, title, body, artifact_path, score, \
-             dedup_key, state, created_at, routed_at, delivered_at, engaged_at, expires_at, engagement, link) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+             dedup_key, state, created_at, routed_at, delivered_at, engaged_at, expires_at, engagement, link, owner_only) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
             params![
                 item.id,
                 item.source_task,
@@ -73,6 +74,7 @@ pub fn insert(db: &Database, item: &ValueItem) -> Result<()> {
                 opt_ts(&item.expires_at),
                 item.engagement,
                 item.link,
+                item.owner_only,
             ],
         )?;
         Ok(())
@@ -495,6 +497,18 @@ pub fn any_with_dedup(db: &Database, dedup_key: &str) -> Result<bool> {
             params![dedup_key],
             |r| r.get(0),
         )?)
+    })
+}
+
+/// Like [`any_with_dedup`], but only counts items written by one of `sources`, so another
+/// producer's item with the same key cannot stand in for the supervisor's own.
+pub fn any_with_dedup_from(db: &Database, dedup_key: &str, sources: &[&str]) -> Result<bool> {
+    db.with_conn(|c| {
+        let mut stmt = c.prepare("SELECT source_task FROM value_items WHERE dedup_key = ?1")?;
+        let found = stmt
+            .query_map(params![dedup_key], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(found.iter().any(|s| sources.contains(&s.as_str())))
     })
 }
 

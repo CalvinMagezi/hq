@@ -497,6 +497,13 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("tool-failure-digest", Duration::from_secs(604800)),
         // How HQ was used (capabilities, corrections, return), once a week; `daemon.adoption_digest`.
         DaemonTask::with_default_timeout("adoption-digest", Duration::from_secs(604800)),
+        // Stale helper requests leave Needs you (restorable); `daemon.inbox_tidy`.
+        // Starts 30 minutes after the daemon and runs only once the supervisor has swept.
+        DaemonTask::delayed(
+            "inbox-tidy",
+            Duration::from_secs(86400),
+            Duration::from_secs(1800),
+        ),
         // Tasks made in chat that are due today or tomorrow, or overdue; acts in waking hours only.
         DaemonTask::with_default_timeout("due-reminders", Duration::from_secs(3600)),
         // Next steps the owner scheduled, back in their chat at the chosen time.
@@ -663,6 +670,7 @@ async fn dispatch_task(
         "task-stale-digest" => tasks_periodic::run_task_stale_digest(db, config).await,
         "tool-failure-digest" => tasks_periodic::run_tool_failure_digest(db, config).await,
         "adoption-digest" => tasks_periodic::run_adoption_digest(db, config).await,
+        "inbox-tidy" => tasks_periodic::run_inbox_tidy(db, config).await,
         "due-reminders" => tasks_periodic::run_due_reminders(db).await,
         "scheduled-offers" => tasks_periodic::run_scheduled_offers(db).await,
         "link-capture" => tasks_periodic::run_link_capture(vault_path, db, config).await,

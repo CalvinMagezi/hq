@@ -62,7 +62,7 @@ impl Topic {
     pub fn of_source(source: &str) -> Topic {
         match source {
             "session-supervisor" | "session_chat" | "harness-sessions" | "subagent_runs"
-            | "background-turn" => Topic::Helpers,
+            | "background-turn" | "fleet-digest" => Topic::Helpers,
             "due_reminder" => Topic::Tasks,
             s if s.starts_with("task_") => Topic::Tasks,
             "adoption_digest"
@@ -74,6 +74,19 @@ impl Topic {
             "email-triage" | "email_triage" => Topic::Email,
             _ => Topic::Hq,
         }
+    }
+}
+
+/// Who an item is from, for the phone's grouping: `you` (something only the owner can decide, or
+/// HQ talking to them), `helpers` (the agents' own traffic) or `system` (upkeep and tips).
+pub fn source_group(source: &str, owner_only: bool) -> &'static str {
+    if owner_only {
+        return "you";
+    }
+    match Topic::of_source(source) {
+        Topic::Helpers => "helpers",
+        Topic::Upkeep | Topic::Tips => "system",
+        Topic::Hq | Topic::Tasks | Topic::Email => "you",
     }
 }
 

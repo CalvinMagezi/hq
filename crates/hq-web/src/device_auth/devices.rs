@@ -19,12 +19,14 @@ pub(crate) const ROTATE_PATH: &str = "/api/auth/rotate";
 pub(crate) const CURRENT_DEVICE_PATH: &str = "/api/auth/devices/current";
 pub(crate) const KEEP_PATH: &str = "/api/auth/devices/{id}/keep";
 
-/// Devices whose new sign-in item still waits for the owner.
+/// Devices the owner has not confirmed: the sign-in item still waits, or it lapsed by itself
+/// (`auto_tidy:signin_ttl`), which takes it out of Needs you but does not confirm the device.
 fn new_devices(db: &hq_db::Database) -> std::collections::HashSet<String> {
     let found = db.with_conn(|c| {
         let mut stmt = c.prepare(
             "SELECT dedup_key FROM value_items WHERE dedup_key LIKE ?1 AND source_task = ?2 \
-             AND state IN ('pending', 'delivered', 'routed')",
+             AND (state IN ('pending', 'delivered', 'routed') \
+                  OR (state = 'expired' AND expired_reason LIKE 'auto_tidy:signin%'))",
         )?;
         let keys = stmt
             .query_map(
@@ -161,7 +163,13 @@ pub(crate) async fn keep_handler(
         return refused;
     }
     match hq_db::web_auth::set_keep(&state.db, &id, body.keep, now()) {
-        Ok(true) => no_store(StatusCode::OK, json!({ "id": id, "keep": body.keep })),
+        Ok(true) => {
+            if body.keep {
+                // Keeping a device is the owner vouching for it.
+                super::settle_sign_in_item(&state.db, &id);
+            }
+            no_store(StatusCode::OK, json!({ "id": id, "keep": body.keep }))
+        }
         Ok(false) => ApiError::not_found().into_response(),
         Err(e) => ApiError::internal(e).into_response(),
     }
