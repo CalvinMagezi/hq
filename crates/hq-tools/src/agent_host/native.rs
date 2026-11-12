@@ -294,6 +294,20 @@ impl NativeBackend {
     /// The request with the agent's reporting hooks added, so the host hears
     /// its state and conversation id from the agent itself. The host writes the
     /// settings file on the machine the agent runs on.
+    /// Starts an agent over ACP. The host completes the handshake and opens the session before
+    /// it answers, so a started agent is ready: there is no screen to wait for.
+    fn launch_acp(&self, req: &LaunchRequest, argv: &[String]) -> Result<Launched, AgentHostError> {
+        let params = acp_spawn_params(req, argv, &self.sandbox, self.idle_ttl_secs);
+        let within = req.start_timeout + self.command_timeout;
+        self.call_within("agent.spawn", params, within)?;
+        Ok(Launched {
+            workspace_id: req.name.clone(),
+            pane_id: req.name.clone(),
+            agent: self.agent(&req.name)?,
+            ready: true,
+        })
+    }
+
     fn with_hooks(&self, req: &LaunchRequest) -> LaunchRequest {
         let mut req = req.clone();
         if let Some(mcp) = &req.mcp
@@ -381,6 +395,25 @@ impl NativeBackend {
 }
 
 const CLAUDE_KIND: &str = "claude";
+/// The `rule` an agent reports when the host reads it over the protocol.
+const ACP_RULE: &str = "acp";
+
+fn acp_spawn_params(
+    req: &LaunchRequest,
+    argv: &[String],
+    sandbox: &Option<Value>,
+    idle_ttl_secs: Option<u64>,
+) -> Value {
+    let env: serde_json::Map<String, Value> = req
+        .env
+        .iter()
+        .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+        .collect();
+    json!({
+        "name": req.name, "argv": argv, "cwd": req.cwd, "agent": req.kind, "env": env,
+        "sandbox": sandbox, "idle_ttl_secs": idle_ttl_secs, "transport": "acp",
+    })
+}
 
 /// The program and arguments to start. A wrapper command runs through a shell,
 /// the same way a person types it into a pane.
@@ -533,6 +566,9 @@ impl HostBackend for NativeBackend {
     }
 
     fn launch(&self, req: &LaunchRequest) -> Result<Launched, AgentHostError> {
+        if let Some(argv) = &req.acp_argv {
+            return self.launch_acp(req, argv);
+        }
         let env: serde_json::Map<String, Value> = req
             .env
             .iter()
@@ -611,6 +647,12 @@ impl HostBackend for NativeBackend {
 
     fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, AgentHostError> {
         self.call("agent.prompt", json!({ "name": target, "text": text }))?;
+        // Over the protocol the prompt is delivered, not typed: there is no echo to wait for and no
+        // Enter to press again, and a turn that is queued behind another is still accepted.
+        let info = self.call("agent.get", json!({ "name": target }))?;
+        if info.get("rule").and_then(Value::as_str) == Some(ACP_RULE) {
+            return Ok(PromptOutcome::Submitted);
+        }
         // Let the echo of the typed text land, so only output after it counts as a reaction.
         self.drawn(target, SUBMIT_ECHO_WITHIN)?;
         let echoed = self.bytes_seen(target)?;
@@ -935,7 +977,19 @@ mod tests {
             mcp: None,
             start_timeout: Duration::from_secs(1),
             policy: None,
+            acp_argv: None,
         }
+    }
+
+    #[test]
+    fn an_acp_spawn_names_the_transport_and_drops_the_terminal_options() {
+        let argv = vec!["opencode".to_string(), "acp".to_string()];
+        let p = acp_spawn_params(&req("opencode", None), &argv, &None, Some(60));
+        assert_eq!(p["transport"], "acp");
+        assert_eq!(p["argv"], json!(["opencode", "acp"]));
+        assert_eq!(p["agent"], "opencode");
+        assert!(p.get("resume_argv").is_none() && p.get("rows").is_none());
+        assert_eq!(p["idle_ttl_secs"], 60);
     }
 
     #[test]

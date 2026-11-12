@@ -45,7 +45,7 @@ trimmed) replayed through the tracker, including cancel and a provider error.
 
 ## Next
 
-1. A transport field on harness specs and profiles in `hq-tools`; `hq doctor` runs `initialize` only.
+1. `hq doctor` runs `initialize` for each ACP agent.
 2. HQ MCP injection through `mcpServers`, and edited files into task activity.
 3. Move the lanes over one at a time, keeping the pty path as the fallback.
 4. Bring ACP agents back after a host restart with the protocol's session resume.
@@ -83,3 +83,13 @@ not require a sandbox, and Hermes stays on the terminal transport where one is r
 
 Run a real agent through the host with `HQ_ACP_LIVE="<command>" cargo test -p hq-host --test
 acp_live -- --ignored --nocapture` (see the file header for the sandbox switches).
+
+## Choosing the transport (third slice)
+
+A harness profile opts in with `transport: acp` (and optionally `acp_args`); see "Running an agent over
+ACP" in `docs/AGENT_SESSIONS.md`. `HarnessProfileConfig` gained `transport` and `acp_args`, a profile
+that names an unknown transport or combines ACP with a wrapper `command` is refused when it resolves,
+and `LaunchRequest.acp_argv` carries the server command to `NativeBackend`, which sends
+`agent.spawn` with `transport: "acp"`, skips the screen wait and the hook, MCP and policy
+plumbing, and treats the agent as ready once the host has opened the session. `submit` over ACP never
+presses Enter a second time: the prompt is delivered, not typed.

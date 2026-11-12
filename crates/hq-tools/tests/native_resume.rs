@@ -137,6 +137,7 @@ fn a_reported_conversation_id_becomes_the_hosts_restart_command() {
             mcp: None,
             start_timeout: WAIT,
             policy: None,
+            acp_argv: None,
         })
         .unwrap();
     let mut client = Client::connect(&dir).unwrap();

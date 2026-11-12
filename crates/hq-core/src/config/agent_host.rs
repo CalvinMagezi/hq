@@ -399,6 +399,17 @@ pub struct HarnessProfileConfig {
     #[serde(default)]
     pub one_shot_args: Option<Vec<String>>,
 
+    /// `acp` runs the agent over the Agent Client Protocol instead of in a terminal: the host reads
+    /// its state from the protocol, and nothing is typed into it. Unset or `pty` keeps the terminal.
+    /// Only for bases that have an ACP command (or when `acp_args` names one), and not together
+    /// with `command`.
+    #[serde(default)]
+    pub transport: Option<String>,
+
+    /// Replaces the arguments that start the base CLI's ACP server (`acp`, or `--acp --stdio`).
+    #[serde(default)]
+    pub acp_args: Option<Vec<String>>,
+
     /// Environment for the pane's shell, and so for the launched CLI.
     #[serde(default)]
     pub env: BTreeMap<String, String>,

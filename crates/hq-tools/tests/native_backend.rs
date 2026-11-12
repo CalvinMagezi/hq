@@ -58,6 +58,7 @@ fn cat(name: &str, kind: &str) -> LaunchRequest {
         mcp: None,
         start_timeout: WAIT,
         policy: None,
+        acp_argv: None,
     }
 }
 
