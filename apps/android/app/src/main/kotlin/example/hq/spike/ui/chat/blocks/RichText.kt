@@ -5,6 +5,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.provider.CalendarContract
+import android.provider.ContactsContract
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
@@ -43,7 +44,7 @@ private val LinkStyle = TextLinkStyles(SpanStyle(color = Mts.BrandBlue, fontWeig
  * recognises (a backticked vault path, a link to a `.md` file). A note reference is a blue, bold, underlined
  * link that calls [onOpenNote]; any other link opens in the browser.
  */
-fun inlineText(text: String, onOpenNote: (String) -> Unit, onOpenUrl: (String) -> Unit, onOpenCalendar: (CalendarLink) -> Unit = {}): AnnotatedString = buildAnnotatedString {
+fun inlineText(text: String, onOpenNote: (String) -> Unit, onOpenUrl: (String) -> Unit, onOpenCalendar: (CalendarLink) -> Unit = {}, onOpenContact: (ContactLink) -> Unit = {}): AnnotatedString = buildAnnotatedString {
     var at = 0
     for (m in INLINE.findAll(text)) {
         append(text.substring(at, m.range.first))
@@ -57,7 +58,7 @@ fun inlineText(text: String, onOpenNote: (String) -> Unit, onOpenUrl: (String) -
             bold != null -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(bold) }
             code != null -> codeSpan(code, onOpenNote)
             wiki != null -> NoteRefs.wikilink(wiki).let { (target, shown) -> noteLink(NoteRefs.sanitize(target), shown, onOpenNote) }
-            else -> externalOrNote(label!!, href!!, onOpenNote, onOpenUrl, onOpenCalendar)
+            else -> externalOrNote(label!!, href!!, onOpenNote, onOpenUrl, onOpenCalendar, onOpenContact)
         }
     }
     append(text.substring(at))
@@ -74,12 +75,14 @@ private fun AnnotatedString.Builder.noteLink(path: String?, label: String, onOpe
     withLink(LinkAnnotation.Clickable("note:$path", LinkStyle) { onOpenNote(path) }) { append(label) }
 }
 
-private fun AnnotatedString.Builder.externalOrNote(label: String, href: String, onOpenNote: (String) -> Unit, onOpenUrl: (String) -> Unit, onOpenCalendar: (CalendarLink) -> Unit) {
+private fun AnnotatedString.Builder.externalOrNote(label: String, href: String, onOpenNote: (String) -> Unit, onOpenUrl: (String) -> Unit, onOpenCalendar: (CalendarLink) -> Unit, onOpenContact: (ContactLink) -> Unit) {
     val note = NoteRefs.fromLink(href)
     val event = CalendarLinks.parse(href)
+    val contact = ContactLinks.parse(href)
     when {
         note != null -> noteLink(note, label, onOpenNote)
         event != null -> withLink(LinkAnnotation.Clickable("calendar:${event.eventId}", LinkStyle) { onOpenCalendar(event) }) { append(label) }
+        contact != null -> withLink(LinkAnnotation.Clickable("contact:${contact.contactId}", LinkStyle) { onOpenContact(contact) }) { append(label) }
         href.startsWith("http://") || href.startsWith("https://") -> withLink(LinkAnnotation.Clickable("url:$href", LinkStyle) { onOpenUrl(href) }) {
             append(label)
             appendInlineContent(EXTERNAL_ICON, "\u2197")
@@ -100,7 +103,7 @@ private val ExternalIcon = mapOf(
 fun RichText(text: String, style: TextStyle, color: Color, onOpenNote: (String) -> Unit, modifier: Modifier = Modifier) {
     val uri = LocalUriHandler.current
     val context = LocalContext.current
-    val annotated = remember(text, onOpenNote) { inlineText(text, onOpenNote, { uri.openUri(it) }, { openCalendarEvent(context, it) }) }
+    val annotated = remember(text, onOpenNote) { inlineText(text, onOpenNote, { uri.openUri(it) }, { openCalendarEvent(context, it) }, { openContact(context, it) }) }
     Text(annotated, style = style, color = color, modifier = modifier, inlineContent = ExternalIcon)
 }
 
@@ -110,5 +113,11 @@ private fun openCalendarEvent(context: Context, link: CalendarLink) {
         .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, link.beginMs)
         .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, link.endMs)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try { context.startActivity(intent) } catch (e: ActivityNotFoundException) { }
+}
+
+/** Opens the contact card in the phone's contacts app. If none can show it, nothing happens. */
+private fun openContact(context: Context, link: ContactLink) {
+    val intent = Intent(Intent.ACTION_VIEW, ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, link.contactId)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     try { context.startActivity(intent) } catch (e: ActivityNotFoundException) { }
 }

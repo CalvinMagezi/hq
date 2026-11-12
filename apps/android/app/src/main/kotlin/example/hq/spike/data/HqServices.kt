@@ -36,6 +36,7 @@ class HqServices private constructor(private val app: Context) {
             example.hq.spike.calendar.CalendarLister(example.hq.spike.calendar.AndroidCalendarReader(app)),
             example.hq.spike.calendar.CalendarModifier(example.hq.spike.calendar.AndroidCalendarEditor(app), calendarPrefs),
         ),
+        example.hq.spike.contacts.ContactsModule(example.hq.spike.contacts.ContactsSearcher(example.hq.spike.contacts.AndroidContactsReader(app))),
     )
     private val deviceActions = example.hq.spike.deviceactions.DeviceActionHandler(
         example.hq.spike.deviceactions.HqDeviceActionLink(client),

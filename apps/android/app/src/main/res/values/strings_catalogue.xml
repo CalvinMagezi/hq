@@ -3746,6 +3746,13 @@
     <string name="cal_group_calendars">Save events to</string>
     <string name="cal_none_writable">No calendar on this phone can take new events.</string>
     <string name="cal_chosen">Chosen</string>
+    <string name="contacts_row_title">Contacts HQ can look up</string>
+    <string name="contacts_status_allowed">Allowed</string>
+    <string name="contacts_intro">When you ask HQ for someone\'s number or email address, it looks them up by name in the contacts on this phone. It only reads them and never changes a contact.</string>
+    <string name="contacts_need_access">HQ needs permission to read your contacts before it can look anyone up.</string>
+    <string name="contacts_allow">Allow contacts access</string>
+    <string name="contacts_denied_note">Contacts access is off. Turn it on in the phone\'s app settings for HQ.</string>
+    <string name="contacts_allowed_note">HQ can look people up by name.</string>
     <string name="group_work">What HQ is working on</string>
     <string name="row_work_tasks">Tasks</string>
     <string name="row_work_helpers">Helpers</string>
