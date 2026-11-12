@@ -166,6 +166,9 @@ pub struct AcpFacts {
     pub context_used: Option<u64>,
     #[serde(default)]
     pub context_size: Option<u64>,
+    /// What the agent said in its last finished turn (the end of it when long): its words.
+    #[serde(default)]
+    pub result: Option<String>,
 }
 
 /// A dialog an agent waits at, as the host read it off the screen.

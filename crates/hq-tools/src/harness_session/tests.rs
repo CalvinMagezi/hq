@@ -4923,3 +4923,42 @@ async fn a_tainted_turn_types_only_into_a_session_its_own_chat_watches() {
         "{err}"
     );
 }
+
+#[test]
+fn a_finished_acp_turn_adds_its_report_to_a_session_view() {
+    let Liveness::Alive(mut agent) = alive("hs-acp") else {
+        unreachable!()
+    };
+    let mut view = json!({});
+    with_turn(&mut view, &agent);
+    assert!(
+        view.get("turn").is_none(),
+        "a terminal agent has no turn report"
+    );
+
+    agent.acp = Some(crate::agent_host::AcpFacts {
+        touched: vec!["/w/a.rs".into()],
+        stop_reason: Some("turn done".into()),
+        turn_tokens: Some(42),
+        result: Some("all done".into()),
+        ..Default::default()
+    });
+    with_turn(&mut view, &agent);
+    assert_eq!(view["turn"]["files_edited"], json!(["/w/a.rs"]));
+    assert_eq!(view["turn"]["tokens"], 42);
+    assert_eq!(view["turn"]["result"], "all done");
+    assert!(
+        view["turn"]["reported_by"]
+            .as_str()
+            .unwrap()
+            .contains("untrusted")
+    );
+
+    agent.acp.as_mut().unwrap().stop_reason = None;
+    let mut running = json!({});
+    with_turn(&mut running, &agent);
+    assert!(
+        running["turn"].get("result").is_none(),
+        "no result before a turn ends"
+    );
+}

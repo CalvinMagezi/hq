@@ -198,6 +198,8 @@ pub struct AcpFacts {
     pub turn_tokens: Option<u64>,
     pub context_used: Option<u64>,
     pub context_size: Option<u64>,
+    /// What the agent said in its last finished turn, the end of it when long. Its words, not HQ's.
+    pub result: Option<String>,
 }
 
 /// Most agents the host runs at once, and the most bytes of command line one

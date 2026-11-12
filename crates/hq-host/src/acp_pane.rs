@@ -30,6 +30,8 @@ const MAX_QUEUED_PROMPTS: usize = 16;
 const RULE: &str = "acp";
 const CLIENT_NAME: &str = "agent-hq-host";
 const MCP_SERVER_NAME: &str = "agent-hq";
+/// Most characters of a turn's final text handed to callers; the transcript has the rest.
+const RESULT_MAX_CHARS: usize = 4000;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -479,6 +481,10 @@ fn mcp_servers(
 
 fn facts_of(t: &hq_acp::Tracker) -> AcpFacts {
     let (context_used, context_size) = t.context_use();
+    let result = t
+        .end()
+        .is_some()
+        .then(|| tail_chars(t.text(), RESULT_MAX_CHARS));
     let (stop_reason, turn_tokens) = match t.end() {
         Some(TurnEnd::Stopped { reason, usage }) => (Some(stop_label(reason)), usage.total),
         Some(TurnEnd::Failed { error, .. }) => (Some(format!("failed: {}", error.message)), None),
@@ -490,7 +496,14 @@ fn facts_of(t: &hq_acp::Tracker) -> AcpFacts {
         turn_tokens,
         context_used,
         context_size,
+        result: result.filter(|r| !r.is_empty()),
     }
+}
+
+/// The last `max` characters of `text`.
+fn tail_chars(text: &str, max: usize) -> String {
+    let count = text.chars().count();
+    text.chars().skip(count.saturating_sub(max)).collect()
 }
 
 fn stop_label(reason: &StopReason) -> String {

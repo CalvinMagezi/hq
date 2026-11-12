@@ -45,6 +45,7 @@ fn a_finished_turn_reports_its_edits_tokens_and_context() {
     assert_eq!(facts.touched, vec!["/work/a.txt"]);
     assert_eq!(facts.stop_reason.as_deref(), Some("turn done"));
     assert_eq!(facts.turn_tokens, Some(7));
+    assert_eq!(facts.result.as_deref(), Some("DONE"));
     host.kill("fact1").unwrap();
 }
 

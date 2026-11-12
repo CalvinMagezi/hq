@@ -1215,6 +1215,7 @@ fn info_json(i: &PaneInfo) -> Value {
             "turn_tokens": a.turn_tokens,
             "context_used": a.context_used,
             "context_size": a.context_size,
+            "result": a.result,
         })),
     })
 }
