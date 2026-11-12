@@ -73,6 +73,27 @@ impl HarnessSessionSpec {
     }
 }
 
+/// How a session talks to its agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Transport {
+    /// A terminal the host reads and types into.
+    Pty,
+    /// The Agent Client Protocol over the agent's stdio.
+    Acp,
+}
+
+const TRANSPORT_ACP: &str = "acp";
+const TRANSPORT_PTY: &str = "pty";
+
+/// The arguments that start a built-in harness's ACP server, for the CLIs that have one.
+fn builtin_acp_args(kind: &str) -> Option<&'static [&'static str]> {
+    match kind {
+        "opencode" | "antigravity" | "cursor" | "kimi" | "hermes" => Some(&["acp"]),
+        "github-copilot" | "copilot" => Some(&["--acp", "--stdio"]),
+        _ => None,
+    }
+}
+
 /// Copilot starts with every tool allowed, as `claude-code` starts with its
 /// permission bypass: in manual approval every command waits on a dialog nobody
 /// is there to answer. The denials name commands that undo or leak work outside
@@ -387,6 +408,31 @@ impl Harness {
         }
     }
 
+    /// How this session talks to its agent: a terminal unless the profile asks for ACP.
+    pub fn transport(&self) -> Transport {
+        let acp = self.profile.as_ref().and_then(|p| p.transport.as_deref()) == Some(TRANSPORT_ACP);
+        if acp { Transport::Acp } else { Transport::Pty }
+    }
+
+    /// The program and arguments that start the agent's ACP server.
+    pub fn acp_command(&self) -> Result<Vec<String>> {
+        let own = self.profile.as_ref().and_then(|p| p.acp_args.clone());
+        let args = match own {
+            Some(args) => args,
+            None => builtin_acp_args(self.spec.kind)
+                .map(|a| a.iter().map(|x| x.to_string()).collect())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "'{}' has no known ACP command; set acp_args on its profile",
+                        self.name
+                    )
+                })?,
+        };
+        Ok(std::iter::once(self.spec.binary().to_string())
+            .chain(args)
+            .collect())
+    }
+
     /// Arguments that run the agent once for `brief` and exit: the profile's
     /// `one_shot_args` when set, else the spec's. `None` when neither has one.
     pub fn one_shot_args(&self, brief: &str) -> Option<Vec<String>> {
@@ -408,6 +454,7 @@ impl Harness {
 /// A profile may share a built-in's name to replace how it launches.
 pub fn resolve_in(cfg: &AgentHostConfig, name: &str) -> Result<Harness> {
     if let Some(profile) = cfg.harness_profiles.get(name) {
+        check_transport(name, profile)?;
         let Some(spec) = spec_for(&profile.base) else {
             bail!(
                 "harness profile '{name}' names unknown base '{}' (known: {})",
@@ -434,6 +481,32 @@ pub fn resolve_in(cfg: &AgentHostConfig, name: &str) -> Result<Harness> {
             known_in(cfg).join(", ")
         ),
     }
+}
+
+/// A profile's transport must be one this build knows, and an ACP profile must be able to start
+/// an ACP server directly (a wrapper `command` cannot).
+fn check_transport(name: &str, profile: &HarnessProfileConfig) -> Result<()> {
+    let acp = match profile.transport.as_deref() {
+        None | Some(TRANSPORT_PTY) => false,
+        Some(TRANSPORT_ACP) => true,
+        Some(other) => bail!("harness profile '{name}': transport '{other}' is not 'pty' or 'acp'"),
+    };
+    if !acp {
+        if profile.acp_args.is_some() {
+            bail!("harness profile '{name}': acp_args only applies with transport: acp");
+        }
+        return Ok(());
+    }
+    if profile.command.is_some() {
+        bail!("harness profile '{name}': a wrapper command cannot be used over ACP");
+    }
+    if profile.args.is_some() {
+        bail!("harness profile '{name}': over ACP the terminal `args` do not apply; use acp_args");
+    }
+    if profile.acp_args.as_ref().is_some_and(Vec::is_empty) {
+        bail!("harness profile '{name}': acp_args is empty, so nothing would start the ACP server");
+    }
+    Ok(())
 }
 
 /// `resolve_in` against the loaded config; without a readable config only the
@@ -467,6 +540,77 @@ pub fn agent_host_config() -> AgentHostConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn acp_profile(base: &str, transport: &str) -> AgentHostConfig {
+        let mut cfg = AgentHostConfig::default();
+        cfg.harness_profiles.insert(
+            "p".into(),
+            HarnessProfileConfig {
+                base: base.into(),
+                transport: Some(transport.into()),
+                ..Default::default()
+            },
+        );
+        cfg
+    }
+
+    #[test]
+    fn an_acp_profile_starts_the_acp_server_of_its_base() {
+        for (base, want) in [
+            ("opencode", vec!["opencode", "acp"]),
+            ("github-copilot", vec!["copilot", "--acp", "--stdio"]),
+        ] {
+            let h = resolve_in(&acp_profile(base, "acp"), "p").unwrap();
+            assert_eq!(h.transport(), Transport::Acp);
+            assert_eq!(h.acp_command().unwrap(), want);
+        }
+    }
+
+    #[test]
+    fn a_profile_without_a_transport_stays_on_the_terminal() {
+        let h = resolve_in(&acp_profile("opencode", "pty"), "p").unwrap();
+        assert_eq!(h.transport(), Transport::Pty);
+        assert_eq!(
+            resolve_in(&AgentHostConfig::default(), "opencode")
+                .unwrap()
+                .transport(),
+            Transport::Pty
+        );
+    }
+
+    #[test]
+    fn a_base_with_no_acp_command_needs_acp_args() {
+        let h = resolve_in(&acp_profile("claude-code", "acp"), "p").unwrap();
+        assert!(h.acp_command().is_err());
+        let mut cfg = acp_profile("claude-code", "acp");
+        cfg.harness_profiles.get_mut("p").unwrap().acp_args = Some(vec!["serve".into()]);
+        assert_eq!(
+            resolve_in(&cfg, "p").unwrap().acp_command().unwrap(),
+            ["claude", "serve"]
+        );
+    }
+
+    #[test]
+    fn acp_profile_settings_that_cannot_work_are_refused() {
+        let with = |edit: fn(&mut HarnessProfileConfig)| {
+            let mut cfg = acp_profile("opencode", "acp");
+            edit(cfg.harness_profiles.get_mut("p").unwrap());
+            resolve_in(&cfg, "p")
+        };
+        assert!(with(|p| p.acp_args = Some(vec![])).is_err());
+        assert!(with(|p| p.args = Some(vec!["--x".into()])).is_err());
+        let mut stray = acp_profile("opencode", "pty");
+        stray.harness_profiles.get_mut("p").unwrap().acp_args = Some(vec!["acp".into()]);
+        assert!(resolve_in(&stray, "p").is_err());
+    }
+
+    #[test]
+    fn bad_transports_are_refused_when_the_profile_resolves() {
+        assert!(resolve_in(&acp_profile("opencode", "carrier-pigeon"), "p").is_err());
+        let mut wrapped = acp_profile("opencode", "acp");
+        wrapped.harness_profiles.get_mut("p").unwrap().command = Some("wrapper".into());
+        assert!(resolve_in(&wrapped, "p").is_err());
+    }
 
     #[test]
     fn all_specs_resolvable_by_name() {

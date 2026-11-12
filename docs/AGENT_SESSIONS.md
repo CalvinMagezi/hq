@@ -927,6 +927,32 @@ The launch commands are the ones each project documents; an install that starts 
 gets a profile (`base: hermes`, `command: ...`, `args: [...]`), and a profile may reuse the
 built-in name.
 
+### Running an agent over ACP
+
+A profile with `transport: acp` starts the base CLI's Agent Client Protocol server instead of its
+terminal interface, so the host reads state, dialogs, finished turns and the transcript from the
+protocol (rule `acp`) and types nothing into it. `harness_session_wait`, the finished-turn alert and
+dialog answering then work for agents that have no state rule file. Opt in per profile; the terminal
+stays the default.
+
+```yaml
+agent_host:
+  harness_profiles:
+    opencode-acp:
+      base: opencode
+      transport: acp
+      env:
+        OPENCODE_DISABLE_AUTOUPDATE: "1"
+```
+
+Built-in ACP commands: `opencode acp`, `agy acp`, `cursor-agent acp`, `kimi acp`, `hermes acp`,
+`copilot --acp --stdio`. A base without one (or a different command) sets `acp_args`. Not supported over
+ACP: a wrapper `command`, `model` (set it in the agent's own config), one-shot runs, HQ's MCP
+connection and command-policy hooks, and coming back after a host restart. A message sent while a turn
+runs waits for it to end; `esc` stops the turn. Hermes over ACP is not confined by the process sandbox
+(its gateway daemon runs the tools), so keep it on the terminal where a sandbox is required.
+See [plans/acp-lane.md](plans/acp-lane.md).
+
 OpenClaw runs with `--local`: its default talks to the OpenClaw gateway on a loopback port,
 and the sandbox refuses loopback connections. OpenClaw refuses `--local` while a gateway runs
 for the same state directory (`A Gateway is running for this state directory ... Run without

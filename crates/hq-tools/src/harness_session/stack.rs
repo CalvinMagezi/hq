@@ -84,6 +84,13 @@ pub fn lane_for(cfg: &HqConfig, s: &Specialist) -> Result<Lane> {
             super::names_in(HarnessCategory::GeneralPurpose).join(", ")
         );
     }
+    if harness.transport() == super::spec::Transport::Acp {
+        bail!(
+            "specialist '{}': '{}' runs over ACP, which has no one-shot run; a stack specialist needs the terminal",
+            s.name,
+            s.harness
+        );
+    }
     if harness.one_shot_args("").is_none() {
         bail!(
             "specialist '{}': '{}' has no one-shot command; give its profile `one_shot_args`",

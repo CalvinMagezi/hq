@@ -510,6 +510,11 @@ impl Host {
         }
     }
 
+    /// Whether `name` is an agent driven over ACP.
+    pub fn is_acp(&self, name: &str) -> bool {
+        lock(&self.acp).contains_key(name)
+    }
+
     fn acp_pane(&self, name: &str) -> Option<Arc<AcpPane>> {
         lock(&self.acp).get(name).cloned()
     }

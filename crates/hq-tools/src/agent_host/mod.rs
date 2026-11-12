@@ -345,6 +345,10 @@ pub struct LaunchRequest {
     /// The command policy the agent starts under (`hq_core::command_policy::Policy` as JSON).
     /// The built-in host turns it into a Claude Code hook that refuses what it denies.
     pub policy: Option<serde_json::Value>,
+    /// The program and arguments of the agent's ACP server, when it runs over the Agent Client
+    /// Protocol instead of in a terminal. Then `args`, `command`, `resume_args`, `mcp` and
+    /// `policy` do not apply.
+    pub acp_argv: Option<Vec<String>>,
 }
 
 /// The HQ endpoint and the session's own token.

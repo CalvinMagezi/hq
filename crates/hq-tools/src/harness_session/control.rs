@@ -69,13 +69,15 @@ pub async fn resume(db: &Arc<Database>, session_id: &str, prompt: Option<&str>) 
     blocking(move || super::checkout::reopen(&reopen_db, &reopen_host, &id)).await??;
     // The policy it started under, so a resumed agent is held to the same rules.
     let policy = super::policy::of(db, session_id);
-    let resumable = match spec.resume {
-        ResumeStrategy::Args(args) => {
-            !args.iter().any(|a| a.contains("{token}")) || row.resume_token.is_some()
-        }
-        ResumeStrategy::TokenOrArgs { .. } | ResumeStrategy::SessionDir => true,
-        ResumeStrategy::None => false,
-    };
+    // An ACP session has no resume command: the protocol's own session resume is not wired yet.
+    let resumable = harness.transport() == super::spec::Transport::Pty
+        && match spec.resume {
+            ResumeStrategy::Args(args) => {
+                !args.iter().any(|a| a.contains("{token}")) || row.resume_token.is_some()
+            }
+            ResumeStrategy::TokenOrArgs { .. } | ResumeStrategy::SessionDir => true,
+            ResumeStrategy::None => false,
+        };
     let mut value = launch_session(
         db,
         &harness,

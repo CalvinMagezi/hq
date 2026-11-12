@@ -355,13 +355,35 @@ fn mcp_access(
     }
 }
 
+/// The ACP server command when the harness runs over ACP. What a terminal start does that an ACP
+/// start cannot is refused here, before anything runs, rather than dropped quietly.
+fn acp_argv_for(harness: &Harness, l: &Launch<'_>) -> Result<Option<Vec<String>>> {
+    if harness.transport() != spec::Transport::Acp {
+        return Ok(None);
+    }
+    if harness.model.is_some() {
+        anyhow::bail!(
+            "'{}' runs over ACP, where HQ does not set the model yet: leave model out and set it in the agent's own config",
+            harness.name
+        );
+    }
+    if l.one_shot.is_some() {
+        anyhow::bail!("'{}' has no one-shot run over ACP", harness.name);
+    }
+    harness.acp_command().map(Some)
+}
+
 pub(super) async fn run_launch(
     db: &Arc<Database>,
     harness: &Harness,
     l: Launch<'_>,
 ) -> Result<Value> {
     preflight::require_binary(&l.host, harness)?;
-    let mcp = mcp_access(db, &l.host, harness, l.session_id);
+    // An ACP agent is not given HQ's MCP connection, so no session token is minted for it.
+    let mcp = match harness.transport() {
+        spec::Transport::Pty => mcp_access(db, &l.host, harness, l.session_id),
+        spec::Transport::Acp => None,
+    };
     let minted = mcp.is_some();
     let session_id = l.session_id.to_string();
     let launched = launch_with(db, harness, l, mcp).await;
@@ -379,9 +401,11 @@ async fn launch_with(
     mcp: Option<McpAccess>,
 ) -> Result<Value> {
     let profile = harness.profile.as_ref();
+    let acp_argv = acp_argv_for(harness, &l)?;
     let prompt = l.prompt.filter(|p| !p.trim().is_empty());
     // A resume is not handed the prompt at start: its prompt is a follow-up, typed in as one.
     let prompt_at_start = match (prompt, l.one_shot, l.resuming) {
+        (Some(_), _, _) if acp_argv.is_some() => Vec::new(),
         (Some(prompt), None, false) => harness.prompt_args(prompt),
         _ => Vec::new(),
     };
@@ -415,6 +439,7 @@ async fn launch_with(
         mcp,
         start_timeout: l.host.launch_bound(),
         policy: l.policy.and_then(|p| serde_json::to_value(p).ok()),
+        acp_argv,
     };
     let began = std::time::Instant::now();
     let host = l.host.clone();
