@@ -775,5 +775,6 @@ fn agent_from_json(v: &Value) -> Option<AgentInfo> {
             .get("pending")
             .and_then(|p| serde_json::from_value(p.clone()).ok()),
         pending_seq: v.get("pending_seq").and_then(Value::as_u64),
+        acp: None,
     })
 }

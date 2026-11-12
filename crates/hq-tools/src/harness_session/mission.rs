@@ -93,15 +93,70 @@ pub fn record(
     session: &HarnessSessionRow,
     event: Event,
 ) -> Result<Option<TaskLink>> {
+    record_with_note(conn, session, event, None)
+}
+
+/// `record`, with `note` added to the comment the event leaves on the task.
+pub fn record_with_note(
+    conn: &Connection,
+    session: &HarnessSessionRow,
+    event: Event,
+    note: Option<&str>,
+) -> Result<Option<TaskLink>> {
     // One transaction, so two events for a session that arrive together cannot
     // interleave their lease changes.
-    t::in_write_tx(conn, |conn| record_in(conn, session, event))
+    t::in_write_tx(conn, |conn| record_in(conn, session, event, note))
+}
+
+/// Most files named in a note, and the longest path kept: an agent's own account is data, and a
+/// task comment is not the place for a megabyte of it.
+const NOTE_MAX_FILES: usize = 12;
+const NOTE_MAX_PATH_CHARS: usize = 160;
+
+/// What a finished turn of an ACP agent adds to its task: the files its tools reported editing
+/// and the tokens it used. It says plainly that this is the agent's report and not a check.
+pub fn turn_note(facts: &crate::agent_host::AcpFacts) -> Option<String> {
+    let mut parts = Vec::new();
+    if !facts.touched.is_empty() {
+        let shown: Vec<String> = facts
+            .touched
+            .iter()
+            .take(NOTE_MAX_FILES)
+            .map(|p| clean_path(p))
+            .collect();
+        let more = facts.touched.len().saturating_sub(NOTE_MAX_FILES);
+        let tail = if more > 0 {
+            format!(" and {more} more")
+        } else {
+            String::new()
+        };
+        parts.push(format!(
+            "Files its edit tools reported (the agent's own account, check `git diff`): {}{tail}.",
+            shown.join(", ")
+        ));
+    }
+    if let Some(tokens) = facts.turn_tokens {
+        parts.push(format!("Tokens this turn: {tokens}."));
+    }
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
+/// A path on one line, no control characters, shortened from the front.
+fn clean_path(path: &str) -> String {
+    let flat: String = path.chars().filter(|c| !c.is_control()).collect();
+    let count = flat.chars().count();
+    if count <= NOTE_MAX_PATH_CHARS {
+        return flat;
+    }
+    let tail: String = flat.chars().skip(count - NOTE_MAX_PATH_CHARS).collect();
+    format!("...{tail}")
 }
 
 fn record_in(
     conn: &Connection,
     session: &HarnessSessionRow,
     event: Event,
+    note: Option<&str>,
 ) -> Result<Option<TaskLink>> {
     // A task archived under a running session is left alone: its events are not errors.
     let Some(task) = linked_task(conn, session)?.filter(|task| task.archived_at.is_none()) else {
@@ -144,6 +199,10 @@ fn record_in(
     };
     close_lease(conn, session, event)?;
     if let Some(body) = comment(session, event, moved.as_ref()) {
+        let body = match note {
+            Some(note) => format!("{body}\n\n{note}"),
+            None => body,
+        };
         t::add_comment(conn, &task.id, COMMENT_AUTHOR, &body, None)?;
     }
     let status = moved
@@ -490,6 +549,49 @@ mod tests {
     fn leases(db: &Database, task: &str) -> Vec<t::WorkSession> {
         db.with_conn(|c| t::list_work_sessions(c, task, 10))
             .unwrap()
+    }
+
+    fn facts(touched: &[&str], tokens: Option<u64>) -> crate::agent_host::AcpFacts {
+        crate::agent_host::AcpFacts {
+            touched: touched.iter().map(|p| p.to_string()).collect(),
+            turn_tokens: tokens,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_finished_acp_turn_names_its_files_and_tokens_and_says_whose_account_it_is() {
+        let note = turn_note(&facts(&["/w/a.rs", "/w/b.rs"], Some(7))).unwrap();
+        assert!(note.contains("/w/a.rs, /w/b.rs") && note.contains("Tokens this turn: 7."));
+        assert!(note.contains("the agent's own account"));
+        assert_eq!(turn_note(&facts(&[], None)), None);
+    }
+
+    #[test]
+    fn the_note_is_bounded_and_one_line_per_path() {
+        let many: Vec<String> = (0..20).map(|n| format!("/w/f{n}.rs")).collect();
+        let refs: Vec<&str> = many.iter().map(String::as_str).collect();
+        let note = turn_note(&facts(&refs, None)).unwrap();
+        assert!(note.contains("and 8 more") && !note.contains("f19.rs"));
+        let long = format!("/w/{}\nrm -rf", "x".repeat(400));
+        let note = turn_note(&facts(&[long.as_str()], None)).unwrap();
+        assert!(!note.contains('\n') && note.contains("..."));
+        assert!(note.chars().count() < 400);
+    }
+
+    #[test]
+    fn the_note_lands_in_the_comment_the_event_leaves() {
+        let (db, task) = setup();
+        let s = session(&db, "hs-note", Some(&task));
+        apply(&db, &s, Event::Launched);
+        let note = turn_note(&facts(&["/w/a.rs"], Some(9)));
+        db.with_conn(|c| record_with_note(c, &s, Event::Finished, note.as_deref()))
+            .unwrap();
+        let last = comments(&db, &task).pop().unwrap();
+        assert!(
+            last.contains("finished a turn") && last.contains("/w/a.rs"),
+            "{last}"
+        );
     }
 
     #[test]

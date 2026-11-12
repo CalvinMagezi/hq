@@ -164,6 +164,21 @@ pub struct PaneInfo {
     pub bytes_seen: u64,
     pub quiet_for: Duration,
     pub age: Duration,
+    /// What an agent driven over ACP reported about its work; None for a terminal agent.
+    pub acp: Option<AcpFacts>,
+}
+
+/// What an ACP agent said about its current or last turn. It is the agent's own account.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AcpFacts {
+    /// Files its edit tools reported, absolute, leaving out edits it reported as failed.
+    pub touched: Vec<String>,
+    /// How the last turn ended (`turn done`, `cancelled`, ...), or why it failed.
+    pub stop_reason: Option<String>,
+    /// Tokens the last finished turn used, as the agent counted them.
+    pub turn_tokens: Option<u64>,
+    pub context_used: Option<u64>,
+    pub context_size: Option<u64>,
 }
 
 /// Most agents the host runs at once, and the most bytes of command line one
@@ -1755,6 +1770,7 @@ fn info_of(name: &str, pane: &Pane, detector: &Detector) -> PaneInfo {
         bytes_seen: pane.bytes_seen(),
         quiet_for: pane.quiet_for(),
         age: pane.started.elapsed(),
+        acp: None,
     }
 }
 

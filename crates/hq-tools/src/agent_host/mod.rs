@@ -147,6 +147,25 @@ pub struct AgentInfo {
     pub pending: Option<Box<PendingDialog>>,
     /// The number an answer to `pending` must name; a new dialog gets a new one.
     pub pending_seq: Option<u64>,
+    /// What an agent driven over ACP said about its work; None for a terminal agent.
+    pub acp: Option<AcpFacts>,
+}
+
+/// What an ACP agent reported about its current or last turn: its own account, not verified.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct AcpFacts {
+    /// Files its edit tools reported, absolute, leaving out edits it reported as failed.
+    #[serde(default)]
+    pub touched: Vec<String>,
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+    /// Tokens the last finished turn used, as the agent counted them.
+    #[serde(default)]
+    pub turn_tokens: Option<u64>,
+    #[serde(default)]
+    pub context_used: Option<u64>,
+    #[serde(default)]
+    pub context_size: Option<u64>,
 }
 
 /// A dialog an agent waits at, as the host read it off the screen.

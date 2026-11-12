@@ -1200,6 +1200,7 @@ mod tests {
             rule: None,
             pending: None,
             pending_seq: None,
+            acp: None,
         }
     }
 

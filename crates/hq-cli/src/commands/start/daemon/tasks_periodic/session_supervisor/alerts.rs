@@ -141,7 +141,8 @@ pub(super) fn alert_finished(
         Ok(true) => {}
         _ => return,
     }
-    let link = record_on_task(db, row, Event::Finished);
+    let note = agent.acp.as_ref().and_then(mission::turn_note);
+    let link = record_on_task_with_note(db, row, Event::Finished, note.as_deref());
     record_event(db, &row.id, "finished", serde_json::json!({ "seq": seq }));
     hq_tools::harness_session::policy::post_summary(&Arc::new(db.clone()), row);
     let excerpt = tail_excerpt(screen, MAX_TAIL_BYTES);
@@ -529,7 +530,16 @@ pub(super) fn record_on_task(
     row: &registry::HarnessSessionRow,
     event: Event,
 ) -> Option<mission::TaskLink> {
-    db.with_conn(|c| mission::record(c, row, event))
+    record_on_task_with_note(db, row, event, None)
+}
+
+pub(super) fn record_on_task_with_note(
+    db: &Database,
+    row: &registry::HarnessSessionRow,
+    event: Event,
+    note: Option<&str>,
+) -> Option<mission::TaskLink> {
+    db.with_conn(|c| mission::record_with_note(c, row, event, note))
         .inspect_err(|e| tracing::warn!(session = %row.id, error = %e, "session-supervisor: task update failed"))
         .ok()
         .flatten()

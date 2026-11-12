@@ -8,10 +8,12 @@
 use crate::detect::{AgentState, AnswerMethod, Dialog, DialogKind, DialogOption};
 use crate::error::HostError;
 use crate::events::{EventKind, EventLog};
-use crate::host::PaneInfo;
+use crate::host::{AcpFacts, PaneInfo};
 use crate::pane::{ExitHook, PaneStatus};
 use crate::sandbox::{Mode, SandboxSpec};
-use hq_acp::{AgentState as WireState, Choice, Connection, OptionKind, ToolKind};
+use hq_acp::{
+    AgentState as WireState, Choice, Connection, OptionKind, StopReason, ToolKind, TurnEnd,
+};
 use serde_json::json;
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -68,6 +70,7 @@ struct View {
     status: PaneStatus,
     last_activity: Instant,
     bytes: u64,
+    facts: AcpFacts,
 }
 
 enum Cmd {
@@ -122,6 +125,7 @@ impl AcpPane {
             status: PaneStatus::Running,
             last_activity: now,
             bytes: 0,
+            facts: AcpFacts::default(),
         }));
         let (tx, rx) = channel();
         let driver = Driver {
@@ -189,6 +193,7 @@ impl AcpPane {
             bytes_seen: v.bytes,
             quiet_for: v.last_activity.elapsed(),
             age: self.started.elapsed(),
+            acp: Some(v.facts.clone()),
         }
     }
 
@@ -384,6 +389,7 @@ impl Driver {
         let mut v = lock(&self.view);
         if heard {
             v.last_activity = Instant::now();
+            v.facts = facts_of(t);
         }
         if wire_seq != synced.wire_seq {
             synced.wire_seq = wire_seq;
@@ -446,6 +452,32 @@ impl Driver {
             v.pending = None;
         }
         (self.on_exit)();
+    }
+}
+
+fn facts_of(t: &hq_acp::Tracker) -> AcpFacts {
+    let (context_used, context_size) = t.context_use();
+    let (stop_reason, turn_tokens) = match t.end() {
+        Some(TurnEnd::Stopped { reason, usage }) => (Some(stop_label(reason)), usage.total),
+        Some(TurnEnd::Failed { error, .. }) => (Some(format!("failed: {}", error.message)), None),
+        None => (None, None),
+    };
+    AcpFacts {
+        touched: t.touched().into_iter().collect(),
+        stop_reason,
+        turn_tokens,
+        context_used,
+        context_size,
+    }
+}
+
+fn stop_label(reason: &StopReason) -> String {
+    match reason {
+        StopReason::EndTurn => "turn done".into(),
+        StopReason::Cancelled => "cancelled".into(),
+        StopReason::MaxTokens => "out of tokens".into(),
+        StopReason::Refusal => "refused".into(),
+        StopReason::Other(s) => s.clone(),
     }
 }
 

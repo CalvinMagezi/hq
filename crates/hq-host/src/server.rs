@@ -1196,6 +1196,13 @@ fn info_json(i: &PaneInfo) -> Value {
         "bytes_seen": i.bytes_seen,
         "quiet_ms": i.quiet_for.as_millis() as u64,
         "age_ms": i.age.as_millis() as u64,
+        "acp": i.acp.as_ref().map(|a| json!({
+            "touched": a.touched,
+            "stop_reason": a.stop_reason,
+            "turn_tokens": a.turn_tokens,
+            "context_used": a.context_used,
+            "context_size": a.context_size,
+        })),
     })
 }
 
