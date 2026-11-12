@@ -379,7 +379,11 @@ pub(super) async fn run_launch(
     l: Launch<'_>,
 ) -> Result<Value> {
     preflight::require_binary(&l.host, harness)?;
-    let mcp = mcp_access(db, &l.host, harness, l.session_id);
+    // An ACP agent is not given HQ's MCP connection, so no session token is minted for it.
+    let mcp = match harness.transport() {
+        spec::Transport::Pty => mcp_access(db, &l.host, harness, l.session_id),
+        spec::Transport::Acp => None,
+    };
     let minted = mcp.is_some();
     let session_id = l.session_id.to_string();
     let launched = launch_with(db, harness, l, mcp).await;

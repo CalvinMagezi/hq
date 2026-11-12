@@ -773,7 +773,9 @@ impl Conn {
             }
             "agent.prompt" => {
                 let p: TextParams = parse(params)?;
-                done(host.prompt(&p.name, &p.text))
+                host.prompt(&p.name, &p.text).map_err(host_err)?;
+                // Tells the caller no Enter is to be pressed again: the prompt was delivered.
+                Ok(json!({ "acp": host.is_acp(&p.name) }))
             }
             "agent.send_keys" => {
                 let p: KeysParams = parse(params)?;

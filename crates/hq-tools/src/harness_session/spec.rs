@@ -486,14 +486,27 @@ pub fn resolve_in(cfg: &AgentHostConfig, name: &str) -> Result<Harness> {
 /// A profile's transport must be one this build knows, and an ACP profile must be able to start
 /// an ACP server directly (a wrapper `command` cannot).
 fn check_transport(name: &str, profile: &HarnessProfileConfig) -> Result<()> {
-    match profile.transport.as_deref() {
-        None | Some(TRANSPORT_PTY) => Ok(()),
-        Some(TRANSPORT_ACP) if profile.command.is_some() => {
-            bail!("harness profile '{name}': a wrapper command cannot be used over ACP")
-        }
-        Some(TRANSPORT_ACP) => Ok(()),
+    let acp = match profile.transport.as_deref() {
+        None | Some(TRANSPORT_PTY) => false,
+        Some(TRANSPORT_ACP) => true,
         Some(other) => bail!("harness profile '{name}': transport '{other}' is not 'pty' or 'acp'"),
+    };
+    if !acp {
+        if profile.acp_args.is_some() {
+            bail!("harness profile '{name}': acp_args only applies with transport: acp");
+        }
+        return Ok(());
     }
+    if profile.command.is_some() {
+        bail!("harness profile '{name}': a wrapper command cannot be used over ACP");
+    }
+    if profile.args.is_some() {
+        bail!("harness profile '{name}': over ACP the terminal `args` do not apply; use acp_args");
+    }
+    if profile.acp_args.as_ref().is_some_and(Vec::is_empty) {
+        bail!("harness profile '{name}': acp_args is empty, so nothing would start the ACP server");
+    }
+    Ok(())
 }
 
 /// `resolve_in` against the loaded config; without a readable config only the
@@ -575,6 +588,20 @@ mod tests {
             resolve_in(&cfg, "p").unwrap().acp_command().unwrap(),
             ["claude", "serve"]
         );
+    }
+
+    #[test]
+    fn acp_profile_settings_that_cannot_work_are_refused() {
+        let with = |edit: fn(&mut HarnessProfileConfig)| {
+            let mut cfg = acp_profile("opencode", "acp");
+            edit(cfg.harness_profiles.get_mut("p").unwrap());
+            resolve_in(&cfg, "p")
+        };
+        assert!(with(|p| p.acp_args = Some(vec![])).is_err());
+        assert!(with(|p| p.args = Some(vec!["--x".into()])).is_err());
+        let mut stray = acp_profile("opencode", "pty");
+        stray.harness_profiles.get_mut("p").unwrap().acp_args = Some(vec!["acp".into()]);
+        assert!(resolve_in(&stray, "p").is_err());
     }
 
     #[test]

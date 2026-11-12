@@ -291,15 +291,13 @@ impl NativeBackend {
         }
     }
 
-    /// The request with the agent's reporting hooks added, so the host hears
-    /// its state and conversation id from the agent itself. The host writes the
-    /// settings file on the machine the agent runs on.
     /// Starts an agent over ACP. The host completes the handshake and opens the session before
     /// it answers, so a started agent is ready: there is no screen to wait for.
     fn launch_acp(&self, req: &LaunchRequest, argv: &[String]) -> Result<Launched, AgentHostError> {
         let params = acp_spawn_params(req, argv, &self.sandbox, self.idle_ttl_secs);
         let within = req.start_timeout + self.command_timeout;
-        self.call_within("agent.spawn", params, within)?;
+        self.call_within("agent.spawn", params, within)
+            .map_err(|e| older_host_hint(e, self.name().to_string()))?;
         Ok(Launched {
             workspace_id: req.name.clone(),
             pane_id: req.name.clone(),
@@ -308,6 +306,9 @@ impl NativeBackend {
         })
     }
 
+    /// The request with the agent's reporting hooks added, so the host hears
+    /// its state and conversation id from the agent itself. The host writes the
+    /// settings file on the machine the agent runs on.
     fn with_hooks(&self, req: &LaunchRequest) -> LaunchRequest {
         let mut req = req.clone();
         if let Some(mcp) = &req.mcp
@@ -395,8 +396,25 @@ impl NativeBackend {
 }
 
 const CLAUDE_KIND: &str = "claude";
-/// The `rule` an agent reports when the host reads it over the protocol.
-const ACP_RULE: &str = "acp";
+
+/// A host built before ACP support rejects the `transport` field of `agent.spawn` with a bare
+/// serde message; say what is actually wrong.
+fn older_host_hint(error: AgentHostError, host: String) -> AgentHostError {
+    match &error {
+        AgentHostError::Api { code, message }
+            if code == "invalid_params" && message.contains("transport") =>
+        {
+            let hint = format!(
+                "host '{host}' runs an hq-host without ACP support: update it, or run this agent in a terminal"
+            );
+            AgentHostError::Api {
+                code: code.clone(),
+                message: hint,
+            }
+        }
+        _ => error,
+    }
+}
 
 fn acp_spawn_params(
     req: &LaunchRequest,
@@ -646,17 +664,10 @@ impl HostBackend for NativeBackend {
     }
 
     fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, AgentHostError> {
-        self.call("agent.prompt", json!({ "name": target, "text": text }))?;
+        let reply = self.call("agent.prompt", json!({ "name": target, "text": text }))?;
         // Over the protocol the prompt is delivered, not typed: there is no echo to wait for and no
         // Enter to press again, and a turn that is queued behind another is still accepted.
-        // A failed lookup only means the terminal checks below run, as before.
-        let info = self.call("agent.get", json!({ "name": target })).ok();
-        if info
-            .as_ref()
-            .and_then(|i| i.get("rule"))
-            .and_then(Value::as_str)
-            == Some(ACP_RULE)
-        {
+        if reply.get("acp").and_then(Value::as_bool) == Some(true) {
             return Ok(PromptOutcome::Submitted);
         }
         // Let the echo of the typed text land, so only output after it counts as a reaction.
