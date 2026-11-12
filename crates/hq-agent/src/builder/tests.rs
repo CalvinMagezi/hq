@@ -1019,3 +1019,69 @@ fn memories_and_concept_matches_leave_the_system_prompt_for_the_turn_note() {
     assert!(volatile.contains("recent memories") && volatile.contains("concept page match"));
     assert!(!volatile.contains("an old line") && !stable.contains("an old line"));
 }
+
+mod thread_taint_carryover {
+    use super::*;
+    use crate::governance::{TaintTracker, is_untrusted_source};
+    use hq_db::{chat, thread_taint};
+
+    fn db_with_threads() -> (Arc<hq_db::Database>, String, String, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("hq-thread-taint-{}", uuid::Uuid::new_v4()));
+        let db = Arc::new(hq_db::Database::open(&dir.join("vault.db")).unwrap());
+        let (a, b) = db
+            .with_conn(|c| {
+                let a = chat::create_thread(c, "a", "user", "user")?.thread_id;
+                let b = chat::create_thread(c, "b", "user", "user")?.thread_id;
+                Ok((a, b))
+            })
+            .unwrap();
+        (db, a, b, dir)
+    }
+
+    /// One turn: a fresh tracker for the thread, then the tool results the turn produced.
+    fn turn(db: &Arc<hq_db::Database>, thread: &str, tools: &[&str]) -> TaintTracker {
+        let taint = TaintTracker::new();
+        carry_thread_taint(&taint, Some(db), thread);
+        for tool in tools.iter().filter(|t| is_untrusted_source(t, "")) {
+            taint.mark(tool);
+        }
+        taint
+    }
+
+    #[test]
+    fn a_read_in_one_turn_taints_the_next_turn_of_that_thread_only() {
+        for source in [hq_tools::calendar::LIST_TOOL_NAME, "web_fetch"] {
+            let (db, a, b, dir) = db_with_threads();
+            assert!(!turn(&db, &a, &["vault_write_note"]).is_tainted());
+            assert!(turn(&db, &a, &[source]).is_tainted());
+            assert_eq!(turn(&db, &a, &[]).source().as_deref(), Some(source));
+            assert!(!turn(&db, &b, &[]).is_tainted());
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn a_clean_thread_stays_clean() {
+        let (db, a, _, dir) = db_with_threads();
+        for _ in 0..3 {
+            assert!(!turn(&db, &a, &["vault_write_note"]).is_tainted());
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_unreadable_record_fails_closed() {
+        let (db, a, _, dir) = db_with_threads();
+        db.with_conn(|c| Ok(c.execute_batch("ALTER TABLE chat_threads DROP COLUMN taint_source")?))
+            .unwrap();
+        let taint = turn(&db, &a, &[]);
+        assert_eq!(
+            taint.source().as_deref(),
+            Some(thread_taint::UNREADABLE_SOURCE)
+        );
+        let no_db = TaintTracker::new();
+        carry_thread_taint(&no_db, None, &a);
+        assert!(no_db.is_tainted());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

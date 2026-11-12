@@ -57,15 +57,28 @@ static OWNER_HOST: LazyLock<Regex> = LazyLock::new(|| {
         .expect("static host pattern must compile")
 });
 
+/// Called once, with the source, the first time a tracker becomes tainted.
+pub type MarkHook = Box<dyn Fn(&str) + Send + Sync>;
+
 /// Session-scoped taint flag, shared by every governed tool in a session and
 /// by the sub-agents it spawns, so delegation cannot launder it. It also
 /// carries the two facts the tainted-session rules need beside it: which hosts
 /// the owner named in their own messages, and whether anyone is there to ask.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct TaintTracker {
     source: Arc<Mutex<Option<String>>>,
+    on_first_mark: Arc<Mutex<Option<MarkHook>>>,
     owner_hosts: Arc<Mutex<HashSet<String>>>,
     unattended: Arc<AtomicBool>,
+}
+
+impl std::fmt::Debug for TaintTracker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaintTracker")
+            .field("source", &self.source())
+            .field("unattended", &self.is_unattended())
+            .finish()
+    }
 }
 
 impl TaintTracker {
@@ -76,10 +89,31 @@ impl TaintTracker {
     /// Record that `tool_name` returned untrusted content. The first source
     /// is kept for the denial message.
     pub fn mark(&self, tool_name: &str) {
-        let mut guard = self.source.lock().expect("TaintTracker lock poisoned");
-        if guard.is_none() {
-            *guard = Some(tool_name.to_string());
+        let first = {
+            let mut guard = self.source.lock().expect("TaintTracker lock poisoned");
+            let first = guard.is_none();
+            if first {
+                *guard = Some(tool_name.to_string());
+            }
+            first
+        };
+        if first
+            && let Some(hook) = &*self
+                .on_first_mark
+                .lock()
+                .expect("TaintTracker lock poisoned")
+        {
+            hook(tool_name);
         }
+    }
+
+    /// Run `hook` when this tracker first becomes tainted, so the mark can outlive the session
+    /// even if the turn dies right after the read.
+    pub fn on_first_mark(&self, hook: MarkHook) {
+        *self
+            .on_first_mark
+            .lock()
+            .expect("TaintTracker lock poisoned") = Some(hook);
     }
 
     /// The tool that first tainted this session, if any.
