@@ -4,6 +4,7 @@ use crate::skills::{list_skills, parse_skill, security_flags, validate_skill, va
 const NAME: &str = "edge-coding-worker";
 const ACTIVE_NOW: &[&str] = &[NAME];
 const BRIEF: &str = "hq-task-brief";
+const WAYFINDER: &str = "hq-wayfinder";
 const CALENDAR: &str = CALENDAR_CREATION_SKILL;
 const READING: &str = CALENDAR_READING_SKILL;
 const EDITING: &str = CALENDAR_EDITING_SKILL;
@@ -90,16 +91,16 @@ fn every_shipped_skill_is_valid_clean_and_marked_as_hq_s() {
 fn a_built_in_is_active_unless_it_is_turned_off() {
     assert_eq!(
         active_for(&config_with(&[], &[])),
-        [NAME, BRIEF, CALENDAR, READING, EDITING],
+        [NAME, BRIEF, WAYFINDER, CALENDAR, READING, EDITING],
         "GitHub can be connected after start, with no repos listed"
     );
     assert_eq!(
         active_for(&config_with(&["o/r"], &[])),
-        [NAME, BRIEF, CALENDAR, READING, EDITING]
+        [NAME, BRIEF, WAYFINDER, CALENDAR, READING, EDITING]
     );
     assert_eq!(
         active_for(&config_with(&["o/r"], &["EDGE-CODING-WORKER"])),
-        [BRIEF, CALENDAR, READING, EDITING]
+        [BRIEF, WAYFINDER, CALENDAR, READING, EDITING]
     );
     assert_eq!(
         unknown_off(&config_with(&[], &["edge-coding-wroker"])),
@@ -539,4 +540,30 @@ fn the_plugin_copy_of_the_task_brief_skill_has_the_same_body() {
         body_of(shipped),
         "packages/claude-plugin/skills/hq-task-brief must match the built-in skill body"
     );
+}
+
+/// The shipped skill `name` and its plugin copy must have the same body.
+fn assert_plugin_mirror(name: &str) {
+    let plugin = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packages/claude-plugin/skills")
+        .join(name)
+        .join("SKILL.md");
+    let plugin =
+        fs::read_to_string(&plugin).unwrap_or_else(|e| panic!("{}: {e}", plugin.display()));
+    let shipped = BUILTIN_SKILLS
+        .iter()
+        .find(|s| s.name == name)
+        .and_then(|s| s.files.iter().find(|(f, _)| *f == SKILL_FILE))
+        .map(|(_, t)| *t)
+        .unwrap();
+    assert_eq!(
+        body_of(&plugin),
+        body_of(shipped),
+        "packages/claude-plugin/skills/{name} must match the built-in skill body"
+    );
+}
+
+#[test]
+fn the_plugin_copy_of_the_wayfinder_skill_has_the_same_body() {
+    assert_plugin_mirror(WAYFINDER);
 }
