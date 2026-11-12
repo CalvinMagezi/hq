@@ -140,6 +140,11 @@ private fun HelperPageView(card: HelperCard, open: HelperOpen, ui: HelpersUi, ac
 
 @Composable
 private fun AskBanner(card: HelperCard, onOpen: () -> Unit) {
+    example.hq.spike.ui.shell.AttentionGate(example.hq.spike.ui.shell.AttentionKind.HelperQuestion, "ask-${card.id}") { AskBannerCard(card, onOpen) }
+}
+
+@Composable
+private fun AskBannerCard(card: HelperCard, onOpen: () -> Unit) {
     val shape = RoundedCornerShape(16.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Amber, shape).clickable(role = Role.Button, onClick = onOpen).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(stringResource(R.string.helpers_needs_your_ok), style = HqType.BodyBold, color = Mts.Amber)

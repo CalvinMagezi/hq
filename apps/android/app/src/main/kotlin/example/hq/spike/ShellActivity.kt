@@ -3,7 +3,6 @@ package example.hq.spike
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -231,7 +230,7 @@ class ShellActivity : ComponentActivity() {
         val shared = example.hq.spike.capture.CaptureActivity.takeDraft()
         shared?.let(chat::addToDraft)
         if (hasUnsavedWork()) {
-            Toast.makeText(this, if (shared != null) SHARED_KEPT else UNSAVED_WORK, Toast.LENGTH_LONG).show()
+            chat.actions.onNotice(if (shared != null) SHARED_KEPT else UNSAVED_WORK)
             return
         }
         closePages()
@@ -308,7 +307,7 @@ class ShellActivity : ComponentActivity() {
         val build = packageManager.getPackageInfo(packageName, 0).let { "${it.versionName.orEmpty().ifBlank { "hub" }} \u00b7 build ${if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) it.longVersionCode else it.versionCode.toLong()}" }
         val text = StartupWords.details(build, active, StartupWords.failedLines(example.hq.spike.ui.shell.Words.of(this), HubService.lastStart(this), HubService.lastExit(this), StartRules.STILL_OPENING_S), log)
         (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("HQ details", text))
-        android.widget.Toast.makeText(this, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+        chat.actions.onNotice("Copied")
     }
 
     private fun tailOf(f: java.io.File): List<String> = try {
@@ -443,7 +442,7 @@ class ShellActivity : ComponentActivity() {
                 }
             }
             val notifUi = notifFacts?.let { NotifUi(it, ::turnOnNotifications) }
-            HqTheme { CompositionLocalProvider(LocalOpenWeb provides { page -> web = page }, LocalNotif provides notifUi, example.hq.spike.ui.shell.LocalReselectAtTop provides atTop) {
+            HqTheme { CompositionLocalProvider(example.hq.spike.ui.usage.LocalBalance provides (if (shown !is Connection.Connected) null else balance), example.hq.spike.ui.usage.LocalOnBalance provides { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) }, LocalOpenWeb provides { page -> web = page }, LocalNotif provides notifUi, example.hq.spike.ui.shell.LocalReselectAtTop provides atTop) {
                 if (firstRunUi.step != null) FirstRunHost(firstRunUi, firstRun.actions)
                 else if (startup == Startup.Starting) StartingScreen(((status as? Connection.Starting)?.step ?: 0) + 1, (status as? Connection.Starting)?.seconds ?: 12) { openCapture() }
                 else HqShell(
@@ -464,11 +463,9 @@ class ShellActivity : ComponentActivity() {
                     topActions = { place ->
                         if (place == Place.Tasks && tasksState.tab == TaskTab.All) IconButton({ tasks.actions.onFilter(true) }, Modifier.size(48.dp)) { Icon(HqIcons.Filter, "Filter", Modifier.size(24.dp), tint = if (tasksState.scope == TaskScope.Everything) Mts.Ink else Mts.BrandGreen) }
                     },
-                    balance = if (shown !is Connection.Connected) null else balance,
-                    onBalance = { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) },
                     request = requested, onRequestHandled = { requested = null },
                     aboveBar = { place -> if (place != Place.Tasks) tasksState.line?.let { Snack(it, tasks.actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) } },
-                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); SettingsHost(settingsState, settings.actions); SearchHost(searchState, shown); if (tasksState.away.open) AwayHost(tasksState); web?.let { page -> WebHostScreen(page, onClose = { web = null }, onStartHq = ::tryStartAgain, onNotes = { web = null; requested = Place.Notes }) } },
+                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); CompositionLocalProvider(example.hq.spike.ui.shell.LocalCoversBar provides true) { SettingsHost(settingsState, settings.actions); SearchHost(searchState, shown); if (tasksState.away.open) AwayHost(tasksState); web?.let { page -> WebHostScreen(page, onClose = { web = null }, onStartHq = ::tryStartAgain, onNotes = { web = null; requested = Place.Notes }) } } },
                 ) { place ->
                     when (place) {
                         Place.Chat -> ChatScreen(chatState, chat.actions, status = shown, onStartHq = ::tryStartAgain, onAiKeys = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Keys) }, needs = { ChatNeeds(needsOfChat(inboxState.shownNeeds, chatState.threadId), inboxState, inbox.actions) })

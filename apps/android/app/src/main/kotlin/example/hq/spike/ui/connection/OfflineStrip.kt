@@ -22,6 +22,8 @@ import example.hq.spike.R
 import example.hq.spike.data.Connection
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.shell.Words
+import example.hq.spike.ui.shell.AttentionKind
+import example.hq.spike.ui.shell.AttentionOrInline
 import example.hq.spike.ui.shell.rememberWords
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -57,6 +59,11 @@ fun OfflineStrip(status: Connection, savedAtMs: Long?, onOpen: () -> Unit, onSta
     val line = OfflineStrip.line(w, status, savedAtMs) ?: return
     val stopped = status is Connection.Stopped
     val describe = w.s(R.string.strip_a11y, line)
+    AttentionOrInline(AttentionKind.ConnectionBanner, "connection", modifier, announce = false) { m -> StripRow(line, stopped, onOpen, onStartHq, m) }
+}
+
+@Composable
+private fun StripRow(line: String, stopped: Boolean, onOpen: () -> Unit, onStartHq: () -> Unit, modifier: Modifier) {
     Row(
         modifier.fillMaxWidth().heightIn(min = 48.dp).background(Mts.Surface100)
             .clickable(role = Role.Button, onClickLabel = stringResource(R.string.conn_open_label), onClick = onOpen)

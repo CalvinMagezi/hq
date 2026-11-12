@@ -1,5 +1,9 @@
 package example.hq.spike.ui.inbox
 
+import example.hq.spike.ui.shell.AttentionKind
+import example.hq.spike.ui.shell.AttentionOrInline
+import example.hq.spike.ui.shell.SnackbarRow
+import example.hq.spike.ui.shell.rememberAttentionKey
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -246,6 +250,12 @@ internal fun DangerButton(label: String, modifier: Modifier = Modifier, enabled:
 /** Shown on the Needs tab while notifications cannot reach the owner, with Turn on and a seven-day Not now. */
 @Composable
 internal fun NotifBanner(banner: InboxBanner, actions: InboxActions) {
+    // Drawn in place, but only while the shell's one banner slot is free of anything that outranks it (a connection problem).
+    example.hq.spike.ui.shell.AttentionGate(example.hq.spike.ui.shell.AttentionKind.NotificationsBlocked, "notifications") { NotifBannerCard(banner, actions) }
+}
+
+@Composable
+private fun NotifBannerCard(banner: InboxBanner, actions: InboxActions) {
     val notif = LocalNotif.current
     val shape = RoundedCornerShape(16.dp)
     Column(
@@ -377,14 +387,7 @@ private fun UpdateRow(card: InboxCard, actions: InboxActions) {
 
 @Composable
 private fun Snack(line: InboxLine, actions: InboxActions, modifier: Modifier) {
-    LaunchedEffect(line) { if (line.action == null) { delay(LINE_MS); actions.onDismissLine() } }
-    Row(
-        modifier.padding(horizontal = 8.dp, vertical = 8.dp).fillMaxWidth().heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(start = 16.dp).semantics { liveRegion = LiveRegionMode.Polite },
-        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(line.text, style = HqType.BodySm, color = Mts.Surface100, modifier = Modifier.weight(1f))
-        line.action?.let { Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onUndo).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text(it, style = HqType.BodySmBold, color = Mts.UndoBlue) } }
-    }
+    AttentionOrInline(if (line.action != null) AttentionKind.UndoSnackbar else AttentionKind.Snackbar, rememberAttentionKey(), modifier, actions.onDismissLine, restartOn = line) { m -> SnackbarRow(line.text, line.action, actions.onUndo, m) }
 }
 
 /** A question on its own page: what is asked, what each answer does, who asked and when, and the answers at the foot. */

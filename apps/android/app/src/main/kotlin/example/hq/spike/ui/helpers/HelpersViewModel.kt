@@ -396,9 +396,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
     private fun editOpen(change: (HelperOpen) -> HelperOpen) = _state.update { s -> s.open?.let { s.copy(open = change(it)) } ?: s }
 
     private fun say(text: String) {
-        lineJob?.cancel()
         _state.update { it.copy(line = HelperLine(text)) }
-        lineJob = viewModelScope.launch { delay(LINE_MS); _state.update { it.copy(line = null) } }
     }
 
     private fun open(id: String) {
