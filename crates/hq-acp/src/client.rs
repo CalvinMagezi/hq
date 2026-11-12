@@ -33,6 +33,71 @@ pub enum ClientError {
     NoSession,
     #[error("unexpected reply: {0}")]
     Protocol(&'static str),
+    #[error("the agent does not offer the model '{wanted}' (it offers: {})", .available.join(", "))]
+    UnknownModel {
+        wanted: String,
+        available: Vec<String>,
+    },
+    #[error("the agent offers no way to choose a model")]
+    NoModelChoice,
+}
+
+/// How an agent lets a client choose its model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelChoice {
+    /// `session/set_model`, with the ids from `models.availableModels`.
+    SetModel,
+    /// `session/set_config_option` on the config option of category `model`.
+    ConfigOption { config_id: String },
+}
+
+/// The models a new session offers and the one it started on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelMenu {
+    pub current: Option<String>,
+    pub available: Vec<String>,
+    pub choice: ModelChoice,
+}
+
+/// Reads the model menu out of a `session/new` result, in either of the two shapes agents use.
+pub fn parse_model_menu(result: &Value) -> Option<ModelMenu> {
+    let strings = |list: Option<&Value>, key: &str| -> Vec<String> {
+        let items = list.and_then(Value::as_array).into_iter().flatten();
+        items
+            .filter_map(|m| m.get(key).and_then(Value::as_str).map(str::to_owned))
+            .collect()
+    };
+    if let Some(models) = result.get("models") {
+        let available = strings(models.get("availableModels"), "modelId");
+        if !available.is_empty() {
+            let current = models.get("currentModelId").and_then(Value::as_str);
+            return Some(ModelMenu {
+                current: current.map(str::to_owned),
+                available,
+                choice: ModelChoice::SetModel,
+            });
+        }
+    }
+    let options = result.get("configOptions").and_then(Value::as_array)?;
+    let model = options.iter().find(|o| {
+        o.get("category").and_then(Value::as_str) == Some("model")
+            || o.get("id").and_then(Value::as_str) == Some("model")
+    })?;
+    let available = strings(model.get("options"), "value");
+    (!available.is_empty()).then(|| ModelMenu {
+        current: model
+            .get("currentValue")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        available,
+        choice: ModelChoice::ConfigOption {
+            config_id: model
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("model")
+                .to_owned(),
+        },
+    })
 }
 
 /// What an agent said it can do at `initialize`. Both spellings of each key are accepted because
@@ -86,6 +151,7 @@ pub struct Connection {
     rx: Receiver<Incoming>,
     next_id: u64,
     session_id: Option<String>,
+    models: Option<ModelMenu>,
     stderr: Arc<Mutex<VecDeque<String>>>,
     pub tracker: Tracker,
 }
@@ -142,6 +208,7 @@ impl Connection {
             rx,
             next_id: 0,
             session_id: None,
+            models: None,
             stderr: tail,
             tracker: Tracker::default(),
         })
@@ -224,8 +291,45 @@ impl Connection {
         let id = result.get("sessionId").and_then(Value::as_str);
         let id = id.ok_or(ClientError::Protocol("session/new returned no sessionId"))?;
         self.session_id = Some(id.to_owned());
+        self.models = parse_model_menu(&result);
         self.tracker.set_cwd(cwd);
         Ok(id.to_owned())
+    }
+
+    /// The models the session offered when it was opened; None for a loaded session or an agent
+    /// that offers no choice.
+    pub fn models(&self) -> Option<&ModelMenu> {
+        self.models.as_ref()
+    }
+
+    /// Switches the session to `wanted`, one of the ids it offered. Does nothing when it is the
+    /// model the session is on already. An id the agent did not offer is refused with the list.
+    pub fn select_model(&mut self, wanted: &str, timeout: Duration) -> Result<(), ClientError> {
+        let session = self.session_id.clone().ok_or(ClientError::NoSession)?;
+        let menu = self.models.clone().ok_or(ClientError::NoModelChoice)?;
+        if menu.current.as_deref() == Some(wanted) {
+            return Ok(());
+        }
+        if !menu.available.iter().any(|m| m == wanted) {
+            return Err(ClientError::UnknownModel {
+                wanted: wanted.to_owned(),
+                available: menu.available,
+            });
+        }
+        match &menu.choice {
+            ModelChoice::SetModel => {
+                let params = json!({"sessionId": session, "modelId": wanted});
+                self.call("session/set_model", params, timeout)?;
+            }
+            ModelChoice::ConfigOption { config_id } => {
+                let params = json!({"sessionId": session, "configId": config_id, "value": wanted});
+                self.call("session/set_config_option", params, timeout)?;
+            }
+        }
+        if let Some(m) = self.models.as_mut() {
+            m.current = Some(wanted.to_owned());
+        }
+        Ok(())
     }
 
     /// Opens a stored session again. The agent replays its history before it answers; that replay
@@ -359,6 +463,29 @@ impl Drop for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn both_model_menu_shapes_are_read() {
+        let set = json!({"models": {"currentModelId": "a", "availableModels": [{"modelId": "a"}, {"modelId": "b"}]}});
+        let menu = parse_model_menu(&set).unwrap();
+        assert_eq!(
+            (menu.current.as_deref(), menu.available.len()),
+            (Some("a"), 2)
+        );
+        assert_eq!(menu.choice, ModelChoice::SetModel);
+        let config = json!({"configOptions": [
+            {"id": "mode", "category": "mode", "options": [{"value": "x"}]},
+            {"id": "model", "category": "model", "currentValue": "p/q", "options": [{"value": "p/q"}, {"value": "p/r"}]}]});
+        let menu = parse_model_menu(&config).unwrap();
+        assert_eq!(menu.available, vec!["p/q", "p/r"]);
+        assert_eq!(
+            menu.choice,
+            ModelChoice::ConfigOption {
+                config_id: "model".into()
+            }
+        );
+        assert_eq!(parse_model_menu(&json!({"sessionId": "s"})), None);
+    }
 
     #[test]
     fn capabilities_accept_both_spellings_and_empty_objects() {

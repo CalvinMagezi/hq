@@ -431,6 +431,7 @@ fn acp_spawn_params(
         "name": req.name, "argv": argv, "cwd": req.cwd, "agent": req.kind, "env": env,
         "sandbox": sandbox, "idle_ttl_secs": idle_ttl_secs, "transport": "acp",
         "mcp": req.mcp.as_ref().map(|m| json!({ "url": m.url, "token": m.token })),
+        "model": req.acp_model,
     })
 }
 
@@ -1000,6 +1001,7 @@ mod tests {
             start_timeout: Duration::from_secs(1),
             policy: None,
             acp_argv: None,
+            acp_model: None,
         }
     }
 
@@ -1012,7 +1014,11 @@ mod tests {
         assert_eq!(p["agent"], "opencode");
         assert!(p.get("resume_argv").is_none() && p.get("rows").is_none());
         assert_eq!(p["idle_ttl_secs"], 60);
-        assert!(p["mcp"].is_null());
+        assert!(p["mcp"].is_null() && p["model"].is_null());
+        let mut with_model = req("opencode", None);
+        with_model.acp_model = Some("m".into());
+        let p = acp_spawn_params(&with_model, &["opencode".to_string()], &None, None);
+        assert_eq!(p["model"], "m");
     }
 
     #[test]

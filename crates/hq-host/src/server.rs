@@ -630,6 +630,7 @@ impl Conn {
                 spec.sandbox = p.sandbox;
                 spec.idle_ttl = p.idle_ttl_secs.map(Duration::from_secs);
                 spec.transport = Transport::parse(p.transport.as_deref()).map_err(host_err)?;
+                spec.model = p.model;
                 spec.mcp = p.mcp.map(|m| McpEndpoint {
                     url: m.url,
                     token: m.token,
@@ -916,6 +917,8 @@ struct SpawnParams {
     transport: Option<String>,
     /// HQ's MCP address and the session's token, for an ACP agent.
     mcp: Option<McpParams>,
+    /// The model an ACP agent is switched to once its session is open.
+    model: Option<String>,
 }
 
 #[derive(Deserialize)]

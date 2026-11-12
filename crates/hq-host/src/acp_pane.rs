@@ -54,6 +54,8 @@ pub(crate) struct AcpLaunch {
     pub mcp: Option<crate::host::McpEndpoint>,
     /// A stored session to load instead of opening a new one.
     pub resume_session: Option<String>,
+    /// The model to switch a new session to.
+    pub model: Option<String>,
     /// Names of the extra variables it was started with, kept so a restart can ask for them again.
     pub env_keys: Vec<String>,
     pub events: Arc<EventLog>,
@@ -133,7 +135,14 @@ impl AcpPane {
                     Some(id) => conn
                         .load_session(id, &cwd, servers, HANDSHAKE_TIMEOUT)
                         .map(|()| id.clone()),
-                    None => conn.new_session(&cwd, servers, HANDSHAKE_TIMEOUT),
+                    None => conn
+                        .new_session(&cwd, servers, HANDSHAKE_TIMEOUT)
+                        .and_then(|id| {
+                            if let Some(model) = &l.model {
+                                conn.select_model(model, HANDSHAKE_TIMEOUT)?;
+                            }
+                            Ok(id)
+                        }),
                 }
             });
         let session_id = started.map_err(|e| spawn_error(with_stderr(&e.to_string(), &conn)))?;

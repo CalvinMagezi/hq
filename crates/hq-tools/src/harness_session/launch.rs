@@ -362,12 +362,6 @@ fn acp_argv_for(harness: &Harness, l: &Launch<'_>) -> Result<Option<Vec<String>>
     if harness.transport() != spec::Transport::Acp {
         return Ok(None);
     }
-    if harness.model.is_some() {
-        anyhow::bail!(
-            "'{}' runs over ACP, where HQ does not set the model yet: leave model out and set it in the agent's own config",
-            harness.name
-        );
-    }
     if l.one_shot.is_some() {
         anyhow::bail!("'{}' has no one-shot run over ACP", harness.name);
     }
@@ -438,6 +432,7 @@ async fn launch_with(
         start_timeout: l.host.launch_bound(),
         policy: l.policy.and_then(|p| serde_json::to_value(p).ok()),
         acp_argv,
+        acp_model: harness.model.clone(),
     };
     let began = std::time::Instant::now();
     let host = l.host.clone();

@@ -368,7 +368,8 @@ impl Harness {
         let Some(model) = model.map(str::trim).filter(|m| !m.is_empty()) else {
             return Ok(self);
         };
-        if self.spec.model_flag.is_none() {
+        // Over ACP the model is chosen in the session, so no CLI flag is needed.
+        if self.spec.model_flag.is_none() && self.transport() != Transport::Acp {
             bail!(
                 "'{}' has no model flag HQ knows, so it cannot be started on '{model}'; leave model out to use its own default",
                 self.name
@@ -459,7 +460,12 @@ impl Harness {
 /// Resolve `name` against the profiles in `cfg`, then the built-in harnesses.
 /// A profile may share a built-in's name to replace how it launches.
 pub fn resolve_in(cfg: &AgentHostConfig, name: &str) -> Result<Harness> {
-    if let Some(profile) = cfg.harness_profiles.get(name) {
+    // An alias (`agy`) finds the profile written for the canonical name (`antigravity`) too.
+    let profile = cfg
+        .harness_profiles
+        .get(name)
+        .or_else(|| cfg.harness_profiles.get(canonical_name(name)));
+    if let Some(profile) = profile {
         check_transport(name, profile)?;
         let Some(spec) = spec_for(&profile.base) else {
             bail!(
@@ -472,7 +478,7 @@ pub fn resolve_in(cfg: &AgentHostConfig, name: &str) -> Result<Harness> {
             name: name.to_string(),
             spec,
             profile: Some(profile.clone()),
-            model: None,
+            model: profile.model.clone(),
         });
     }
     match spec_for(name) {
@@ -492,6 +498,9 @@ pub fn resolve_in(cfg: &AgentHostConfig, name: &str) -> Result<Harness> {
 /// A profile's transport must be one this build knows, and an ACP profile must be able to start
 /// an ACP server directly (a wrapper `command` cannot).
 fn check_transport(name: &str, profile: &HarnessProfileConfig) -> Result<()> {
+    if let Some(model) = profile.model.as_deref().filter(|m| !valid_model(m)) {
+        bail!("harness profile '{name}': '{model}' is not a model id");
+    }
     let acp = match profile.transport.as_deref() {
         None | Some(TRANSPORT_PTY) => false,
         Some(TRANSPORT_ACP) => true,
@@ -621,6 +630,39 @@ mod tests {
         let mut pty = acp_profile("opencode", "pty");
         pty.harness_profiles.get_mut("p").unwrap().hq_mcp = Some(true);
         assert!(resolve_in(&pty, "p").is_err());
+    }
+
+    #[test]
+    fn a_profile_model_is_the_default_and_a_callers_model_wins() {
+        let mut cfg = acp_profile("antigravity", "pty");
+        cfg.harness_profiles.get_mut("p").unwrap().model = Some("gemini-4-hydrogen-medium".into());
+        let h = resolve_in(&cfg, "p").unwrap();
+        assert_eq!(h.model_args(), ["--model", "gemini-4-hydrogen-medium"]);
+        let h = h.with_model(Some("gemini-4-hydrogen-high")).unwrap();
+        assert_eq!(h.model_args(), ["--model", "gemini-4-hydrogen-high"]);
+        cfg.harness_profiles.get_mut("p").unwrap().model = Some("--bad".into());
+        assert!(resolve_in(&cfg, "p").is_err());
+    }
+
+    #[test]
+    fn an_alias_finds_the_profile_of_its_canonical_name() {
+        let mut cfg = AgentHostConfig::default();
+        cfg.harness_profiles.insert(
+            "antigravity".into(),
+            HarnessProfileConfig {
+                base: "antigravity".into(),
+                model: Some("gemini-4-hydrogen-medium".into()),
+                ..Default::default()
+            },
+        );
+        let h = resolve_in(&cfg, "agy").unwrap();
+        assert_eq!(h.model.as_deref(), Some("gemini-4-hydrogen-medium"));
+    }
+
+    #[test]
+    fn over_acp_a_model_needs_no_cli_flag() {
+        let h = resolve_in(&acp_profile("hermes", "acp"), "p").unwrap();
+        assert!(h.with_model(Some("copilot:gpt-6-luna")).is_ok());
     }
 
     #[test]

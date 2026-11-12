@@ -371,6 +371,8 @@ pub struct LaunchRequest {
     /// Protocol instead of in a terminal. Then `args`, `command`, `resume_args`, `mcp` and
     /// `policy` do not apply.
     pub acp_argv: Option<Vec<String>>,
+    /// The model an ACP agent is switched to once its session is open.
+    pub acp_model: Option<String>,
 }
 
 /// The HQ endpoint and the session's own token.

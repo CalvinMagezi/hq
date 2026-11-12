@@ -99,6 +99,9 @@ pub struct SpawnSpec {
     pub mcp: Option<McpEndpoint>,
     /// A stored ACP session to load again instead of opening a new one (a restart's restore).
     pub resume_session: Option<String>,
+    /// The model an ACP agent is switched to once its session is open. Refused with the list of
+    /// what the agent offers when it offers no such model.
+    pub model: Option<String>,
 }
 
 /// An MCP address and the token that goes with it. The token never shows in debug output.
@@ -134,6 +137,7 @@ impl SpawnSpec {
             transport: Transport::Pty,
             mcp: None,
             resume_session: None,
+            model: None,
         }
     }
 }
@@ -213,6 +217,8 @@ const MAX_ARGV_BYTES: usize = 64 * 1024;
 /// Longest MCP address and token the host will write into a config file.
 const MAX_MCP_URL_BYTES: usize = 2048;
 const MAX_MCP_TOKEN_BYTES: usize = 256;
+/// Longest model id accepted for an ACP agent.
+const MAX_MODEL_BYTES: usize = 128;
 /// Longest conversation id an agent may report. They are short tokens; anything
 /// else would end up in a restart command line.
 const MAX_SESSION_ID_CHARS: usize = 128;
@@ -726,6 +732,13 @@ impl Host {
                 "this host only starts sandboxed agents; the machine's owner can start it with --allow-unsandboxed".into(),
             ));
         }
+        if spec
+            .model
+            .as_ref()
+            .is_some_and(|m| m.is_empty() || m.len() > MAX_MODEL_BYTES)
+        {
+            return Err(HostError::TooLarge("the model id"));
+        }
         let too_big = |m: &McpEndpoint| {
             m.url.len() > MAX_MCP_URL_BYTES || m.token.len() > MAX_MCP_TOKEN_BYTES
         };
@@ -781,6 +794,7 @@ impl Host {
             idle_ttl: spec.idle_ttl,
             mcp: spec.mcp,
             resume_session: spec.resume_session,
+            model: spec.model,
             env_keys: spec.env.iter().map(|(k, _)| k.clone()).collect(),
             events: self.events.clone(),
             on_exit: self.exit_hook(&spec.name, egress_port),

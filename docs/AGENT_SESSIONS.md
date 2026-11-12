@@ -945,9 +945,14 @@ agent_host:
         OPENCODE_DISABLE_AUTOUPDATE: "1"
 ```
 
+`model: <id>` on any profile sets the model its sessions start on when the caller names none: the CLI's
+model flag in a terminal, a switch in the session over ACP (through `session/set_model` or the agent's model
+config option). A caller's own `model` wins, and an id the agent does not offer fails the start with the list
+it offers. An alias finds the profile of its canonical name, so one `antigravity` profile serves `agy` too.
+
 Built-in ACP commands: `opencode acp`, `agy acp`, `cursor-agent acp`, `kimi acp`, `hermes acp`,
 `copilot --acp --stdio`. A base without one (or a different command) sets `acp_args`. Not supported over
-ACP: a wrapper `command`, `model` (set it in the agent's own config), one-shot runs, command-policy
+ACP: a wrapper `command`, one-shot runs, command-policy
 hooks, and coming back after a host restart. `hq_mcp: true` on the profile gives the agent HQ's MCP
 connection (tasks, vault, handing work on) in its session, with a token of its own, if the agent says
 it can use an HTTP MCP server; without it the agent gets none. A message sent while a turn

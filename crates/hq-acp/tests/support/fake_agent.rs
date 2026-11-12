@@ -107,6 +107,19 @@ fn leave_a_child_behind() {
     }
 }
 
+/// What `session/new` answers: a plain session, or one that offers a choice of models in either of
+/// the two shapes agents use (`models` for `model-set`, a config option for `model-config`).
+fn new_session_result(scenario: &str) -> Value {
+    match scenario {
+        "model-set" => json!({"sessionId": "fake-1", "models": {"currentModelId": "m-old",
+            "availableModels": [{"modelId": "m-old"}, {"modelId": "m-new"}]}}),
+        "model-config" => json!({"sessionId": "fake-1", "configOptions": [{"id": "model",
+            "category": "model", "currentValue": "m-old",
+            "options": [{"value": "m-old"}, {"value": "m-new"}]}]}),
+        _ => json!({"sessionId": "fake-1"}),
+    }
+}
+
 fn main() {
     let scenario = std::env::args().nth(1).unwrap_or_else(|| "turn".into());
     if scenario == "noise" {
@@ -114,6 +127,7 @@ fn main() {
     }
     let mut lines = stdin().lock().lines().map_while(Result::ok);
     let mut mcp_seen = String::new();
+    let mut model = String::from("m-old");
     while let Some(m) = next_line(&mut lines) {
         let id = m.get("id").cloned().unwrap_or(Value::Null);
         match m["method"].as_str() {
@@ -132,7 +146,15 @@ fn main() {
                     leave_a_child_behind();
                 }
                 mcp_seen = m["params"]["mcpServers"].to_string();
-                reply(&id, json!({"sessionId": "fake-1"}))
+                reply(&id, new_session_result(&scenario))
+            }
+            Some("session/set_model") => {
+                model = m["params"]["modelId"].as_str().unwrap_or("").to_string();
+                reply(&id, json!({}))
+            }
+            Some("session/set_config_option") => {
+                model = m["params"]["value"].as_str().unwrap_or("").to_string();
+                reply(&id, json!({}))
             }
             Some("session/load") if m["params"]["sessionId"] != "fake-1" => {
                 fail(&id, -32602, "session not found")
@@ -146,6 +168,10 @@ fn main() {
                 );
                 mcp_seen = m["params"]["mcpServers"].to_string();
                 reply(&id, json!({}))
+            }
+            Some("session/prompt") if scenario.starts_with("model") => {
+                chunk(&format!("MODEL:{model}"));
+                reply(&id, json!({"stopReason": "end_turn"}));
             }
             Some("session/prompt") => prompt_turn(&scenario, &mcp_seen, &id, &mut lines),
             _ => {}

@@ -120,3 +120,11 @@ agent does. The agent replays its stored conversation while loading; the tracker
 old edits are not reported as new work, and the transcript starts with `restored session <id>`. An agent
 that cannot load sessions, or no longer has the session, fails the restore with its own message. HQ's MCP
 token is not stored, so a restored agent gets none until it is started again.
+
+## Choosing the model (seventh slice)
+
+A profile's `model` is the default for its sessions and a caller's `model` overrides it. Over ACP the
+host reads the menu a new session offers (`models.availableModels`, or the config option of category
+`model`) and switches with `session/set_model` or `session/set_config_option`; an id not on the menu
+fails the start with the list. agy, for one, ignores the model its CLI settings file holds when driven
+over ACP and starts on its own default, so an ACP profile that wants a particular model must say so.
