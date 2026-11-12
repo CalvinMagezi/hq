@@ -257,13 +257,13 @@ pub enum LaterOutcome {
 }
 
 /// Parks the open offer under `message_id` until the person answers the inbox item
-/// `item_for(kind)` builds, which brings the offer back to its chat once. The item is written in
+/// `item_for(kind, thread)` builds, which brings the offer back to its chat once. The item is written in
 /// the same transaction as the parking row, so a parked offer always has its item, and a failure
 /// leaves the offer open to try again. Any kind of offer can wait, once.
 pub fn later(
     conn: &Connection,
     message_id: &str,
-    item_for: impl FnOnce(&str) -> ValueItem,
+    item_for: impl FnOnce(&str, &str) -> ValueItem,
     now: i64,
 ) -> Result<LaterOutcome> {
     let Some(offer) = saved_offer(conn, message_id)? else {
@@ -276,7 +276,7 @@ pub fn later(
     if answer(&tx, message_id, Answer::Later, now)?.is_none() {
         return Ok(LaterOutcome::NoOffer);
     }
-    let item = item_for(&offer.kind);
+    let item = item_for(&offer.kind, &offer.thread_id);
     crate::value_items::insert_on(&tx, &item)?;
     tx.execute(
         "INSERT INTO offer_later (item_id, thread_id, message_id, offer, line, reply, send, created_at)
@@ -999,7 +999,7 @@ mod tests {
     }
 
     fn park(c: &Connection, message: &str, id: &str) -> LaterOutcome {
-        later(c, message, |_| later_item(id), NOW).unwrap()
+        later(c, message, |_, _| later_item(id), NOW).unwrap()
     }
 
     fn set_state(c: &Connection, id: &str, state: &str) {
@@ -1091,7 +1091,7 @@ mod tests {
             park(c, &m, "dup");
             let n = offered_reply(c, &t.thread_id, "dated_todo");
             // The same item id again fails the insert: the whole step rolls back.
-            assert!(later(c, &n, |_| later_item("dup"), NOW).is_err());
+            assert!(later(c, &n, |_, _| later_item("dup"), NOW).is_err());
             let parked: i64 = c.query_row("SELECT COUNT(*) FROM offer_later", [], |r| r.get(0))?;
             assert_eq!(parked, 1);
             let open: Option<String> = c.query_row(

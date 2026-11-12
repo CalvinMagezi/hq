@@ -193,14 +193,16 @@ fn later_title(kind: &str) -> String {
 
 /// The one inbox item a Later offer leaves. It is a plain update for the owner's own devices
 /// (`SCHEDULED_OFFER_SOURCE` is device-only: never pushed), and it is the only resurfacing.
-fn later_item(item_id: &str, kind: &str) -> ValueItem {
+fn later_item(item_id: &str, kind: &str, thread_id: &str) -> ValueItem {
     let mut item = ValueItem::new(
         SCHEDULED_OFFER_SOURCE,
         ValueKind::Fyi,
         later_title(kind),
         "Open this to bring it back to your chat.".to_string(),
     )
-    .with_dedup_key(format!("{}{item_id}", hq_db::offers::LATER_ITEM_PREFIX));
+    .with_dedup_key(format!("{}{item_id}", hq_db::offers::LATER_ITEM_PREFIX))
+    // The chat the offer comes back to, so a client opens that chat and not whichever is open.
+    .with_link(format!("/chat?thread={thread_id}"));
     item.id = item_id.to_string();
     item
 }
@@ -230,9 +232,12 @@ pub(crate) async fn answer_handler(
             (Some(due_at), _) => Ok(hq_db::offers::schedule(c, &body.message_id, due_at, now)?
                 .map_or(LaterOutcome::NoOffer, LaterOutcome::Parked)),
             // The parking row and its inbox item are written together, or not at all.
-            (None, Answer::Later) => {
-                hq_db::offers::later(c, &body.message_id, |kind| later_item(&item_id, kind), now)
-            }
+            (None, Answer::Later) => hq_db::offers::later(
+                c,
+                &body.message_id,
+                |kind, thread| later_item(&item_id, kind, thread),
+                now,
+            ),
             (None, _) => Ok(hq_db::offers::answer(c, &body.message_id, answer, now)?
                 .map_or(LaterOutcome::NoOffer, LaterOutcome::Parked)),
         })
@@ -470,7 +475,7 @@ mod tests {
         assert_eq!(kind, "fyi");
         assert!(!owner_only, "a Later offer is not a decision");
         assert_eq!(title, "Still want to turn a pasted list into tasks?");
-        assert!(later_item(&id, KIND).is_device_only());
+        assert!(later_item(&id, KIND, "t1").is_device_only());
 
         // The inbox offers `open` ("Bring it back") and dismiss, and nothing else.
         let listed =
@@ -482,6 +487,11 @@ mod tests {
             .unwrap();
         assert_eq!(n.actions, vec!["open", "dismiss"]);
         assert_eq!(n.metadata.extra["open_label"], "Bring it back");
+        assert_eq!(
+            n.metadata.link.as_deref(),
+            Some(format!("/chat?thread={thread}").as_str()),
+            "the item names the chat the offer comes back to"
+        );
         assert_eq!(
             offers_in(&state, &thread),
             0,
