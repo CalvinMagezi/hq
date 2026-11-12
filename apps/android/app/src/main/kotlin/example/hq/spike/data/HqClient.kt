@@ -19,7 +19,12 @@ import org.json.JSONObject
 
 /** The local hq is not answering, or answered with an error. */
 /** hq did not answer, or answered with an error; [status] is the HTTP status when there was one. */
-class HqUnavailable(message: String, cause: Throwable? = null, val status: Int = 0) : IOException(message, cause)
+class HqUnavailable(message: String, cause: Throwable? = null, val status: Int = 0) : IOException(message, cause) {
+    companion object {
+        /** HQ answered, but with something the phone cannot read: an error to retry, not "HQ is not running". */
+        const val UNREADABLE = -1
+    }
+}
 
 /** hq cannot make that export from this note (no tables, a file that is not Markdown); [message] says why. */
 class ExportRefused(message: String) : IOException(message)
@@ -121,12 +126,12 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
                 if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note", status = r.code)
                 val o = JSONObject(r.body.string())
                 if (o.optBoolean("isDir", false)) throw NoteNotFound(path)
-                NoteBody(o.optString("path", path), o.optString("content", ""), o.optBoolean("truncated", false), o.optString("hash", "").ifBlank { null })
+                NoteWire.body(o, path)
             }
         } catch (e: IOException) {
             throw if (e is HqUnavailable || e is NoteNotFound) e else HqUnavailable("hq is not reachable", e)
         } catch (e: org.json.JSONException) {
-            throw HqUnavailable("hq sent something unreadable", e)
+            throw HqUnavailable("hq sent something unreadable", e, status = HqUnavailable.UNREADABLE)
         }
     }
 
@@ -143,7 +148,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         } catch (e: IOException) {
             throw if (e is HqUnavailable || e is NoteNotFound) e else HqUnavailable("hq is not reachable", e)
         } catch (e: org.json.JSONException) {
-            throw HqUnavailable("hq sent something unreadable", e)
+            throw HqUnavailable("hq sent something unreadable", e, status = HqUnavailable.UNREADABLE)
         }
     }
 
@@ -306,7 +311,13 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     suspend fun createTask(body: JSONObject): TaskItem = send(authed("/api/tasks").post(json(body)).build()) { taskOf(JSONObject(it)) }
 
     /** Adds a task with a repeat key; true when HQ already had one with that key and so added nothing. */
-    suspend fun createTaskOnce(body: JSONObject): Boolean = send(authed("/api/tasks").post(json(body)).build()) { JSONObject(it).optBoolean("deduplicated") }
+    suspend fun createTaskOnce(body: JSONObject): Boolean = createTaskNamed(body).first
+
+    /** Like [createTaskOnce] and also the id of the task, so it can be taken back; null when HQ did not say. */
+    suspend fun createTaskNamed(body: JSONObject): Pair<Boolean, String?> = send(authed("/api/tasks").post(json(body)).build()) {
+        val o = JSONObject(it)
+        o.optBoolean("deduplicated") to o.optString("id", "").ifBlank { null }
+    }
 
     suspend fun taskComments(id: String): List<TaskComment> =
         send(authed("/api/tasks/${java.net.URLEncoder.encode(id, "UTF-8")}/comments").build()) { text ->
@@ -582,10 +593,34 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     }
 
     /** Notes in a list: path, title, a short preview, when it changed and whether it is pinned. */
-    data class NoteItem(val path: String, val title: String, val preview: String, val mtime: String, val pinned: Boolean)
+    data class NoteItem(
+        val path: String, val title: String, val preview: String, val mtime: String, val pinned: Boolean,
+        /** Who wrote this version: you, hq or import. An older HQ sends nothing, which reads as you. */
+        val writtenBy: String = WRITTEN_BY_YOU,
+        /** `new` or `changed` while the owner has not looked at what HQ wrote; null otherwise. */
+        val review: String? = null,
+        val why: String? = null,
+        val tags: List<String> = emptyList(),
+    )
 
-    private fun noteItems(array: JSONArray?) = array.objects().map {
-        NoteItem(it.getString("path"), it.optString("title", ""), it.optString("preview", ""), it.optString("mtime", ""), it.optBoolean("pinned", false))
+    private fun noteItems(array: JSONArray?) = array.objects().map(NoteWire::item)
+
+    /** The home screen's Recent list and whether HQ filed something the owner has not seen (the dot on Vault). */
+    data class VaultSignals(val recent: List<NoteItem>, val hasNew: Boolean)
+
+    suspend fun vaultSignals(): VaultSignals = send(authed("/api/vault-signals").build()) {
+        val o = JSONObject(it)
+        VaultSignals(noteItems(o.optJSONArray("recent")), o.optBoolean("has_new", false))
+    }
+
+    /** The owner opened this note: HQ stops calling it new. An older HQ has no such route, which is fine. */
+    suspend fun markNoteSeen(path: String) {
+        try { send(authed("/api/note/seen").post(json(JSONObject().put("path", path))).build()) { } } catch (e: HqUnavailable) { if (e.status != HTTP_NOT_FOUND) throw e }
+    }
+
+    /** Keep: the owner accepts what HQ wrote. */
+    suspend fun keepNote(path: String) {
+        send(authed("/api/note/review").post(json(JSONObject().put("path", path).put("verdict", "accepted"))).build()) { }
     }
 
     /** The newest notes, as the home screen's Recent list. */
@@ -614,8 +649,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     data class NoteHit(val path: String, val title: String, val notebook: String, val snippet: String)
 
     /** [folder] narrows the search to that notes folder and the ones inside it; HQ filters before it cuts to [limit]. */
-    suspend fun searchNoteHits(query: String, limit: Int = 30, folder: String? = null): List<NoteHit> =
-        send(authed("/api/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=$limit" + (folder?.let { "&folder=" + java.net.URLEncoder.encode(it, "UTF-8") } ?: "")).build()) { text ->
+    suspend fun searchNoteHits(query: String, limit: Int = 30, folder: String? = null, writtenByHq: Boolean = false, tag: String? = null): List<NoteHit> =
+        send(authed("/api/search?" + noteSearchQuery(query, limit, folder, writtenByHq, tag)).build()) { text ->
             JSONObject(text).optJSONArray("results").objects().map {
                 NoteHit(it.getString("note_path"), it.optString("title", ""), it.optString("notebook", ""), it.optString("snippet", ""))
             }
@@ -641,7 +676,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 
     suspend fun deleteJson(path: String): JSONObject = send(authed(path).delete().build()) { if (it.isBlank()) JSONObject() else JSONObject(it) }
 
-    data class TrashedNote(val trashPath: String, val originalPath: String, val trashedOn: String, val daysLeft: Int)
+    /** [byHq] is true when HQ moved the note to the Trash itself; an HQ that does not say reads as the owner. */
+    data class TrashedNote(val trashPath: String, val originalPath: String, val trashedOn: String, val daysLeft: Int, val byHq: Boolean = false)
 
     suspend fun deleteNote(path: String): String =
         send(authed("/api/note?path=${java.net.URLEncoder.encode(path, "UTF-8")}").delete().build()) {
@@ -652,7 +688,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         send(authed("/api/note/trash").build()) { text ->
             val json = JSONObject(text)
             val items = json.optJSONArray("items").objects().map {
-                TrashedNote(it.getString("trash_path"), it.getString("original_path"), it.getString("trashed_on"), it.optInt("days_left", 0))
+                TrashedNote(it.getString("trash_path"), it.getString("original_path"), it.getString("trashed_on"), it.optInt("days_left", 0), it.optString("deleted_by", "") == WRITTEN_BY_HQ)
             }
             items to json.optInt("retention_days", 30)
         }
@@ -662,9 +698,15 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
             JSONObject(it).getString("content")
         }
 
-    suspend fun restoreNote(trashPath: String): String =
+    suspend fun restoreNote(trashPath: String): String = restoreNoteTo(trashPath).path
+
+    /** Where a restored note went: its own folder, the nearest folder that is left, or the top of the Vault. An older HQ does not say, which reads as its own folder. */
+    data class Restored(val path: String, val to: String)
+
+    suspend fun restoreNoteTo(trashPath: String): Restored =
         send(authed("/api/note/trash/restore").post(JSONObject().put("trash_path", trashPath).toString().toRequestBody("application/json".toMediaType())).build()) {
-            JSONObject(it).getString("path")
+            val o = JSONObject(it)
+            Restored(o.getString("path"), NoteWire.restoredTo(o))
         }
 
     /** Checks an AI provider key with one small call to the provider and, if it works, stores it. 400 means the key was refused, 409 that the environment sets it. */
@@ -804,7 +846,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         } catch (e: IOException) {
             throw if (e is HqUnavailable) e else HqUnavailable("hq is not reachable", e)
         } catch (e: org.json.JSONException) {
-            throw HqUnavailable("hq sent something unreadable", e)
+            throw HqUnavailable("hq sent something unreadable", e, status = HqUnavailable.UNREADABLE)
         }
     }
 

@@ -146,6 +146,11 @@ data class NoteSheet(
     val pinned: Boolean = false,
     /** The note's hash when it was read, sent back with a save so HQ can tell it changed meanwhile. */
     val hash: String? = null,
+    /** Who wrote this version (you, hq, import), `new` or `changed` until the owner has looked, the one line that says why it exists, and its front-matter tags. */
+    val writtenBy: String = example.hq.spike.data.WRITTEN_BY_YOU,
+    val review: String? = null,
+    val why: String? = null,
+    val tags: List<String> = emptyList(),
 )
 
 enum class ExportGroup(val label: String) { Document("Document"), Picture("Picture"), Tables("Tables in this note") }

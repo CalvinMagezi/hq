@@ -7,6 +7,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.R
+import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqUnavailable
 import example.hq.spike.data.NoteChanged
@@ -20,6 +21,7 @@ import example.hq.spike.ui.chat.blocks.NoteRefs
 import example.hq.spike.ui.chat.blocks.NoteText
 import example.hq.spike.ui.shell.Undo
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -61,6 +63,13 @@ class NotesActions(
     val onRestore: (String) -> Unit = {},
     val onUndoDelete: () -> Unit = {},
     val onUndoExpire: () -> Unit = {},
+    val onPoll: () -> Unit = {},
+    val onKeep: () -> Unit = {},
+    val onMoreFolders: (Boolean) -> Unit = {},
+    val onNewSheet: (Boolean) -> Unit = {},
+    val onPasteNew: (String) -> Unit = {},
+    /** The Vault place is on screen (true) or left (false): the quiet dot clears while it is open. */
+    val onShown: (Boolean) -> Unit = {},
     /** The note page being left reports how far it was scrolled (first visible item, offset), so Back can return to the same place. */
     val onScrolled: (String, Int, Int) -> Unit = { _, _, _ -> },
     val scrollOf: (String) -> Pair<Int, Int>? = { null },
@@ -75,6 +84,9 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     private val exporter = NoteExporter(app, client, viewModelScope)
     private var frozen = false
     private var undoJob: Job? = null
+    private var slowJob: Job? = null
+    private var visible = false
+    private var knownNew: Set<String> = emptySet()
 
     private val scrolls = ScrollMemory()
 
@@ -91,7 +103,8 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         onChooseFolder = { open -> edit { it.copy(chooser = open) } },
         onPickFolder = { f -> edit { it.copy(folder = f, chooser = false) } },
         onSave = ::save, onSeeTheirs = ::seeTheirs, onKeepBoth = ::keepBoth, onLeave = ::leave, onKeepEditing = { edit { it.copy(leaving = false) } }, onDiscard = ::discard,
-        onDelete = ::deleteNote, onOpenTrash = ::openTrash, onToggleTrashed = ::toggleTrashed, onRestore = ::restoreTrashed, onUndoDelete = ::undoDelete, onUndoExpire = { _state.update { it.copy(undoDelete = null, undoText = null) } },
+        onDelete = ::deleteNote, onOpenTrash = ::openTrash, onToggleTrashed = ::toggleTrashed, onRestore = ::restoreTrashed, onUndoDelete = ::undo, onUndoExpire = { _state.update(VaultReducer::expired) }, onPoll = ::pollSignals,
+        onKeep = ::keepChange, onMoreFolders = { open -> _state.update { it.copy(foldersOpen = open) } }, onNewSheet = { open -> _state.update { it.copy(newOpen = open) } }, onPasteNew = ::pasteNew, onShown = ::shown,
         onScrolled = scrolls::save, scrollOf = scrolls::restore,
     )
 
@@ -133,15 +146,58 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refresh() {
         if (frozen) return
-        viewModelScope.launch {
-            val recent = try { client.recentNotes() } catch (e: HqUnavailable) { null }
-            val pinned = try { client.pinnedNotes() } catch (e: HqUnavailable) { null }
-            val folders = try { client.folders() } catch (e: HqUnavailable) { null }
-            _state.update {
-                if (recent == null && pinned == null && folders == null) it.copy(loaded = true, offline = true)
-                else it.copy(loaded = true, offline = false, recent = recent ?: it.recent, pinned = pinned ?: it.pinned, folders = folders ?: it.folders)
+        if (!_state.value.loaded && slowJob == null) {
+            slowJob = viewModelScope.launch {
+                delay(VaultRules.SLOW_MS)
+                _state.update { if (it.loaded) it else it.copy(slow = true) }
             }
         }
+        viewModelScope.launch {
+            var status = 0
+            suspend fun <T> guard(call: suspend () -> T): T? = try { call() } catch (e: HqUnavailable) { status = if (status == 0) e.status else status; null }
+            val signals = async { guard { client.vaultSignals() } }
+            val pinned = async { guard { client.pinnedNotes() } }
+            val folders = async { guard { client.folders() } }
+            val trash = async { guard { client.trash().first.size } }
+            val sig = signals.await()
+            val pin = pinned.await()
+            val fol = folders.await()
+            val tr = trash.await()
+            slowJob?.cancel()
+            // Worked out here, not inside the update below: an update can run twice and must give the same answer.
+            val fresh = sig?.let { freshAfter(it) } ?: false
+            _state.update {
+                if (sig == null && pin == null && fol == null) it.copy(loaded = true, slow = false, offline = VaultRules.isOffline(status), error = !VaultRules.isOffline(status))
+                else {
+                    val base = if (sig != null) VaultReducer.signals(it, sig.recent, sig.hasNew, VaultRules.dotCleared(visible, fresh, it.dotCleared)) else it
+                    base.copy(loaded = true, slow = false, offline = false, error = false, pinned = pin ?: it.pinned, folders = fol ?: it.folders, trashCount = tr ?: it.trashCount)
+                }
+            }
+        }
+    }
+
+    /** The cheap poll: only the signals, so the dot can come up while the owner is elsewhere. The lists and the Trash are read when Vault opens. */
+    fun pollSignals() {
+        if (frozen) return
+        viewModelScope.launch {
+            val sig = try { client.vaultSignals() } catch (e: HqUnavailable) { return@launch }
+            val fresh = freshAfter(sig)
+            _state.update { VaultReducer.signals(it, sig.recent, sig.hasNew, VaultRules.dotCleared(visible, fresh, it.dotCleared)) }
+        }
+    }
+
+    /** Whether the answer names a marked note the phone had not heard of; remembers what it named. */
+    private fun freshAfter(sig: HqClient.VaultSignals): Boolean {
+        val keys = VaultRules.markedPaths(sig.recent)
+        val fresh = VaultRules.hasFresh(knownNew, keys)
+        knownNew = keys
+        return fresh
+    }
+
+    private fun shown(open: Boolean) {
+        visible = open
+        // A sheet belongs to the place: leaving Vault closes them, so coming back does not show a stale one.
+        _state.update { if (open) it.copy(dotCleared = true) else it.copy(newOpen = false, foldersOpen = false) }
     }
 
     private fun openFolder(path: String) {
@@ -195,7 +251,11 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
             val phase = try {
                 val body = client.note(path)
                 val pins = try { client.pinned() } catch (e: HqUnavailable) { emptySet() }
-                val sheet = NoteSheet(body.path, NoteRefs.title(body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, null, body.path in pins, body.hash)
+                val sheet = NoteSheet(
+                    body.path, VaultRules.titleOf(body.content, body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, null, body.path in pins, body.hash,
+                    body.writtenBy, body.review, body.why, body.tags,
+                )
+                if (body.review == "new") markSeen(body.path)
                 val edited = (_state.value.recent + _state.value.pinned).firstOrNull { it.path == body.path }?.let { NoteTime.edited(it.mtime) }.orEmpty()
                 ReaderPhase.Ready(sheet, edited)
             } catch (e: NoteNotFound) {
@@ -222,16 +282,75 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** A task in the Inbox that points at this note. The same note twice answers with the first task, so a second tap adds nothing. */
+    /**
+     * A task in the Inbox that points at this note, named with the note's title. It is added at once and said in an Undo
+     * snackbar ("Task added. Undo") for 10 seconds, so a stray tap costs nothing. The same note twice answers with the
+     * first task, so a second tap adds nothing and the line says so.
+     */
     private fun makeTask() {
         val note = (_state.value.reader as? ReaderPhase.Ready)?.note ?: return
+        val app = getApplication<Application>()
+        _state.update { it.copy(menu = false) }
         viewModelScope.launch {
-            val said = try {
-                getApplication<Application>().getString(if (client.createTaskOnce(noteTaskBody(note.path, note.title))) example.hq.spike.R.string.notes_has_task else example.hq.spike.R.string.notes_task_added)
+            try {
+                val (already, id) = client.createTaskNamed(noteTaskBody(note.path, note.title))
+                if (already || id == null) _state.update { it.copy(notice = Notice(app.getString(R.string.notes_has_task))) }
+                else _state.update { VaultReducer.pend(it, PendingUndo.TaskAdded(id, note.path)) }
             } catch (e: HqUnavailable) {
-                getApplication<Application>().getString(if (e.status == 0) example.hq.spike.R.string.notes_task_no_reply else example.hq.spike.R.string.notes_task_failed)
+                _state.update { it.copy(notice = Notice(app.getString(if (e.status == 0) R.string.notes_task_no_reply else R.string.notes_task_failed))) }
             }
-            _state.update { it.copy(notice = Notice(said)) }
+        }
+    }
+
+    /** The owner opened a note HQ filed: it stops being new, here and on HQ. */
+    private fun markSeen(path: String) {
+        _state.update { VaultReducer.seen(it, path) }
+        viewModelScope.launch {
+            try { client.markNoteSeen(path); refreshDot() } catch (e: HqUnavailable) { /* the mark stays; it clears the next time the note opens */ }
+        }
+    }
+
+    private suspend fun refreshDot() {
+        val sig = try { client.vaultSignals() } catch (e: HqUnavailable) { return }
+        val fresh = freshAfter(sig)
+        _state.update { VaultReducer.signals(it, sig.recent, sig.hasNew, VaultRules.dotCleared(visible, fresh, it.dotCleared)) }
+    }
+
+    /** Keep: the owner accepts what HQ changed, and the bar goes. */
+    private fun keepChange() {
+        val ready = _state.value.reader as? ReaderPhase.Ready ?: return
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            try {
+                client.keepNote(ready.note.path)
+                _state.update { s ->
+                    val now = s.reader as? ReaderPhase.Ready
+                    val seen = VaultReducer.seen(s, ready.note.path)
+                    if (now?.note?.path == ready.note.path) seen.copy(reader = now.copy(note = now.note.copy(review = null))) else seen
+                }
+                refreshDot()
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(notice = Notice(app.getString(R.string.vault_keep_failed))) }
+            }
+        }
+    }
+
+    /** Paste: the clipboard text becomes a note in the Inbox folder and opens. */
+    private fun pasteNew(text: String) {
+        val app = getApplication<Application>()
+        _state.update { it.copy(newOpen = false) }
+        if (text.isBlank()) {
+            _state.update { it.copy(notice = Notice(app.getString(R.string.vault_paste_empty))) }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val path = client.createNote(INBOX, firstLine(text), text)
+                openNote(path)
+                refresh()
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(notice = Notice(app.getString(R.string.vault_paste_failed))) }
+            }
         }
     }
 
@@ -250,7 +369,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
                 val trashPath = client.deleteNote(ready.note.path)
                 Counters.get(app).bump(Counter.UndoNoteDeleted, 1)
                 undoJob?.cancel()
-                _state.update { it.copy(undoDelete = trashPath, undoText = app.getString(R.string.note_deleted)) }
+                _state.update { VaultReducer.pend(it, PendingUndo.NoteDeleted(trashPath)) }
                 popNow()
                 reloadBehind()
             } catch (e: HqUnavailable) {
@@ -259,20 +378,31 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun undoDelete() {
-        val trashPath = _state.value.undoDelete ?: return
+    /** Undo takes back exactly the action the snackbar named: a task is archived, a deleted note comes out of the Trash, never the other way round. */
+    private fun undo() {
+        val (what, cleared) = VaultReducer.undone(_state.value)
+        if (what == PendingUndo.None) return
         undoJob?.cancel()
         undoJob = null
-        _state.update { it.copy(undoDelete = null, undoText = null) }
+        _state.value = cleared
         val app = getApplication<Application>()
         viewModelScope.launch {
             try {
-                client.restoreNote(trashPath)
-                Counters.get(app).bump(Counter.UndoNoteDeleted, 0)
-                _state.update { it.copy(notice = Notice(app.getString(R.string.note_restored))) }
-                reloadBehind()
+                when (what) {
+                    is PendingUndo.TaskAdded -> {
+                        client.archiveTask(what.id)
+                        _state.update { it.copy(notice = Notice(app.getString(R.string.vault_task_removed))) }
+                    }
+                    is PendingUndo.NoteDeleted -> {
+                        client.restoreNote(what.trashPath)
+                        Counters.get(app).bump(Counter.UndoNoteDeleted, 0)
+                        _state.update { it.copy(notice = Notice(app.getString(R.string.note_restored))) }
+                        reloadBehind()
+                    }
+                    PendingUndo.None -> Unit
+                }
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(notice = Notice(app.getString(R.string.trash_restore_failed))) }
+                _state.update { it.copy(notice = Notice(app.getString(if (what is PendingUndo.TaskAdded) R.string.vault_task_not_removed else R.string.trash_restore_failed))) }
             }
         }
     }
@@ -312,11 +442,11 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         val app = getApplication<Application>()
         viewModelScope.launch {
             try {
-                val restoredPath = client.restoreNote(trashPath)
-                val folder = restoredFolder(restoredPath)
+                val restored = client.restoreNoteTo(trashPath)
+                val place = VaultRules.restoredPlace(restored.to, restored.path)
                 _state.update { s ->
                     s.copy(
-                        notice = Notice(app.getString(R.string.trash_restored_to, folder)),
+                        notice = Notice(if (place == null) app.getString(R.string.trash_restored_vault) else app.getString(R.string.trash_restored_to, place)),
                         trash = s.trash.copy(
                             busy = s.trash.busy - trashPath,
                             items = s.trash.items.filter { it.trashPath != trashPath },
@@ -424,7 +554,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val phase = try {
                 val body = client.note(path)
-                ReaderPhase.Ready(NoteSheet(body.path, NoteRefs.title(body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, null, pinned, body.hash), "edited just now")
+                ReaderPhase.Ready(NoteSheet(body.path, VaultRules.titleOf(body.content, body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, null, pinned, body.hash, body.writtenBy, body.review, body.why, body.tags), "edited just now")
             } catch (e: NoteNotFound) { ReaderPhase.Gone } catch (e: HqUnavailable) { ReaderPhase.Failed }
             _state.update { if (it.top == NotesRoute.Reader(path)) it.copy(reader = phase) else it }
         }

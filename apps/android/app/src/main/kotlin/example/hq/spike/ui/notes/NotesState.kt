@@ -11,6 +11,17 @@ import example.hq.spike.ui.chat.blocks.NoteRefs
 /** The reader's path for a note link by id that names no note: its name is not known. */
 const val UNKNOWN_NOTE = ""
 
+/** The one action an Undo snackbar can take back. */
+sealed interface PendingUndo {
+    data object None : PendingUndo
+
+    /** "Make a task" added task [id] for the note at [note]. */
+    data class TaskAdded(val id: String, val note: String) : PendingUndo
+
+    /** The note went to the Trash at [trashPath]. */
+    data class NoteDeleted(val trashPath: String) : PendingUndo
+}
+
 /** A page pushed over the Notes home. Back pops one. */
 sealed interface NotesRoute {
     data class Folder(val path: String) : NotesRoute
@@ -75,18 +86,34 @@ data class NotesUi(
     val export: ExportState? = null,
     val notice: Notice? = null,
     val trash: TrashView = TrashView(),
-    val undoDelete: String? = null,
-    val undoText: String? = null,
+    /** What the one Undo snackbar on screen would take back. A new action replaces it, so the line and the Undo never disagree. */
+    val pending: PendingUndo = PendingUndo.None,
+    /** Notes the owner opened or kept on this phone: a refresh that was already in flight must not bring their New or Changed mark back. */
+    val seenLocally: Set<String> = emptySet(),
+    /** How many notes the Trash holds, for its chip; zero draws no number. */
+    val trashCount: Int = 0,
+    /** HQ filed or changed something the owner has not seen, for the dot on Vault. */
+    val hasNew: Boolean = false,
+    /** The dot was cleared by opening Vault; a note HQ files later brings it back. */
+    val dotCleared: Boolean = false,
+    /** The full folder list opened by the More chip. */
+    val foldersOpen: Boolean = false,
+    /** The New sheet. */
+    val newOpen: Boolean = false,
+    /** The first read is taking longer than [VaultRules.SLOW_MS]. */
+    val slow: Boolean = false,
+    /** The last read failed with HQ answering badly, as opposed to HQ being off ([offline]). */
+    val error: Boolean = false,
 ) {
+
     val top: NotesRoute? get() = stack.lastOrNull()
+
+    /** The quiet dot on Vault in the bar. Never a number. */
+    val dot: Boolean get() = hasNew && !dotCleared
 
     /** The folders directly under Notebooks, Inbox first, for the chips on the home screen. */
     val topFolders: List<String> get() = folders.map { it.removePrefix("Notebooks/").substringBefore('/') }.filter { it.isNotBlank() }.distinct()
 }
-
-/** The folder part of a note's vault path with the leading Notebooks/ removed. */
-internal fun restoredFolder(path: String): String =
-    path.substringBeforeLast('/').removePrefix("Notebooks/").ifEmpty { "Notebooks" }
 
 /** The task "Make a task" adds: the note's title, its path as the description (a task has no link field), and the path as the repeat key. */
 internal fun noteTaskBody(path: String, title: String): org.json.JSONObject =

@@ -77,7 +77,10 @@ data class StoredMessage(
 }
 
 /** A note's text as saved, front matter included. [truncated] when hq cut a very long note. */
-data class NoteBody(val path: String, val content: String, val truncated: Boolean, val hash: String? = null)
+data class NoteBody(
+    val path: String, val content: String, val truncated: Boolean, val hash: String? = null,
+    val writtenBy: String = WRITTEN_BY_YOU, val review: String? = null, val why: String? = null, val tags: List<String> = emptyList(),
+)
 
 data class ThreadList(val threads: List<ChatThread>, val running: Set<String>)
 
@@ -96,3 +99,55 @@ private fun JSONArray?.toToolSteps(): List<ToolStep> {
 }
 
 internal fun JSONObject.optStringOrNull(key: String): String? = if (has(key) && !isNull(key)) getString(key) else null
+
+/** Who wrote a note's current version, as HQ marks it. */
+const val WRITTEN_BY_YOU = "you"
+const val WRITTEN_BY_HQ = "hq"
+
+/** Where a restored note went (`restored_to`). */
+const val RESTORED_ORIGINAL = "original"
+const val RESTORED_FOLDER = "folder"
+const val RESTORED_VAULT = "vault"
+
+/** The query string of a note search: the words, how many, and the three narrowings HQ knows. */
+internal fun noteSearchQuery(query: String, limit: Int, folder: String?, writtenByHq: Boolean, tag: String?): String {
+    fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
+    return buildString {
+        append("q=").append(enc(query)).append("&limit=").append(limit)
+        folder?.let { append("&folder=").append(enc(it)) }
+        if (writtenByHq) append("&written_by=hq")
+        tag?.takeIf { it.isNotBlank() }?.let { append("&tag=").append(enc(it.trimStart('#'))) }
+    }
+}
+
+/** Reads what HQ says about a note without trusting its shape: an absent, null or odd field falls back to today's behaviour. */
+internal object NoteWire {
+    private val WRITERS = setOf(WRITTEN_BY_YOU, WRITTEN_BY_HQ, "import")
+    private val RESTORED = setOf(RESTORED_ORIGINAL, RESTORED_FOLDER, RESTORED_VAULT)
+
+    /** A string field that may be missing, null or blank; those read as absent. */
+    fun text(o: JSONObject, key: String): String? = if (!o.has(key) || o.isNull(key)) null else (o.opt(key) as? String)?.takeIf { it.isNotBlank() }
+
+    fun writtenBy(o: JSONObject): String = text(o, "written_by")?.takeIf { it in WRITERS } ?: WRITTEN_BY_YOU
+
+    /** Only `new` and `changed` mean anything; any other word is no mark. */
+    fun review(o: JSONObject): String? = text(o, "review")?.takeIf { it == "new" || it == "changed" }
+
+    /** The tags that are strings; a null or a number among them is dropped. */
+    fun tags(o: JSONObject): List<String> {
+        val a = o.optJSONArray("tags") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { (a.opt(it) as? String)?.trim()?.takeIf(String::isNotEmpty) }
+    }
+
+    fun restoredTo(o: JSONObject): String = text(o, "restored_to")?.takeIf { it in RESTORED } ?: RESTORED_ORIGINAL
+
+    fun item(o: JSONObject): HqClient.NoteItem = HqClient.NoteItem(
+        o.getString("path"), o.optString("title", ""), o.optString("preview", ""), o.optString("mtime", ""), o.optBoolean("pinned", false),
+        writtenBy(o), review(o), text(o, "why"), tags(o),
+    )
+
+    fun body(o: JSONObject, path: String): NoteBody = NoteBody(
+        o.optString("path", path), o.optString("content", ""), o.optBoolean("truncated", false), o.optString("hash", "").ifBlank { null },
+        writtenBy(o), review(o), text(o, "why"), tags(o),
+    )
+}

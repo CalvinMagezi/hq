@@ -58,15 +58,16 @@ private val Small = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp)
 private val MenuTop = 150.dp
 private val ExportTop = 70.dp
 
-/** What the note menu and the export steps can ask for; Chat and Notes each supply their own. */
+/** What the note menu and the export steps can ask for; Chat and the Vault each supply their own. A null action leaves its row out. */
 class NoteMenuActions(
     val onClose: () -> Unit = {},
     val onEdit: (() -> Unit)? = null,
     val onTogglePin: () -> Unit = {},
-    val onAsk: () -> Unit = {},
+    val onAsk: (() -> Unit)? = {},
     val onExport: () -> Unit = {},
     val onNotice: (String) -> Unit = {},
     val onDelete: (() -> Unit)? = null,
+    val onMakeTask: (() -> Unit)? = null,
 )
 
 class ExportActions(
@@ -76,30 +77,59 @@ class ExportActions(
     val onNotice: (String) -> Unit = {},
 )
 
-/** Everything you can do with the open note, in one place: pin, ask HQ, share, export, copy. Rename and move wait for server routes. */
+/**
+ * Everything you can do with the open note, in one sheet of at most six rows: pin, make a task, ask HQ, and a "Share and
+ * export" group holding share, export and the two copies. Rename and move wait for server routes.
+ */
 @Composable
 fun NoteMenuSheet(sheet: NoteSheet, actions: NoteMenuActions) {
     val copy = rememberCopier()
     val context = LocalContext.current
-    SheetFrame(actions.onClose, top = MenuTop) {
-        Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
-            Text(sheet.title, style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1)
-            if (sheet.trail.isNotBlank()) Text(sheet.trail, style = Small, color = Mts.InkMuted)
-        }
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            actions.onEdit?.let { ActionRow(HqIcons.Edit, "Edit", null, { it() }, minHeight = ROW_HEIGHT) }
-            ActionRow(HqIcons.Pin, if (sheet.pinned) "Unpin" else "Pin to top", null, { actions.onTogglePin() }, minHeight = ROW_HEIGHT)
-            ActionRow(HqIcons.Spark, "Ask HQ about this note", null, { actions.onClose(); actions.onAsk() }, minHeight = ROW_HEIGHT)
-            ActionRow(HqIcons.Share, "Share", null, { actions.onClose(); shareText(context, sheet) }, minHeight = ROW_HEIGHT)
-            ActionRow(HqIcons.Download, "Export as…", "PDF, Word, a picture and more", { actions.onClose(); actions.onExport() }, minHeight = ROW_HEIGHT)
-            ActionRow(HqIcons.Copy, "Copy path", null, { copy(sheet.path); actions.onClose(); actions.onNotice("Copied the note path") }, minHeight = ROW_HEIGHT)
-            ActionRow(HqIcons.Copy, "Copy note text", null, { copy(NoteText.withoutFrontmatter(sheet.body)); actions.onClose(); actions.onNotice("Copied") }, minHeight = ROW_HEIGHT)
-            actions.onDelete?.let { ActionRow(HqIcons.Trash, stringResource(R.string.notes_delete), null, { actions.onClose(); it() }, minHeight = ROW_HEIGHT) }
-        }
+    val copiedPath = stringResource(R.string.vault_copied_path)
+    val copiedText = stringResource(R.string.chat_copied)
+    val items = NoteMenuItems.build(
+        sheet, actions,
+        NoteMenuItems.Words(
+            edit = stringResource(R.string.note_editor_edit), pin = stringResource(R.string.notes_pin), unpin = stringResource(R.string.pin_unpin),
+            ask = stringResource(R.string.vault_ask_about), makeTask = stringResource(R.string.notes_make_task), shareExport = stringResource(R.string.vault_share_export),
+            share = stringResource(R.string.notes_share), export = stringResource(R.string.vault_export_as), exportHint = stringResource(R.string.vault_export_hint),
+            copyPath = stringResource(R.string.vault_copy_path), copyText = stringResource(R.string.vault_copy_text), delete = stringResource(R.string.notes_delete),
+            more = stringResource(R.string.vault_more), tooLong = stringResource(R.string.notes_too_long_share),
+        ),
+        share = { shareText(context, sheet) }, copyPath = { copy(sheet.path); actions.onNotice(copiedPath) },
+        copyText = { copy(NoteText.withoutFrontmatter(sheet.body)); actions.onNotice(copiedText) },
+    )
+    example.hq.spike.ui.shell.SheetListSheet(sheet.title, sheet.trail, items, stringResource(R.string.notify_back), actions.onClose, MenuTop)
+}
+
+/** The rows of the note menu, built apart from the drawing so a test can count them. */
+object NoteMenuItems {
+    class Words(
+        val edit: String, val pin: String, val unpin: String, val ask: String, val makeTask: String, val shareExport: String, val share: String,
+        val export: String, val exportHint: String, val copyPath: String, val copyText: String, val delete: String, val more: String, val tooLong: String,
+    )
+
+    fun build(sheet: NoteSheet, a: NoteMenuActions, w: Words, share: () -> Unit, copyPath: () -> Unit, copyText: () -> Unit): List<example.hq.spike.ui.shell.SheetItem> {
+        val rows = mutableListOf<example.hq.spike.ui.shell.SheetItem>()
+        a.onEdit?.let { rows += example.hq.spike.ui.shell.SheetAction(HqIcons.Edit, w.edit, onClick = it) }
+        rows += example.hq.spike.ui.shell.SheetAction(HqIcons.Pin, if (sheet.pinned) w.unpin else w.pin, onClick = a.onTogglePin)
+        a.onAsk?.let { rows += example.hq.spike.ui.shell.SheetAction(HqIcons.Spark, w.ask, onClick = it) }
+        a.onMakeTask?.let { rows += example.hq.spike.ui.shell.SheetAction(HqIcons.Tasks, w.makeTask, onClick = it) }
+        rows += example.hq.spike.ui.shell.SheetGroup(
+            HqIcons.Share, w.shareExport,
+            listOf(
+                // Only the first part of a long note is here, so sharing it would send a cut-off copy: say so instead.
+                example.hq.spike.ui.shell.SheetAction(HqIcons.Share, w.share) { if (sheet.truncated) a.onNotice(w.tooLong) else share() },
+                example.hq.spike.ui.shell.SheetAction(HqIcons.Download, w.export, w.exportHint, onClick = a.onExport),
+                example.hq.spike.ui.shell.SheetAction(HqIcons.Copy, w.copyText, onClick = copyText),
+                example.hq.spike.ui.shell.SheetAction(HqIcons.Copy, w.copyPath, onClick = copyPath),
+            ),
+        )
+        a.onDelete?.let { rows += example.hq.spike.ui.shell.SheetAction(HqIcons.Trash, w.delete, danger = true, onClick = it) }
+        return example.hq.spike.ui.shell.SheetList.fit(rows, HqIcons.MoreVertical, w.more)
     }
 }
 
-private val ROW_HEIGHT = 64.dp
 
 internal fun shareText(context: Context, sheet: NoteSheet) {
     val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_SUBJECT, sheet.title).putExtra(Intent.EXTRA_TEXT, NoteText.withoutFrontmatter(sheet.body))

@@ -42,3 +42,22 @@ class SearchMatchTest {
         assertEquals(true, SearchMatch.hits("alpha beta", "alpha\n beta"))
     }
 }
+
+class TagChipsTest {
+    @Test fun `the active tag comes first and each tag once`() {
+        assertEquals(listOf("work", "idea", "android"), SearchMatch.tagChips(listOf("idea", "Work", "android", "idea"), "work"))
+    }
+
+    @Test fun `at most eight tag chips and none blank`() {
+        assertEquals(SearchMatch.MAX_TAG_CHIPS, SearchMatch.tagChips((1..20).map { "t$it" }, null).size)
+        assertEquals(listOf("a"), SearchMatch.tagChips(listOf("#a", "", "#"), null))
+    }
+}
+
+class FilterRuleTest {
+    @Test fun `filters need a word because HQ refuses an empty search`() {
+        org.junit.Assert.assertFalse(SearchMatch.canFilter(""))
+        org.junit.Assert.assertFalse(SearchMatch.canFilter("   \n"))
+        org.junit.Assert.assertTrue(SearchMatch.canFilter(" plan "))
+    }
+}

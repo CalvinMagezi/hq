@@ -46,6 +46,12 @@ data class SearchUi(
     val scope: SearchScope = SearchScope.All,
     /** A notes folder (under Notebooks) the search stays in, asked of HQ, never filtered on the phone. */
     val folder: String? = null,
+    /** Only notes HQ wrote, asked of HQ. */
+    val writtenByHq: Boolean = false,
+    /** Only notes with this front-matter tag (no leading #), asked of HQ. */
+    val tag: String? = null,
+    /** Tags the phone knows from the notes it has listed, offered as chips next to the active one. */
+    val tags: List<String> = emptyList(),
     val notes: List<SearchHit> = emptyList(),
     val tasks: List<TaskItem> = emptyList(),
     val chats: List<ChatRow> = emptyList(),
@@ -76,6 +82,8 @@ class SearchActions(
     val onQuery: (String) -> Unit = {},
     val onScope: (SearchScope) -> Unit = {},
     val onFolder: (String?) -> Unit = {},
+    val onWrittenByHq: (Boolean) -> Unit = {},
+    val onTag: (String?) -> Unit = {},
     val onRecent: (String) -> Unit = {},
     val onPicked: (String) -> Unit = {},
     val onClearRecent: () -> Unit = {},
@@ -85,7 +93,7 @@ class SearchActions(
 )
 
 /** The lists the phone already has, matched here so tasks and helpers still search while HQ is down. */
-data class SearchSources(val tasks: List<TaskItem> = emptyList(), val chats: List<ChatRow> = emptyList(), val helpers: List<HelperCard> = emptyList(), val server: Boolean = false)
+data class SearchSources(val tasks: List<TaskItem> = emptyList(), val chats: List<ChatRow> = emptyList(), val helpers: List<HelperCard> = emptyList(), val server: Boolean = false, val tags: List<String> = emptyList())
 
 /** One field across notes, tasks, chats and helpers. Notes ask HQ (and so do chats' rows); tasks and helpers are matched here. */
 class SearchViewModel(app: Application) : AndroidViewModel(app) {
@@ -104,7 +112,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     val actions = SearchActions(
-        onOpen = ::open, onClose = ::close, onHide = { _state.update { it.copy(open = false) } }, onQuery = ::query, onScope = ::scope, onFolder = ::folder, onRecent = ::query,
+        onOpen = ::open, onClose = ::close, onHide = { _state.update { it.copy(open = false) } }, onQuery = ::query, onScope = ::scope, onFolder = ::folder, onWrittenByHq = ::writtenByHq, onTag = ::tag, onRecent = ::query,
         onPicked = ::remember, onClearRecent = ::clearRecent, onUndoClear = ::undoClear,
         onClearedShown = { _state.update { it.copy(cleared = false) } },
         onScrolled = { i, o -> scrollAt = i to o },
@@ -132,7 +140,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         parked = null
         job?.cancel()
         scrollAt = 0 to 0
-        _state.update { SearchUi(open = true, scope = start.scope, folder = start.folder, recent = recent(), hqDown = down(services.status.value), server = from.server) }
+        _state.update { SearchUi(open = true, scope = start.scope, folder = start.folder, writtenByHq = start.writtenByHq, tag = start.tag, tags = SearchMatch.tagChips(from.tags, start.tag), recent = recent(), hqDown = down(services.status.value), server = from.server) }
         if (start.query.isNotBlank()) query(start.query)
     }
 
@@ -180,6 +188,16 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         query(_state.value.query)
     }
 
+    private fun writtenByHq(on: Boolean) {
+        _state.update { it.copy(writtenByHq = on) }
+        query(_state.value.query)
+    }
+
+    private fun tag(t: String?) {
+        _state.update { it.copy(tag = t) }
+        query(_state.value.query)
+    }
+
     private fun query(q: String) {
         job?.cancel()
         val down = down(services.status.value)
@@ -199,13 +217,15 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (!searching || down) return
         val folder = _state.value.folder
+        val byHq = _state.value.writtenByHq
+        val tag = _state.value.tag
         job = viewModelScope.launch {
             delay(DEBOUNCE_MS)
             val found = try {
-                client.searchNoteHits(q.trim(), NOTE_HITS, folder).map { SearchHit(it.path, it.title.ifBlank { NoteRefs.title(it.path) }, it.notebook, it.snippet) }
+                client.searchNoteHits(q.trim(), NOTE_HITS, folder, byHq, tag).map { SearchHit(it.path, it.title.ifBlank { NoteRefs.title(it.path) }, it.notebook, it.snippet) }
             } catch (e: HqUnavailable) { null }
             _state.update { s ->
-                if (s.query != q || s.folder != folder) s
+                if (s.query != q || s.folder != folder || s.writtenByHq != byHq || s.tag != tag) s
                 else s.copy(
                     notes = found ?: emptyList(), loading = false, notesFail = if (found == null) NotesFail.of(services.status.value) else null,
                     folders = if (found != null && folder == null) folderCounts(found) else s.folders,

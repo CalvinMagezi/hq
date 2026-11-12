@@ -27,7 +27,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -92,6 +97,7 @@ fun SearchScreen(ui: SearchUi, actions: SearchActions, goes: SearchGoes, stopped
     Column(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().imePadding()) {
         FieldRow(ui, actions, focus)
         ScopeChips(ui, actions)
+        if (ui.scope == SearchScope.Notes) FilterChips(ui, actions)
         if (ui.scope == SearchScope.Notes && ui.folder != null) FolderFrom(ui, actions)
         if (searching && ui.scope == SearchScope.Notes) FolderChips(ui, actions)
         LazyColumn(Modifier.weight(1f), state = list, contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -134,6 +140,38 @@ private fun ScopeChips(ui: SearchUi, actions: SearchActions) {
             ) { Text(SearchWords.chip(w, ui, s), style = HqType.BodySmBold, color = if (on) Mts.Surface000 else Mts.Ink, maxLines = 1) }
         }
     }
+}
+
+/**
+ * "Written by HQ" and the tags the phone knows: each narrows the search and each says whether it is on. With no word typed
+ * they look off and a tap only explains why, because HQ cannot filter an empty search.
+ */
+@Composable
+private fun FilterChips(ui: SearchUi, actions: SearchActions) {
+    val w = rememberWords()
+    val can = SearchMatch.canFilter(ui.query)
+    var hint by remember { mutableStateOf(false) }
+    LaunchedEffect(can) { if (can) hint = false }
+    Column {
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(w.s(R.string.vault_filter_hq), ui.writtenByHq, can) { if (can) actions.onWrittenByHq(!ui.writtenByHq) else hint = true }
+            ui.tags.forEach { t ->
+                val on = ui.tag.equals(t, ignoreCase = true)
+                FilterChip("#$t", on, can) { if (can) actions.onTag(if (on) null else t) else hint = true }
+            }
+        }
+        if (hint && !can) Text(w.s(R.string.vault_filter_hint), style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+    }
+}
+
+@Composable
+private fun FilterChip(label: String, on: Boolean, enabledLook: Boolean, onToggle: () -> Unit) {
+    Box(
+        Modifier.heightIn(min = 48.dp).clip(CircleShape).alpha(if (enabledLook) 1f else 0.5f)
+            .then(if (on) Modifier.background(Mts.Surface200) else Modifier.border(1.dp, Mts.Line, CircleShape))
+            .toggleable(value = on, role = Role.Checkbox, onValueChange = { onToggle() }).padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, style = HqType.BodySmBold, color = Mts.Ink, maxLines = 1) }
 }
 
 @Composable

@@ -183,8 +183,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Text that came from outside (the share sheet): added after what is already typed, never over it. */
     fun addToDraft(text: String) {
-        val now = _state.value.draft
-        setDraft(if (now.isBlank()) text else now.trimEnd() + "\n\n" + text)
+        setDraft(draftWith(_state.value.draft, text))
     }
 
     private fun send() {
@@ -527,3 +526,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         const val CHAT_GONE = "That chat is not in your list"
     }
 }
+
+/** [text] added after what is already typed, or alone when the field is empty; typing is never replaced. */
+internal fun draftWith(now: String, text: String): String = if (now.isBlank()) text else now.trimEnd() + "\n\n" + text
