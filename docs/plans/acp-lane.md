@@ -93,3 +93,11 @@ and `LaunchRequest.acp_argv` carries the server command to `NativeBackend`, whic
 `agent.spawn` with `transport: "acp"`, skips the screen wait and the hook, MCP and policy
 plumbing, and treats the agent as ready once the host has opened the session. `submit` over ACP never
 presses Enter a second time: the prompt is delivered, not typed.
+
+## What a finished turn leaves on the task (fourth slice)
+
+`agent.get` and `agent.list` carry an `acp` object for an ACP agent: the files its edit tools reported
+(absolute, failed edits left out), how the last turn ended, the tokens it used, and the context use.
+When the session supervisor sees a turn finish it adds a note to the comment the task already gets:
+the files (at most twelve, one line each, shortened) and the tokens, worded as the agent's own account
+to check against `git diff`. A terminal agent has no such report and is unchanged.

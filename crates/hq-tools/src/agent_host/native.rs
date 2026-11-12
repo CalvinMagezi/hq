@@ -510,6 +510,10 @@ fn parse_info(v: &Value) -> Option<AgentInfo> {
             .filter(|p| !p.is_null())
             .and_then(|p| serde_json::from_value(p.clone()).ok()),
         pending_seq: v.get("pending_seq").and_then(Value::as_u64),
+        acp: v
+            .get("acp")
+            .filter(|a| !a.is_null())
+            .and_then(|a| serde_json::from_value(a.clone()).ok()),
     })
 }
 

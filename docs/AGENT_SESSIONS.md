@@ -951,7 +951,8 @@ ACP: a wrapper `command`, `model` (set it in the agent's own config), one-shot r
 connection and command-policy hooks, and coming back after a host restart. A message sent while a turn
 runs waits for it to end; `esc` stops the turn. Hermes over ACP is not confined by the process sandbox
 (its gateway daemon runs the tools), so keep it on the terminal where a sandbox is required.
-See [plans/acp-lane.md](plans/acp-lane.md).
+A finished turn adds the files the agent's edit tools reported, and its token use, to the task comment
+(the agent's own account; check `git diff`). See [plans/acp-lane.md](plans/acp-lane.md).
 
 OpenClaw runs with `--local`: its default talks to the OpenClaw gateway on a loopback port,
 and the sandbox refuses loopback connections. OpenClaw refuses `--local` while a gateway runs

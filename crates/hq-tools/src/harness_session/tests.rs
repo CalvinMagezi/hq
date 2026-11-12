@@ -843,6 +843,7 @@ fn alive(name: &str) -> Liveness {
         rule: None,
         pending: None,
         pending_seq: None,
+        acp: None,
     }))
 }
 
