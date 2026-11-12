@@ -1,5 +1,6 @@
 //! The set of agents this host runs, and the operations on them.
 
+use crate::acp_pane::{AcpLaunch, AcpPane};
 use crate::detect::{AgentState, AnswerMethod, Detector, Dialog, Input, MAX_DIALOG_LINES};
 use crate::egress::{Decision, Egress};
 use crate::emu::{Row, VtEmulator};
@@ -41,12 +42,34 @@ const ANSWER_SETTLE: Duration = Duration::from_secs(3);
 const BRACKETED_PASTE_START: &[u8] = b"\x1b[200~";
 const BRACKETED_PASTE_END: &[u8] = b"\x1b[201~";
 
+/// Why raw input is refused for an ACP agent: it takes prompts and answers, not keystrokes.
+const RAW_INPUT_UNSUPPORTED: &str = "this agent is driven over the protocol: send a prompt or answer its dialog; only esc and ctrl+c (stop the turn) are keys it takes";
+
 /// Agent names: `[a-z][a-z0-9_-]{0,31}`.
 pub fn valid_name(name: &str) -> bool {
     let mut chars = name.chars();
     chars.next().is_some_and(|c| c.is_ascii_lowercase())
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-'))
         && name.len() <= MAX_NAME_LEN
+}
+
+/// How the host talks to an agent: through a terminal it reads, or over the Agent Client
+/// Protocol, where the agent reports its own state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Transport {
+    #[default]
+    Pty,
+    Acp,
+}
+
+impl Transport {
+    pub fn parse(name: Option<&str>) -> Result<Self, HostError> {
+        match name {
+            None | Some("pty") => Ok(Self::Pty),
+            Some("acp") => Ok(Self::Acp),
+            Some(_) => Err(HostError::Unsupported("transport must be 'pty' or 'acp'")),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +93,8 @@ pub struct SpawnSpec {
     /// Stop the agent once it has been silent and not working for this long, so
     /// agents nobody is watching do not pile up. It stays resumable.
     pub idle_ttl: Option<Duration>,
+    /// A terminal by default. Over ACP the host needs no screen rules and types no keys.
+    pub transport: Transport,
 }
 
 impl SpawnSpec {
@@ -86,6 +111,7 @@ impl SpawnSpec {
             scrollback_rows: DEFAULT_SCROLLBACK_ROWS,
             sandbox: None,
             idle_ttl: None,
+            transport: Transport::Pty,
         }
     }
 }
@@ -233,6 +259,7 @@ pub struct AwaitingInfo {
 
 pub struct Host {
     panes: Registry,
+    acp: Arc<Mutex<BTreeMap<String, Arc<AcpPane>>>>,
     awaiting: Awaiting,
     max_agents: usize,
     events: Arc<EventLog>,
@@ -311,6 +338,7 @@ impl Host {
     pub fn with_detector(detector: Detector) -> Self {
         Self {
             panes: Arc::new(Mutex::new(BTreeMap::new())),
+            acp: Arc::new(Mutex::new(BTreeMap::new())),
             awaiting: Arc::new(Mutex::new(BTreeMap::new())),
             max_agents: MAX_AGENTS,
             events: Arc::new(EventLog::from_clock()),
@@ -476,6 +504,20 @@ impl Host {
         }
     }
 
+    fn acp_pane(&self, name: &str) -> Option<Arc<AcpPane>> {
+        lock(&self.acp).get(name).cloned()
+    }
+
+    fn agent_count(&self) -> usize {
+        lock(&self.panes).len() + lock(&self.acp).len() + lock(&self.awaiting).len()
+    }
+
+    fn name_in_use(&self, name: &str) -> bool {
+        lock(&self.panes).contains_key(name)
+            || lock(&self.acp).contains_key(name)
+            || lock(&self.awaiting).contains_key(name)
+    }
+
     fn pane(&self, name: &str) -> Result<Arc<Pane>, HostError> {
         lock(&self.panes)
             .get(name)
@@ -493,6 +535,9 @@ impl Host {
     }
 
     fn start(&self, spec: SpawnSpec) -> Result<PaneInfo, HostError> {
+        if spec.transport == Transport::Acp {
+            return self.start_acp(spec);
+        }
         if !valid_name(&spec.name) {
             return Err(HostError::InvalidName(spec.name));
         }
@@ -516,13 +561,11 @@ impl Host {
         {
             return Err(HostError::TooLarge("the command line"));
         }
-        if lock(&self.panes).len() + lock(&self.awaiting).len() >= self.max_agents {
+        if self.agent_count() >= self.max_agents {
             return Err(HostError::TooManyAgents(self.max_agents));
         }
 
-        if lock(&self.panes).contains_key(&spec.name)
-            || lock(&self.awaiting).contains_key(&spec.name)
-        {
+        if self.name_in_use(&spec.name) {
             return Err(HostError::NameTaken(spec.name));
         }
         // Start the process without holding the registry lock: looking up the
@@ -609,6 +652,92 @@ impl Host {
         self.events.push(&spec.name, EventKind::Spawned, None, None);
         self.save();
         Ok(info_of(&spec.name, pane.as_ref(), &self.detector))
+    }
+
+    /// Starts an agent over ACP. The process runs under the same sandbox as a pty agent, with
+    /// pipes in place of a terminal. It is not brought back after a host restart: the protocol's
+    /// session resume is not wired in yet.
+    fn start_acp(&self, spec: SpawnSpec) -> Result<PaneInfo, HostError> {
+        if !valid_name(&spec.name) {
+            return Err(HostError::InvalidName(spec.name));
+        }
+        let sandboxed = spec
+            .sandbox
+            .as_ref()
+            .is_some_and(|s| s.mode == Mode::Process);
+        if self.require_sandbox && !sandboxed {
+            return Err(HostError::Sandbox(
+                "this host only starts sandboxed agents; the machine's owner can start it with --allow-unsandboxed".into(),
+            ));
+        }
+        if spec.argv.is_empty() || spec.argv.iter().map(String::len).sum::<usize>() > MAX_ARGV_BYTES
+        {
+            return Err(HostError::TooLarge("the command line"));
+        }
+        if self.agent_count() >= self.max_agents {
+            return Err(HostError::TooManyAgents(self.max_agents));
+        }
+        if self.name_in_use(&spec.name) {
+            return Err(HostError::NameTaken(spec.name));
+        }
+        let mut env = pane_env(&spec.env);
+        let confined = match spec.sandbox.as_ref().filter(|s| s.mode == Mode::Process) {
+            Some(sb) => {
+                let run_dir = lock(&self.run_dir).clone();
+                Some(sandbox::confine(
+                    &self.egress,
+                    sb,
+                    &sandbox::Launch {
+                        name: &spec.name,
+                        cwd: &spec.cwd,
+                        run_dir: run_dir.as_deref(),
+                        argv: &spec.argv,
+                        agent: spec.agent.as_deref(),
+                        env: &spec.env,
+                        helper: self.helper.as_deref(),
+                        hq: &self.hq_paths,
+                    },
+                )?)
+            }
+            None => None,
+        };
+        let (exec, egress_port) = match confined {
+            Some(c) => {
+                env.extend(c.env);
+                (c.argv, c.egress_port)
+            }
+            None => (spec.argv.clone(), None),
+        };
+        let launched = AcpPane::launch(AcpLaunch {
+            name: spec.name.clone(),
+            agent: spec.agent,
+            argv: spec.argv,
+            exec,
+            env,
+            cwd: spec.cwd,
+            sandbox: spec.sandbox,
+            idle_ttl: spec.idle_ttl,
+            events: self.events.clone(),
+            on_exit: self.exit_hook(&spec.name, egress_port),
+        });
+        let pane = match launched {
+            Ok(p) => Arc::new(p),
+            Err(e) => {
+                if let Some(port) = egress_port {
+                    self.egress.close_port(&spec.name, port);
+                }
+                return Err(e);
+            }
+        };
+        let mut acp = lock(&self.acp);
+        if acp.contains_key(&spec.name) {
+            pane.kill();
+            return Err(HostError::NameTaken(spec.name));
+        }
+        acp.insert(spec.name.clone(), pane.clone());
+        drop(acp);
+        self.events.push(&spec.name, EventKind::Spawned, None, None);
+        Ok(pane.info(&spec.name))
     }
 
     /// The flags that point a Claude Code agent at a hook file for `name`,
@@ -864,6 +993,9 @@ impl Host {
         for pane in panes {
             pane.kill();
         }
+        for pane in lock(&self.acp).values() {
+            pane.kill();
+        }
     }
 
     /// The recent allow and deny decisions of `name`'s egress proxy.
@@ -888,6 +1020,7 @@ impl Host {
                     let _ = host.announce(name);
                 }
                 host.reap_idle(&names);
+                host.reap_idle_acp();
                 drop(host);
                 std::thread::sleep(STATE_WATCH_INTERVAL);
             }
@@ -900,6 +1033,9 @@ impl Host {
     /// `done` is set, so a reader that sees `done` also sees the number to alert on. The returned
     /// info carries the dialog's number.
     fn announce(&self, name: &str) -> Result<PaneInfo, HostError> {
+        if let Some(acp) = self.acp_pane(name) {
+            return Ok(acp.info(name));
+        }
         let pane = self.pane(name)?;
         let mut info = info_of(name, pane.as_ref(), &self.detector);
         let Some(state) = info.state else {
@@ -968,6 +1104,22 @@ impl Host {
         }
     }
 
+    /// Stops ACP agents that outlived their idle limit, like `reap_idle` for terminal agents.
+    fn reap_idle_acp(&self) {
+        let idle: Vec<String> = lock(&self.acp)
+            .iter()
+            .filter(|(_, p)| {
+                let past = p.idle_ttl.is_some_and(|ttl| p.quiet_for() >= ttl);
+                past && p.status() == PaneStatus::Running && p.state() != AgentState::Working
+            })
+            .map(|(n, _)| n.clone())
+            .collect();
+        for name in idle {
+            eprintln!("hq host: stopping '{name}', idle past its limit");
+            let _ = self.remove(&name);
+        }
+    }
+
     /// Tells the host where its control socket is, so panes can be given the
     /// way to reach it. Called by the server when it binds.
     pub fn set_run_dir(&self, dir: &Path) {
@@ -988,6 +1140,11 @@ impl Host {
     /// Replaces the command that brings a resumable agent back after a host
     /// restart, for example once its conversation id is known.
     pub fn set_resume(&self, name: &str, argv: Vec<String>) -> Result<(), HostError> {
+        if self.acp_pane(name).is_some() {
+            return Err(HostError::Unsupported(
+                "an ACP agent is not restarted by command; it has no resume command",
+            ));
+        }
         let pane = self.pane(name)?;
         if argv.is_empty() || pane.resume.is_none() {
             return Err(HostError::InvalidResume);
@@ -1023,7 +1180,8 @@ impl Host {
     }
 
     pub fn list(&self) -> Vec<PaneInfo> {
-        let names: Vec<String> = lock(&self.panes).keys().cloned().collect();
+        let mut names: Vec<String> = lock(&self.panes).keys().cloned().collect();
+        names.extend(lock(&self.acp).keys().cloned());
         names.iter().filter_map(|n| self.announce(n).ok()).collect()
     }
 
@@ -1032,6 +1190,9 @@ impl Host {
     /// is pressed only once the screen shows the cursor on that option. Then waits a moment for
     /// the dialog to go away; `registered` is false when it is still there.
     pub fn answer(&self, name: &str, seq: u64, id: Option<u32>) -> Result<Answered, HostError> {
+        if let Some(acp) = self.acp_pane(name) {
+            return self.answer_acp(name, &acp, seq, id);
+        }
         self.live_pane(name)?;
         let info = self.announce(name)?;
         let (Some(dialog), Some(current)) = (info.pending.clone(), info.pending_seq) else {
@@ -1053,6 +1214,28 @@ impl Host {
             let after = self.announce(name)?;
             let gone = after.state != Some(AgentState::Blocked)
                 || after.pending_seq.is_some_and(|s| s != seq);
+            if gone || Instant::now() >= deadline {
+                return Ok(Answered {
+                    registered: gone,
+                    info: after,
+                });
+            }
+        }
+    }
+
+    fn answer_acp(
+        &self,
+        name: &str,
+        acp: &AcpPane,
+        seq: u64,
+        id: Option<u32>,
+    ) -> Result<Answered, HostError> {
+        acp.answer(name, seq, id)?;
+        let deadline = Instant::now() + ANSWER_SETTLE;
+        loop {
+            std::thread::sleep(STATE_POLL);
+            let after = acp.info(name);
+            let gone = after.pending_seq != Some(seq);
             if gone || Instant::now() >= deadline {
                 return Ok(Answered {
                     registered: gone,
@@ -1103,6 +1286,11 @@ impl Host {
 
     /// Forgets an agent and stops its process and the processes it started.
     pub fn remove(&self, name: &str) -> Result<(), HostError> {
+        if let Some(acp) = lock(&self.acp).remove(name) {
+            acp.kill();
+            self.events.push(name, EventKind::Removed, None, None);
+            return Ok(());
+        }
         let Some(pane) = lock(&self.panes).remove(name) else {
             if lock(&self.awaiting).remove(name).is_some() {
                 self.forget_files(name);
@@ -1124,6 +1312,14 @@ impl Host {
 
     /// The last `lines` lines of the chosen view (all of them when `lines` is 0).
     pub fn read(&self, name: &str, source: ReadSource, lines: usize) -> Result<String, HostError> {
+        if let Some(acp) = self.acp_pane(name) {
+            let (mut all, partial, _) = acp.transcript();
+            all.extend(Some(partial).filter(|p| !p.is_empty()));
+            if lines > 0 && all.len() > lines {
+                all.drain(..all.len() - lines);
+            }
+            return Ok(all.join("\n"));
+        }
         let pane = self.pane(name)?;
         let mut out: Vec<String> = match source {
             ReadSource::Visible => pane.rows(false).into_iter().map(|r| r.text).collect(),
@@ -1148,6 +1344,28 @@ impl Host {
         cursor: Option<&str>,
         max: usize,
     ) -> Result<ReadSince, HostError> {
+        if let Some(acp) = self.acp_pane(name) {
+            let (done, partial, _) = acp.transcript();
+            let (from, reset) = match cursor {
+                None => (done.len(), false),
+                Some(c) => match place_cursor(&done, c) {
+                    Some(at) => (at, false),
+                    None => (done.len().saturating_sub(max), true),
+                },
+            };
+            let new = &done[from.min(done.len())..];
+            let skipped = new.len().saturating_sub(max);
+            return Ok(ReadSince {
+                lines: new[skipped..].to_vec(),
+                skipped,
+                screen: Some(partial)
+                    .filter(|p| !p.is_empty())
+                    .into_iter()
+                    .collect(),
+                next: cursor_at(&done),
+                reset,
+            });
+        }
         let pane = self.pane(name)?;
         let (history, visible) = pane.with_emu(|e| (e.history(), e.visible()));
         let off_screen = history.len().saturating_sub(visible.len());
@@ -1181,12 +1399,18 @@ impl Host {
 
     /// Raw bytes, exactly as given.
     pub fn send_text(&self, name: &str, text: &str) -> Result<(), HostError> {
+        if self.acp_pane(name).is_some() {
+            return Err(HostError::Unsupported(RAW_INPUT_UNSUPPORTED));
+        }
         self.live_pane(name)?.write(text.as_bytes())
     }
 
     /// Text as a paste: bracketed when the program asked for it, so embedded
     /// newlines are not taken for Enter.
     pub fn paste(&self, name: &str, text: &str) -> Result<(), HostError> {
+        if self.acp_pane(name).is_some() {
+            return Err(HostError::Unsupported(RAW_INPUT_UNSUPPORTED));
+        }
         let pane = self.live_pane(name)?;
         if pane.with_emu(|e| e.bracketed_paste()) {
             // The text cannot end the paste early: whatever followed a forged
@@ -1202,6 +1426,15 @@ impl Host {
 
     /// Logical key names (`enter`, `esc`, `ctrl+c`, ...), validated before anything is sent.
     pub fn send_keys(&self, name: &str, keys: &[String]) -> Result<(), HostError> {
+        if let Some(acp) = self.acp_pane(name) {
+            // The only keys that mean something to a protocol agent are the ones that stop a turn.
+            let stops =
+                !keys.is_empty() && keys.iter().all(|k| matches!(k.as_str(), "esc" | "ctrl+c"));
+            if !stops {
+                return Err(HostError::Unsupported(RAW_INPUT_UNSUPPORTED));
+            }
+            return acp.cancel(name);
+        }
         let mut bytes = Vec::new();
         for key in keys {
             bytes.extend(encode_key(key)?);
@@ -1213,6 +1446,9 @@ impl Host {
     /// Enter would pick whichever option is highlighted, which can be one that widens what the
     /// agent may do ("don't ask again"). A dialog is answered with keys, on purpose.
     pub fn prompt(&self, name: &str, text: &str) -> Result<(), HostError> {
+        if let Some(acp) = self.acp_pane(name) {
+            return acp.prompt(name, text);
+        }
         let pane = self.live_pane(name)?;
         if info_of(name, &pane, &self.detector).state == Some(AgentState::Blocked) {
             return Err(HostError::Blocked(name.to_string()));
@@ -1224,10 +1460,25 @@ impl Host {
 
     pub fn resize(&self, name: &str, rows: u16, cols: u16) -> Result<(), HostError> {
         check_size(rows, cols)?;
+        if self.acp_pane(name).is_some() {
+            return Ok(());
+        }
         self.live_pane(name)?.resize(rows, cols)
     }
 
     pub fn wait_exit(&self, name: &str, timeout: Duration) -> Result<u32, HostError> {
+        if let Some(acp) = self.acp_pane(name) {
+            let deadline = Instant::now() + timeout;
+            loop {
+                if let PaneStatus::Exited { code } = acp.status() {
+                    return Ok(code);
+                }
+                if Instant::now() >= deadline {
+                    return Err(HostError::Timeout(timeout));
+                }
+                std::thread::sleep(STATE_POLL);
+            }
+        }
         self.pane(name)?.wait_exit(timeout)
     }
 
@@ -1237,6 +1488,16 @@ impl Host {
         quiet: Duration,
         timeout: Duration,
     ) -> Result<(), HostError> {
+        if let Some(acp) = self.acp_pane(name) {
+            let deadline = Instant::now() + timeout;
+            while acp.quiet_for() < quiet {
+                if Instant::now() >= deadline {
+                    return Err(HostError::Timeout(timeout));
+                }
+                std::thread::sleep(STATE_POLL);
+            }
+            return Ok(());
+        }
         self.pane(name)?.wait_quiet(quiet, timeout)
     }
 
@@ -1278,6 +1539,10 @@ impl Host {
     }
 
     pub fn kill(&self, name: &str) -> Result<(), HostError> {
+        if let Some(acp) = self.acp_pane(name) {
+            acp.kill();
+            return Ok(());
+        }
         self.pane(name)?.kill();
         // Do not wait for the exit: a host that dies now must not bring it back.
         self.save();

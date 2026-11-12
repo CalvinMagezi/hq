@@ -46,6 +46,8 @@ pub enum HostError {
     StaleDialog { name: String, current: u64 },
     #[error("the dialog has no option {0}")]
     NoSuchOption(u32),
+    #[error("{0}")]
+    Unsupported(&'static str),
     #[error(
         "option {0} opens a text field instead of answering; decline the dialog and send the message as a prompt"
     )]
@@ -79,6 +81,7 @@ impl HostError {
             HostError::NoDialog(_) => "no_dialog",
             HostError::StaleDialog { .. } => "stale_dialog",
             HostError::NoSuchOption(_) => "invalid_option",
+            HostError::Unsupported(_) => "unsupported",
             HostError::TypedOption(_) => "typed_option",
             HostError::NoCursor => "no_cursor",
             HostError::AnswerUnverified(_) => "answer_unverified",

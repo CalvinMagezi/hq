@@ -142,6 +142,16 @@ impl Connection {
         })
     }
 
+    /// The process id, which the host uses to stop the agent's whole process group.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// The exit code once the process has ended, `None` while it runs or after a signal.
+    pub fn exit_code(&mut self) -> Option<i32> {
+        self.child.try_wait().ok().flatten().and_then(|s| s.code())
+    }
+
     pub fn session_id(&self) -> Option<&str> {
         self.session_id.as_deref()
     }
@@ -189,6 +199,7 @@ impl Connection {
         let session = self.session_id.clone().ok_or(ClientError::NoSession)?;
         let params = json!({"sessionId": session, "prompt": [{"type": "text", "text": text}]});
         let id = self.take_id();
+        self.tracker.record_prompt(text);
         self.tracker.start_prompt(id);
         self.write(&request(id, "session/prompt", params))?;
         Ok(id)

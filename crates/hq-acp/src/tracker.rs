@@ -6,11 +6,13 @@ use crate::dialog::{Choice, Dialog, outcome, parse_dialog};
 use crate::update::{ToolKind, Update, parse_update};
 use crate::wire::{Incoming, METHOD_NOT_FOUND, RpcError, notification, reply_error, reply_ok};
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 const PERMISSION_METHOD: &str = "session/request_permission";
 const UPDATE_METHOD: &str = "session/update";
 const AUTH_CODE: i64 = -32000;
+/// Lines of transcript kept; older ones are dropped and counted.
+const TRANSCRIPT_MAX_LINES: usize = 5000;
 const BILLING_WORDS: [&str; 5] = ["subscription", "quota", "billing", "rate limit", "credit"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +107,9 @@ pub struct Tracker {
     context: (Option<u64>, Option<u64>),
     end: Option<TurnEnd>,
     cwd: Option<String>,
+    lines: VecDeque<String>,
+    dropped: u64,
+    partial: String,
 }
 
 impl Default for Tracker {
@@ -120,6 +125,9 @@ impl Default for Tracker {
             context: (None, None),
             end: None,
             cwd: None,
+            lines: VecDeque::new(),
+            dropped: 0,
+            partial: String::new(),
         }
     }
 }
@@ -155,6 +163,27 @@ impl Tracker {
     /// Context window use as `(used, size)`, when the agent reports it.
     pub fn context_use(&self) -> (Option<u64>, Option<u64>) {
         (self.context.1, self.context.0)
+    }
+
+    /// The session as lines, oldest first: what the agent said, the tools it started, the dialogs
+    /// it opened and how each turn ended. Older lines are dropped past a cap; `dropped` counts them.
+    pub fn lines(&self) -> &VecDeque<String> {
+        &self.lines
+    }
+
+    /// The unfinished last line of the agent's text.
+    pub fn partial(&self) -> &str {
+        &self.partial
+    }
+
+    pub fn dropped(&self) -> u64 {
+        self.dropped
+    }
+
+    /// Records a prompt that was sent, so the transcript reads as a conversation.
+    pub fn record_prompt(&mut self, text: &str) {
+        let first = text.lines().next().unwrap_or("");
+        self.note(format!("> {first}"));
     }
 
     /// The folder the session runs in; relative paths an agent reports (Hermes sends
@@ -247,8 +276,14 @@ impl Tracker {
 
     fn apply(&mut self, update: Update) {
         match update {
-            Update::AgentText(t) => self.text.push_str(&t),
+            Update::AgentText(t) => {
+                self.say(&t);
+                self.text.push_str(&t);
+            }
             Update::ToolStart(call) => {
+                if !call.title.is_empty() {
+                    self.note(format!("tool: {}", call.title));
+                }
                 self.tools.insert(call.id.clone(), call.kind);
                 if call.kind == ToolKind::Edit {
                     self.edits.entry(call.id).or_default().paths = call.paths;
@@ -278,6 +313,8 @@ impl Tracker {
         if let Some(old) = self.pending.take() {
             lines.push(reply_ok(&old.request_id, outcome(&Choice::Cancelled)));
         }
+        let title = params.pointer("/toolCall/title").and_then(Value::as_str);
+        self.note(format!("ask: {}", title.unwrap_or("permission")));
         let seq = self.bump();
         self.pending = Some(Pending {
             seq,
@@ -291,6 +328,10 @@ impl Tracker {
     fn finish(&mut self, result: &Result<Value, RpcError>) {
         self.prompt_id = None;
         self.pending = None;
+        self.note(match result {
+            Ok(v) => format!("end: {}", stop_label(&stop_reason(v))),
+            Err(e) => format!("failed: {}", e.message),
+        });
         self.end = Some(match result {
             Ok(v) => TurnEnd::Stopped {
                 reason: stop_reason(v),
@@ -304,6 +345,36 @@ impl Tracker {
         self.set_state(AgentState::Idle);
     }
 
+    /// Adds agent text, finishing a line at each newline.
+    fn say(&mut self, text: &str) {
+        let mut pieces = text.split('\n');
+        if let Some(first) = pieces.next() {
+            self.partial.push_str(first);
+        }
+        for piece in pieces {
+            let done = std::mem::take(&mut self.partial);
+            self.push_line(done);
+            self.partial.push_str(piece);
+        }
+    }
+
+    /// A marker line; whatever the agent was in the middle of saying is finished first.
+    fn note(&mut self, line: String) {
+        if !self.partial.is_empty() {
+            let done = std::mem::take(&mut self.partial);
+            self.push_line(done);
+        }
+        self.push_line(line);
+    }
+
+    fn push_line(&mut self, line: String) {
+        if self.lines.len() == TRANSCRIPT_MAX_LINES {
+            self.lines.pop_front();
+            self.dropped += 1;
+        }
+        self.lines.push_back(line);
+    }
+
     fn set_state(&mut self, state: AgentState) {
         self.state = state;
         self.bump();
@@ -312,6 +383,16 @@ impl Tracker {
     fn bump(&mut self) -> u64 {
         self.state_seq += 1;
         self.state_seq
+    }
+}
+
+fn stop_label(reason: &StopReason) -> String {
+    match reason {
+        StopReason::EndTurn => "turn done".into(),
+        StopReason::Cancelled => "cancelled".into(),
+        StopReason::MaxTokens => "out of tokens".into(),
+        StopReason::Refusal => "refused".into(),
+        StopReason::Other(s) => s.clone(),
     }
 }
 
@@ -415,6 +496,25 @@ mod tests {
             r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"b","status":"failed"}}}"#,
         );
         assert_eq!(t.touched().into_iter().collect::<Vec<_>>(), vec!["/w/ok"]);
+    }
+
+    #[test]
+    fn the_transcript_reads_as_lines_with_markers() {
+        let mut t = Tracker::default();
+        t.record_prompt("write it\nplease");
+        t.start_prompt(1);
+        let chunk = |text: &str| {
+            format!(
+                r#"{{"method":"session/update","params":{{"update":{{"sessionUpdate":"agent_message_chunk","content":{{"text":"{text}"}}}}}}}}"#
+            )
+        };
+        feed(&mut t, &chunk("one\\ntw"));
+        feed(&mut t, &chunk("o"));
+        assert_eq!(t.partial(), "two");
+        feed(&mut t, r#"{"id":1,"result":{"stopReason":"end_turn"}}"#);
+        let lines: Vec<&str> = t.lines().iter().map(String::as_str).collect();
+        assert_eq!(lines, vec!["> write it", "one", "two", "end: turn done"]);
+        assert_eq!(t.partial(), "");
     }
 
     #[test]

@@ -3688,6 +3688,7 @@ dependencies = [
 name = "hq-host"
 version = "0.9.1"
 dependencies = [
+ "hq-acp",
  "hq-sandbox",
  "nix 0.28.0",
  "portable-pty",

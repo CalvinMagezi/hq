@@ -7,6 +7,7 @@ description = "Agent HQ's built-in host for long-lived coding agents (pty hostin
 
 [dependencies]
 hq-sandbox = { path = "../hq-sandbox" }
+hq-acp = { path = "../hq-acp" }
 portable-pty = "0.9"
 vt100 = "0.16"
 regex = { workspace = true }
@@ -22,3 +23,9 @@ which = "7"
 
 [dev-dependencies]
 tempfile = "3"
+
+[[bin]]
+name = "hq-host-fake-acp-agent"
+path = "../hq-acp/tests/support/fake_agent.rs"
+test = false
+doc = false

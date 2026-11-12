@@ -10,6 +10,8 @@ mod names;
 pub use names::check_folder_name;
 
 #[cfg(unix)]
+mod acp_pane;
+#[cfg(unix)]
 mod awake;
 #[cfg(unix)]
 mod client;
@@ -96,7 +98,7 @@ pub use hooks::{
 #[cfg(unix)]
 pub use host::{
     Answered, AwaitingInfo, BurstLimit, Host, PANE_TOKEN_ENV, PaneInfo, PaneStatus, RUN_DIR_ENV,
-    ReadSource, RestoreReport, SpawnSpec, valid_name,
+    ReadSource, RestoreReport, SpawnSpec, Transport, valid_name,
 };
 #[cfg(unix)]
 pub use keys::encode_key;
