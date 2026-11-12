@@ -80,6 +80,39 @@ pub fn keyword_search_in(
     limit: usize,
     prefix: Option<&str>,
 ) -> Result<Vec<SearchResult>> {
+    keyword_search_filtered(
+        conn,
+        query,
+        limit,
+        &SearchFilter {
+            prefix,
+            ..SearchFilter::default()
+        },
+    )
+}
+
+/// What a search may be narrowed to. Every part is applied in the query, before the limit.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SearchFilter<'a> {
+    /// Only notes whose path starts with this (`Notebooks/Projects/`).
+    pub prefix: Option<&'a str>,
+    /// Only notes whose tag column contains this text. The column is space-joined, so this is a
+    /// superset of the notes that carry the whole tag: the caller confirms with the note's own
+    /// front matter.
+    pub tag: Option<&'a str>,
+    /// Only notes with a record written by HQ. A superset too: the caller confirms the version on
+    /// disk with `note_marks::mark`.
+    pub written_by_hq: bool,
+}
+
+/// [`keyword_search`] narrowed by a [`SearchFilter`].
+pub fn keyword_search_filtered(
+    conn: &Connection,
+    query: &str,
+    limit: usize,
+    filter: &SearchFilter<'_>,
+) -> Result<Vec<SearchResult>> {
+    let prefix = filter;
     let all_terms = join_terms(query, " ");
     if all_terms.is_empty() {
         return Ok(Vec::new());
@@ -102,31 +135,54 @@ fn like_prefix(prefix: &str) -> String {
     format!("{escaped}%")
 }
 
+/// `text` as a LIKE pattern that matches it anywhere, taken literally.
+fn like_contains(text: &str) -> String {
+    let escaped = text
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    format!("%{escaped}%")
+}
+
 fn match_query(
     conn: &Connection,
     escaped: &str,
     limit: usize,
-    prefix: Option<&str>,
+    filter: &SearchFilter<'_>,
 ) -> Result<Vec<SearchResult>> {
-    let mut stmt = conn.prepare(
+    let sql = format!(
         "SELECT path, title, snippet(notes_fts, 2, '<mark>', '</mark>', '...', 30) as snippet,
                 tags, rank
          FROM notes_fts
          WHERE notes_fts MATCH ?1 AND (?3 IS NULL OR path LIKE ?3 ESCAPE '\\')
+           AND (?4 IS NULL OR lower(tags) LIKE ?4 ESCAPE '\\')
+           AND (?5 = 0 OR path IN ({}))
          ORDER BY rank
          LIMIT ?2",
-    )?;
-    let pattern = prefix.map(like_prefix);
+        crate::provenance::HQ_WRITTEN_PATHS_SQL
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let pattern = filter.prefix.map(like_prefix);
+    let tag_pattern = filter.tag.map(|t| like_contains(&t.trim().to_lowercase()));
 
-    let rows = stmt.query_map(rusqlite::params![escaped, limit, pattern], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, f64>(4)?,
-        ))
-    })?;
+    let rows = stmt.query_map(
+        rusqlite::params![
+            escaped,
+            limit,
+            pattern,
+            tag_pattern,
+            i64::from(filter.written_by_hq)
+        ],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, f64>(4)?,
+            ))
+        },
+    )?;
 
     let mut results = Vec::new();
     for row in rows {
@@ -321,6 +377,52 @@ mod folder_tests {
             // `_` and `%` in a folder name are literal, not LIKE wildcards.
             let none = keyword_search_in(c, "battery", 10, Some("Notebooks/Projects/Agent_HQ/"))?;
             assert!(none.is_empty(), "{none:?}");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn tag_and_written_by_filters_apply_before_the_limit() {
+        use crate::provenance::{Attribution, SourceKind, record};
+        let db = crate::Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            // Ten better-ranked notes that do not match the filters, one that does.
+            for n in 0..10 {
+                index_note(
+                    c,
+                    &format!("Notebooks/n{n}.md"),
+                    "n",
+                    "pelican pelican pelican",
+                    "plain",
+                )?;
+            }
+            index_note(c, "Notebooks/hq.md", "hq", "pelican", "work idea")?;
+            let agent = Attribution {
+                actor_id: Some("helper"),
+                source_kind: Some(SourceKind::Agent),
+                session_id: Some("s1"),
+                task_id: None,
+            };
+            record(c, "Notebooks/hq.md", "h1", &agent)?;
+            let hq = SearchFilter {
+                written_by_hq: true,
+                ..SearchFilter::default()
+            };
+            let hits = keyword_search_filtered(c, "pelican", 1, &hq)?;
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0].note_path, "Notebooks/hq.md");
+            let tagged = SearchFilter {
+                tag: Some("Idea"),
+                ..SearchFilter::default()
+            };
+            let hits = keyword_search_filtered(c, "pelican", 1, &tagged)?;
+            assert_eq!(hits[0].note_path, "Notebooks/hq.md");
+            let none = SearchFilter {
+                tag: Some("zzz"),
+                ..SearchFilter::default()
+            };
+            assert!(keyword_search_filtered(c, "pelican", 5, &none)?.is_empty());
             Ok(())
         })
         .unwrap();

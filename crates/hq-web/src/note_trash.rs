@@ -131,6 +131,7 @@ pub(crate) async fn trash_restore_handler(
         Ok(vault) => vault,
         Err(e) => return e.into_response(),
     };
+    // Whether the note's folder is still there decides where it goes back to.
     let restored = match tokio::task::spawn_blocking(move || vault.restore_note(&rel)).await {
         Ok(Ok(restored)) => restored,
         Ok(Err(e)) => return ApiError::bad_request(e.to_string()).into_response(),
@@ -139,7 +140,9 @@ pub(crate) async fn trash_restore_handler(
     let hq_vault::reorg::RestoredNote {
         original_path,
         path: restored,
+        restored_to,
     } = restored;
+    let restored_to = restored_to.as_str();
     let abs = state.vault_path.join(&restored);
     if let Ok(raw) = std::fs::read_to_string(&abs) {
         index_web_note(&state, &abs, &raw);
@@ -157,7 +160,7 @@ pub(crate) async fn trash_restore_handler(
     }) {
         tracing::warn!(error = %e, "note restore: could not revive its provenance");
     }
-    Json(json!({"success": true, "path": restored})).into_response()
+    Json(json!({"success": true, "path": restored, "restored_to": restored_to})).into_response()
 }
 
 #[cfg(test)]
@@ -226,7 +229,50 @@ mod tests {
         let (status, restored) = call(&app, "POST", "/api/note/trash/restore", &body).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(restored["path"], "Notebooks/Inbox/a.md");
+        assert_eq!(restored["restored_to"], "original");
         assert!(vault.path().join("Notebooks/Inbox/a.md").exists());
+    }
+
+    #[tokio::test]
+    async fn restore_says_folder_when_only_a_parent_survives() {
+        let (vault, app) = vault_with_note();
+        std::fs::create_dir_all(vault.path().join("Notebooks/Area/Deep")).unwrap();
+        std::fs::write(vault.path().join("Notebooks/Area/Deep/b.md"), "x").unwrap();
+        let (_, deleted) = call(
+            &app,
+            "DELETE",
+            "/api/note?path=Notebooks/Area/Deep/b.md",
+            "",
+        )
+        .await;
+        let trash_path = deleted["trash_path"].as_str().unwrap().to_string();
+        std::fs::remove_dir_all(vault.path().join("Notebooks/Area/Deep")).unwrap();
+        let body = serde_json::json!({ "trash_path": trash_path }).to_string();
+        let (_, restored) = call(&app, "POST", "/api/note/trash/restore", &body).await;
+        assert_eq!(restored["restored_to"], "folder");
+        assert_eq!(restored["path"], "Notebooks/Area/b.md");
+    }
+
+    #[test]
+    fn the_trash_sentence_names_the_real_retention() {
+        let sentence = hq_core::losing::consequence("vault_delete", &serde_json::json!({}), None);
+        let days = hq_vault::reorg::TRASH_RETENTION_DAYS.to_string();
+        assert!(sentence.unwrap().contains(&days));
+    }
+
+    #[tokio::test]
+    async fn restore_says_vault_when_the_original_folder_is_gone() {
+        let (vault, app) = vault_with_note();
+        let (_, deleted) = call(&app, "DELETE", "/api/note?path=Notebooks/Inbox/a.md", "").await;
+        let trash_path = deleted["trash_path"].as_str().unwrap().to_string();
+        std::fs::remove_dir_all(vault.path().join("Notebooks/Inbox")).unwrap();
+        let body = serde_json::json!({ "trash_path": trash_path }).to_string();
+        let (status, restored) = call(&app, "POST", "/api/note/trash/restore", &body).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(restored["restored_to"], "vault");
+        assert_eq!(restored["path"], "Notebooks/a.md");
+        assert!(vault.path().join("Notebooks/a.md").exists());
+        assert!(!vault.path().join("Notebooks/Inbox").exists());
     }
 
     #[tokio::test]

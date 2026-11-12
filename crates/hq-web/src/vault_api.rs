@@ -309,17 +309,28 @@ fn read_capped(path: &Path, size: u64, cap: u64) -> std::io::Result<String> {
 }
 
 /// Body of `GET /api/note` for a path that exists: directory listing or capped text.
-pub(crate) fn read_note(vault: &Path, rel: &str, abs: &Path, lite: bool) -> Response {
+pub(crate) fn read_note(
+    db: &hq_db::Database,
+    vault: &Path,
+    rel: &str,
+    abs: &Path,
+    lite: bool,
+) -> Response {
     if abs.is_dir() {
         let entries: Vec<Value> = sorted_entries(abs, lite)
             .into_iter()
             .map(|e| {
                 let path = e.path();
-                json!({
+                let mut entry = json!({
                     "name": e.file_name().to_string_lossy(),
                     "path": rel_to_vault(vault, &path),
                     "isDir": path.is_dir(),
-                })
+                });
+                if path.is_file() && path.extension().is_some_and(|x| x == "md") {
+                    entry["tags"] = json!(tags_of_file(&path));
+                    add_mark(db, vault, &mut entry);
+                }
+                entry
             })
             .collect();
         return Json(json!({"path": rel, "content": "", "isDir": true, "entries": entries}))
@@ -348,11 +359,15 @@ pub(crate) fn read_note(vault: &Path, rel: &str, abs: &Path, lite: bool) -> Resp
         Ok(content) => {
             // The version the editor starts from; a save names it as `base` (web wave 4, notes rule 3).
             let hash = (size <= cap).then(|| hq_db::search::content_hash(&content));
-            Json(json!({
+            let mut note = json!({
                 "path": rel, "content": content, "isDir": false, "truncated": size > cap,
                 "hash": hash,
-            }))
-            .into_response()
+            });
+            if ext == "md" {
+                note["tags"] = json!(tags_of_file(abs));
+                add_mark(db, vault, &mut note);
+            }
+            Json(note).into_response()
         }
         Err(e) => ApiError::internal(e).into_response(),
     }
@@ -937,14 +952,102 @@ fn read_head(path: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
+/// Most bytes of a note read to find its front matter and tags.
+const FRONT_MATTER_CAP: usize = 64 * 1024;
+/// Deepest `[` / `{` nesting a front matter may have before it is not parsed.
+const FRONT_MATTER_MAX_DEPTH: usize = 8;
+/// Largest file hashed to tell whether HQ's record is still the version on disk.
+const MARK_HASH_CAP: u64 = 4 * 1024 * 1024;
+
+/// Whether front matter is safe to hand to the YAML parser: small, shallow, and without
+/// anchors or aliases, which can expand a few hundred bytes into gigabytes.
+fn front_matter_is_plain(text: &str) -> bool {
+    if text.len() > FRONT_MATTER_CAP {
+        return false;
+    }
+    let (mut depth, mut deepest) = (0usize, 0usize);
+    for c in text.chars() {
+        match c {
+            '[' | '{' => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            ']' | '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    deepest <= FRONT_MATTER_MAX_DEPTH
+        && !text
+            .split(|c: char| c.is_whitespace() || matches!(c, ',' | '[' | ']' | '{' | '}' | ':'))
+            .any(|token| token.starts_with('&') || token.starts_with('*'))
+}
+
+/// The front matter as a mapping; empty when it is missing, too big, anchored or not YAML.
+fn parse_front_matter(text: Option<&str>) -> serde_yaml::Mapping {
+    text.filter(|t| front_matter_is_plain(t))
+        .and_then(|t| serde_yaml::from_str(t).ok())
+        .unwrap_or_default()
+}
+
+/// The one reading of a note's `tags` that every list, payload and search filter uses. Read only.
+pub(crate) fn tags_of_file(path: &Path) -> Vec<String> {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    let read = std::fs::File::open(path)
+        .map(|f| f.take(FRONT_MATTER_CAP as u64 + 1).read_to_end(&mut buf));
+    if read.is_err() {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&buf);
+    yaml_str_list(&parse_front_matter(split_frontmatter(&text).0), "tags")
+}
+
+/// Whether `tags` holds `wanted` as a whole tag, ignoring case and a leading `#`.
+pub(crate) fn has_tag(tags: &[String], wanted: &str) -> bool {
+    let wanted = wanted.trim().trim_start_matches('#').to_lowercase();
+    tags.iter()
+        .any(|t| t.trim().trim_start_matches('#').to_lowercase() == wanted)
+}
+
+/// The hash of the note as it is now, or `None` for a file too large to hash here (it reads as
+/// the owner's).
+pub(crate) fn file_hash(vault: &Path, rel: &str) -> Option<String> {
+    let path = vault.join(rel);
+    if std::fs::metadata(&path).ok()?.len() > MARK_HASH_CAP {
+        return None;
+    }
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|raw| hq_db::search::content_hash(&raw))
+}
+
+/// Merges `written_by`, `review` and `why` into a note's JSON. A failed lookup leaves the note
+/// as the owner's, with no flag, rather than failing the list. Blocking: call it off the
+/// async runtime.
+pub(crate) fn add_mark(db: &hq_db::Database, vault: &Path, value: &mut Value) {
+    let Some(rel) = value["path"].as_str().map(str::to_string) else {
+        return;
+    };
+    let mark = db
+        .with_conn(|c| hq_db::note_marks::mark(c, &rel, || file_hash(vault, &rel)))
+        .unwrap_or_else(|_| hq_db::note_marks::NoteMark::you());
+    if let (Some(obj), Value::Object(extra)) = (value.as_object_mut(), mark.to_json()) {
+        obj.extend(extra);
+    }
+}
+
 fn note_meta(vault: &Path, path: &Path) -> Option<NoteMeta> {
     let meta = std::fs::metadata(path).ok()?;
     let mtime = meta.modified().ok()?;
     let head = read_head(path)?;
     let (fm_text, body) = split_frontmatter(&head);
-    let fm: serde_yaml::Mapping = fm_text
-        .and_then(|t| serde_yaml::from_str(t).ok())
-        .unwrap_or_default();
+    let fm = parse_front_matter(fm_text);
+    // A front matter longer than the head read is parsed from the whole file for its tags.
+    let tags = if fm_text.is_none() && head.starts_with("---") {
+        tags_of_file(path)
+    } else {
+        yaml_str_list(&fm, "tags")
+    };
     let status = yaml_str(&fm, "status").map(|s| s.to_lowercase());
     let decision_needed = yaml_true(&fm, "decision_needed");
     let pinned = yaml_true(&fm, "pinned");
@@ -957,7 +1060,7 @@ fn note_meta(vault: &Path, path: &Path) -> Option<NoteMeta> {
         "path": rel_to_vault(vault, path),
         "title": title,
         "preview": preview_text(body),
-        "tags": yaml_str_list(&fm, "tags"),
+        "tags": tags,
         "mtime": chrono::DateTime::<chrono::Utc>::from(mtime).to_rfc3339(),
         "size": meta.len(),
         "type": yaml_str(&fm, "type"),
@@ -1076,6 +1179,7 @@ pub(crate) fn pinned_notes(vault: &Path, lite: bool, db: &hq_db::Database) -> Ve
                         .flatten()
                 });
             value["suggestedBy"] = json!(suggested_by);
+            add_mark(db, vault, &mut value);
             value
         })
         .collect()
@@ -1088,13 +1192,14 @@ static SIGNALS_CACHE: Mutex<Option<(PathBuf, bool, Instant, Value)>> = Mutex::ne
 pub(crate) async fn signals_handler(State(state): State<Arc<WsState>>) -> Response {
     let vault = state.vault_path.clone();
     let lite = state.profile().is_lite();
-    if let Ok(guard) = SIGNALS_CACHE.lock()
-        && let Some((path, cached_lite, at, value)) = guard.as_ref()
-        && *path == vault
-        && *cached_lite == lite
-        && at.elapsed() < SIGNALS_TTL
-    {
-        return Json(value.clone()).into_response();
+    let cached = SIGNALS_CACHE.lock().ok().and_then(|guard| {
+        guard.as_ref().and_then(|(path, cached_lite, at, value)| {
+            (*path == vault && *cached_lite == lite && at.elapsed() < SIGNALS_TTL)
+                .then(|| value.clone())
+        })
+    });
+    if let Some(cached) = cached {
+        return marked_signals(state, cached).await;
     }
     let value = match tokio::task::spawn_blocking(move || vault_signals(&vault, lite)).await {
         Ok(v) => v,
@@ -1108,7 +1213,88 @@ pub(crate) async fn signals_handler(State(state): State<Arc<WsState>>) -> Respon
             value.clone(),
         ));
     }
-    Json(value).into_response()
+    marked_signals(state, value).await
+}
+
+async fn marked_signals(state: Arc<WsState>, signals: Value) -> Response {
+    match tokio::task::spawn_blocking(move || with_marks(&state, signals)).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+/// The signals' note lists with each note's mark, and `has_new`: whether any note carries a
+/// `new` or `changed` mark (the quiet dot on Vault). Marks change when the owner opens a note, so
+/// they are added per request and never cached with the walk.
+fn with_marks(state: &WsState, mut signals: Value) -> Value {
+    for bucket in ["recent", "work", "review", "activity"] {
+        if let Some(notes) = signals[bucket].as_array_mut() {
+            for note in notes {
+                add_mark(&state.db, &state.vault_path, note);
+            }
+        }
+    }
+    let has_new = state
+        .db
+        .with_conn(|c| hq_db::note_marks::any_new(c, |rel| file_hash(&state.vault_path, rel)))
+        .unwrap_or(false);
+    signals["has_new"] = json!(has_new);
+    signals
+}
+
+/// `POST /api/note/seen {path}`: the owner opened this note, which clears `new` on the version
+/// on disk. Reading a note never does this itself. The path is read as `GET /api/note` reads it
+/// (extension and `./` forms resolve to one note), and the note must be a `.md` file.
+pub(crate) async fn note_seen_handler(
+    State(state): State<Arc<WsState>>,
+    Json(body): Json<Value>,
+) -> Response {
+    let requested = body
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let requested = requested
+        .strip_prefix("./")
+        .unwrap_or(requested)
+        .to_string();
+    if is_rejected_note_ref(&requested) {
+        return ApiError::bad_request("invalid path").into_response();
+    }
+    if !state.path_allowed(&requested) {
+        return ApiError::not_found().into_response();
+    }
+    let worker = state.clone();
+    let done = tokio::task::spawn_blocking(move || mark_note_seen(&worker, &requested)).await;
+    match done {
+        Ok(Ok(())) => Json(json!({"success": true})).into_response(),
+        Ok(Err(refusal)) => *refusal,
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+fn mark_note_seen(state: &WsState, requested: &str) -> Result<(), Box<Response>> {
+    let not_found = || Box::new(ApiError::not_found().into_response());
+    let (abs, effective) = resolve_note_path(&state.vault_path, requested).ok_or_else(not_found)?;
+    if !effective.ends_with(".md")
+        || !state.path_allowed(&effective)
+        || !state.resolved_allowed(&abs)
+        || !abs.is_file()
+    {
+        return Err(not_found());
+    }
+    let too_big = std::fs::metadata(&abs).map_err(|_| not_found())?.len() > MARK_HASH_CAP;
+    if too_big {
+        let body = Json(json!({"error": "the note is too large to mark as opened"}));
+        return Err(Box::new(
+            (axum::http::StatusCode::PAYLOAD_TOO_LARGE, body).into_response(),
+        ));
+    }
+    let hash = file_hash(&state.vault_path, &effective).ok_or_else(not_found)?;
+    state
+        .db
+        .with_conn(|c| hq_db::note_marks::mark_seen(c, &effective, &hash))
+        .map_err(|e| Box::new(ApiError::internal(e).into_response()))
 }
 
 #[cfg(test)]
@@ -1501,5 +1687,325 @@ mod tests {
         assert_eq!(kids[0]["name"], "Inbox");
         assert_eq!(kids[0]["children"][0]["path"], "Notebooks/Inbox/b.md");
         assert_eq!(kids[1]["type"], "file");
+    }
+}
+
+#[cfg(test)]
+mod mark_tests {
+    use super::{FRONT_MATTER_CAP, MARK_HASH_CAP, has_tag, note_meta, tags_of_file, with_marks};
+    use crate::{WsState, create_router};
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, StatusCode};
+    use hq_db::provenance::{Attribution, SourceKind, record};
+    use serde_json::{Value, json};
+    use std::sync::Arc;
+    use std::time::Instant;
+    use tower::ServiceExt;
+
+    const BODY_LIMIT: usize = 1 << 20;
+    const NOTE: &str = "---\ntags: [work, idea]\n---\nbody about pelicans";
+
+    fn setup() -> (tempfile::TempDir, Arc<WsState>, axum::Router) {
+        let v = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(v.path().join("Notebooks/Inbox")).unwrap();
+        std::fs::write(v.path().join("Notebooks/Inbox/a.md"), NOTE).unwrap();
+        let state = Arc::new(WsState::new(v.path().to_path_buf(), None));
+        let app = create_router(state.clone());
+        (v, state, app)
+    }
+
+    fn hq_wrote(state: &WsState, rel: &str, raw: &str) {
+        let hash = hq_db::search::content_hash(raw);
+        state
+            .db
+            .with_conn(|c| {
+                hq_db::search::index_note(c, rel, "a", raw, "work idea")?;
+                record(
+                    c,
+                    rel,
+                    &hash,
+                    &Attribution {
+                        actor_id: Some("helper"),
+                        source_kind: Some(SourceKind::Agent),
+                        session_id: Some("s1"),
+                        task_id: None,
+                    },
+                )
+                .map(|_| ())
+            })
+            .unwrap();
+    }
+
+    async fn call(app: &axum::Router, method: &str, uri: &str, body: &str) -> (StatusCode, Value) {
+        let request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), BODY_LIMIT).await.unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_note_carries_who_wrote_it_why_and_its_tags_and_new_clears_on_seen() {
+        let (_v, state, app) = setup();
+        let rel = "Notebooks/Inbox/a.md";
+        let (_, mine) = call(&app, "GET", &format!("/api/note?path={rel}"), "").await;
+        assert_eq!(mine["written_by"], "you");
+        assert_eq!(mine["tags"], json!(["work", "idea"]));
+
+        hq_wrote(&state, rel, NOTE);
+        let (_, note) = call(&app, "GET", &format!("/api/note?path={rel}"), "").await;
+        assert_eq!(note["written_by"], "hq");
+        assert_eq!(note["review"], "new");
+        assert!(
+            note["why"]
+                .as_str()
+                .unwrap()
+                .starts_with("Saved from your chat, ")
+        );
+
+        // Reading did not clear it; the explicit call does.
+        let (_, again) = call(&app, "GET", &format!("/api/note?path={rel}"), "").await;
+        assert_eq!(again["review"], "new");
+        let body = json!({ "path": rel }).to_string();
+        let (status, _) = call(&app, "POST", "/api/note/seen", &body).await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, after) = call(&app, "GET", &format!("/api/note?path={rel}"), "").await;
+        assert_eq!(after["review"], Value::Null);
+        assert_eq!(after["written_by"], "hq");
+
+        // The folder listing carries the same fields.
+        let (_, listing) = call(&app, "GET", "/api/note?path=Notebooks/Inbox", "").await;
+        assert_eq!(listing["entries"][0]["written_by"], "hq");
+        assert_eq!(listing["entries"][0]["tags"], json!(["work", "idea"]));
+    }
+
+    #[tokio::test]
+    async fn opening_a_changed_note_leaves_it_changed() {
+        let (v, state, app) = setup();
+        let rel = "Notebooks/Inbox/a.md";
+        let owner_hash = hq_db::search::content_hash(NOTE);
+        state
+            .db
+            .with_conn(|c| {
+                record(
+                    c,
+                    rel,
+                    &owner_hash,
+                    &Attribution {
+                        actor_id: Some("owner"),
+                        source_kind: Some(SourceKind::Human),
+                        session_id: None,
+                        task_id: None,
+                    },
+                )
+                .map(|_| ())
+            })
+            .unwrap();
+        let edited = format!("{NOTE}\nHQ added a line");
+        std::fs::write(v.path().join(rel), &edited).unwrap();
+        hq_wrote(&state, rel, &edited);
+        let uri = format!("/api/note?path={rel}");
+        let (_, note) = call(&app, "GET", &uri, "").await;
+        assert_eq!(note["review"], "changed");
+        let body = json!({ "path": rel }).to_string();
+        call(&app, "POST", "/api/note/seen", &body).await;
+        let (_, after) = call(&app, "GET", &uri, "").await;
+        assert_eq!(after["review"], "changed");
+        let keep = json!({ "path": rel, "verdict": "accepted" }).to_string();
+        let (status, _) = call(&app, "POST", "/api/note/review", &keep).await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, kept) = call(&app, "GET", &uri, "").await;
+        assert_eq!(kept["review"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn seen_refuses_a_path_outside_the_notes() {
+        let (_v, _state, app) = setup();
+        for bad in ["../x.md", "/etc/hosts", ""] {
+            let body = json!({ "path": bad }).to_string();
+            let (status, _) = call(&app, "POST", "/api/note/seen", &body).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{bad:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn search_filters_by_who_wrote_it_and_tag_and_refuses_a_climbing_folder() {
+        let (v, state, app) = setup();
+        for n in 0..5 {
+            let rel = format!("Notebooks/Inbox/m{n}.md");
+            let raw = "pelicans pelicans pelicans";
+            std::fs::write(v.path().join(&rel), raw).unwrap();
+            state
+                .db
+                .with_conn(|c| hq_db::search::index_note(c, &rel, "m", raw, ""))
+                .unwrap();
+        }
+        hq_wrote(&state, "Notebooks/Inbox/a.md", NOTE);
+        let (_, hits) = call(
+            &app,
+            "GET",
+            "/api/search?q=pelicans&written_by=hq&limit=1",
+            "",
+        )
+        .await;
+        assert_eq!(hits["results"][0]["note_path"], "Notebooks/Inbox/a.md");
+        let (_, hits) = call(&app, "GET", "/api/search?q=pelicans&tag=idea&limit=1", "").await;
+        assert_eq!(hits["results"][0]["note_path"], "Notebooks/Inbox/a.md");
+        let (status, _) = call(&app, "GET", "/api/search?q=pelicans&written_by=you", "").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        for bad in ["..%2Fx", "%2Fetc", "a%5Cb", "a/../b"] {
+            let uri = format!("/api/search?q=pelicans&folder={bad}");
+            let (status, _) = call(&app, "GET", &uri, "").await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+        }
+    }
+
+    #[tokio::test]
+    async fn seen_reads_the_path_as_a_note_read_does_and_keeps_one_row() {
+        let (v, state, app) = setup();
+        let rel = "Notebooks/Inbox/a.md";
+        hq_wrote(&state, rel, NOTE);
+        for form in [
+            "./Notebooks/Inbox/a.md",
+            "Notebooks/Inbox/a",
+            " Notebooks/Inbox/a.md ",
+        ] {
+            let body = json!({ "path": form }).to_string();
+            let (status, _) = call(&app, "POST", "/api/note/seen", &body).await;
+            assert_eq!(status, StatusCode::OK, "{form}");
+        }
+        let rows: Vec<String> = state
+            .db
+            .with_conn(|c| {
+                let mut stmt = c.prepare("SELECT path FROM note_seen")?;
+                Ok(stmt
+                    .query_map([], |r| r.get(0))?
+                    .collect::<Result<_, _>>()?)
+            })
+            .unwrap();
+        assert_eq!(rows, [rel]);
+        let (_, note) = call(&app, "GET", &format!("/api/note?path={rel}"), "").await;
+        assert_eq!(note["review"], Value::Null);
+
+        let missing = json!({ "path": "Notebooks/Inbox/none.md" }).to_string();
+        assert_eq!(
+            call(&app, "POST", "/api/note/seen", &missing).await.0,
+            StatusCode::NOT_FOUND
+        );
+        std::fs::write(v.path().join("Notebooks/Inbox/pic.png"), "x").unwrap();
+        let png = json!({ "path": "Notebooks/Inbox/pic.png" }).to_string();
+        assert_eq!(
+            call(&app, "POST", "/api/note/seen", &png).await.0,
+            StatusCode::NOT_FOUND
+        );
+        let big = vec![b'a'; (MARK_HASH_CAP + 1) as usize];
+        std::fs::write(v.path().join("Notebooks/Inbox/big.md"), big).unwrap();
+        let body = json!({ "path": "Notebooks/Inbox/big.md" }).to_string();
+        assert_eq!(
+            call(&app, "POST", "/api/note/seen", &body).await.0,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+    }
+
+    #[test]
+    fn tags_match_whole_case_folded_and_survive_a_long_front_matter() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |name: &str, text: &str| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, text).unwrap();
+            p
+        };
+        let multi = write("m.md", "---\ntags: [\"machine learning\", Rust]\n---\nx");
+        let tags = tags_of_file(&multi);
+        assert!(has_tag(&tags, "machine learning"));
+        assert!(has_tag(&tags, "#RUST"));
+        assert!(!has_tag(&tags, "learning"));
+        // Tags after more than 4096 bytes of other front matter are still read.
+        let padding = "note: ".to_string() + &"x".repeat(6000);
+        let long = write("l.md", &format!("---\n{padding}\ntags: [late]\n---\nx"));
+        assert_eq!(tags_of_file(&long), ["late"]);
+        // The list view reads them the same way.
+        let meta = note_meta(dir.path(), &long).unwrap();
+        assert_eq!(meta.value["tags"], json!(["late"]));
+    }
+
+    #[test]
+    fn an_alias_bomb_in_the_front_matter_is_refused_quickly() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut fm = String::from("a: &a [x,x,x,x,x,x,x,x,x]\n");
+        for n in 0..1500 {
+            let prev = if n == 0 {
+                "a".to_string()
+            } else {
+                format!("l{}", n - 1)
+            };
+            fm.push_str(&format!("l{n}: &l{n} [*{prev},*{prev},*{prev},*{prev}]\n"));
+        }
+        assert!(
+            fm.len() > 30_000 && fm.len() < FRONT_MATTER_CAP,
+            "{}",
+            fm.len()
+        );
+        fm.push_str("tags: [secret]\n");
+        let path = dir.path().join("bomb.md");
+        std::fs::write(&path, format!("---\n{fm}---\nbody")).unwrap();
+        let started = Instant::now();
+        assert!(tags_of_file(&path).is_empty());
+        let meta = note_meta(dir.path(), &path);
+        assert!(started.elapsed() < std::time::Duration::from_millis(200));
+        assert!(meta.is_none_or(|m| m.value["tags"] == json!([])));
+    }
+
+    #[tokio::test]
+    async fn an_outside_edit_drops_a_note_from_the_hq_search_and_the_dot() {
+        let (v, state, app) = setup();
+        let rel = "Notebooks/Inbox/a.md";
+        hq_wrote(&state, rel, NOTE);
+        let (_, signals) = call(&app, "GET", "/api/vault-signals", "").await;
+        assert_eq!(signals["has_new"], true);
+        let (_, hits) = call(&app, "GET", "/api/search?q=pelicans&written_by=hq", "").await;
+        assert_eq!(hits["results"].as_array().unwrap().len(), 1);
+
+        std::fs::write(v.path().join(rel), format!("{NOTE} edited elsewhere")).unwrap();
+        let (_, hits) = call(&app, "GET", "/api/search?q=pelicans&written_by=hq", "").await;
+        assert!(hits["results"].as_array().unwrap().is_empty(), "{hits}");
+        let (_, note) = call(&app, "GET", &format!("/api/note?path={rel}"), "").await;
+        assert_eq!(note["written_by"], "you");
+        // The vault-signals walk is cached for a few seconds; ask the function directly.
+        let marked = with_marks(&state, json!({"recent": [{"path": rel}]}));
+        assert_eq!(marked["has_new"], false);
+        assert_eq!(marked["recent"][0]["written_by"], "you");
+    }
+
+    #[tokio::test]
+    async fn a_filtered_search_walk_finds_a_match_past_hundreds_of_other_files() {
+        let (v, _state, app) = setup();
+        for n in 0..650 {
+            std::fs::write(
+                v.path().join(format!("Notebooks/Inbox/f{n}.md")),
+                "---\ntags: [other]\n---\nquokka",
+            )
+            .unwrap();
+        }
+        std::fs::write(
+            v.path().join("Notebooks/Inbox/target.md"),
+            "---\ntags: [Wanted]\n---\nquokka",
+        )
+        .unwrap();
+        let (_, hits) = call(&app, "GET", "/api/search?q=quokka&tag=wanted&limit=1", "").await;
+        assert_eq!(
+            hits["results"][0]["note_path"], "Notebooks/Inbox/target.md",
+            "{hits}"
+        );
+        let (_, none) = call(&app, "GET", "/api/search?q=quokka&tag=learning", "").await;
+        assert!(none["results"].as_array().unwrap().is_empty());
     }
 }

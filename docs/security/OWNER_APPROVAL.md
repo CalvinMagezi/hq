@@ -106,3 +106,21 @@ into or answer only a coding agent its own web chat watches. The reasoning is in
   is the better design. Tracked in `TECHDEBT.md`.
 - A relay turn whose `vault.db` cannot be opened runs without asking (it logs a warning), because
   there is no inbox to ask through.
+
+## Fields on an approval item (for the apps)
+
+`GET /api/notifications` puts these on `metadata.approval`, all set by the runtime from the call:
+
+- `loses` and `verb`: from `hq_core::losing::tool_verb`.
+- `consequence`: one plain sentence (`hq_core::losing::consequence`). It follows the tool's name
+  (a fixed table: `vault_delete` says the note goes to the Trash and can be restored for 30 days,
+  `task_delete` says it cannot be undone), the host the runtime parsed from a fetch ("HQ will open
+  example.com and read the page."), or the verb found in a shell command HQ is asked to run. It
+  never follows an `action` or inner `tool` argument the model supplied, and it is absent when HQ
+  cannot say it truly (the card then shows the request itself).
+- `site`: the host of a `web_fetch` call.
+- `site_approvals`: how many times the owner answered "Allow once" for that site, across chats
+  (`hq_db::fetch_sites::allowed_once_for_host`, table `site_allowed_once`). Only inbox answers
+  write it, so a helper session's prompts never count; "Allow all" and a decline never change it.
+  It is display only: the apps offer "Allow all for this site" once it reaches two, but the
+  server accepts `approve_site` at any count.
