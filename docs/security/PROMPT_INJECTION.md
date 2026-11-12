@@ -47,7 +47,13 @@ normal and the `BypassPermissions` paths.
    anyone other than the owner or HQ itself, including another bot, a webhook post and a
    forwarded message. Only HQ's own messages are quoted to the model as "assistant".
 
-   Taint lasts for the session. One `TaintTracker` is shared by the parent
+   Taint lasts for the session, and in a web chat for the whole thread. The first source a turn
+   reads is written to `chat_threads.taint_source` the moment it taints the tracker (so a turn
+   that dies after the read still leaves it), and every later turn of that thread starts
+   tainted with the same source (`SessionBuilder::taint_thread`, `hq_db::thread_taint`). A
+   different thread is unaffected, an unreadable record counts as tainted, and the owner's own
+   messages never set it. Telegram and Discord chats do not carry taint across turns yet.
+   One `TaintTracker` is shared by the parent
    session and every sub-agent `spawn_subagents` starts, in both directions,
    so delegating cannot launder it.
 3. **After taint**, two more things are denied (`SecretTier::Tainted`, `egress.rs`):

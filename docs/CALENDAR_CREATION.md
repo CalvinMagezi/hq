@@ -86,5 +86,5 @@ is active. It uses the same `device_action` channel and routes as creation, with
   that is not plain digits drops the event. The phone never supplies a URL; the app opens the
   event in the calendar when the link is tapped.
 - Calendar text is untrusted. `calendar_list_events` is in `UNTRUSTED_SOURCE_TOOLS`, so after a
-  read `calendar_create_event` asks the owner. Logs carry the request id, phase, outcome code and
+  read `calendar_create_event` asks the owner, in that turn and in every later turn of the same chat thread. Logs carry the request id, phase, outcome code and
   counts, never titles. See `docs/security/PROMPT_INJECTION.md`.

@@ -239,6 +239,9 @@ fn native_builder(
     if hooks.worker_preset {
         base_builder = base_builder.worker_preset(hq_tools::github::clone_root());
     }
+    if let Some(thread) = hooks.identity.as_ref().and_then(|i| i.web_thread()) {
+        base_builder = base_builder.taint_thread(thread);
+    }
     if let Some(source) = &hooks.untrusted_input {
         base_builder = base_builder.untrusted_input(source.clone());
     } else if !hooks.prompt_by_hq {

@@ -40,6 +40,7 @@ pub mod task_graph;
 pub mod task_outcomes;
 pub mod tasks;
 pub mod thread_folds;
+pub mod thread_taint;
 pub mod tool_failures;
 pub mod tool_usage;
 pub mod usage_ledger;

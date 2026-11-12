@@ -275,6 +275,7 @@ pub struct SessionBuilder {
     worker_checkouts: Option<PathBuf>,
     /// Why the session counts as having read untrusted text before its first tool call.
     untrusted_input: Option<String>,
+    taint_thread: Option<String>,
     /// Nobody is there to approve a call; see [`Self::unattended`].
     unattended: bool,
     /// Text the owner wrote themselves; see [`Self::owner_words`].
@@ -322,6 +323,7 @@ impl SessionBuilder {
             tool_deny_prefixes: Vec::new(),
             worker_checkouts: None,
             untrusted_input: None,
+            taint_thread: None,
             unattended: false,
             owner_words: Vec::new(),
             pinned_model: None,
@@ -548,6 +550,14 @@ impl SessionBuilder {
         self
     }
 
+    /// Carry taint across the turns of one chat thread: start tainted if an earlier turn read
+    /// untrusted content, and record the thread when this turn does. Unreadable state counts
+    /// as tainted.
+    pub fn taint_thread(mut self, thread_id: impl Into<String>) -> Self {
+        self.taint_thread = Some(thread_id.into());
+        self
+    }
+
     /// Mark a turn nobody is there to approve (a watch firing, a turn the web driver or a
     /// follow-up started). Once it reads outside text, it runs nothing that needs the owner.
     pub fn unattended(mut self, unattended: bool) -> Self {
@@ -651,6 +661,9 @@ impl SessionBuilder {
         let taint = crate::governance::TaintTracker::new();
         if let Some(source) = &self.untrusted_input {
             taint.mark(source);
+        }
+        if let Some(thread_id) = &self.taint_thread {
+            carry_thread_taint(&taint, shared_db.as_ref(), thread_id);
         }
         if self.unattended {
             taint.set_unattended();
@@ -785,3 +798,30 @@ impl SessionBuilder {
 mod compat_tests;
 #[cfg(test)]
 mod tests;
+
+/// Starts `taint` from the thread's recorded source and persists a new one the moment it is set.
+fn carry_thread_taint(
+    taint: &crate::governance::TaintTracker,
+    db: Option<&Arc<hq_db::Database>>,
+    thread_id: &str,
+) {
+    use hq_db::thread_taint;
+    let Some(db) = db else {
+        taint.mark(thread_taint::UNREADABLE_SOURCE);
+        return;
+    };
+    match db.with_conn(|conn| thread_taint::source(conn, thread_id)) {
+        Ok(Some(source)) => taint.mark(&source),
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!(%e, "thread taint unreadable; treating the thread as tainted");
+            taint.mark(thread_taint::UNREADABLE_SOURCE);
+        }
+    }
+    let (db, thread_id) = (db.clone(), thread_id.to_string());
+    taint.on_first_mark(Box::new(move |source| {
+        if let Err(e) = db.with_conn(|conn| thread_taint::mark(conn, &thread_id, source)) {
+            tracing::warn!(%e, "could not record thread taint");
+        }
+    }));
+}
