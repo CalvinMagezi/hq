@@ -2,18 +2,14 @@
 //! The phone writes through Android's Calendar Provider; HQ never learns what a calendar holds
 //! beyond the one event it asked for.
 
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
-use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use serde_json::{Value, json};
-use tokio::sync::watch;
 
+use super::ACTION_NAME;
 use super::check::{Checked, check};
 use super::outcome::{self, PHONE_OUTCOMES, SAVED_TO};
-use super::store::{self, DeviceActionStore, Opened, Phase, Timeouts};
-use crate::skills::builtin::{self, CALENDAR_CREATION_SKILL};
+use crate::device_actions::{DeviceLink, DeviceToolSpec, RiskClass, RunFuture, outcome_is_known};
+use crate::skills::builtin::CALENDAR_CREATION_SKILL;
 
 pub const TOOL_NAME: &str = "calendar_create_event";
 
@@ -21,174 +17,61 @@ const TOOL_DESCRIPTION: &str = "Create one event in the owner's phone calendar, 
     review screen. Load the calendar-creation skill first. Dates are the phone's local time, \
     already resolved by you. Attendees, recurrence and reminders are not supported.";
 
-/// The phone's zone and clock as the app last reported them, advanced by the time since.
-/// HQ never reads its own clock for a calendar: the phone is where the event lives.
-#[derive(Debug, Clone)]
-pub struct PhoneClock {
-    pub zone: Tz,
-    reported: DateTime<Utc>,
-    received: Instant,
+pub(super) const SPEC: DeviceToolSpec = DeviceToolSpec {
+    name: TOOL_NAME,
+    wire_action: ACTION_NAME,
+    risk: RiskClass::Create,
+    skill: CALENDAR_CREATION_SKILL,
+    phone_outcomes: PHONE_OUTCOMES,
+    description: TOOL_DESCRIPTION,
+    parameters,
+    describe,
+    finalize,
+    unavailable: outcome::unavailable,
+    lost: outcome::unverified,
+    run,
+};
+
+fn run<'a>(link: &'a DeviceLink, tool_call_id: &'a str, args: &'a Value) -> RunFuture<'a> {
+    Box::pin(run_create(link, tool_call_id, args))
 }
 
-impl PhoneClock {
-    /// `None` when the zone is not an IANA name or the time is not RFC 3339: the tool is then
-    /// not offered, since a guessed zone would put an event at the wrong hour.
-    pub fn parse(zone: &str, now_utc: &str) -> Option<Self> {
-        let zone: Tz = zone.trim().parse().ok()?;
-        let reported = DateTime::parse_from_rfc3339(now_utc.trim())
-            .ok()?
-            .with_timezone(&Utc);
-        Some(Self {
-            zone,
-            reported,
-            received: Instant::now(),
-        })
-    }
-
-    pub fn now(&self) -> DateTime<Utc> {
-        self.reported + chrono::TimeDelta::from_std(self.received.elapsed()).unwrap_or_default()
-    }
+fn describe(_args: &Value) -> String {
+    "would add an event to the owner's phone calendar".into()
 }
 
-pub(super) type Emit = Arc<dyn Fn(Value) + Send + Sync>;
-
-/// One chat turn's link to the phone that sent it.
-pub struct DeviceCalendar {
-    pub(super) thread_id: String,
-    pub(super) store: Arc<DeviceActionStore>,
-    pub(super) emit: Emit,
-    pub(super) phone: PhoneClock,
-    pub(super) timeouts: Timeouts,
-}
-
-impl DeviceCalendar {
-    pub fn new(
-        thread_id: impl Into<String>,
-        store: Arc<DeviceActionStore>,
-        emit: Emit,
-        phone: PhoneClock,
-    ) -> Self {
-        Self {
-            thread_id: thread_id.into(),
-            store,
-            emit,
-            phone,
-            timeouts: Timeouts::default(),
-        }
-    }
-
-    pub fn with_timeouts(mut self, timeouts: Timeouts) -> Self {
-        self.timeouts = timeouts;
-        self
-    }
-
-    pub fn name(&self) -> &'static str {
-        TOOL_NAME
-    }
-
-    pub fn description(&self) -> &'static str {
-        TOOL_DESCRIPTION
-    }
-
-    pub fn parameters(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "description": "1 to 200 characters."},
-                "start_local": {
-                    "type": "string",
-                    "description": "Phone-local start: YYYY-MM-DDTHH:MM, or YYYY-MM-DD when all_day. No offset."
-                },
-                "end_local": {"type": "string", "description": "Phone-local end, same format. Give this or duration_minutes, not both."},
-                "duration_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
-                "all_day": {"type": "boolean", "description": "Only when the owner said all day."},
-                "location": {"type": "string", "description": "Only if the owner gave one."},
-                "description": {"type": "string", "description": "Only if the owner gave one."}
+fn parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "1 to 200 characters."},
+            "start_local": {
+                "type": "string",
+                "description": "Phone-local start: YYYY-MM-DDTHH:MM, or YYYY-MM-DD when all_day. No offset."
             },
-            "required": ["title", "start_local"],
-            "additionalProperties": false
-        })
-    }
+            "end_local": {"type": "string", "description": "Phone-local end, same format. Give this or duration_minutes, not both."},
+            "duration_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+            "all_day": {"type": "boolean", "description": "Only when the owner said all day."},
+            "location": {"type": "string", "description": "Only if the owner gave one."},
+            "description": {"type": "string", "description": "Only if the owner gave one."}
+        },
+        "required": ["title", "start_local"],
+        "additionalProperties": false
+    })
+}
 
-    /// The zone and date the model needs to resolve words like "tomorrow".
-    pub fn context_line(&self) -> String {
-        let local = self.phone.now().with_timezone(&self.phone.zone);
-        format!(
-            "The owner's phone is in {} and it is {} there.",
-            self.phone.zone.name(),
-            local.format("%A %Y-%m-%d %H:%M")
-        )
+/// Runs one call. Always returns one of the contract's outcomes, never an error.
+pub async fn run_create(link: &DeviceLink, tool_call_id: &str, args: &Value) -> Value {
+    if let Some(refusal) = link.skill_gate(&SPEC) {
+        return refusal;
     }
-
-    /// Runs one call. Always returns one of the contract's outcomes, never an error.
-    pub async fn create(&self, tool_call_id: &str, args: &Value) -> Value {
-        if builtin::shipped_hash(CALENDAR_CREATION_SKILL).is_none()
-            || !builtin::is_active(CALENDAR_CREATION_SKILL)
-        {
-            return outcome::unavailable("skill_not_active");
-        }
-        let checked = match check(args, self.phone.zone, self.phone.now()) {
-            Ok(c) => c,
-            Err(refusal) => return refusal,
-        };
-        let request_id = uuid::Uuid::new_v4().to_string();
-        let payload = wire_payload(&request_id, self.phone.zone, &checked);
-        let opened = self.store.open(
-            &self.thread_id,
-            tool_call_id,
-            &request_id,
-            payload,
-            self.timeouts,
-        );
-        let (action_id, frame, phase) = match opened {
-            Ok(Opened::New {
-                action_id,
-                frame,
-                phase,
-            }) => (action_id, frame, phase),
-            Ok(Opened::Known { outcome }) => {
-                return outcome.unwrap_or_else(|| outcome::unverified("still_waiting"));
-            }
-            Err(_) => return outcome::unavailable("too_many_pending"),
-        };
-        tracing::info!(%request_id, %action_id, phase = "sent", "device action");
-        (self.emit)(frame);
-        let result = self.wait(&action_id, phase, outcome::unverified).await;
-        tracing::info!(%request_id, %action_id, phase = "done", outcome = outcome::code(&result), "device action");
-        result
-    }
-
-    /// `lost` builds the outcome for "the answer never came", which differs by action: a create
-    /// may have happened, a read has nothing to report.
-    pub(super) async fn wait(
-        &self,
-        action_id: &str,
-        mut phase: watch::Receiver<Phase>,
-        lost: fn(&str) -> Value,
-    ) -> Value {
-        let ack = Duration::from_secs(self.timeouts.ack_secs);
-        let result = Duration::from_secs(self.timeouts.result_secs);
-        let first = tokio::time::timeout(ack, phase.wait_for(|p| *p != Phase::Open))
-            .await
-            .map(|r| r.map(|p| *p));
-        match first {
-            Ok(Ok(Phase::Abandoned)) => return outcome::unreachable(),
-            Ok(Ok(_)) => {}
-            // The sender lives in the store; losing it means the action was pruned.
-            Ok(Err(_)) => return lost("action_lost"),
-            Err(_) if self.store.abandon_if_unacked(action_id) => return outcome::unreachable(),
-            // The ack landed in the instant the timer fired.
-            Err(_) => {}
-        }
-        let second = tokio::time::timeout(result, phase.wait_for(|p| *p == Phase::Settled)).await;
-        if second.is_err() {
-            self.store.give_up(action_id);
-            return lost("no_result_in_time");
-        }
-        self.store
-            .outcome(action_id)
-            .unwrap_or_else(|| lost("action_lost"))
-    }
+    let checked = match check(args, link.phone.zone, link.phone.now()) {
+        Ok(c) => c,
+        Err(refusal) => return refusal,
+    };
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let payload = wire_payload(&request_id, link.phone.zone, &checked);
+    link.round_trip(&SPEC, tool_call_id, payload).await
 }
 
 fn wire_payload(request_id: &str, zone: Tz, c: &Checked) -> Value {
@@ -214,35 +97,6 @@ fn wire_payload(request_id: &str, zone: Tz, c: &Checked) -> Value {
 /// known outcome.
 pub fn result_is_acceptable(body: &Value) -> bool {
     outcome_is_known(body, PHONE_OUTCOMES)
-}
-
-pub(super) fn outcome_is_known(body: &Value, allowed: &[&str]) -> bool {
-    body.get("v").and_then(Value::as_u64) == Some(1)
-        && body
-            .get("outcome")
-            .and_then(Value::as_str)
-            .is_some_and(|o| allowed.contains(&o))
-}
-
-/// `result_is_acceptable` for the action called `name`. An unknown name accepts nothing.
-pub fn result_is_acceptable_for(name: &str, body: &Value) -> bool {
-    match name {
-        store::ACTION_NAME => result_is_acceptable(body),
-        store::LIST_ACTION_NAME => outcome_is_known(body, outcome::LIST_PHONE_OUTCOMES),
-        store::UPDATE_ACTION_NAME => outcome_is_known(body, outcome::UPDATE_PHONE_OUTCOMES),
-        store::DELETE_ACTION_NAME => outcome_is_known(body, outcome::DELETE_PHONE_OUTCOMES),
-        _ => false,
-    }
-}
-
-/// `finalize` for the action called `name`.
-pub fn finalize_for(name: &str, body: &Value, payload: &Value) -> Value {
-    match name {
-        store::LIST_ACTION_NAME => super::list::finalize_list(body, payload),
-        store::UPDATE_ACTION_NAME => super::update::finalize_update(body, payload),
-        store::DELETE_ACTION_NAME => super::delete::finalize_delete(body, payload),
-        _ => finalize(body, payload),
-    }
 }
 
 const CREATED_FIELDS: &[&str] = &[

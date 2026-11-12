@@ -55,7 +55,7 @@ enum ClientMsg {
         /// Where the words came from; only "voice" is kept (D7). Never shown to the model.
         source: Option<String>,
         /// The phone's zone and clock, sent by the Android app. Used for this turn only; its
-        /// presence is what offers `calendar_create_event`. Older apps omit it.
+        /// presence is what offers the device tools (calendar). Older apps omit it.
         device: Option<crate::device_actions_api::DeviceInfo>,
     },
     Stop {
@@ -707,7 +707,7 @@ struct ChatTurn {
     /// Set for a reply to the person's own message: the reply may carry one offer.
     offer: Option<crate::offers_api::OfferContext>,
     /// The phone this reply is for, when it reported a zone and clock.
-    device: Option<Arc<hq_tools::calendar::DeviceCalendar>>,
+    device: Option<Arc<hq_tools::device_actions::DeviceLink>>,
 }
 
 /// Runs a turn and watches it. A panic inside the run would otherwise leave no
@@ -820,7 +820,7 @@ impl ChatTurn {
             }),
             isolated: true,
             image_parts,
-            device_calendar: self.device.clone(),
+            device_link: self.device.clone(),
             ..Default::default()
         };
         // Same shared runner as the Telegram/Discord relays: session model, tool

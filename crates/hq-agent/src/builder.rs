@@ -428,25 +428,19 @@ impl SessionBuilder {
         self
     }
 
-    /// Offers the four `calendar_*_event(s)` tools in this session. Only a chat turn that came from the
-    /// owner's phone has a link to give; every other session never calls this.
-    pub fn device_calendar(
+    /// Offers every device tool (the calendar's four today) in this session. Only a chat turn that
+    /// came from the owner's phone has a link to give; every other session never calls this.
+    pub fn device_actions(
         mut self,
-        device: std::sync::Arc<hq_tools::calendar::DeviceCalendar>,
+        link: std::sync::Arc<hq_tools::device_actions::DeviceLink>,
     ) -> Self {
-        self.extra_tools.push(Box::new(
-            crate::calendar_tool::CalendarCreateEventTool::new(device.clone()),
-        ));
-        self.extra_tools.push(Box::new(
-            crate::calendar_tool::CalendarUpdateEventTool::new(device.clone()),
-        ));
-        self.extra_tools.push(Box::new(
-            crate::calendar_tool::CalendarDeleteEventTool::new(device.clone()),
-        ));
-        self.extra_tools
-            .push(Box::new(crate::calendar_tool::CalendarListEventsTool::new(
-                device,
-            )));
+        for spec in hq_tools::device_actions::offered() {
+            self.extra_tools
+                .push(Box::new(crate::device_tool::DeviceActionTool::new(
+                    spec,
+                    link.clone(),
+                )));
+        }
         self
     }
 

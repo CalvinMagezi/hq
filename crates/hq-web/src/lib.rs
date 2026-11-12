@@ -104,8 +104,8 @@ pub struct WsState {
     /// WS message aborts the turn's driver task, which drops the harness
     /// stream and finalizes the turn.
     pub(crate) active_chat_turns: ws::ChatTurnMap,
-    /// Requests sent to a phone and not yet settled (`calendar_create_event`).
-    pub(crate) device_actions: Arc<hq_tools::calendar::DeviceActionStore>,
+    /// Requests sent to a phone and not yet settled (device tools).
+    pub(crate) device_actions: Arc<hq_tools::device_actions::DeviceActionStore>,
     pub(crate) device_action_rate: device_actions_api::RateWindow,
     /// Web Push, when `web_push` is on and its key could be loaded.
     pub(crate) web_push: Option<Arc<web_push::WebPush>>,

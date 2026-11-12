@@ -120,9 +120,9 @@ pub struct NativeHqHooks {
     /// Where `PermissionMode::Default` asks the owner before a call that needs them. Set by a
     /// surface the owner drives (web chat, a relay chat); `None` never asks.
     pub owner_approval: Option<Arc<crate::governance::OwnerApproval>>,
-    /// The phone this turn came from, when it reported its zone and clock. Only then is
-    /// `calendar_create_event` offered.
-    pub device_calendar: Option<Arc<hq_tools::calendar::DeviceCalendar>>,
+    /// The phone this turn came from, when it reported its zone and clock. Only then are the
+    /// device tools (calendar) offered.
+    pub device_link: Option<Arc<hq_tools::device_actions::DeviceLink>>,
 }
 
 /// Outcome of a native-hq run, carrying the explicit success + quality signal so
@@ -259,8 +259,8 @@ fn native_builder(
     base_builder = base_builder
         .role(hooks.role)
         .owner_approval(hooks.owner_approval.clone());
-    if let Some(device) = &hooks.device_calendar {
-        base_builder = base_builder.device_calendar(device.clone());
+    if let Some(link) = &hooks.device_link {
+        base_builder = base_builder.device_actions(link.clone());
     }
     if let Some(preset) = hooks.permission_preset {
         base_builder = base_builder.permission_preset(preset);

@@ -22,6 +22,7 @@ pub mod coding;
 pub mod collection_tip;
 pub mod convert;
 pub mod copilot_credits;
+pub mod device_actions;
 pub mod external_runner;
 pub mod family_confirm;
 pub mod family_guest;

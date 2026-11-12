@@ -8,11 +8,9 @@ use chrono_tz::Tz;
 use serde_json::{Map, Value, json};
 
 use super::check::{DATE_FORMAT, TIMED_FORMAT, TITLE_MAX_CHARS, text};
-use super::create::{DeviceCalendar, PHONE_TEXT_MAX_CHARS, clean, pass_through};
+use super::create::{PHONE_TEXT_MAX_CHARS, clean, pass_through};
 use super::list::{ID_MAX_DIGITS, LINK_PREFIX, MS_PER_DAY, UNTITLED};
-use super::outcome::{self, invalid};
-use super::store::Opened;
-use crate::skills::builtin;
+use super::outcome::invalid;
 
 const RESERVED_PREFIX: &str = "_hq_";
 const BEGIN_PARAM: &str = "?begin=";
@@ -140,84 +138,15 @@ pub(super) fn finalize_modification(
     }
 }
 
-impl DeviceCalendar {
-    /// Sends one update or delete and waits for the phone. Always returns one of the contract's
-    /// outcomes, never an error. Logs hold ids and codes, never a title.
-    pub(super) async fn run_modification(
-        &self,
-        action: &'static str,
-        skill: &str,
-        tool_call_id: &str,
-        payload: Value,
-        unverified: fn(&str) -> Value,
-    ) -> Value {
-        if builtin::shipped_hash(skill).is_none() || !builtin::is_active(skill) {
-            return outcome::unavailable("skill_not_active");
-        }
-        let request_id = payload["request_id"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
-        let opened = self.store.open_named(
-            action,
-            &self.thread_id,
-            tool_call_id,
-            &request_id,
-            payload,
-            self.timeouts,
-        );
-        let (action_id, frame, phase) = match opened {
-            Ok(Opened::New {
-                action_id,
-                frame,
-                phase,
-            }) => (action_id, frame, phase),
-            Ok(Opened::Known { outcome }) => {
-                return outcome.unwrap_or_else(|| unverified("still_waiting"));
-            }
-            Err(_) => return outcome::unavailable("too_many_pending"),
-        };
-        tracing::info!(%request_id, %action_id, action, phase = "sent", "device action");
-        (self.emit)(frame);
-        let result = self.wait(&action_id, phase, unverified).await;
-        tracing::info!(
-            %request_id, %action_id, action, phase = "done", outcome = outcome::code(&result),
-            "device action"
-        );
-        result
-    }
+/// `key` of the tool call's arguments, cleaned and cut for an approval line.
+pub(super) fn quoted(args: &Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(|t| clean(t, APPROVAL_TITLE_MAX_CHARS))
+        .filter(|t| !t.is_empty())
 }
 
-/// One line for the owner's approval: what a modification call would do to which event. `None`
-/// for any other tool. Titles are untrusted, so they are cleaned and cut.
-pub fn describe_modification(tool: &str, args: &Value) -> Option<String> {
-    let short = |key: &str| {
-        args.get(key)
-            .and_then(Value::as_str)
-            .map(|t| clean(t, APPROVAL_TITLE_MAX_CHARS))
-            .filter(|t| !t.is_empty())
-    };
-    let event =
-        short("title").map_or_else(|| "an event".to_string(), |t| format!("the event \"{t}\""));
-    match tool {
-        super::delete::DELETE_TOOL_NAME => Some(format!(
-            "would delete {event} from the owner's phone calendar"
-        )),
-        super::update::UPDATE_TOOL_NAME => {
-            let mut changes = Vec::new();
-            if let Some(t) = short("new_title") {
-                changes.push(format!("title to \"{t}\""));
-            }
-            for (key, label) in [("new_start_local", "start"), ("new_end_local", "end")] {
-                if let Some(v) = short(key) {
-                    changes.push(format!("{label} to {v}"));
-                }
-            }
-            Some(format!(
-                "would change {event} on the owner's phone calendar: {}",
-                changes.join(", ")
-            ))
-        }
-        _ => None,
-    }
+/// The event a modification names, as the owner reads it.
+pub(super) fn describe_target(args: &Value) -> String {
+    quoted(args, "title").map_or_else(|| "an event".to_string(), |t| format!("the event \"{t}\""))
 }

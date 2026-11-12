@@ -6,10 +6,11 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use super::check::check;
-use super::create::DeviceCalendar;
-use super::outcome::{CREATED, code};
-use super::store::{Clock, DeviceActionStore, Opened, Reject, Timeouts};
-use super::{PhoneClock, finalize, result_is_acceptable};
+use super::create::run_create;
+use super::outcome::CREATED;
+use super::{ACTION_NAME, finalize, result_is_acceptable};
+use crate::device_actions::store::{Clock, DeviceActionStore, Opened, Reject, Timeouts};
+use crate::device_actions::{DeviceLink, PhoneClock, code};
 use crate::skills::builtin::{CALENDAR_CREATION_SKILL, set_active_for_this_thread};
 
 const LONDON: Tz = chrono_tz::Europe::London;
@@ -261,7 +262,8 @@ fn manual_store() -> (Arc<ManualClock>, DeviceActionStore) {
 
 fn open(store: &DeviceActionStore, thread: &str, request: &str) -> String {
     match store
-        .open(
+        .open_named(
+            ACTION_NAME,
             thread,
             "call-1",
             request,
@@ -351,11 +353,11 @@ fn a_chat_may_have_four_open_actions_and_no_more() {
     for i in 0..4 {
         open(&store, "t1", &format!("r{i}"));
     }
-    let fifth = store.open("t1", "c", "r9", json!({}), Timeouts::default());
+    let fifth = store.open_named(ACTION_NAME, "t1", "c", "r9", json!({}), Timeouts::default());
     assert!(fifth.is_err());
     assert!(
         store
-            .open("t2", "c", "r9", json!({}), Timeouts::default())
+            .open_named(ACTION_NAME, "t2", "c", "r9", json!({}), Timeouts::default())
             .is_ok()
     );
 }
@@ -365,7 +367,14 @@ fn the_same_request_id_returns_the_same_result() {
     let (_, store) = manual_store();
     let id = open(&store, "t1", "same");
     match store
-        .open("t1", "c", "same", json!({}), Timeouts::default())
+        .open_named(
+            ACTION_NAME,
+            "t1",
+            "c",
+            "same",
+            json!({}),
+            Timeouts::default(),
+        )
         .ok()
         .unwrap()
     {
@@ -381,7 +390,14 @@ fn the_same_request_id_returns_the_same_result() {
         )
         .unwrap();
     match store
-        .open("t1", "c", "same", json!({}), Timeouts::default())
+        .open_named(
+            ACTION_NAME,
+            "t1",
+            "c",
+            "same",
+            json!({}),
+            Timeouts::default(),
+        )
         .ok()
         .unwrap()
     {
@@ -449,13 +465,13 @@ fn phone() -> PhoneClock {
 
 type Frames = mpsc::UnboundedReceiver<Value>;
 
-fn tool(store: Arc<DeviceActionStore>, timeouts: Timeouts) -> (DeviceCalendar, Frames) {
+fn tool(store: Arc<DeviceActionStore>, timeouts: Timeouts) -> (DeviceLink, Frames) {
     let (tx, rx) = mpsc::unbounded_channel();
     let emit = Arc::new(move |frame: Value| {
         let _ = tx.send(frame);
     });
     (
-        DeviceCalendar::new("thread-1", store, emit, phone()).with_timeouts(timeouts),
+        DeviceLink::new("thread-1", store, emit, phone()).with_timeouts(timeouts),
         rx,
     )
 }
@@ -473,7 +489,7 @@ const FAST: Timeouts = Timeouts {
 async fn it_refuses_without_the_shipped_skill() {
     let _off = set_active_for_this_thread(Some(&[]));
     let (tool, mut frames) = tool(Arc::default(), FAST);
-    let out = tool.create("c1", &args()).await;
+    let out = run_create(&tool, "c1", &args()).await;
     assert_eq!(reason(&out), ("calendar_unavailable", "skill_not_active"));
     assert!(frames.try_recv().is_err(), "nothing was sent to the phone");
 }
@@ -482,12 +498,12 @@ async fn it_refuses_without_the_shipped_skill() {
 async fn a_bad_request_never_reaches_the_phone() {
     let _on = set_active_for_this_thread(Some(&[CALENDAR_CREATION_SKILL]));
     let (tool, mut frames) = tool(Arc::default(), FAST);
-    let out = tool
-        .create(
-            "c1",
-            &json!({"title": "T", "start_local": tomorrow_noon(), "attendees": ["a"]}),
-        )
-        .await;
+    let out = run_create(
+        &tool,
+        "c1",
+        &json!({"title": "T", "start_local": tomorrow_noon(), "attendees": ["a"]}),
+    )
+    .await;
     assert_eq!(reason(&out).1, "unsupported_field");
     assert!(frames.try_recv().is_err());
 }
@@ -522,7 +538,7 @@ async fn the_round_trip_returns_created_with_the_one_hour_disclosure() {
         }
     };
     let request = args();
-    let (out, ()) = tokio::join!(tool.create("call-7", &request), phone_side);
+    let (out, ()) = tokio::join!(run_create(&tool, "call-7", &request), phone_side);
     assert_eq!(out["outcome"], CREATED);
     assert_eq!(out["duration_defaulted"], true);
     assert_eq!(out["calendar_label"], "Personal");
@@ -543,7 +559,7 @@ async fn no_ack_in_time_is_device_unreachable_and_a_late_ack_is_refused() {
             result_secs: 1,
         },
     );
-    let out = tool.create("c1", &args()).await;
+    let out = run_create(&tool, "c1", &args()).await;
     assert_eq!(out["outcome"], "device_unreachable");
     let id = frames.recv().await.unwrap()["action_id"]
         .as_str()
@@ -577,7 +593,7 @@ async fn an_ack_with_no_result_is_creation_unverified_and_the_late_result_is_kep
         }
     };
     let request = args();
-    let (out, (id, payload)) = tokio::join!(tool.create("c1", &request), acker);
+    let (out, (id, payload)) = tokio::join!(run_create(&tool, "c1", &request), acker);
     assert_eq!(reason(&out), ("creation_unverified", "no_result_in_time"));
     assert_eq!(store.pending(Some("thread-1")).len(), 1);
     store.settle(&id, &created_for(&payload), finalize).unwrap();
@@ -592,7 +608,7 @@ async fn the_sixth_call_in_a_chat_is_refused_while_four_wait() {
         open(&store, "thread-1", &format!("held-{i}"));
     }
     let (tool, mut frames) = tool(store, FAST);
-    let out = tool.create("c1", &args()).await;
+    let out = run_create(&tool, "c1", &args()).await;
     assert_eq!(reason(&out), ("calendar_unavailable", "too_many_pending"));
     assert!(frames.try_recv().is_err());
 }
@@ -631,7 +647,7 @@ fn phone_supplied_text_is_bounded_and_single_line_before_the_model_sees_it() {
 
 // ----- reading -----
 
-use super::list::{CALENDAR_LIST_MAX_EVENTS, check_window, finalize_list};
+use super::list::{CALENDAR_LIST_MAX_EVENTS, check_window, finalize_list, run_list};
 use crate::skills::builtin::CALENDAR_READING_SKILL;
 
 const NAIROBI: Tz = chrono_tz::Africa::Nairobi;
@@ -873,7 +889,7 @@ fn a_timed_event_ending_at_the_window_start_is_out_and_dropped_ones_do_not_count
 
 #[test]
 fn the_phone_outcomes_for_a_read_are_a_short_list_and_denials_pass_through() {
-    use super::result_is_acceptable_for;
+    use crate::device_actions::result_is_acceptable_for;
     for ok in [
         "listed",
         "permission_denied",
@@ -912,7 +928,7 @@ async fn a_read_refuses_without_its_skill_and_round_trips_with_it() {
     let (t, mut frames) = tool(Arc::default(), FAST);
     {
         let _off = set_active_for_this_thread(Some(&[CALENDAR_CREATION_SKILL]));
-        let out = t.list("c1", &json!({})).await;
+        let out = run_list(&t, "c1", &json!({})).await;
         assert_eq!(reason(&out), ("calendar_unavailable", "skill_not_active"));
         assert!(frames.try_recv().is_err());
     }
@@ -936,11 +952,13 @@ async fn a_read_refuses_without_its_skill_and_round_trips_with_it() {
         let body = listed(vec![ev("5", from + 1000, from + 2000)], false);
         let name = store.action_name(&id).unwrap();
         store
-            .settle(&id, &body, |b, p| super::finalize_for(name, b, p))
+            .settle(&id, &body, |b, p| {
+                crate::device_actions::finalize_for(name, b, p)
+            })
             .unwrap();
     };
     let none = json!({});
-    let (out, ()) = tokio::join!(t.list("c1", &none), phone_side);
+    let (out, ()) = tokio::join!(run_list(&t, "c1", &none), phone_side);
     assert_eq!(out["outcome"], "listed");
     assert_eq!(out["count"], 1);
 }

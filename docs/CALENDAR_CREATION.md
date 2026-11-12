@@ -1,5 +1,9 @@
 # Creating, reading, changing and deleting calendar events on the phone
 
+The calendar is the first domain on the shared device-action platform (the store, the link to the
+phone, the risk classes and how to add a domain are in `DEVICE_ACTIONS.md`). This page is what is
+specific to the calendar.
+
 Ask HQ in the phone app to put something on your calendar and it is saved straight to the
 phone's calendar, with no review screen. A clear request creates the event. A request with a
 missing or ambiguous detail gets one short question first.
@@ -42,7 +46,8 @@ The phone stores them as UTC midnight to the next UTC midnight, as the provider 
 
 - An action id is 128 random bits, valid for one action, and dies with it. It is the only handle
   the phone holds. The `/ws` socket is one shared broadcast, so the id is not tied to a socket.
-- At most 4 actions wait per chat, and the three routes allow 60 calls a minute together.
+- At most 4 actions wait per chat, and the three routes allow 60 calls a minute together
+  (`DEVICE_ACTIONS.md`, "Safety rules").
 - The phone's strings (calendar names, accounts) reach the model only after being cut to one line
   and 200 characters, and at most 8 choices are shown. The skill tells the model they are labels.
 - Once a turn has read outside text, `calendar_create_event` asks the owner first
@@ -85,8 +90,8 @@ is active. It uses the same `device_action` channel and routes as creation, with
 - `open_link` is built by HQ from numbers only: `hq://calendar/event/{id}?begin=..&end=..`. An id
   that is not plain digits drops the event. The phone never supplies a URL; the app opens the
   event in the calendar when the link is tapped.
-- Calendar text is untrusted. `calendar_list_events` is in `UNTRUSTED_SOURCE_TOOLS`, so after a
-  read `calendar_create_event` asks the owner, in that turn and in every later turn of the same chat thread. Logs carry the request id, phase, outcome code and
+- Calendar text is untrusted. `calendar_list_events` is a `Read` spec, so after a
+  read `calendar_create_event` (a `Create` spec) asks the owner, in that turn and in every later turn of the same chat thread. Logs carry the request id, phase, outcome code and
   counts, never titles. See `docs/security/PROMPT_INJECTION.md`.
 
 ## Changing and deleting events
@@ -125,7 +130,7 @@ active. They use the same channel, routes and timeouts as creation, with the act
 - **Limits.** A recurring event (a rule, an instance or an exception) is refused in this version
   (`recurring_unsupported`); the owner uses the calendar app. Any editable event the owner can read
   may be changed, not only ones HQ created.
-- **Approval.** Every call asks the owner first, in a clean chat too, and does not run where
+- **Approval.** These are `Modify` and `Destructive` specs, so every call asks the owner first, in a clean chat too, and does not run where
   nobody can be asked. The inbox card shows the exact arguments plus a line naming the action,
   the cleaned title and the changes. See `docs/security/OWNER_APPROVAL.md`.
 - Logs hold request ids, the action, the phase and an outcome code, never titles.

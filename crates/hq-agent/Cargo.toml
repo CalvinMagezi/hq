@@ -39,5 +39,6 @@ once_cell = { workspace = true }
 
 [dev-dependencies]
 hq-core = { workspace = true, features = ["test-util"] }
+hq-tools = { workspace = true, features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"
