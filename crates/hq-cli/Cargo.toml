@@ -30,6 +30,7 @@ hq-export = { workspace = true }
 hq-update = { workspace = true }
 hq-backup = { workspace = true }
 hq-host = { workspace = true }
+hq-acp = { path = "../hq-acp" }
 tokio = { workspace = true }
 # `self-apply` stages the built binary in an unnamed temporary file.
 tempfile = { workspace = true }

@@ -88,7 +88,7 @@ const TRANSPORT_PTY: &str = "pty";
 /// The arguments that start a built-in harness's ACP server, for the CLIs that have one.
 fn builtin_acp_args(kind: &str) -> Option<&'static [&'static str]> {
     match kind {
-        "opencode" | "antigravity" | "cursor" | "kimi" | "hermes" => Some(&["acp"]),
+        "opencode" | "agy" | "cursor" | "kimi" | "hermes" => Some(&["acp"]),
         "github-copilot" | "copilot" => Some(&["--acp", "--stdio"]),
         _ => None,
     }
@@ -559,6 +559,8 @@ mod tests {
         for (base, want) in [
             ("opencode", vec!["opencode", "acp"]),
             ("github-copilot", vec!["copilot", "--acp", "--stdio"]),
+            ("antigravity", vec!["agy", "acp"]),
+            ("cursor", vec!["cursor-agent", "acp"]),
         ] {
             let h = resolve_in(&acp_profile(base, "acp"), "p").unwrap();
             assert_eq!(h.transport(), Transport::Acp);
