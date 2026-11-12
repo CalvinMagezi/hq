@@ -357,6 +357,12 @@ fn valid_model(model: &str) -> bool {
         })
 }
 
+/// Over ACP the id travels as JSON and is checked against the agent's own menu, never put on a
+/// command line, so only its size and plain printable characters matter (`sonnet[1m]` is real).
+fn valid_acp_model(model: &str) -> bool {
+    !model.is_empty() && model.len() <= MAX_MODEL_CHARS && !model.chars().any(char::is_control)
+}
+
 impl Harness {
     pub fn category(&self) -> HarnessCategory {
         self.spec.category
@@ -368,13 +374,18 @@ impl Harness {
         let Some(model) = model.map(str::trim).filter(|m| !m.is_empty()) else {
             return Ok(self);
         };
-        if self.spec.model_flag.is_none() {
+        // Over ACP the model is chosen in the session, so no CLI flag is needed.
+        if self.spec.model_flag.is_none() && self.transport() != Transport::Acp {
             bail!(
                 "'{}' has no model flag HQ knows, so it cannot be started on '{model}'; leave model out to use its own default",
                 self.name
             );
         }
-        if !valid_model(model) {
+        let valid = match self.transport() {
+            Transport::Acp => valid_acp_model(model),
+            Transport::Pty => valid_model(model),
+        };
+        if !valid {
             bail!(
                 "'{model}' is not a model id (letters, digits and . _ - : / @ + only, not starting with -)"
             );
@@ -451,6 +462,7 @@ impl Harness {
             template
                 .iter()
                 .map(|a| a.replace("{brief}", brief))
+                .chain(self.model_args())
                 .collect(),
         )
     }
@@ -459,7 +471,12 @@ impl Harness {
 /// Resolve `name` against the profiles in `cfg`, then the built-in harnesses.
 /// A profile may share a built-in's name to replace how it launches.
 pub fn resolve_in(cfg: &AgentHostConfig, name: &str) -> Result<Harness> {
-    if let Some(profile) = cfg.harness_profiles.get(name) {
+    // An alias (`agy`) finds the profile written for the canonical name (`antigravity`) too.
+    let profile = cfg
+        .harness_profiles
+        .get(name)
+        .or_else(|| cfg.harness_profiles.get(canonical_name(name)));
+    if let Some(profile) = profile {
         check_transport(name, profile)?;
         let Some(spec) = spec_for(&profile.base) else {
             bail!(
@@ -468,12 +485,15 @@ pub fn resolve_in(cfg: &AgentHostConfig, name: &str) -> Result<Harness> {
                 builtin_names().join(", ")
             );
         };
-        return Ok(Harness {
+        let harness = Harness {
             name: name.to_string(),
             spec,
             profile: Some(profile.clone()),
             model: None,
-        });
+        };
+        // A profile default goes through the same rule as a caller's model, so a CLI with no model
+        // flag refuses it when the profile resolves instead of dropping it at launch.
+        return harness.with_model(profile.model.as_deref());
     }
     match spec_for(name) {
         Some(spec) => Ok(Harness {
@@ -497,6 +517,16 @@ fn check_transport(name: &str, profile: &HarnessProfileConfig) -> Result<()> {
         Some(TRANSPORT_ACP) => true,
         Some(other) => bail!("harness profile '{name}': transport '{other}' is not 'pty' or 'acp'"),
     };
+    let id_ok = |m: &str| {
+        if acp {
+            valid_acp_model(m)
+        } else {
+            valid_model(m)
+        }
+    };
+    if let Some(model) = profile.model.as_deref().filter(|m| !id_ok(m)) {
+        bail!("harness profile '{name}': '{model}' is not a model id");
+    }
     if !acp {
         if profile.acp_args.is_some() || profile.hq_mcp.is_some() {
             bail!("harness profile '{name}': acp_args and hq_mcp only apply with transport: acp");
@@ -621,6 +651,67 @@ mod tests {
         let mut pty = acp_profile("opencode", "pty");
         pty.harness_profiles.get_mut("p").unwrap().hq_mcp = Some(true);
         assert!(resolve_in(&pty, "p").is_err());
+    }
+
+    #[test]
+    fn a_profile_model_is_the_default_and_a_callers_model_wins() {
+        let mut cfg = acp_profile("antigravity", "pty");
+        cfg.harness_profiles.get_mut("p").unwrap().model = Some("gemini-4-hydrogen-medium".into());
+        let h = resolve_in(&cfg, "p").unwrap();
+        assert_eq!(h.model_args(), ["--model", "gemini-4-hydrogen-medium"]);
+        let h = h.with_model(Some("gemini-4-hydrogen-high")).unwrap();
+        assert_eq!(h.model_args(), ["--model", "gemini-4-hydrogen-high"]);
+        cfg.harness_profiles.get_mut("p").unwrap().model = Some("--bad".into());
+        assert!(resolve_in(&cfg, "p").is_err());
+    }
+
+    #[test]
+    fn an_alias_finds_the_profile_of_its_canonical_name() {
+        let mut cfg = AgentHostConfig::default();
+        cfg.harness_profiles.insert(
+            "antigravity".into(),
+            HarnessProfileConfig {
+                base: "antigravity".into(),
+                model: Some("gemini-4-hydrogen-medium".into()),
+                ..Default::default()
+            },
+        );
+        let h = resolve_in(&cfg, "agy").unwrap();
+        assert_eq!(h.model.as_deref(), Some("gemini-4-hydrogen-medium"));
+    }
+
+    #[test]
+    fn over_acp_a_model_needs_no_cli_flag() {
+        let h = resolve_in(&acp_profile("hermes", "acp"), "p").unwrap();
+        assert!(h.with_model(Some("copilot:gpt-6-luna")).is_ok());
+    }
+
+    #[test]
+    fn a_profile_model_on_a_cli_with_no_model_flag_is_refused_and_acp_ids_may_hold_brackets() {
+        let mut cfg = acp_profile("hermes", "pty");
+        cfg.harness_profiles.get_mut("p").unwrap().model = Some("gpt-6-luna".into());
+        assert!(
+            resolve_in(&cfg, "p").is_err(),
+            "hermes has no model flag in a terminal"
+        );
+        let mut acp = acp_profile("hermes", "acp");
+        acp.harness_profiles.get_mut("p").unwrap().model = Some("claude-sonnet[1m]".into());
+        assert!(resolve_in(&acp, "p").is_ok());
+        acp.harness_profiles.get_mut("p").unwrap().model = Some("bad\nid".into());
+        assert!(resolve_in(&acp, "p").is_err());
+    }
+
+    #[test]
+    fn a_one_shot_run_gets_the_profile_model_too() {
+        let mut cfg = acp_profile("opencode", "pty");
+        let p = cfg.harness_profiles.get_mut("p").unwrap();
+        p.model = Some("kimi/k3".into());
+        p.one_shot_args = Some(vec!["run".into(), "{brief}".into()]);
+        let args = resolve_in(&cfg, "p")
+            .unwrap()
+            .one_shot_args("do it")
+            .unwrap();
+        assert_eq!(args, ["run", "do it", "--model", "kimi/k3"]);
     }
 
     #[test]

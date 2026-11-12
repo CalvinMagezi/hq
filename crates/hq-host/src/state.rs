@@ -41,12 +41,20 @@ pub struct PaneRecord {
     /// Seconds of idleness after which the host stops the agent.
     #[serde(default)]
     pub idle_ttl_secs: Option<u64>,
+    /// Set for an agent driven over ACP: `resume_argv` is then its server command and this is the
+    /// session the protocol loads again.
+    #[serde(default)]
+    pub acp_session: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Document {
     version: u32,
     panes: Vec<PaneRecord>,
+    /// Agents driven over ACP. Their own key, so a host that predates ACP skips them instead of
+    /// running their server command in a terminal and saving them back as terminal agents.
+    #[serde(default)]
+    acp_panes: Vec<PaneRecord>,
 }
 
 pub(crate) struct StateFile {
@@ -79,9 +87,14 @@ impl StateFile {
             return Ok(());
         }
         token::ensure_dir(&self.dir)?;
+        let (acp_panes, panes): (Vec<_>, Vec<_>) = records
+            .iter()
+            .cloned()
+            .partition(|r| r.acp_session.is_some());
         let doc = Document {
             version: FORMAT_VERSION,
-            panes: records.to_vec(),
+            panes,
+            acp_panes,
         };
         let bytes = serde_json::to_vec_pretty(&doc).map_err(Error::other)?;
         let tmp = self.dir.join(format!("{STATE_FILE}.tmp"));
@@ -120,7 +133,9 @@ impl StateFile {
         }
         let text = fs::read_to_string(&self.path)?;
         match serde_json::from_str::<Document>(&text) {
-            Ok(doc) if doc.version == FORMAT_VERSION => Ok(doc.panes),
+            Ok(doc) if doc.version == FORMAT_VERSION => {
+                Ok(doc.panes.into_iter().chain(doc.acp_panes).collect())
+            }
             _ => {
                 let aside = self.dir.join(format!("{STATE_FILE}.unreadable"));
                 fs::rename(&self.path, &aside)?;
@@ -147,7 +162,25 @@ mod tests {
             scrollback_rows: 1000,
             sandbox: None,
             idle_ttl_secs: None,
+            acp_session: None,
         }
+    }
+
+    #[test]
+    fn acp_records_are_kept_under_their_own_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = StateFile::new(&dir.path().join("run"));
+        let mut acp = record("agent");
+        acp.acp_session = Some("s-1".into());
+        state.write(&[record("term"), acp.clone()]).unwrap();
+        let text = fs::read_to_string(&state.path).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(doc["panes"].as_array().unwrap().len(), 1);
+        assert_eq!(doc["acp_panes"].as_array().unwrap().len(), 1);
+        assert_eq!(doc["acp_panes"][0]["name"], "agent");
+        let mut back = state.read().unwrap();
+        back.sort_by(|a, b| a.name.cmp(&b.name));
+        assert_eq!(back, vec![acp, record("term")]);
     }
 
     #[test]

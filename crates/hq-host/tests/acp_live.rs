@@ -3,7 +3,7 @@
 //!
 //! `HQ_ACP_LIVE="hermes acp" cargo test -p hq-host --test acp_live -- --ignored --nocapture`
 //!
-//! Set `HQ_ACP_LIVE_SANDBOX=open` to confine it `HQ_ACP_LIVE_WRITABLE` (colon-separated extra paths) and `HQ_ACP_LIVE_AGENT` to the agent kind the
+//! Set `HQ_ACP_LIVE_SANDBOX=open` to confine it `HQ_ACP_LIVE_WRITABLE` (colon-separated extra paths) and `HQ_ACP_LIVE_MODEL` (an id the agent offers) and `HQ_ACP_LIVE_AGENT` to the agent kind the
 //! sandbox tables know (`antigravity`, `copilot`, ...). The agent is asked to write `hello.txt` in a
 //! scratch folder; the test answers its dialog if it asks, and checks the file exists.
 #![cfg(unix)]
@@ -26,6 +26,7 @@ fn a_real_agent_writes_a_file_through_the_host() {
     let mut spec = SpawnSpec::new("live", argv, project.path());
     spec.transport = Transport::Acp;
     spec.agent = std::env::var("HQ_ACP_LIVE_AGENT").ok();
+    spec.model = std::env::var("HQ_ACP_LIVE_MODEL").ok();
     spec.env = vec![("PATH".into(), std::env::var("PATH").unwrap())];
     if let Ok(home) = std::env::var("HOME") {
         spec.env.push(("HOME".into(), home));

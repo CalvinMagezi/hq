@@ -172,6 +172,7 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
         &self,
         name: &str,
         _env: Vec<(String, String)>,
+        _mcp: Option<crate::agent_host::McpAccess>,
     ) -> Result<(), AgentHostError> {
         Err(AgentHostError::Api {
             code: "unsupported".into(),
@@ -407,8 +408,9 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
         &self,
         name: &str,
         env: Vec<(String, String)>,
+        mcp: Option<crate::agent_host::McpAccess>,
     ) -> Result<(), AgentHostError> {
-        (**self).resume_awaiting(name, env)
+        (**self).resume_awaiting(name, env, mcp)
     }
     fn installed_programs(&self, names: &[String]) -> Option<Vec<String>> {
         (**self).installed_programs(names)

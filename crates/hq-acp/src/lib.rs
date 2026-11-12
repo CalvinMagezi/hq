@@ -8,7 +8,10 @@ mod tracker;
 mod update;
 mod wire;
 
-pub use client::{Capabilities, ClientError, Connection, parse_capabilities};
+pub use client::{
+    Capabilities, ClientError, Connection, ModelChoice, ModelMenu, parse_capabilities,
+    parse_model_menu,
+};
 pub use dialog::{Choice, Dialog, DialogOption, OptionKind, outcome, parse_dialog};
 pub use tracker::{
     AgentState, AnswerError, FailureKind, Pending, StopReason, TokenUsage, Tracker, TurnEnd,

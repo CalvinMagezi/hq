@@ -90,7 +90,7 @@ pub(super) fn session_port(session_id: &str) -> u16 {
 /// Starts the agents a restarted built-in host (local or remote) is holding for
 /// their env, matching them to the sessions placed on that host.
 /// Best effort: one that cannot be resumed stays held and is tried next sweep.
-pub fn resume_awaiting(rows: &[HarnessSessionRow], host: &Host) {
+pub fn resume_awaiting(db: &Arc<Database>, rows: &[HarnessSessionRow], host: &Host) {
     let Ok(waiting) = host.awaiting() else { return };
     for agent in waiting {
         let on_host = |r: &&HarnessSessionRow| r.host == host.name() && r.agent_name == agent.name;
@@ -101,7 +101,12 @@ pub fn resume_awaiting(rows: &[HarnessSessionRow], host: &Host) {
             continue;
         };
         let env = launch_env(&harness, &row.id);
-        if let Err(e) = host.resume_awaiting(&agent.name, env) {
+        // The host does not keep the MCP token, so an ACP agent that asked for it gets a fresh one.
+        let mcp = harness
+            .gives_hq_mcp()
+            .then(|| mcp_access(db, host, &harness, &row.id))
+            .flatten();
+        if let Err(e) = host.resume_awaiting(&agent.name, env, mcp) {
             tracing::warn!(session = %row.id, error = %e, "could not resume a held agent");
         }
     }
@@ -362,12 +367,6 @@ fn acp_argv_for(harness: &Harness, l: &Launch<'_>) -> Result<Option<Vec<String>>
     if harness.transport() != spec::Transport::Acp {
         return Ok(None);
     }
-    if harness.model.is_some() {
-        anyhow::bail!(
-            "'{}' runs over ACP, where HQ does not set the model yet: leave model out and set it in the agent's own config",
-            harness.name
-        );
-    }
     if l.one_shot.is_some() {
         anyhow::bail!("'{}' has no one-shot run over ACP", harness.name);
     }
@@ -438,6 +437,7 @@ async fn launch_with(
         start_timeout: l.host.launch_bound(),
         policy: l.policy.and_then(|p| serde_json::to_value(p).ok()),
         acp_argv,
+        acp_model: harness.model.clone(),
     };
     let began = std::time::Instant::now();
     let host = l.host.clone();

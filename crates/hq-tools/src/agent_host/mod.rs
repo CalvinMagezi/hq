@@ -166,6 +166,9 @@ pub struct AcpFacts {
     pub context_used: Option<u64>,
     #[serde(default)]
     pub context_size: Option<u64>,
+    /// What the agent said in its last finished turn (the end of it when long): its words.
+    #[serde(default)]
+    pub result: Option<String>,
 }
 
 /// A dialog an agent waits at, as the host read it off the screen.
@@ -368,6 +371,8 @@ pub struct LaunchRequest {
     /// Protocol instead of in a terminal. Then `args`, `command`, `resume_args`, `mcp` and
     /// `policy` do not apply.
     pub acp_argv: Option<Vec<String>>,
+    /// The model an ACP agent is switched to once its session is open.
+    pub acp_model: Option<String>,
 }
 
 /// The HQ endpoint and the session's own token.

@@ -66,6 +66,7 @@ fn acp_request(name: &str) -> LaunchRequest {
         start_timeout: WAIT,
         policy: None,
         acp_argv: Some(vec!["sh".into(), "-c".into(), FAKE_AGENT.into()]),
+        acp_model: None,
     }
 }
 

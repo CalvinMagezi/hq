@@ -17,6 +17,7 @@ use hq_acp::{
 use serde_json::json;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -30,6 +31,10 @@ const MAX_QUEUED_PROMPTS: usize = 16;
 const RULE: &str = "acp";
 const CLIENT_NAME: &str = "agent-hq-host";
 const MCP_SERVER_NAME: &str = "agent-hq";
+const NO_LOAD_SESSION: &str =
+    "the agent cannot load a stored session, so it cannot be brought back";
+/// Most characters of a turn's final text handed to callers; the transcript has the rest.
+const RESULT_MAX_CHARS: usize = 4000;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -47,6 +52,12 @@ pub(crate) struct AcpLaunch {
     pub sandbox: Option<SandboxSpec>,
     pub idle_ttl: Option<Duration>,
     pub mcp: Option<crate::host::McpEndpoint>,
+    /// A stored session to load instead of opening a new one.
+    pub resume_session: Option<String>,
+    /// The model to switch a new session to.
+    pub model: Option<String>,
+    /// Names of the extra variables it was started with, kept so a restart can ask for them again.
+    pub env_keys: Vec<String>,
     pub events: Arc<EventLog>,
     pub on_exit: ExitHook,
 }
@@ -84,6 +95,8 @@ enum Cmd {
 
 pub(crate) struct AcpPane {
     pub agent: Option<String>,
+    pub env_keys: Vec<String>,
+    stopping: AtomicBool,
     pub argv: Vec<String>,
     pub cwd: PathBuf,
     pub sandbox: Option<SandboxSpec>,
@@ -114,19 +127,36 @@ impl AcpPane {
             .initialize(CLIENT_NAME, HANDSHAKE_TIMEOUT)
             .and_then(|caps| {
                 let servers = mcp_servers(l.mcp.as_ref(), &caps);
-                conn.new_session(&l.cwd.to_string_lossy(), servers, HANDSHAKE_TIMEOUT)
+                let cwd = l.cwd.to_string_lossy();
+                match &l.resume_session {
+                    Some(_) if !caps.load_session => {
+                        Err(hq_acp::ClientError::Protocol(NO_LOAD_SESSION))
+                    }
+                    Some(id) => conn
+                        .load_session(id, &cwd, servers, HANDSHAKE_TIMEOUT)
+                        .map(|()| id.clone()),
+                    None => conn
+                        .new_session(&cwd, servers, HANDSHAKE_TIMEOUT)
+                        .and_then(|id| {
+                            if let Some(model) = &l.model {
+                                conn.select_model(model, HANDSHAKE_TIMEOUT)?;
+                            }
+                            Ok(id)
+                        }),
+                }
             });
         let session_id = started.map_err(|e| spawn_error(with_stderr(&e.to_string(), &conn)))?;
         let pid = conn.pid();
         let now = Instant::now();
+        let seed = Seed::of(&conn.tracker);
         let view = Arc::new(Mutex::new(View {
             state: AgentState::Idle,
             state_seq: 0,
             done: false,
             pending: None,
-            lines: VecDeque::new(),
-            dropped: 0,
-            partial: String::new(),
+            lines: seed.lines.clone(),
+            dropped: seed.dropped,
+            partial: seed.partial.clone(),
             status: PaneStatus::Running,
             last_activity: now,
             bytes: 0,
@@ -140,10 +170,13 @@ impl AcpPane {
             name: l.name,
             events: l.events,
             on_exit: l.on_exit,
+            synced: seed.synced(),
         };
         std::thread::spawn(move || driver.run());
         Ok(Self {
             agent: l.agent,
+            env_keys: l.env_keys,
+            stopping: AtomicBool::new(false),
             argv: l.argv,
             cwd: l.cwd,
             sandbox: l.sandbox,
@@ -266,7 +299,17 @@ impl AcpPane {
 
     /// Stops the agent and everything it started. Returns at once; the driver finishes the job.
     pub(crate) fn kill(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
         let _ = self.cmds.send(Cmd::Stop);
+    }
+
+    /// Asked to stop, though the process may not have ended yet.
+    pub(crate) fn is_stopping(&self) -> bool {
+        self.stopping.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn session_id(&self) -> &str {
+        &self.session_id
     }
 
     fn command(
@@ -321,6 +364,33 @@ struct Synced {
     partial: usize,
 }
 
+/// What the tracker already holds when the handshake ends (a restored session's note), so the first
+/// read sees it without waiting for the driver's first look.
+struct Seed {
+    lines: VecDeque<String>,
+    dropped: u64,
+    partial: String,
+}
+
+impl Seed {
+    fn of(t: &hq_acp::Tracker) -> Self {
+        Self {
+            lines: t.lines().iter().cloned().collect(),
+            dropped: t.dropped(),
+            partial: t.partial().to_string(),
+        }
+    }
+
+    fn synced(&self) -> Synced {
+        Synced {
+            wire_seq: 0,
+            lines: self.lines.len(),
+            dropped: self.dropped,
+            partial: self.partial.len(),
+        }
+    }
+}
+
 struct Driver {
     conn: Connection,
     cmds: Receiver<Cmd>,
@@ -328,12 +398,13 @@ struct Driver {
     name: String,
     events: Arc<EventLog>,
     on_exit: ExitHook,
+    synced: Synced,
 }
 
 impl Driver {
     fn run(mut self) {
         let mut queue: VecDeque<String> = VecDeque::new();
-        let mut synced = Synced::default();
+        let mut synced = std::mem::take(&mut self.synced);
         let code = loop {
             if !self.take_commands(&mut queue) {
                 break self.stop();
@@ -398,6 +469,7 @@ impl Driver {
         }
         if wire_seq != synced.wire_seq {
             synced.wire_seq = wire_seq;
+            v.facts = facts_of(t);
             let state = host_state(t.state());
             let open = t.pending().map(|p| (p.seq, open_dialog(&p.dialog)));
             let seq = match &open {
@@ -479,6 +551,10 @@ fn mcp_servers(
 
 fn facts_of(t: &hq_acp::Tracker) -> AcpFacts {
     let (context_used, context_size) = t.context_use();
+    let result = t
+        .end()
+        .is_some()
+        .then(|| tail_chars(t.text(), RESULT_MAX_CHARS));
     let (stop_reason, turn_tokens) = match t.end() {
         Some(TurnEnd::Stopped { reason, usage }) => (Some(stop_label(reason)), usage.total),
         Some(TurnEnd::Failed { error, .. }) => (Some(format!("failed: {}", error.message)), None),
@@ -490,7 +566,14 @@ fn facts_of(t: &hq_acp::Tracker) -> AcpFacts {
         turn_tokens,
         context_used,
         context_size,
+        result: result.filter(|r| !r.is_empty()),
     }
+}
+
+/// The last `max` characters of `text`.
+fn tail_chars(text: &str, max: usize) -> String {
+    let count = text.chars().count();
+    text.chars().skip(count.saturating_sub(max)).collect()
 }
 
 fn stop_label(reason: &StopReason) -> String {

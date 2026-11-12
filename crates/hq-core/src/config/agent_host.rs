@@ -415,6 +415,11 @@ pub struct HarnessProfileConfig {
     #[serde(default)]
     pub hq_mcp: Option<bool>,
 
+    /// The model sessions of this profile start on when the caller names none: passed with the
+    /// CLI's model flag in a terminal, chosen in the session over ACP. A caller's own `model` wins.
+    #[serde(default)]
+    pub model: Option<String>,
+
     /// Environment for the pane's shell, and so for the launched CLI.
     #[serde(default)]
     pub env: BTreeMap<String, String>,

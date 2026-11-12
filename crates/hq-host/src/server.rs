@@ -630,6 +630,7 @@ impl Conn {
                 spec.sandbox = p.sandbox;
                 spec.idle_ttl = p.idle_ttl_secs.map(Duration::from_secs);
                 spec.transport = Transport::parse(p.transport.as_deref()).map_err(host_err)?;
+                spec.model = p.model;
                 spec.mcp = p.mcp.map(|m| McpEndpoint {
                     url: m.url,
                     token: m.token,
@@ -699,7 +700,12 @@ impl Conn {
             "agent.resume" => {
                 let p: ResumeParams = parse(params)?;
                 let env = p.env.into_iter().collect();
-                Ok(info_json(&host.resume(&p.name, env).map_err(host_err)?))
+                let mcp = p.mcp.map(|m| McpEndpoint {
+                    url: m.url,
+                    token: m.token,
+                });
+                let resumed = host.resume_with(&p.name, env, mcp);
+                Ok(info_json(&resumed.map_err(host_err)?))
             }
             "agent.get" => {
                 let p: Named = parse(params)?;
@@ -916,6 +922,8 @@ struct SpawnParams {
     transport: Option<String>,
     /// HQ's MCP address and the session's token, for an ACP agent.
     mcp: Option<McpParams>,
+    /// The model an ACP agent is switched to once its session is open.
+    model: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1016,6 +1024,9 @@ struct ResumeParams {
     name: String,
     #[serde(default)]
     env: std::collections::BTreeMap<String, String>,
+    /// HQ's MCP address and the session's token, for an ACP agent being brought back.
+    #[serde(default)]
+    mcp: Option<McpParams>,
 }
 
 #[derive(Deserialize, Default, Clone, Copy)]
@@ -1215,6 +1226,7 @@ fn info_json(i: &PaneInfo) -> Value {
             "turn_tokens": a.turn_tokens,
             "context_used": a.context_used,
             "context_size": a.context_size,
+            "result": a.result,
         })),
     })
 }

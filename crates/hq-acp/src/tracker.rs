@@ -114,6 +114,7 @@ pub struct Tracker {
     lines: VecDeque<String>,
     dropped: u64,
     partial: String,
+    replaying: bool,
 }
 
 impl Default for Tracker {
@@ -132,6 +133,7 @@ impl Default for Tracker {
             lines: VecDeque::new(),
             dropped: 0,
             partial: String::new(),
+            replaying: false,
         }
     }
 }
@@ -189,6 +191,17 @@ impl Tracker {
         self.note(format!("failed: {why}"));
     }
 
+    /// While a stored session is being loaded the agent replays its history as updates; those are
+    /// old work, so they change nothing here: not the transcript, not the edited files.
+    pub fn set_replaying(&mut self, on: bool) {
+        self.replaying = on;
+    }
+
+    /// Notes in the transcript that this is a session brought back, not a new one.
+    pub fn record_restored(&mut self, session_id: &str) {
+        self.note(format!("restored session {session_id}"));
+    }
+
     /// Records a prompt that was sent, so the transcript reads as a conversation.
     pub fn record_prompt(&mut self, text: &str) {
         let first = text.lines().next().unwrap_or("");
@@ -230,6 +243,9 @@ impl Tracker {
     /// Takes one message from the agent. Returns the lines to write back to it, if any.
     pub fn feed(&mut self, msg: &Incoming) -> Vec<String> {
         match msg {
+            Incoming::Notification { method, .. } if method == UPDATE_METHOD && self.replaying => {
+                Vec::new()
+            }
             Incoming::Notification { method, params } if method == UPDATE_METHOD => {
                 if let Some(update) = parse_update(params) {
                     self.apply(update);
@@ -530,6 +546,19 @@ mod tests {
         let lines: Vec<&str> = t.lines().iter().map(String::as_str).collect();
         assert_eq!(lines, vec!["> write it", "one", "two", "end: turn done"]);
         assert_eq!(t.partial(), "");
+    }
+
+    #[test]
+    fn a_replayed_history_changes_nothing() {
+        let mut t = Tracker::default();
+        t.set_replaying(true);
+        let old = r#"{"method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"o","kind":"edit","title":"old","locations":[{"path":"/old"}]}}}"#;
+        feed(&mut t, old);
+        t.set_replaying(false);
+        t.record_restored("s-1");
+        assert!(t.touched().is_empty());
+        let lines: Vec<&str> = t.lines().iter().map(String::as_str).collect();
+        assert_eq!(lines, vec!["restored session s-1"]);
     }
 
     #[test]

@@ -97,6 +97,11 @@ pub struct SpawnSpec {
     pub transport: Transport,
     /// HQ's MCP address and this session's token, for an ACP agent to be given in its session.
     pub mcp: Option<McpEndpoint>,
+    /// A stored ACP session to load again instead of opening a new one (a restart's restore).
+    pub resume_session: Option<String>,
+    /// The model an ACP agent is switched to once its session is open. Refused with the list of
+    /// what the agent offers when it offers no such model.
+    pub model: Option<String>,
 }
 
 /// An MCP address and the token that goes with it. The token never shows in debug output.
@@ -131,6 +136,8 @@ impl SpawnSpec {
             idle_ttl: None,
             transport: Transport::Pty,
             mcp: None,
+            resume_session: None,
+            model: None,
         }
     }
 }
@@ -198,6 +205,8 @@ pub struct AcpFacts {
     pub turn_tokens: Option<u64>,
     pub context_used: Option<u64>,
     pub context_size: Option<u64>,
+    /// What the agent said in its last finished turn, the end of it when long. Its words, not HQ's.
+    pub result: Option<String>,
 }
 
 /// Most agents the host runs at once, and the most bytes of command line one
@@ -208,6 +217,8 @@ const MAX_ARGV_BYTES: usize = 64 * 1024;
 /// Longest MCP address and token the host will write into a config file.
 const MAX_MCP_URL_BYTES: usize = 2048;
 const MAX_MCP_TOKEN_BYTES: usize = 256;
+/// Longest model id accepted for an ACP agent.
+const MAX_MODEL_BYTES: usize = 128;
 /// Longest conversation id an agent may report. They are short tokens; anything
 /// else would end up in a restart command line.
 const MAX_SESSION_ID_CHARS: usize = 128;
@@ -220,6 +231,7 @@ pub const PANE_TOKEN_ENV: &str = "HQ_HOST_TOKEN";
 pub const RUN_DIR_ENV: &str = "HQ_HOST_DIR";
 
 type Registry = Arc<Mutex<BTreeMap<String, Arc<Pane>>>>;
+type AcpRegistry = Arc<Mutex<BTreeMap<String, Arc<AcpPane>>>>;
 /// Agents restored from the state file that cannot start until their
 /// environment is supplied again.
 type Awaiting = Arc<Mutex<BTreeMap<String, PaneRecord>>>;
@@ -293,7 +305,7 @@ pub struct AwaitingInfo {
 
 pub struct Host {
     panes: Registry,
-    acp: Arc<Mutex<BTreeMap<String, Arc<AcpPane>>>>,
+    acp: AcpRegistry,
     awaiting: Awaiting,
     max_agents: usize,
     events: Arc<EventLog>,
@@ -720,6 +732,13 @@ impl Host {
                 "this host only starts sandboxed agents; the machine's owner can start it with --allow-unsandboxed".into(),
             ));
         }
+        if spec
+            .model
+            .as_ref()
+            .is_some_and(|m| m.is_empty() || m.len() > MAX_MODEL_BYTES)
+        {
+            return Err(HostError::TooLarge("the model id"));
+        }
         let too_big = |m: &McpEndpoint| {
             m.url.len() > MAX_MCP_URL_BYTES || m.token.len() > MAX_MCP_TOKEN_BYTES
         };
@@ -774,6 +793,9 @@ impl Host {
             sandbox: spec.sandbox,
             idle_ttl: spec.idle_ttl,
             mcp: spec.mcp,
+            resume_session: spec.resume_session,
+            model: spec.model,
+            env_keys: spec.env.iter().map(|(k, _)| k.clone()).collect(),
             events: self.events.clone(),
             on_exit: self.exit_hook(&spec.name, egress_port),
         });
@@ -796,6 +818,7 @@ impl Host {
         drop(panes);
         acp.insert(spec.name.clone(), pane.clone());
         drop(acp);
+        self.save();
         self.events.push(&spec.name, EventKind::Spawned, None, None);
         Ok(pane.info(&spec.name))
     }
@@ -909,25 +932,34 @@ impl Host {
     /// resumed. A failure is reported on stderr and never fails the caller: an
     /// agent that cannot be remembered still runs.
     fn save(&self) {
-        save_state(&self.panes, &self.awaiting, self.state.as_deref());
+        save_state(
+            &self.panes,
+            &self.acp,
+            &self.awaiting,
+            self.state.as_deref(),
+        );
     }
 
     fn exit_hook(&self, name: &str, egress_port: Option<u16>) -> ExitHook {
         // The registry is captured only to rewrite the state file. A host with
         // none must not be kept alive by its own panes, or dropping it would
         // leave the processes running.
-        let saver = self
-            .state
-            .clone()
-            .map(|state| (state, self.panes.clone(), self.awaiting.clone()));
+        let saver = self.state.clone().map(|state| {
+            (
+                state,
+                self.panes.clone(),
+                self.acp.clone(),
+                self.awaiting.clone(),
+            )
+        });
         let (events, name) = (self.events.clone(), name.to_string());
         let egress = self.egress.clone();
         Arc::new(move || {
             if let Some(port) = egress_port {
                 egress.close_port(&name, port);
             }
-            if let Some((state, panes, awaiting)) = &saver {
-                save_state(panes, awaiting, Some(state));
+            if let Some((state, panes, acp, awaiting)) = &saver {
+                save_state(panes, acp, awaiting, Some(state));
             }
             events.push(&name, EventKind::Exited, None, None);
         })
@@ -976,6 +1008,14 @@ impl Host {
                     report.skipped.push((name, e.to_string()));
                     lock(&self.awaiting).insert(rec.name.clone(), rec);
                 }
+                // An ACP agent that would not load (a login that ran out, a busy machine) keeps its
+                // record, so resuming it later still finds the session.
+                Err(e) if rec.acp_session.is_some() => {
+                    report
+                        .skipped
+                        .push((name, format!("{e} (kept: resume it once that is fixed)")));
+                    lock(&self.awaiting).insert(rec.name.clone(), rec);
+                }
                 Err(e) => report.skipped.push((name, e.to_string())),
             }
         }
@@ -1002,6 +1042,17 @@ impl Host {
     /// Starts a waiting agent with the environment its starter supplies again.
     /// It stays waiting if a variable is missing or the start fails.
     pub fn resume(&self, name: &str, env: Vec<(String, String)>) -> Result<PaneInfo, HostError> {
+        self.resume_with(name, env, None)
+    }
+
+    /// `resume`, also giving an ACP agent HQ's MCP connection in its session. The endpoint is never
+    /// stored, so a restored agent has none until the caller supplies it here.
+    pub fn resume_with(
+        &self,
+        name: &str,
+        env: Vec<(String, String)>,
+        mcp: Option<McpEndpoint>,
+    ) -> Result<PaneInfo, HostError> {
         let rec = lock(&self.awaiting)
             .get(name)
             .cloned()
@@ -1028,7 +1079,11 @@ impl Host {
             return Err(locked);
         }
         lock(&self.awaiting).remove(name);
-        let started = self.start(spec_of(rec.clone(), env)).and_then(|info| {
+        let mut spec = spec_of(rec.clone(), env);
+        if spec.transport == Transport::Acp {
+            spec.mcp = mcp;
+        }
+        let started = self.start(spec).and_then(|info| {
             self.undo_if_locked(&info.name)?;
             Ok(info)
         });
@@ -1352,8 +1407,11 @@ impl Host {
 
     /// Forgets an agent and stops its process and the processes it started.
     pub fn remove(&self, name: &str) -> Result<(), HostError> {
-        if let Some(acp) = lock(&self.acp).remove(name) {
+        // Taken out first: `save` locks the registry again.
+        let removed = lock(&self.acp).remove(name);
+        if let Some(acp) = removed {
             acp.kill();
+            self.save();
             self.forget_files(name);
             self.events.push(name, EventKind::Removed, None, None);
             return Ok(());
@@ -1609,6 +1667,8 @@ impl Host {
     pub fn kill(&self, name: &str) -> Result<(), HostError> {
         if let Some(acp) = self.acp_pane(name) {
             acp.kill();
+            // Do not wait for the exit: a host that dies now must not bring it back.
+            self.save();
             return Ok(());
         }
         self.pane(name)?.kill();
@@ -1619,7 +1679,7 @@ impl Host {
 }
 
 /// Writes the resumable running agents to the state file, if there is one.
-fn save_state(panes: &Registry, awaiting: &Awaiting, state: Option<&StateFile>) {
+fn save_state(panes: &Registry, acp: &AcpRegistry, awaiting: &Awaiting, state: Option<&StateFile>) {
     let Some(state) = state else { return };
     let waiting: Vec<PaneRecord> = lock(awaiting).values().cloned().collect();
     let records: Vec<PaneRecord> = lock(panes)
@@ -1640,13 +1700,36 @@ fn save_state(panes: &Registry, awaiting: &Awaiting, state: Option<&StateFile>) 
                 scrollback_rows: resume.scrollback_rows,
                 sandbox: pane.sandbox.clone(),
                 idle_ttl_secs: pane.idle_ttl.map(|t| t.as_secs()),
+                acp_session: None,
             })
         })
+        .chain(acp_records(acp))
         .chain(waiting)
         .collect();
     if let Err(e) = state.write(&records) {
         eprintln!("hq host: could not save session.json: {e}");
     }
+}
+
+/// The ACP agents to bring back: each one's server command and the session to load again.
+fn acp_records(acp: &AcpRegistry) -> Vec<PaneRecord> {
+    lock(acp)
+        .iter()
+        .filter(|(_, pane)| pane.status() == PaneStatus::Running && !pane.is_stopping())
+        .map(|(name, pane)| PaneRecord {
+            name: name.clone(),
+            resume_argv: pane.argv.clone(),
+            agent: pane.agent.clone(),
+            cwd: pane.cwd.clone(),
+            env_keys: pane.env_keys.clone(),
+            rows: DEFAULT_ROWS,
+            cols: DEFAULT_COLS,
+            scrollback_rows: 0,
+            sandbox: pane.sandbox.clone(),
+            idle_ttl_secs: pane.idle_ttl.map(|t| t.as_secs()),
+            acp_session: Some(pane.session_id().to_string()),
+        })
+        .collect()
 }
 
 /// Whether `id` looks like an agent's conversation id: letters, digits, `-`, `_`
@@ -1698,6 +1781,11 @@ fn spec_of(rec: PaneRecord, env: Vec<(String, String)>) -> SpawnSpec {
     spec.scrollback_rows = rec.scrollback_rows;
     spec.sandbox = rec.sandbox;
     spec.idle_ttl = rec.idle_ttl_secs.map(Duration::from_secs);
+    if let Some(session) = rec.acp_session {
+        spec.transport = Transport::Acp;
+        spec.resume_session = Some(session);
+        spec.resume_argv = None;
+    }
     spec
 }
 
