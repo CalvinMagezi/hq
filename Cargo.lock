@@ -3456,6 +3456,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "futures",
+ "hq-acp",
  "hq-agent",
  "hq-backup",
  "hq-bridge",

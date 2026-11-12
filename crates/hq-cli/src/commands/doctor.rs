@@ -16,6 +16,7 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     report_import_tools();
     report_code_signature();
     report_state_rules();
+    report_acp_agents(config);
     report_spend_ledger(config);
     super::health::print_summary(issues, "hq doctor");
     Ok(())
@@ -240,6 +241,79 @@ fn state_rule_lines(dir: &std::path::Path, report: &hq_host::OverrideReport) -> 
     }
     lines
 }
+
+/// How long an ACP agent gets to answer `initialize` before doctor calls it stuck.
+const ACP_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// How long it gets to end when doctor is done with it, before its whole group is killed.
+const ACP_PROBE_STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// What `initialize` told doctor about an ACP agent, or why it could not.
+#[cfg(unix)]
+fn probe_acp(command: &[String], env: &[(String, String)]) -> Result<hq_acp::Capabilities, String> {
+    let (program, args) = command.split_first().ok_or("no command")?;
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args).envs(env.iter().cloned());
+    let mut conn = hq_acp::Connection::spawn(cmd).map_err(|e| format!("could not start: {e}"))?;
+    let caps = conn
+        .initialize("hq-doctor", ACP_PROBE_TIMEOUT)
+        .map_err(|e| e.to_string());
+    conn.stop_group(ACP_PROBE_STOP_GRACE);
+    caps
+}
+
+#[cfg(unix)]
+fn acp_agent_line(name: &str, result: &Result<hq_acp::Capabilities, String>) -> Line {
+    match result {
+        Ok(c) => {
+            let yes_no = |b: bool| if b { "yes" } else { "no" };
+            Line(
+                "ok",
+                format!(
+                    "{name}: {} {} (resume {}, HTTP MCP {})",
+                    c.agent_name,
+                    c.agent_version,
+                    yes_no(c.resume || c.load_session),
+                    yes_no(c.mcp_http)
+                ),
+            )
+        }
+        Err(why) => Line("warn", format!("{name}: {why}")),
+    }
+}
+
+/// The ACP profiles in the config, asked to `initialize` and nothing more: no session is opened and
+/// no model is called, so it costs nothing. Silent when no profile uses ACP.
+#[cfg(unix)]
+fn report_acp_agents(config: &HqConfig) {
+    let mut lines = Vec::new();
+    for (name, profile) in &config.agent_host.harness_profiles {
+        if profile.transport.as_deref() != Some("acp") {
+            continue;
+        }
+        let result = hq_tools::harness_session::resolve_in(&config.agent_host, name)
+            .and_then(|h| h.acp_command())
+            .map_err(|e| e.to_string())
+            .and_then(|command| {
+                let env: Vec<_> = profile
+                    .env
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                probe_acp(&command, &env)
+            });
+        lines.push(acp_agent_line(name, &result));
+    }
+    if lines.is_empty() {
+        return;
+    }
+    println!("\nACP agents (initialize only, no session is opened)");
+    for Line(label, text) in lines {
+        println!("  {label}  {text}");
+    }
+}
+
+#[cfg(not(unix))]
+fn report_acp_agents(_config: &HqConfig) {}
 
 fn on_path(tool: &str) -> bool {
     std::env::var_os("PATH")
@@ -940,6 +1014,33 @@ mod tests {
 
     fn labels(lines: &[Line]) -> Vec<&'static str> {
         lines.iter().map(|l| l.0).collect()
+    }
+
+    #[cfg(unix)]
+    const FAKE_ACP: &str = r#"read -r line; printf '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true}},"agentInfo":{"name":"fake","version":"9"}}}\n'; sleep 30"#;
+
+    #[cfg(unix)]
+    #[test]
+    fn an_acp_agent_that_answers_initialize_is_reported_with_what_it_can_do() {
+        let command = vec!["sh".to_string(), "-c".to_string(), FAKE_ACP.to_string()];
+        let probed = probe_acp(&command, &[]);
+        let Line(label, text) = acp_agent_line("fake-acp", &probed);
+        assert_eq!(label, "ok");
+        assert_eq!(text, "fake-acp: fake 9 (resume yes, HTTP MCP yes)");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_acp_agent_that_cannot_start_or_stays_silent_is_a_warning() {
+        let missing = probe_acp(&["/nonexistent/acp-agent".to_string()], &[]);
+        let Line(label, text) = acp_agent_line("gone", &missing);
+        assert_eq!(label, "warn");
+        assert!(text.starts_with("gone: could not start"), "{text}");
+        let exits = probe_acp(
+            &["sh".to_string(), "-c".to_string(), "exit 2".to_string()],
+            &[],
+        );
+        assert!(exits.is_err());
     }
 
     #[test]
