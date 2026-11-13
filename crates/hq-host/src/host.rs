@@ -1000,6 +1000,16 @@ impl Host {
                         held.reason
                     ),
                 ));
+            } else if !rec.cwd.is_dir() {
+                // A finished session whose worktree was removed would otherwise start in a
+                // folder that is gone, exit at once and be saved again at every restart.
+                report.skipped.push((
+                    rec.name.clone(),
+                    format!(
+                        "its folder {} is gone, so it is forgotten",
+                        rec.cwd.display()
+                    ),
+                ));
             } else if !rec.env_keys.is_empty() {
                 lock(&self.awaiting).insert(rec.name.clone(), rec);
             } else {
