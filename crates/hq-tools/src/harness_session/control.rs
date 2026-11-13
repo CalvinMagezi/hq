@@ -326,7 +326,13 @@ pub fn link_with(
         report["goal_moved"] = json!(true);
         report["next_message"] = json!(message);
         if tell {
-            match send(db, session_id, &message, chat) {
+            match send(
+                db,
+                session_id,
+                &message,
+                chat,
+                answer::Answerer::Automated("HQ moving the session to its next task"),
+            ) {
                 Ok(_) => report["told"] = json!(true),
                 Err(e) => {
                     report["told"] = json!(false);
@@ -842,6 +848,7 @@ pub fn send(
     session_id: &str,
     text: &str,
     chat: Option<&WatchingChat>,
+    who: answer::Answerer,
 ) -> Result<Value> {
     if chat.is_some_and(|c| c.driver_turn) {
         super::brief::refuse_repeated_brief(db, session_id, text)?;
@@ -849,6 +856,9 @@ pub fn send(
     let result = metered(db, session_id, chat, SendKind::Text, || {
         send_text(db, session_id, text)
     });
+    if result.is_ok() {
+        super::turn_origin::note_prompt(session_id, who);
+    }
     screen_changed(session_id);
     result
 }
@@ -941,6 +951,7 @@ pub fn send_keys(
                 row.host
             );
         };
+        super::turn_origin::check_stop(&row.id, who, keys, agent.status == AgentStatus::Working)?;
         check_keys_at_dialog(&host, &row, agent.status == AgentStatus::Blocked, keys, who)?;
         host.send_keys(&row.agent_name, keys)?;
         Ok(())
