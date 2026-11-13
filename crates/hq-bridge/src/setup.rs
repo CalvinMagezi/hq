@@ -14,9 +14,9 @@
 //! carries no address and no port the receiver must listen on. Only a serving hub accepts the
 //! protocol, and the gate in `bridge.rs` admits paired peers only.
 
-use crate::bridge::{Dialer, Live, LiveGuard, peer_revoked_us, refused};
+use crate::bridge::{Dialer, Live, LiveGuard, refused};
 use crate::code::printable;
-use crate::services::run_forward;
+use crate::services::{SVC_ALPN, run_forward};
 use crate::wire::MAX_NAME_CHARS;
 use anyhow::{Context, Result, anyhow, bail};
 use hq_db::{
@@ -376,17 +376,17 @@ impl ProtocolHandler for SetupProtocol {
             Ok(Ok(())) => {
                 // Wait for the machine to read the answer and close, or closing would cut it off.
                 let _ = tokio::time::timeout(EXCHANGE_TIMEOUT, conn.closed()).await;
-                if peer_revoked_us(conn.close_reason().as_ref()) {
-                    self.revoker.learned(&id).await;
-                }
+                self.revoker
+                    .connection_ended(&id, conn.close_reason().as_ref(), SVC_ALPN)
+                    .await;
                 return Ok(());
             }
             Ok(Err(e)) => format!("{e:#}"),
             Err(_) => "it timed out".to_string(),
         };
-        if peer_revoked_us(conn.close_reason().as_ref()) {
-            self.revoker.learned(&id).await;
-        }
+        self.revoker
+            .connection_ended(&id, conn.close_reason().as_ref(), SVC_ALPN)
+            .await;
         tracing::warn!(peer = %id.fmt_short(), "bridge setup refused: {why}");
         conn.close(REJECT_SETUP.into(), b"setup refused");
         Ok(())
