@@ -123,6 +123,12 @@ data class SettingsUi(
     /** Bytes the speech model takes on this phone, or -1 when it is not downloaded; and the delete question. */
     val speechBytes: Long = -1,
     val askDeleteSpeech: Boolean = false,
+    /** Keys on this phone: the open "Remove this key?" question, what the section last said, a bump that makes it read the keys again, and a name to fill in for Replace. */
+    val keyRemove: KeyRemove? = null,
+    val keysLine: String? = null,
+    val keysLineBad: Boolean = false,
+    val keysVersion: Int = 0,
+    val keyReplace: String? = null,
     /** When HQ last answered, and whether what is shown now includes values kept from that earlier answer. */
     val savedAt: Instant? = null,
     val stale: Boolean = false,
@@ -188,6 +194,10 @@ class SettingsActions(
     val onSignOutAllConfirm: () -> Unit = {},
     val onCopy: (String) -> Unit = {},
     val onKeyOpen: (KeySheet) -> Unit = {},
+    val onAskRemoveKey: (String?) -> Unit = {},
+    val onRemoveKey: () -> Unit = {},
+    val onReplaceKey: () -> Unit = {},
+    val onKeyReplaceHandled: () -> Unit = {},
     val onKeyClose: () -> Unit = {},
     val onKeySave: (String) -> Unit = {},
     val onShowTitles: (Boolean) -> Unit = {},
@@ -308,11 +318,15 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.withDownloadFacts().copy(dlUndo = null) }
             }
         },
+        onAskRemoveKey = { name -> if (name == null) _state.update(KeyRemoval::cancel) else askRemoveKey(name) },
+        onRemoveKey = ::removeKey,
+        onReplaceKey = { _state.update(KeyRemoval::replace) },
+        onKeyReplaceHandled = { _state.update(KeyRemoval::replaceHandled) },
         onAskDeleteSpeech = { ask -> _state.update { it.copy(askDeleteSpeech = ask) } },
         onDeleteSpeech = {
             viewModelScope.launch(Dispatchers.IO) {
                 example.hq.spike.voice.VoiceModels(ctx()).delete()
-                _state.update { it.withDownloadFacts().copy(askDeleteSpeech = false, stack = it.stack.filter { p -> p != SettingsPage.Speech }, line = ctx().getString(R.string.speech_deleted), phone = phoneRows()) }
+                _state.update { it.withDownloadFacts().copy(askDeleteSpeech = false, line = ctx().getString(R.string.speech_deleted), phone = phoneRows()) }
             }
         },
         onUpdateMain = { main ->
@@ -398,6 +412,24 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun askRemoveKey(name: String) {
+        viewModelScope.launch {
+            val only = withContext(Dispatchers.IO) { example.hq.spike.KeyVault.isOnlyModelKey(example.hq.spike.KeyVault.names(ctx()), name) }
+            _state.update { KeyRemoval.ask(it, name, only) }
+        }
+    }
+
+    private fun removeKey() {
+        val q = _state.value.keyRemove ?: return
+        if (q.busy) return
+        _state.update(KeyRemoval::begin)
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { example.hq.spike.KeyVault.remove(ctx(), q.name).also { if (it) HubService.restartHq() } }
+            val line = if (ok) ctx().getString(if (q.only) R.string.remove_only_key_done else R.string.remove_key_done) else FirstRunWords.KEYS_NOT_REMOVED
+            _state.update { KeyRemoval.finished(it, line, ok) }
+        }
+    }
+
     private fun forgetSite(site: String) {
         viewModelScope.launch {
             val gone = try { client.deleteAt("/api/fetch-sites/${java.net.URLEncoder.encode(site, "UTF-8")}"); true } catch (e: HqUnavailable) { false }
@@ -462,19 +494,20 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val nm = c.getSystemService(NotificationManager::class.java)
         fun on(id: String) = nm.getNotificationChannel(id)?.importance?.let { it != NotificationManager.IMPORTANCE_NONE } ?: true
         val allowed = nm.areNotificationsEnabled()
-        val speech = example.hq.spike.voice.VoiceModels(c).let { if (it.ready()) it.onPhoneBytes() else -1L }
-        return listOfNotNull(
-            HomeRow(SettingsPage.Background, "background", c.getString(R.string.about_background), SettingsWords.backgroundWords(Words.of(c), active)),
-            HomeRow(SettingsPage.KeepRunning, "battery", c.getString(R.string.settings_page_keep_running), PhoneWords.keepSummary(Words.of(ctx()), keepFacts(), Instant.now()), warn = keepFacts().let { PhoneWords.keepRunning(Words.of(ctx()), it, Instant.now()).checked.any { r -> !r.ok } }),
-            HomeRow(SettingsPage.Notifications, "notifications", c.getString(R.string.row_notifications), if (!allowed) c.getString(R.string.assist_mic_off) else homeNotifLine(listOf(R.string.notify_home_needs_on to on(AlertPoster.NEEDS), R.string.notify_home_updates_on to on(AlertPoster.UPDATES), R.string.notify_home_app_updates_on to on(AlertPoster.APP_UPDATES))), warn = !allowed || !on(AlertPoster.NEEDS) || !on(AlertPoster.UPDATES) || !on(AlertPoster.APP_UPDATES)),
+        val keepToFix = keepFixCount()
+        // The page list is SettingsWords.PHONE_PAGES: a row for a page not in it is dropped, so Home and the placement test read one list.
+        return SettingsWords.inPhoneOrder(listOfNotNull(
+            HomeRow(SettingsPage.Background, "background", c.getString(R.string.about_background), SettingsWords.backgroundHome(Words.of(c), active, keepToFix), warn = keepToFix > 0),
+            HomeRow(SettingsPage.Notifications, "notifications", c.getString(R.string.row_notifications), if (!allowed) c.getString(R.string.assist_mic_off) else homeNotifLine(listOf(R.string.notify_home_needs_on to on(AlertPoster.NEEDS), R.string.notify_home_updates_on to on(AlertPoster.UPDATES))), warn = SettingsWords.notificationsWarn(allowed, on(AlertPoster.NEEDS), on(AlertPoster.UPDATES))),
             assistantRow(c),
             calendarRow(c),
             contactsRow(c),
-            speech.takeIf { it >= 0 }?.let { HomeRow(SettingsPage.Speech, "speech", c.getString(R.string.speech_title), c.getString(R.string.speech_home_status, example.hq.spike.download.DownloadRules.sizeMb(it))) },
             HomeRow(SettingsPage.CaptureWidgets, "capture", c.getString(R.string.settings_page_capture), PhoneWords.captureSummary(Words.of(c), captureFacts())),
-            HomeRow(SettingsPage.StoredKeys, "key", FirstRunWords.KEYS_TITLE, c.getString(R.string.settings_stored_keys_status)),
-        )
+        ))
     }
+
+    /** How many Keep running checks need a fix; the line on Background work and the Home warning card both read it. */
+    private fun keepFixCount(): Int = PhoneWords.keepRunning(Words.of(ctx()), keepFacts(), Instant.now()).checked.count { !it.ok }
 
     private fun calendarRow(c: Context): HomeRow {
         val allowed = example.hq.spike.calendar.AndroidCalendarStore.hasPermission(c)

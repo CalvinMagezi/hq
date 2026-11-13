@@ -23,12 +23,12 @@ import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 import example.hq.spike.voice.VoiceModels
 
-/** The speech model's own page: what it is, where it came from, what it cost in mobile data, and Delete. Before the download it offers it. */
+/** The "Speech model" section of Phone assistant: what it is, where it came from, what it cost in mobile data, and Delete. Before the download it offers it. */
 @Composable
-internal fun SpeechPage(ui: SettingsUi, actions: SettingsActions) {
+internal fun SpeechSection(ui: SettingsUi, actions: SettingsActions) {
     val context = LocalContext.current
     val w = rememberWords()
-    Page {
+    Column {
         if (ui.speechBytes >= 0) {
             val paid = Counters.get(context).snapshot().current.slot(Counter.DataSpeechModel, 0)
             val rows = buildList {

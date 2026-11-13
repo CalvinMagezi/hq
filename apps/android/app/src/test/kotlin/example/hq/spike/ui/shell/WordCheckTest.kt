@@ -58,7 +58,8 @@ class WordCheckTest {
         "a semicolon" to Regex(";"),
     )
 
-    private fun owned(text: String) = text.isNotBlank()
+    /** The key-name hint is the exact name HQ looks for, a thing to type rather than a word to read. */
+    private fun owned(text: String) = text.isNotBlank() && text != example.hq.spike.ui.firstrun.FirstRunWords.KEYS_NAME_HINT
 
     /** Every sentence of [text] that runs past 15 words. */
     private fun longSentences(text: String): List<String> =

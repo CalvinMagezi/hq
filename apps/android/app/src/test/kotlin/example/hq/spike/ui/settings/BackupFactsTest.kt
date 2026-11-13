@@ -102,7 +102,7 @@ class BackupFactsTest {
     @Test fun aGoodBackupThatIsOnlyOnThePhoneWarnsAndAsksForACopy() {
         val f = BackupFacts(on, newestMs = hoursAgo(1))
         assertTrue(BackupWords.warns(f, now))
-        assertEquals("Last backup 1 h ago \u00b7 only on this phone", home(f))
+        assertEquals("Last backup 1 h ago \u00b7 phone only", home(f))
         val c = card(f)
         assertEquals(BackupWords.Tone.Warn, c.tone)
         assertEquals("If you lose it, you lose them. Last backup 1 h ago. Save a copy to a computer or a cloud drive.", c.body)
