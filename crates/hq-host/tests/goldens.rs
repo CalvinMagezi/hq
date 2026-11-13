@@ -76,6 +76,26 @@ fn pi_screens_from_real_sessions_are_detected_correctly() {
     assert!(check_agent("pi") >= 2);
 }
 
+#[test]
+fn hermes_screens_from_real_sessions_are_detected_correctly() {
+    assert!(check_agent("hermes") >= 3);
+}
+
+/// A Hermes screen without its footer (the banner still loading) reads unknown, never idle.
+#[test]
+fn a_hermes_screen_without_its_footer_is_unknown() {
+    let got = Detector::builtin()
+        .detect(
+            "hermes",
+            DetectInput {
+                screen: "Welcome to Hermes Agent! Type your message or /help for commands.",
+                osc_title: "",
+            },
+        )
+        .expect("rule file exists");
+    assert_eq!(got.state, AgentState::Unknown);
+}
+
 /// A pi screen with neither the spinner nor its footer reads unknown, never idle.
 #[test]
 fn a_pi_screen_without_a_known_footer_is_unknown() {
