@@ -32,7 +32,7 @@ a model instead of starting on its default, and so does an id that could read as
 | `harness_session_send` | Submit a prompt, or press `keys` (`down`, `enter`, `esc`, `ctrl+c`) for a dialog HQ cannot read. Drive, an agent session, a claude.ai connection, an `hq_ask` reply and a turn that read untrusted content answer a dialog HQ can read with `harness_session_answer`, never with keys, and at one it cannot read may only press `esc` or `ctrl+c`. An automated caller may not press `esc` or `ctrl+c` to stop a turn the owner started (the daemon remembers who gave each session its latest prompt; after a restart nothing is refused). |
 | `harness_session_pending` | The dialog a blocked session waits at, as data: its number (`seq`), kind, question, command or path, folder and options. |
 | `harness_session_answer` | Answer that dialog by option (`seq` and `option`), or `decline` it, optionally with a `message` sent as the next prompt. |
-| `harness_session_wait` | Block until the session goes `idle`, `done` or `blocked`. |
+| `harness_session_wait` | Block until the session goes `idle`, `done` or `blocked`. `session_ids` (up to 10) waits for several against one deadline and returns one report per session, each with its own turn result; one that cannot be reached reports its error and does not fail the rest. |
 | `harness_session_events` | What happened to sessions, a task or a team, as compact events after a cursor, waiting up to 45 s for the next one. See "Following sessions by events". |
 | `harness_session_logs` / `_status` / `_list` | Read output and live state. `logs` with `since` returns only what is new. |
 | `harness_session_stop` / `_resume` | Close the workspace, or continue a stopped session. |

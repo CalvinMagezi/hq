@@ -9,6 +9,9 @@ use std::sync::Arc;
 use super::WatchingChat;
 use crate::registry::HqTool;
 use crate::util::{arg_str, arg_str_list};
+
+/// Most sessions one wait may cover.
+const MAX_FAN_IN: usize = 10;
 use hq_db::harness_sessions_registry as registry;
 
 /// Where a tool-started session runs. An explicit folder that exists is used as given. A blank one,
@@ -813,17 +816,17 @@ impl HqTool for HarnessSessionWaitTool {
         "harness_session_wait"
     }
     fn description(&self) -> &str {
-        "Block until a harness session settles: idle or done (ready for input, usually finished a turn) or blocked (waiting on a dialog). Returns settled=false if the timeout passes first. Use after harness_session_send instead of polling logs."
+        "Block until a harness session settles: idle or done (ready for input, usually finished a turn) or blocked (waiting on a dialog). Returns settled=false if the timeout passes first. Use after harness_session_send instead of polling logs. Pass `session_ids` (up to 10) instead of `session_id` to wait for several at once against one deadline: the reply has one report per session, each with its own turn result, and settled is true only when every one settled."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
                 "session_id": { "type": "string" },
+                "session_ids": { "type": "array", "items": { "type": "string" }, "maxItems": 10, "description": "Wait for all of these instead of one session_id" },
                 "timeout_secs": { "type": "integer", "description": "Seconds to wait, 3 to 45 (default 40). To wait longer, call again.", "default": 40 },
                 "until": { "type": "array", "items": { "type": "string", "enum": ["idle", "working", "blocked", "done"] }, "description": "States that end the wait (default: idle, done, blocked)" }
-            },
-            "required": ["session_id"]
+            }
         })
     }
     fn category(&self) -> &str {
@@ -849,9 +852,28 @@ impl HqTool for HarnessSessionWaitTool {
             .unwrap_or_default();
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
+        let many = arg_str_list(&args, "session_ids");
         let timeout = std::time::Duration::from_secs(secs.clamp(3, super::MAX_WAIT.as_secs()));
-        super::connector_may_drive(&db, &args, &id)?;
         let caller = super::caller_session(&args).map(str::to_string);
+        if many.is_empty() && id.is_empty() {
+            anyhow::bail!("pass `session_id`, or `session_ids` to wait for several");
+        }
+        if !many.is_empty() {
+            if many.len() > MAX_FAN_IN {
+                anyhow::bail!("wait for at most {MAX_FAN_IN} sessions at once");
+            }
+            for one in &many {
+                super::connector_may_drive(&db, &args, one)?;
+            }
+            return tokio::task::spawn_blocking(move || {
+                let may_reach = |one: &str| {
+                    db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), one))
+                };
+                Ok(super::wait_all(&db, &many, &until, timeout, &may_reach))
+            })
+            .await?;
+        }
+        super::connector_may_drive(&db, &args, &id)?;
         tokio::task::spawn_blocking(move || {
             db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;
             super::wait(&db, &id, &until, timeout)
