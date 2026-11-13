@@ -1,0 +1,39 @@
+# Agent HQ's own rules for Hermes Agent (Nous Research), written from screens of a
+# Hermes v0.23.1 terminal session on gpt-6-luna captured on 2026-11-13
+# (tests/fixtures/hermes).
+#
+# Hermes keeps a status footer (" ☤ model · context · ...") under its input box
+# whether it works or waits. While it works, the line above the box reads
+# "☤ ❯ type to redirect this turn · Tab queues it for after", so working is read
+# from the bottom few lines and idle only from the footer with no such line. Its
+# approval questions are not covered yet: a screen none of the rules recognise
+# reads unknown, never idle.
+id = "hermes"
+version = "2026.11.13.1"
+min_engine_version = 4
+updated_at = "2026-11-13T00:00:00Z"
+
+[[rules]]
+id = "working_redirect_hint"
+state = "working"
+priority = 960
+region = "bottom_non_empty_lines(6)"
+visible_working = true
+# "☤ ❯ type to redirect this turn · Tab queues it for after"
+line_regex = ['type to redirect this turn']
+
+[[rules]]
+id = "idle_footer"
+state = "idle"
+priority = 900
+region = "bottom_non_empty_lines(1)"
+visible_idle = true
+# " ☤ gpt-6-luna · ctx -- · [░░░░░░░░░░] -- · 2s ...", or later with the context use
+# in place of "ctx --": the caduceus and the model name always start the footer.
+line_regex = ['^\s*\x{2624}\s+\S+\s+\x{00B7}']
+
+[[rules]]
+id = "unrecognised"
+state = "unknown"
+priority = 0
+# No gate: a screen none of the rules above know reads unknown.

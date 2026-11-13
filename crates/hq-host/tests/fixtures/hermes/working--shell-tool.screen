@@ -1,0 +1,12 @@
+Welcome to Hermes Agent! Type your message or /help for commands.
+✦ Tip: Environment variable substitution works in config.yaml: use ${VAR_NAME} syntax.
+
+
+
+────────────────────────────────────────
+❯ Count slowly from 1 to 40, one number per line, running the shell command sleep 1 between each number.
+────────────────────────────────────────
+── ⠧ 💻 for n in $(seq 1 40) + 5 commands · 20s · ↓ 176 tok ──────────────────────────────── Count slowly from 1 to 40 ─
+☤ ❯ type to redirect this turn · Tab queues it for after
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☤ gpt-6-luna · 13.8K/272K · [░░░░░░░░░░] 5% · ◷ 4.7s · ↑ 37 t/s · 33s · ⏱ 20s

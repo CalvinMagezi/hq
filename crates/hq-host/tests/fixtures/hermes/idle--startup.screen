@@ -1,0 +1,7 @@
+Welcome to Hermes Agent! Type your message or /help for commands.
+✦ Tip: Environment variable substitution works in config.yaml: use ${VAR_NAME} syntax.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Ask anything, or type / for commands…
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☤ gpt-6-luna · ctx -- · [░░░░░░░░░░] -- · 2s · ⏲ 0s · …/project (main…)  / commands · @ files · ! shell
