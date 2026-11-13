@@ -81,6 +81,26 @@ fn hermes_screens_from_real_sessions_are_detected_correctly() {
     assert!(check_agent("hermes") >= 3);
 }
 
+#[test]
+fn opencode_screens_from_real_sessions_are_detected_correctly() {
+    assert!(check_agent("opencode") >= 3);
+}
+
+/// An opencode screen without its hint line (a permission question, say) reads unknown, never idle.
+#[test]
+fn an_opencode_screen_without_its_hint_line_is_unknown() {
+    let got = Detector::builtin()
+        .detect(
+            "opencode",
+            DetectInput {
+                screen: "  Allow this command?\n  Yes   No",
+                osc_title: "",
+            },
+        )
+        .expect("rule file exists");
+    assert_eq!(got.state, AgentState::Unknown);
+}
+
 /// A Hermes screen without its footer (the banner still loading) reads unknown, never idle.
 #[test]
 fn a_hermes_screen_without_its_footer_is_unknown() {
