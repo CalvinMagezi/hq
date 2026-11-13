@@ -173,6 +173,27 @@ fn a_state_file_others_can_write_is_not_obeyed() {
 }
 
 #[test]
+fn a_record_whose_folder_is_gone_is_forgotten_not_started_again() {
+    let (_tmp, before) = state_dir();
+    let work = tempfile::tempdir().unwrap();
+    let first = Host::new().with_state_dir(&before);
+    let mut spec = resumable("gone", "sleep 30", "sleep 30");
+    spec.cwd = work.path().to_path_buf();
+    first.spawn(spec).unwrap();
+    let after = before.with_file_name("after");
+    copy_state(&before, &after);
+    first.kill("gone").unwrap();
+    drop(work);
+
+    let second = Host::new().with_state_dir(&after);
+    let report = second.restore();
+    assert!(report.restored.is_empty(), "{report:?}");
+    assert!(report.skipped[0].1.contains("is gone"), "{report:?}");
+    let saved = std::fs::read_to_string(after.join("session.json")).unwrap();
+    assert!(!saved.contains("\"gone\""), "{saved}");
+}
+
+#[test]
 fn an_empty_resume_command_is_refused() {
     let host = Host::new();
     let mut spec = resumable("x", "true", "true");
