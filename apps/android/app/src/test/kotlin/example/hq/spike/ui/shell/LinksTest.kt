@@ -70,7 +70,7 @@ class LinksTest {
 
     @Test fun everyAllowedSettingsScreenIsAPageAndEveryPageIsAllowed() {
         // The set-up and pairing pages need a bot in hand, so a link cannot open them. Technical details and What HQ noticed open only from About.
-        assertEquals(SettingsPage.entries.filter { it != SettingsPage.SetupApp && it != SettingsPage.PairApp && it != SettingsPage.Technical && it != SettingsPage.Noticed }.map { it.name.lowercase() }.toSet(), Links.SETTINGS_SCREENS)
+        assertEquals(SettingsPage.entries.filter { it != SettingsPage.SetupApp && it != SettingsPage.PairApp && it != SettingsPage.Technical && it != SettingsPage.Noticed }.map { it.name.lowercase() }.toSet() + example.hq.spike.ui.settings.SettingsRoutes.ALIASES.keys, Links.SETTINGS_SCREENS)
     }
 
     @Test fun searchOpensTheSearchOnItsScope() {

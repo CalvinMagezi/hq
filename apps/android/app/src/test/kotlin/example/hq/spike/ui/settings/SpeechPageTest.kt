@@ -25,7 +25,7 @@ class SpeechPageTest {
 
     @Test fun theFactsAreTheOnesThePhoneKnowsAndDeleteAsksFirst() {
         val asked = mutableListOf<Boolean>()
-        rule.setContent { HqTheme { SpeechPage(SettingsUi(speechBytes = 120_000_000L), SettingsActions(onAskDeleteSpeech = { asked += it })) } }
+        rule.setContent { HqTheme { Page { SpeechSection(SettingsUi(speechBytes = 120_000_000L), SettingsActions(onAskDeleteSpeech = { asked += it })) } } }
         rule.onNodeWithText("Understands English").assertExists()
         rule.onNodeWithText("The sherpa-onnx project on GitHub").assertExists()
         rule.onNodeWithText("Delete speech model").performClick()

@@ -5,14 +5,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,8 +29,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import example.hq.spike.HubService
 import example.hq.spike.R
-import example.hq.spike.ui.shell.ConfirmCopy
-import example.hq.spike.ui.shell.ConfirmDialog
+import example.hq.spike.ui.settings.SettingsActions
+import example.hq.spike.ui.settings.SettingsUi
 import example.hq.spike.KeyVault
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
@@ -43,21 +40,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Settings, "Keys on this phone": the names of the credentials sealed in the Android Keystore, never their values.
+ * Settings, "Keys on this phone" (a section of AI service and keys): the names of the credentials sealed in the Android Keystore, never their values.
  * A key can be added, replaced or removed here; hq restarts so it reads the change.
  */
 @Composable
-fun StoredKeysPage() {
+fun StoredKeysPage(ui: SettingsUi, actions: SettingsActions) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var names by remember { mutableStateOf<List<String>?>(null) }
     var name by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
     var show by remember { mutableStateOf(false) }
-    var confirming by remember { mutableStateOf<String?>(null) }
     var line by remember { mutableStateOf<String?>(null) }
     var bad by remember { mutableStateOf(false) }
-    var busy by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    val busy = saving || ui.keyRemove?.busy == true
     // Replace fills in a name that looks just like the field's hint, so it also moves the cursor to the key and says so.
     val keyField = remember { FocusRequester() }
     var replaceAsked by remember { mutableIntStateOf(0) }
@@ -65,10 +62,14 @@ fun StoredKeysPage() {
     fun replace(n: String) { name = n; value = ""; bad = false; line = FirstRunWords.keysReplacing(KeyNames.display(n)); replaceAsked++ }
 
     suspend fun reload() { names = withContext(Dispatchers.IO) { KeyVault.names(context) } }
-    LaunchedEffect(Unit) { reload() }
+    // A removal runs from Settings (its question is a modal there); this section only follows what it reports.
+    LaunchedEffect(ui.keysVersion) { reload() }
+    LaunchedEffect(ui.keysLine) { ui.keysLine?.let { line = it; bad = ui.keysLineBad } }
+    LaunchedEffect(ui.keyReplace) { ui.keyReplace?.let { replace(it); actions.onKeyReplaceHandled() } }
 
-    Box(Modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    // A section of AI service and keys, whose page scrolls: this takes its height from its content.
+    Box(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(FirstRunWords.KEYS_BODY, style = HqType.BodySm, color = Mts.InkMuted)
         val shape = RoundedCornerShape(12.dp)
         Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100)) {
@@ -80,7 +81,7 @@ fun StoredKeysPage() {
                     Icon(HqIcons.Key, null, Modifier.size(20.dp), tint = Mts.InkMuted)
                     Text(KeyNames.display(n), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.weight(1f).padding(start = 8.dp))
                     TextAction("Replace", enabled = !busy) { replace(n) }
-                    TextAction(FirstRunWords.KEYS_REMOVE, enabled = !busy) { confirming = n; line = null }
+                    TextAction(FirstRunWords.KEYS_REMOVE, enabled = !busy) { line = null; actions.onAskRemoveKey(n) }
                 }
             }
         }
@@ -95,7 +96,7 @@ fun StoredKeysPage() {
                 line = "That key was not saved: $problem."
                 return@GreenPill
             }
-            busy = true
+            saving = true
             val typedName = name
             val typedValue = value
             scope.launch {
@@ -104,28 +105,9 @@ fun StoredKeysPage() {
                 line = if (refused == null) FirstRunWords.KEYS_SAVED else "That key was not saved: $refused."
                 if (refused == null) { name = ""; value = "" }
                 reload()
-                busy = false
+                saving = false
             }
         }
-    }
-    // Inside the Box: Settings lays its pages out in a Column, so a second root here would sit below the page, off screen.
-    confirming?.let { n ->
-        val only = KeyVault.isOnlyModelKey(names.orEmpty(), n)
-        ConfirmDialog(
-            ConfirmCopy.removeKey(context, ConfirmCopy.keyLabel(n), only), onKeep = { confirming = null }, busy = busy,
-            onExtra = { confirming = null; replace(n) },
-            onAct = {
-                busy = true
-                scope.launch {
-                    val ok = withContext(Dispatchers.IO) { KeyVault.remove(context, n).also { if (it) HubService.restartHq() } }
-                    confirming = null
-                    bad = !ok
-                    line = if (ok) context.getString(if (only) R.string.remove_only_key_done else R.string.remove_key_done) else FirstRunWords.KEYS_NOT_REMOVED
-                    reload()
-                    busy = false
-                }
-            },
-        )
     }
     }
 }

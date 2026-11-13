@@ -8,6 +8,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeParseException
 import example.hq.spike.ui.usage.ChainRow
 import example.hq.spike.ui.usage.UsageWords
+import example.hq.spike.update.UpdateState
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -31,7 +32,8 @@ data class SettingsSnapshot(
     val github: JSONObject? = null,
 )
 
-enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp, StoredKeys, Technical, Noticed, Update, Speech, Assistant, Calendar, Contacts, Suggests }
+/** Keys on this phone, Speech model and Connected tools are sections inside Keys, Assistant and Computers; their old names live on in [SettingsRoutes]. */
+enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, Computers, CaptureWidgets, SetupApp, PairApp, Technical, Noticed, Update, Assistant, Calendar, Contacts, Suggests }
 
 /** The Settings row that opens the GitHub connection. */
 const val HQ_CODER_ROW = "github"
@@ -73,6 +75,11 @@ object SettingsWords {
     private val TOOL_KEYS = setOf("Brave Search")
 
     fun configuredKeys(s: JSONObject?): List<String> = s.arr("provider_keys").items().filter { it.optBoolean("configured") && it.optString("name") !in TOOL_KEYS }.map { it.optString("name") }
+
+    /** The parts of AI service and keys. The keys sealed on this phone never depend on HQ, so they show even when HQ does not answer (this is where a key is added when HQ will not start). */
+    enum class KeysPart { Hq, Phone }
+
+    fun keysParts(settings: JSONObject?): List<KeysPart> = if (settings == null) listOf(KeysPart.Phone) else listOf(KeysPart.Hq, KeysPart.Phone)
 
     fun keysStatus(w: Words, s: JSONObject?, providers: JSONObject? = null): String {
         if (s == null) return notAnswered(w)
@@ -148,44 +155,118 @@ object SettingsWords {
         return w.s(R.string.settings_spent_of, money(head.optDouble("spent_usd")), money(head.optDouble("limit_usd")), period).trim()
     }
 
-    fun home(w: Words, snap: SettingsSnapshot, now: Instant = Instant.now(), phone: List<HomeRow> = emptyList(), loaded: Boolean = true, backup: BackupFacts = BackupFacts(), strip: String? = null, server: HomeRow? = null): List<HomeGroup> = withChecking(w, loaded, listOf(
-        HomeGroup(w.s(R.string.settings_group_phone), phone),
+    /** Notifications turn amber only when something needs doing: Android blocks them, or a channel for what needs the owner is off. A channel the owner turned off on purpose (App updates) is a choice. */
+    fun notificationsWarn(allowed: Boolean, needsOn: Boolean, updatesOn: Boolean): Boolean = !allowed || !needsOn || !updatesOn
+
+    /** [rows] kept to the pages of This phone and in its order. */
+    fun inPhoneOrder(rows: List<HomeRow>): List<HomeRow> = PHONE_PAGES.mapNotNull { p -> rows.firstOrNull { it.page == p } }
+
+    /** The pages the view model puts in "This phone" (read from Android, so they are not built here); the placement test counts them as on Home. */
+    val PHONE_PAGES = listOf(SettingsPage.Background, SettingsPage.Notifications, SettingsPage.Assistant, SettingsPage.Calendar, SettingsPage.Contacts, SettingsPage.CaptureWidgets)
+
+    /** The paired server's row: the state first, so the 40 character cut can only shorten the host; amber while signed out. */
+    fun serverRow(w: Words, host: String, signedOut: Boolean): HomeRow =
+        HomeRow(SettingsPage.Devices, "phone", w.s(R.string.settings_server_hq_row), w.s(if (signedOut) R.string.settings_server_row_out else R.string.settings_server_row_in, host), warn = signedOut)
+
+    /** The longest a Home state line may be; a longer one is cut rather than wrapped into a second line. */
+    const val STATE_MAX = 40
+
+    private fun fit(s: String) = if (s.length <= STATE_MAX) s else s.take(STATE_MAX - 1).trimEnd() + "\u2026"
+
+    /** What Updates says on Home, and whether that wants a look. [ready] is the version that waits, if one does. */
+    fun updatesHome(w: Words, state: UpdateState, installed: String, ready: String?): Pair<String, Boolean> = when {
+        state is UpdateState.Checking -> w.s(R.string.settings_updates_checking) to false
+        state is UpdateState.Off -> w.s(R.string.settings_updates_off) to false
+        ready != null -> w.s(R.string.settings_updates_ready, ready) to false
+        state is UpdateState.InstalledWithdrawn || state is UpdateState.Problem || state is UpdateState.Failed || state is UpdateState.NeedsNewerAndroid -> w.s(R.string.settings_updates_look) to true
+        installed.isBlank() -> w.s(R.string.settings_updates_checking) to false
+        else -> w.s(R.string.settings_updates_version, installed) to false
+    }
+
+    /** Background work's line: on or off, then how many Keep running checks need a fix. */
+    fun backgroundHome(w: Words, active: Boolean, toFix: Int): String = when {
+        toFix <= 0 -> backgroundWords(w, active)
+        active -> w.s(R.string.settings_background_on_fix, toFix)
+        else -> w.s(R.string.settings_background_off_fix, toFix)
+    }
+
+    /** The computers paired with HQ: the list HQ keeps, without `native`, which is HQ's own machine and not a pairing. */
+    fun pairedComputers(s: JSONObject?): Int = s.obj("agent_host").arr("hosts")?.let { a -> (0 until a.length()).count { a.optString(it) !in PHONE_HOSTS } } ?: 0
+
+    private val PHONE_HOSTS = setOf("native", "local")
+
+    private fun computersHome(w: Words, s: JSONObject?): String {
+        if (s == null) return notAnswered(w)
+        val n = pairedComputers(s)
+        return if (n == 0) w.s(R.string.settings_computers_none) else w.n(R.plurals.settings_computers_state, n, n)
+    }
+
+    /**
+     * Settings Home: six named groups. [phone] is what Android says (Background work, Notifications, Phone assistant, Calendar, Capture and widgets),
+     * read by the view model; the rest comes from HQ. One state line per row, 40 characters or fewer, state first.
+     */
+    fun home(
+        w: Words, snap: SettingsSnapshot, now: Instant = Instant.now(), phone: List<HomeRow> = emptyList(), loaded: Boolean = true, backup: BackupFacts = BackupFacts(),
+        strip: String? = null, server: HomeRow? = null, updates: Pair<String, Boolean> = w.s(R.string.settings_updates_checking) to false,
+    ): List<HomeGroup> = withChecking(w, loaded, listOf(
         HomeGroup(
-            w.s(R.string.settings_group_accounts), listOf(
-                HomeRow(SettingsPage.Keys, "key", w.s(R.string.row_ai_keys), keysStatus(w, snap.settings, snap.providers)),
-                HomeRow(SettingsPage.Messaging, "chat", w.s(R.string.row_messaging), messagingStatus(w, snap.chatApps)),
-                HomeRow(SettingsPage.Devices, "phone", w.s(R.string.devices_title), devicesStatus(w, snap.devices)),
-                HomeRow(null, HQ_CODER_ROW, w.s(R.string.row_github), githubStatus(w, snap.github), warn = githubWarns(snap.github)),
-            ) + listOfNotNull(server),
-            note = claudeViaLaptop(w),
-            lead = strip,
-        ),
-        HomeGroup(
-            w.s(R.string.settings_group_behaves), listOf(
-                HomeRow(SettingsPage.Safety, "shield", w.s(R.string.row_safety), if (snap.settings == null) notAnswered(w) else w.s(R.string.connect_scope_read_only_title)),
-                HomeRow(SettingsPage.Suggests, SUGGESTS_ROW, w.s(R.string.row_suggests), w.s(R.string.trail_suggests)),
-            ),
-        ),
-        HomeGroup(
-            w.s(R.string.group_work), listOf(
+            w.s(R.string.settings_group_work), listOf(
                 HomeRow(null, WORK_TASKS_ROW, w.s(R.string.row_work_tasks), w.s(R.string.trail_work_tasks)),
                 HomeRow(null, WORK_HELPERS_ROW, w.s(R.string.row_work_helpers), w.s(R.string.trail_work_helpers)),
             ),
         ),
         HomeGroup(
-            w.s(R.string.settings_group_data), listOf(
+            w.s(R.string.settings_group_ai), listOf(
+                HomeRow(SettingsPage.Keys, "key", w.s(R.string.row_ai_keys), keysStatus(w, snap.settings, snap.providers)),
                 HomeRow(SettingsPage.Spending, "gauge", w.s(R.string.row_spending), spendingStatus(w, snap.budgets)),
-                HomeRow(SettingsPage.About, "arch", w.s(R.string.row_backup), BackupWords.homeLine(w, backup, now), warn = BackupWords.warns(backup, now)),
             ),
         ),
-    ))
+        HomeGroup(
+            w.s(R.string.settings_group_chats), listOf(
+                HomeRow(SettingsPage.Messaging, "chat", w.s(R.string.row_messaging), messagingStatus(w, snap.chatApps)),
+                HomeRow(SettingsPage.Devices, "phone", w.s(R.string.devices_title), devicesStatus(w, snap.devices)),
+                HomeRow(SettingsPage.Computers, "computer", w.s(R.string.settings_page_computers), computersHome(w, snap.settings)),
+                HomeRow(null, HQ_CODER_ROW, w.s(R.string.row_github), githubStatus(w, snap.github), warn = githubWarns(snap.github)),
+            ) + listOfNotNull(server),
+            note = claudeViaLaptop(w),
+            lead = strip,
+        ),
+        HomeGroup(w.s(R.string.settings_group_phone), phone),
+        HomeGroup(
+            w.s(R.string.settings_group_safety), listOf(
+                HomeRow(SettingsPage.Safety, "shield", w.s(R.string.row_safety), if (snap.settings == null) notAnswered(w) else w.s(R.string.connect_scope_read_only_title)),
+                HomeRow(SettingsPage.Suggests, SUGGESTS_ROW, w.s(R.string.row_suggests), w.s(R.string.trail_suggests)),
+            ),
+        ),
+        HomeGroup(
+            w.s(R.string.settings_group_data), listOf(
+                HomeRow(SettingsPage.About, "arch", w.s(R.string.settings_backup_title), BackupWords.homeLine(w, backup, now), warn = BackupWords.warns(backup, now)),
+                HomeRow(SettingsPage.Update, "update", w.s(R.string.upd_page_title), updates.first, warn = updates.second),
+                HomeRow(SettingsPage.Technical, "technical", w.s(R.string.settings_technical_title), w.s(R.string.settings_technical_home)),
+            ),
+        ),
+    )).map { g -> g.copy(rows = g.rows.map { it.copy(status = fit(it.status)) }) }
+
+    /** The one card above the groups, by the precedence the board sets: a pulled build, then Android stopping HQ, then the backup; the plain Update card only when none of those shows. */
+    enum class HomeCard { Withdrawn, KeepStops, Backup, Update, None }
+
+    fun homeCard(withdrawn: Boolean, keepToFix: Int, backupWarns: Boolean, updateReady: Boolean): HomeCard = when {
+        withdrawn -> HomeCard.Withdrawn
+        keepToFix > 0 -> HomeCard.KeepStops
+        backupWarns -> HomeCard.Backup
+        updateReady -> HomeCard.Update
+        else -> HomeCard.None
+    }
 
     /** Until the first read has finished, the rows that come from HQ say so, rather than "No answer yet". */
     private fun withChecking(w: Words, loaded: Boolean, groups: List<HomeGroup>): List<HomeGroup> =
-        if (loaded) groups else groups.map { g -> if (g.title == w.s(R.string.settings_group_phone)) g else g.copy(rows = g.rows.map { if (it.page == SettingsPage.About || it.key in FIXED_ROWS) it else it.copy(status = w.s(R.string.settings_checking)) }) }
+        if (loaded) groups else groups.map { g -> if (g.title == w.s(R.string.settings_group_phone)) g else g.copy(rows = g.rows.map { if (it.page in LOCAL_PAGES || it.key in FIXED_ROWS) it else it.copy(status = w.s(R.string.settings_checking)) }) }
 
     /** Rows whose line never comes from HQ, so it has nothing to check. */
     private val FIXED_ROWS = setOf(WORK_TASKS_ROW, WORK_HELPERS_ROW, SUGGESTS_ROW)
+
+    /** Pages whose line comes from this phone, not from HQ. */
+    private val LOCAL_PAGES = setOf(SettingsPage.About, SettingsPage.Update, SettingsPage.Technical)
 
     /** Who GitHub is connected to, or the step that is left; what HQ Coder is, while HQ has not said. */
     fun githubStatus(w: Words, g: JSONObject?): String = when (g?.optString("standing")) {
@@ -193,7 +274,7 @@ object SettingsWords {
         "needs_install" -> w.s(R.string.trail_github_install)
         "reconnect" -> w.s(R.string.trail_github_reconnect)
         "not_connected" -> w.s(R.string.trail_github_off)
-        else -> w.s(R.string.github_row_body)
+        else -> w.s(R.string.trail_github_default)
     }
 
     fun githubWarns(g: JSONObject?): Boolean = g?.optString("standing") in setOf("needs_install", "reconnect")
@@ -276,7 +357,7 @@ object SettingsWords {
             )
             SafetyTab.Helpers -> listOf(
                 FactRow(w.s(R.string.settings_helper_default), host.text("default_host")?.let { computerName(w, it) } ?: w.s(R.string.settings_none_set)),
-                countRow(w.s(R.string.settings_page_computers), host.arr("hosts")?.length() ?: 0, SettingsPage.Computers),
+                countRow(w.s(R.string.settings_section_computers), host.arr("hosts")?.length() ?: 0, SettingsPage.Computers),
                 FactRow(w.s(R.string.settings_helper_safe_box), sandbox(w, host.text("sandbox_mode").orEmpty())),
                 FactRow(w.s(R.string.settings_helper_idle), host?.optInt("idle_reap_hours")?.let { if (it <= 0) w.s(R.string.sheet_never) else w.s(R.string.settings_hours_n, it) } ?: w.s(R.string.sheet_never)),
                 FactRow(w.s(R.string.settings_safety_say_yes), yesNo(w, host?.optBoolean("drive_new_watches") == true)),
@@ -285,7 +366,7 @@ object SettingsWords {
                 FactRow(w.s(R.string.settings_helper_no_progress), (host?.optInt("driver_no_progress_limit") ?: 0).let { n -> w.n(R.plurals.settings_no_progress_after, n, n) }, w.s(R.string.settings_helper_no_progress_text)),
             )
             SafetyTab.Tools -> listOf(
-                countRow(w.s(R.string.settings_tools_connected), integ.arr("remote_mcp")?.length() ?: 0, SettingsPage.ConnectedTools),
+                countRow(w.s(R.string.settings_tools_connected), integ.arr("remote_mcp")?.length() ?: 0, SettingsPage.Computers),
                 FactRow(w.s(R.string.settings_tools_search), integ.text("searxng_host") ?: w.s(R.string.settings_built_in)),
                 FactRow(w.s(R.string.settings_tools_disk), onOff(w, integ?.optBoolean("disk_watchdog_enabled") == true)),
             )

@@ -272,9 +272,9 @@ class ShellActivity : ComponentActivity() {
         }
         t.web?.let { WebPage.fromSlug(it) }?.let { web = it }
         t.screen?.let { name ->
-            val page = SettingsPage.entries.firstOrNull { it.name.equals(name, true) } ?: return@let
+            val pages = example.hq.spike.ui.settings.SettingsRoutes.stack(name) ?: return@let
             settings.actions.onOpen()
-            if (page != SettingsPage.Home) settings.actions.onPage(page)
+            pages.forEach(settings.actions.onPage)
         }
     }
 

@@ -151,10 +151,9 @@ internal fun UpdatePage(ui: SettingsUi, actions: SettingsActions) {
                 FactRow(stringResource(R.string.upd_fact_android), facts.release),
             ),
         )
-        if (m == null) {
-            Text(UpdateLogic.wordsFor(context, state), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
-            return@Page
-        }
+        Box(Modifier.padding(top = 12.dp)) { UpdateGroup(ui, actions, checkRow = m == null, busyDialog = false) }
+        // The check row above already says where the update stands, so there is nothing more to add until a version waits.
+        if (m == null) return@Page
         val notes = m.notes[java.util.Locale.getDefault().language] ?: m.notes["en"]
         if (!notes.isNullOrEmpty()) {
             Label(stringResource(R.string.upd_notes_heading))

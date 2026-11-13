@@ -84,7 +84,7 @@ object PhoneWords {
     /** The Home row for Capture: where a share opens, and how many saved things still wait for HQ. */
     fun captureSummary(w: example.hq.spike.ui.shell.Words, f: CaptureFacts): String {
         val opens = w.s(when (f.shareOpens) { "task" -> R.string.settings_share_task; example.hq.spike.capture.CapturePrefs.LAST -> R.string.settings_share_last_used; else -> R.string.settings_share_note })
-        return if (f.waiting.isEmpty()) opens else w.s(R.string.settings_share_waiting, opens, f.waiting.size)
+        return if (f.waiting.isEmpty()) opens else w.s(R.string.settings_share_waiting, f.waiting.size)
     }
 
     /** What a queued item says about itself: what it is, and why it is still here. */

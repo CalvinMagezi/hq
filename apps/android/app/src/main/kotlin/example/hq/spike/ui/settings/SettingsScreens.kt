@@ -113,6 +113,9 @@ private fun icon(key: String): ImageVector = when (key) {
     "notifications" -> HqIcons.Inbox
     "capture" -> HqIcons.Plus
     "key" -> HqIcons.Key
+    "computer" -> HqIcons.Plug
+    "update" -> HqIcons.Download
+    "technical" -> HqIcons.Info
     "assistant" -> HqIcons.Mic
     "calendar" -> HqIcons.Clock
     "contacts" -> HqIcons.Phone
@@ -142,21 +145,18 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.Messaging -> stringResource(R.string.row_messaging)
     SettingsPage.Devices -> stringResource(R.string.devices_title)
     SettingsPage.Spending -> stringResource(R.string.row_spending)
-    SettingsPage.About -> stringResource(R.string.row_backup)
+    SettingsPage.About -> stringResource(R.string.settings_backup_title)
     SettingsPage.Background -> stringResource(R.string.about_background)
     SettingsPage.KeepRunning -> stringResource(R.string.settings_page_keep_running)
     SettingsPage.Notifications -> stringResource(R.string.row_notifications)
     SettingsPage.Origins -> stringResource(R.string.settings_page_origins)
-    SettingsPage.ConnectedTools -> stringResource(R.string.settings_page_tools)
     SettingsPage.Computers -> stringResource(R.string.settings_page_computers)
     SettingsPage.CaptureWidgets -> stringResource(R.string.settings_page_capture)
     SettingsPage.SetupApp -> stringResource(R.string.settings_page_setup)
     SettingsPage.PairApp -> stringResource(R.string.dev_pair)
-    SettingsPage.StoredKeys -> FirstRunWords.KEYS_TITLE
     SettingsPage.Technical -> stringResource(R.string.settings_technical_title)
     SettingsPage.Noticed -> stringResource(R.string.noticed_title)
     SettingsPage.Update -> stringResource(R.string.upd_page_title)
-    SettingsPage.Speech -> stringResource(R.string.speech_title)
     SettingsPage.Assistant -> stringResource(R.string.assist_row_title)
     SettingsPage.Calendar -> stringResource(R.string.cal_row_title)
     SettingsPage.Contacts -> stringResource(R.string.contacts_row_title)
@@ -195,18 +195,15 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.CaptureWidgets -> CaptureWidgets(ui, actions)
                 SettingsPage.SetupApp -> SetupApp(ui, actions)
                 SettingsPage.PairApp -> PairApp(ui, actions)
-                SettingsPage.StoredKeys -> StoredKeysPage()
                 SettingsPage.Technical -> Technical(ui, actions)
                 SettingsPage.Update -> UpdatePage(ui, actions)
-                SettingsPage.Speech -> SpeechPage(ui, actions)
                 SettingsPage.Assistant -> AssistantPage(ui, actions)
                 SettingsPage.Calendar -> CalendarPage()
                 SettingsPage.Contacts -> ContactsPage()
                 SettingsPage.Suggests -> SuggestsPage()
                 SettingsPage.Noticed -> NoticedPage(Counters.get(androidx.compose.ui.platform.LocalContext.current))
                 SettingsPage.Origins -> ReadOnlyList(ui, stringResource(R.string.settings_none_origins)) { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
-                SettingsPage.ConnectedTools -> ReadOnlyList(ui, stringResource(R.string.settings_none_tools)) { Facts(SettingsWords.toolRows(example.hq.spike.ui.shell.rememberWords(), ui.snap.settings)) }
-                SettingsPage.Computers -> ReadOnlyList(ui, stringResource(R.string.settings_none_computers)) { Facts(SettingsWords.computerRows(example.hq.spike.ui.shell.rememberWords(), ui.snap.settings)) }
+                SettingsPage.Computers -> ComputersAndTools(ui)
             }
         }
         val context = androidx.compose.ui.platform.LocalContext.current
@@ -217,6 +214,9 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
         ui.keySheet?.let { KeySheetView(it, actions) }
         ui.askDisconnect?.let { p -> ConfirmDialog(ConfirmCopy.disconnectApp(context, SettingsWords.appName(p)), { actions.onAskDisconnect(null) }, actions.onDisconnect) }
         ui.askReplace?.let { p -> ConfirmDialog(ConfirmCopy.unlinkAccount(context, SettingsWords.appName(p)), { actions.onAskReplace(null) }, { actions.onPair(p, true) }) }
+        ui.keyRemove?.let { q ->
+            ConfirmDialog(ConfirmCopy.removeKey(context, ConfirmCopy.keyLabel(q.name), q.only), { actions.onAskRemoveKey(null) }, actions.onRemoveKey, busy = q.busy, onExtra = actions.onReplaceKey)
+        }
         if (ui.askDeleteSpeech) ConfirmDialog(ConfirmCopy.deleteSpeech(context), { actions.onAskDeleteSpeech(false) }, actions.onDeleteSpeech)
         if (ui.askSignOutAll) ConfirmDialog(ConfirmCopy.signOutAll(context), { actions.onSignOutAll(false) }, actions.onSignOutAllConfirm)
         ui.askSignOut?.let { d -> ConfirmDialog(ConfirmCopy.signOutDevice(context, d.label), { actions.onAskSignOut(null) }, actions.onSignOutConfirm, busy = ui.busy == "out:${d.id}", error = ui.signOutError) }
@@ -333,11 +333,20 @@ private fun Home(ui: SettingsUi, actions: SettingsActions) {
     val w = example.hq.spike.ui.shell.rememberWords()
     val context = androidx.compose.ui.platform.LocalContext.current
     val strip = ui.savedAt?.takeIf { ui.stale }?.let { w.s(R.string.bk_strip_saved, android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date(it.toEpochMilli()))) }
+    val keepToFix = ui.phone.firstOrNull { it.page == SettingsPage.Background }?.warn == true
+    val ready = readyManifest(ui)
+    val card = SettingsWords.homeCard(ui.update is UpdateState.InstalledWithdrawn, if (keepToFix) PhoneWords.keepRunning(w, ui.keep, ui.now).checked.count { !it.ok } else 0, BackupWords.warns(ui.backup, ui.now), ready != null)
+    val updates = SettingsWords.updatesHome(w, ui.update, ui.updateFacts.installedVersion, ready?.version)
     Page {
-        WithdrawnCard(ui, actions)
-        UpdateCard(ui, actions)
-        BackupWords.slot(w, ui.backup, ui.now)?.let { slot -> BackupSlot(slot) { actions.onPage(SettingsPage.About) } }
-        SettingsWords.home(w, ui.snap, ui.now, ui.phone, ui.loaded, ui.backup, strip, serverRow(w, context)).forEachIndexed { gi, g ->
+        // One card at most: Home never stacks a warning on a warning, and the plain Update card gives way to any of them.
+        when (card) {
+            SettingsWords.HomeCard.Withdrawn -> WithdrawnCard(ui, actions)
+            SettingsWords.HomeCard.KeepStops -> PhoneWords.keepRunning(w, ui.keep, ui.now).let { page -> KeepStopsCard(page.noticeTitle, page.notice) { actions.onPage(SettingsPage.Background); actions.onPage(SettingsPage.KeepRunning) } }
+            SettingsWords.HomeCard.Backup -> BackupWords.slot(w, ui.backup, ui.now)?.let { slot -> BackupSlot(slot) { actions.onPage(SettingsPage.About) } }
+            SettingsWords.HomeCard.Update -> UpdateCard(ui, actions)
+            SettingsWords.HomeCard.None -> Unit
+        }
+        SettingsWords.home(w, ui.snap, ui.now, ui.phone, ui.loaded, ui.backup, strip, serverRow(w, context), updates).forEachIndexed { gi, g ->
             Text(g.title.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = if (gi == 0) 8.dp else 20.dp, end = 16.dp, bottom = 4.dp))
             g.lead?.let { Text(it, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp)) }
             Group {
@@ -345,6 +354,39 @@ private fun Home(ui: SettingsUi, actions: SettingsActions) {
             }
             g.note?.let { Text(it, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp)) }
         }
+    }
+}
+
+/** The warning card for "Android may stop HQ": what is wrong in one sentence, tap to open the checks that fix it. */
+@Composable
+private fun KeepStopsCard(title: String, body: String, onOpen: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Amber, shape)
+            .clickable(role = Role.Button, onClick = onOpen).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(HqIcons.Warning, null, Modifier.size(22.dp), tint = Mts.Amber)
+            Text(title, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.semantics { heading() })
+        }
+        Text(body, style = HqType.BodySm, color = Mts.Ink)
+    }
+}
+
+/** Computers and Connected tools, once the two tabs of Safety and limits: one page, two sections, read only. */
+@Composable
+private fun ComputersAndTools(ui: SettingsUi) {
+    val w = example.hq.spike.ui.shell.rememberWords()
+    Page {
+        Notice(stringResource(R.string.settings_read_only_notice))
+        if (ui.snap.settings == null) { Unanswered(ui, "settings", false); return@Page }
+        Label(stringResource(R.string.settings_section_computers))
+        val computers = SettingsWords.computerRows(w, ui.snap.settings)
+        if (computers.isEmpty()) Notice(stringResource(R.string.settings_none_computers), HqIcons.Info) else Facts(computers)
+        Label(stringResource(R.string.settings_tools_connected))
+        val tools = SettingsWords.toolRows(w, ui.snap.settings)
+        if (tools.isEmpty()) Notice(stringResource(R.string.settings_none_tools), HqIcons.Info) else Facts(tools)
     }
 }
 
@@ -421,45 +463,49 @@ private fun Keys(ui: SettingsUi, actions: SettingsActions) {
     val w = example.hq.spike.ui.shell.rememberWords()
     val s = ui.snap.settings
     Page {
-        if (Unanswered(ui, "settings", s != null) || s == null) return@Page
-        Label(stringResource(R.string.settings_label_model))
-        Facts(listOf(FactRow(w.s(R.string.settings_which_ai_uses), SettingsWords.activeModel(w, s)), FactRow(w.s(R.string.settings_local_only), SettingsWords.onOff(w, s.optJSONObject("model")?.optBoolean("local_only") == true))))
-        Text(stringResource(R.string.settings_the_model_is_set), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
-        val ai = SettingsWords.aiRows(w, ui.snap)
-        if (ai.isNotEmpty()) {
-            Label(stringResource(R.string.settings_label_which_answers))
-            Facts(ai)
-            Text(stringResource(R.string.settings_hq_tries_them_in), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
-        }
-        Label(stringResource(R.string.settings_label_your_keys))
-        Group {
-            SettingsWords.keyRows(s, ui.snap.copilot, ui.snap.providers).forEachIndexed { i, (name, set, source) ->
-                if (i > 0) Divider()
-                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(name, style = HqType.BodyBold, color = Mts.Ink)
-                        Text(stringResource(if (set) (if (source == "env") R.string.settings_key_set_env else R.string.settings_key_set) else if (source == "unreadable") R.string.settings_key_unreadable else R.string.settings_key_not_set), style = HqType.BodySm, color = if (set) Mts.BrandGreen else Mts.InkMuted)
-                    }
-                    SettingsWords.keyAction(w, s, name, set, source)?.let { a ->
-                        Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface200).clickable(role = Role.Button) { actions.onKeyOpen(KeySheet(a.id, name, replace = set)) }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-                            Text(a.label, style = HqType.BodySmBold, color = Mts.Ink)
+        // HQ's part of the page needs HQ; the keys on this phone do not, so they show whatever HQ says.
+        if (SettingsWords.KeysPart.Hq in SettingsWords.keysParts(s) && s != null) {
+            Label(stringResource(R.string.settings_label_model))
+            Facts(listOf(FactRow(w.s(R.string.settings_which_ai_uses), SettingsWords.activeModel(w, s)), FactRow(w.s(R.string.settings_local_only), SettingsWords.onOff(w, s.optJSONObject("model")?.optBoolean("local_only") == true))))
+            Text(stringResource(R.string.settings_the_model_is_set), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
+            val ai = SettingsWords.aiRows(w, ui.snap)
+            if (ai.isNotEmpty()) {
+                Label(stringResource(R.string.settings_label_which_answers))
+                Facts(ai)
+                Text(stringResource(R.string.settings_hq_tries_them_in), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
+            }
+            Label(stringResource(R.string.settings_label_your_keys))
+            Group {
+                SettingsWords.keyRows(s, ui.snap.copilot, ui.snap.providers).forEachIndexed { i, (name, set, source) ->
+                    if (i > 0) Divider()
+                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(name, style = HqType.BodyBold, color = Mts.Ink)
+                            Text(stringResource(if (set) (if (source == "env") R.string.settings_key_set_env else R.string.settings_key_set) else if (source == "unreadable") R.string.settings_key_unreadable else R.string.settings_key_not_set), style = HqType.BodySm, color = if (set) Mts.BrandGreen else Mts.InkMuted)
+                        }
+                        SettingsWords.keyAction(w, s, name, set, source)?.let { a ->
+                            Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface200).clickable(role = Role.Button) { actions.onKeyOpen(KeySheet(a.id, name, replace = set)) }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                                Text(a.label, style = HqType.BodySmBold, color = Mts.Ink)
+                            }
                         }
                     }
                 }
             }
-        }
-        if (ai.isEmpty()) {
-            Label(stringResource(R.string.settings_label_first_down))
-            Group {
-                SettingsWords.fallbackRows(w, s).forEachIndexed { i, (a, b) ->
-                    if (i > 0) Divider()
-                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(a, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
-                        Text(b, style = HqType.BodySm, color = Mts.InkMuted)
+            if (ai.isEmpty()) {
+                Label(stringResource(R.string.settings_label_first_down))
+                Group {
+                    SettingsWords.fallbackRows(w, s).forEachIndexed { i, (a, b) ->
+                        if (i > 0) Divider()
+                        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(a, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
+                            Text(b, style = HqType.BodySm, color = Mts.InkMuted)
+                        }
                     }
                 }
             }
-        }
+        } else Unanswered(ui, "settings", false)
+        Label(FirstRunWords.KEYS_TITLE)
+        StoredKeysPage(ui, actions)
     }
 }
 
@@ -758,6 +804,9 @@ private fun Background(ui: SettingsUi, actions: SettingsActions) {
         Box(Modifier.padding(top = 12.dp)) { Notice(stringResource(R.string.settings_one_device_only), HqIcons.Warning, warn = true) }
         Label(stringResource(R.string.assist_group_right_now))
         Facts(SettingsWords.rightNow(example.hq.spike.ui.shell.rememberWords(), ui.snap, active, ui.restarting))
+        val keep = PhoneWords.keepRunning(example.hq.spike.ui.shell.rememberWords(), ui.keep, ui.now)
+        Label(stringResource(R.string.settings_keep_running_section))
+        Facts(listOf(FactRow(stringResource(R.string.settings_page_keep_running), PhoneWords.keepSummary(example.hq.spike.ui.shell.rememberWords(), ui.keep, ui.now), keep.noticeTitle, opens = SettingsPage.KeepRunning)), actions.onPage)
     }
 }
 
@@ -1233,32 +1282,7 @@ private fun About(ui: SettingsUi, actions: SettingsActions) {
     Page {
         BackupCard(ui, actions)
         MovingCard()
-        Label(stringResource(R.string.settings_label_about))
-        Facts(
-            listOf(
-                FactRow("AgentHQ", stringResource(R.string.about_build, ui.build.substringAfterLast(' '))),
-                FactRow(stringResource(R.string.about_background), stringResource(if (ui.mode == "active") R.string.about_background_on else R.string.about_background_off)),
-                FactRow(stringResource(R.string.about_hq_version), ui.snap.health?.optString("version")?.takeIf { it.isNotBlank() } ?: stringResource(R.string.settings_no_answer_yet)),
-            ) + listOfNotNull(SettingsWords.notesCount(ui.snap)?.let { FactRow(stringResource(R.string.place_notes), it) }),
-        )
-        Label(stringResource(R.string.settings_app_updates))
-        UpdateGroup(ui, actions)
         StorageGroup(ui, actions)
-        Label(stringResource(R.string.settings_label_support))
-        Group {
-            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button) { actions.onPage(SettingsPage.Technical) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.settings_technical_title), style = HqType.BodyBold, color = Mts.Ink)
-                    Text(stringResource(R.string.settings_technical_sub), style = HqType.BodySm, color = Mts.InkMuted)
-                }
-                Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
-            }
-            Divider()
-            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = !ui.restarting, role = Role.Button) { actions.onRestart(true) }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(if (ui.restarting) R.string.settings_restarting_hq_dots else R.string.restart_act), style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
-                if (ui.restarting) Spinner(20) else Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
-            }
-        }
     }
 }
 
@@ -1286,7 +1310,7 @@ private fun Technical(ui: SettingsUi, actions: SettingsActions) {
                 FactRow(stringResource(R.string.technical_build), code.toString()),
                 FactRow(stringResource(R.string.technical_android), facts.android),
                 FactRow(stringResource(R.string.technical_hq), hq),
-            ),
+            ) + listOfNotNull(SettingsWords.notesCount(ui.snap)?.let { FactRow(stringResource(R.string.place_notes), it) }),
         )
         Group {
             Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button) { actions.onPage(SettingsPage.Noticed) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1303,6 +1327,11 @@ private fun Technical(ui: SettingsUi, actions: SettingsActions) {
                     Text(stringResource(R.string.copy_details_title), style = HqType.BodyBold, color = Mts.Ink)
                     Text(stringResource(R.string.copy_details_sub), style = HqType.BodySm, color = Mts.InkMuted)
                 }
+            }
+            Divider()
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = !ui.restarting, role = Role.Button) { actions.onRestart(true) }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(if (ui.restarting) R.string.settings_restarting_hq_dots else R.string.restart_act), style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
+                if (ui.restarting) Spinner(20) else Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
             }
         }
         Text(stringResource(R.string.technical_note), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp))
@@ -1434,20 +1463,21 @@ internal fun NoticedPage(counters: Counters) {
 
 /** The App updates rows: one that opens the Update page when a version is waiting (or checks when none is), and the test-versions switch. */
 @Composable
-private fun UpdateGroup(ui: SettingsUi, actions: SettingsActions) {
+/** [busyDialog] is false where the page draws the busy dialog itself, so one install question never shows twice. */
+internal fun UpdateGroup(ui: SettingsUi, actions: SettingsActions, checkRow: Boolean = true, busyDialog: Boolean = true) {
     val state = ui.update
     val context = androidx.compose.ui.platform.LocalContext.current
     val working = state == UpdateState.Checking
     val waiting = Updater.manifestOf(state) != null && state !is UpdateState.Installing
     Group {
-        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = !working, role = Role.Button) { if (waiting) actions.onPage(SettingsPage.Update) else actions.onCheckUpdate() }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (checkRow) Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = !working, role = Role.Button) { if (waiting) actions.onPage(SettingsPage.Update) else actions.onCheckUpdate() }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
                 Text(stringResource(if (waiting) R.string.upd_row_install else R.string.upd_row_check), style = HqType.BodyBold, color = Mts.Ink)
                 Text(UpdateLogic.wordsFor(context, state), style = HqType.BodySm, color = if (state is UpdateState.Problem || state is UpdateState.Failed) Mts.Amber else Mts.InkMuted)
             }
             if (working) Spinner(20) else Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
         }
-        if (state is UpdateState.Busy) {
+        if (busyDialog && state is UpdateState.Busy) {
             example.hq.spike.update.InstallBusyDialog(
                 state.reason,
                 onWait = { actions.onWaitThenInstall(state.manifest) },
@@ -1455,7 +1485,7 @@ private fun UpdateGroup(ui: SettingsUi, actions: SettingsActions) {
                 onDismiss = { actions.onBusyDismiss(state.manifest) },
             )
         }
-        Divider()
+        if (checkRow) Divider()
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Switch) { actions.onUpdateMain(!ui.updateMain) }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
                 Text(stringResource(R.string.settings_follow_every_build_of), style = HqType.BodyBold, color = Mts.Ink)
@@ -1606,6 +1636,5 @@ private fun MonoRow(text: String) {
 /** The server HQ's own row, only while a server is kept: its name and whether it is signed in. The name is its host, as there is no name field. */
 private fun serverRow(w: example.hq.spike.ui.shell.Words, c: android.content.Context): HomeRow? {
     val host = example.hq.spike.ServerHq.address(c)?.substringAfter("://")?.substringBefore('/') ?: return null
-    val state = w.s(if (example.hq.spike.ServerHq.signedOut(c)) R.string.state_server_signed_out else R.string.state_connected)
-    return HomeRow(SettingsPage.Devices, "phone", w.s(R.string.settings_server_hq_row), w.s(R.string.settings_server_hq_row_body, host) + " · " + state)
+    return SettingsWords.serverRow(w, host, example.hq.spike.ServerHq.signedOut(c))
 }

@@ -1,6 +1,5 @@
 package example.hq.spike.ui.settings
 
-import example.hq.spike.ui.firstrun.FirstRunWords
 import java.time.Instant
 import org.json.JSONObject
 
@@ -40,10 +39,8 @@ fun settingsFixture(name: String?): SettingsUi? {
     )
     val phone = listOf(
         HomeRow(SettingsPage.Background, "background", "Background work", "On \u00b7 answers chats, runs tasks"),
-        HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", "Good · 1 thing to check"),
         HomeRow(SettingsPage.Notifications, "notifications", "Notifications", "Needs you on · Updates on"),
         HomeRow(SettingsPage.CaptureWidgets, "capture", "Capture and widgets", "Sharing opens a new note"),
-        HomeRow(SettingsPage.StoredKeys, "key", FirstRunWords.KEYS_TITLE, "Add, replace or remove"),
     )
     val channels = listOf(ChannelFacts("needs", "Needs you", 4, true), ChannelFacts("updates", "Updates", 3, false), ChannelFacts("hub", "HQ is running", 2, false))
     val base = SettingsUi(open = true, snap = SettingsSnapshot(settings, chat, devices, budgets, health, providers = providers, copilot = copilot, forecast = forecast), loaded = true, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
@@ -56,8 +53,8 @@ fun settingsFixture(name: String?): SettingsUi? {
         "s-keys" -> base.copy(stack = listOf(SettingsPage.Keys))
         "s-chat" -> base.copy(stack = listOf(SettingsPage.Messaging))
         "s-devices" -> base.copy(stack = listOf(SettingsPage.Devices))
-        "s-keep" -> base.copy(stack = listOf(SettingsPage.KeepRunning), keep = KeepFacts(autoRevokeOff = true, samsung = true, lastStop = LastStop(android.app.ApplicationExitInfo.REASON_LOW_MEMORY, now.minusSeconds(172_800))))
-        "s-keep-bad" -> base.copy(stack = listOf(SettingsPage.KeepRunning), keep = KeepFacts(batteryUnrestricted = false, autoRevokeOff = false, notificationsAllowed = false))
+        "s-keep" -> base.copy(stack = listOf(SettingsPage.Background, SettingsPage.KeepRunning), keep = KeepFacts(autoRevokeOff = true, samsung = true, lastStop = LastStop(android.app.ApplicationExitInfo.REASON_LOW_MEMORY, now.minusSeconds(172_800))))
+        "s-keep-bad" -> base.copy(stack = listOf(SettingsPage.Background, SettingsPage.KeepRunning), keep = KeepFacts(batteryUnrestricted = false, autoRevokeOff = false, notificationsAllowed = false))
         "s-notif" -> base.copy(stack = listOf(SettingsPage.Notifications), notif = NotifFacts(true, channels, true))
         "s-notif-off" -> base.copy(stack = listOf(SettingsPage.Notifications), notif = NotifFacts(false, channels, false))
         "s-pair" -> base.copy(stack = listOf(SettingsPage.Messaging, SettingsPage.PairApp), pair = PairState("telegram", "K4M7Q-2XPA9", "/pair K4M7Q-2XPA9", "https://t.me/example_bot?start=K4M7Q-2XPA9", Instant.now().epochSecond + 272))
@@ -79,9 +76,9 @@ fun settingsFixture(name: String?): SettingsUi? {
         "s-spend" -> base.copy(stack = listOf(SettingsPage.Spending))
         "s-spend-exceeded" -> base.copy(stack = listOf(SettingsPage.Spending), snap = base.snap.copy(budgets = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","action":"block","limit_usd":5,"spent_usd":5.2,"pct":104,"state":"exceeded","resets_at":${future(1_800)}}]}"""), forecast = JSONObject("""{"month":{"rate_per_hour":null,"spent_this_period":0,"hours_to_reset":700,"projected_period_total":null}}""")))
         "s-origins" -> base.copy(stack = listOf(SettingsPage.Safety, SettingsPage.Origins))
-        "s-tools" -> base.copy(stack = listOf(SettingsPage.Safety, SettingsPage.ConnectedTools))
-        "s-computers" -> base.copy(stack = listOf(SettingsPage.Safety, SettingsPage.Computers))
-        "s-restart-ask" -> base.copy(stack = listOf(SettingsPage.About), askRestart = true)
+        "s-tools" -> base.copy(stack = listOf(SettingsPage.Computers))
+        "s-computers" -> base.copy(stack = listOf(SettingsPage.Computers))
+        "s-restart-ask" -> base.copy(stack = listOf(SettingsPage.Technical), askRestart = true)
         "s-about" -> base.copy(stack = listOf(SettingsPage.About))
         "s-down" -> base.copy(stack = listOf(SettingsPage.Keys), snap = SettingsSnapshot(), loaded = true)
         else -> null

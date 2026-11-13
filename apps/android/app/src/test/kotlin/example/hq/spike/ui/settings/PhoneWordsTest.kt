@@ -100,7 +100,7 @@ class PhoneWordsTest {
         assertEquals("Sharing opens a new task", PhoneWords.captureSummary(testWords(), CaptureFacts("task")))
         assertEquals("Sharing opens the last one you used", PhoneWords.captureSummary(testWords(), CaptureFacts("last")))
         val q = example.hq.spike.capture.Queued("a", "note", "N", org.json.JSONObject(), 1L)
-        assertEquals("Sharing opens a new note \u00b7 1 waiting to send", PhoneWords.captureSummary(testWords(), CaptureFacts(waiting = listOf(q))))
+        assertEquals("1 waiting to send", PhoneWords.captureSummary(testWords(), CaptureFacts(waiting = listOf(q))))
     }
 
     @Test fun aQueuedItemSaysWhatItIsAndWhyItIsStillThere() {
