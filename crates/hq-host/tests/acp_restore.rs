@@ -91,6 +91,27 @@ fn a_restored_session_is_put_back_on_the_model_it_was_on() {
 }
 
 #[test]
+fn a_saved_model_the_agent_no_longer_offers_does_not_cost_the_session() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (before, after) = (tmp.path().join("before"), tmp.path().join("after"));
+    let first = Host::new().with_state_dir(&before);
+    let mut chosen = spec("gone1", "model-set");
+    chosen.model = Some("m-new".into());
+    first.spawn(chosen).unwrap();
+    crash_copy(&before, &after);
+    first.kill("gone1").unwrap();
+    first.wait_exit("gone1", WAIT).unwrap();
+    let file = after.join("session.json");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("\"m-new\""));
+    std::fs::write(&file, text.replace("\"m-new\"", "\"m-retired\"")).unwrap();
+
+    let second = Host::new().with_state_dir(&after);
+    assert_eq!(second.restore().restored, vec!["gone1".to_string()]);
+    second.kill("gone1").unwrap();
+}
+
+#[test]
 fn several_acp_agents_come_back_together() {
     const AGENTS: usize = 6;
     let tmp = tempfile::tempdir().unwrap();
