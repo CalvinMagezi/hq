@@ -89,7 +89,7 @@ fn launch_send_read_and_close_round_trip() {
     let b = host.backend();
     assert!(!b.version().unwrap().is_empty());
 
-    let launched = b.launch(&cat("hs-one", "opencode")).unwrap();
+    let launched = b.launch(&cat("hs-one", "kimi")).unwrap();
     assert!(
         launched.ready,
         "a kind without rules has no state to wait for"
@@ -112,8 +112,8 @@ fn launch_send_read_and_close_round_trip() {
 fn a_taken_name_is_an_api_error() {
     let host = Running::start();
     let b = host.backend();
-    b.launch(&cat("hs-dup", "opencode")).unwrap();
-    match b.launch(&cat("hs-dup", "opencode")) {
+    b.launch(&cat("hs-dup", "kimi")).unwrap();
+    match b.launch(&cat("hs-dup", "kimi")) {
         Err(AgentHostError::Api { code, .. }) => assert_eq!(code, "name_taken"),
         other => panic!("expected name_taken, got {other:?}"),
     }
@@ -123,7 +123,7 @@ fn a_taken_name_is_an_api_error() {
 fn invalid_keys_are_refused_before_they_reach_the_host() {
     let host = Running::start();
     let b = host.backend();
-    b.launch(&cat("hs-keys", "opencode")).unwrap();
+    b.launch(&cat("hs-keys", "kimi")).unwrap();
     let err = b.send_keys("hs-keys", &["--help".to_string()]).unwrap_err();
     assert!(matches!(err, AgentHostError::Api { ref code, .. } if code == "invalid_keys"));
     b.send_keys("hs-keys", &["ctrl+c".to_string()]).unwrap();
@@ -197,7 +197,7 @@ fn a_claude_launch_gets_private_hook_settings_and_other_kinds_do_not() {
     let host = Running::start();
     let b = host.backend();
     b.launch(&cat("hs-hooked", "claude")).unwrap();
-    b.launch(&cat("hs-plain", "opencode")).unwrap();
+    b.launch(&cat("hs-plain", "kimi")).unwrap();
 
     let hooks = host.dir.path().join("run/hooks");
     let file = hooks.join("hs-hooked.json");
@@ -248,7 +248,7 @@ fn an_agent_that_settles_after_a_startup_spinner_is_ready() {
 fn a_kind_without_rules_is_also_not_ready_before_its_screen_is_drawn() {
     let host = Running::start();
     let b = host.backend();
-    let mut req = cat("hs-slow-plain", "opencode");
+    let mut req = cat("hs-slow-plain", "kimi");
     req.command = Some("f() { sleep 2; echo drawn-screen; cat; }; f".into());
     let began = Instant::now();
     let launched = b.launch(&req).unwrap();
@@ -351,7 +351,7 @@ fn a_launch_with_hq_access_gets_a_private_mcp_config_and_flag() {
     );
 
     // Another kind never gets one.
-    let mut other = cat("hs-nomcp", "opencode");
+    let mut other = cat("hs-nomcp", "kimi");
     other.mcp = req.mcp.clone();
     b.launch(&other).unwrap();
     assert!(!host.dir.path().join("run/mcp/hs-nomcp.json").exists());
