@@ -30,6 +30,8 @@ const STOP_GRACE: Duration = Duration::from_secs(2);
 /// Prompts held back while a turn runs; more are refused so a runaway caller cannot grow memory.
 const MAX_QUEUED_PROMPTS: usize = 16;
 const RULE: &str = "acp";
+/// What the last turn reports when it ended with no answer twice.
+const NO_ANSWER: &str = "no answer after one retry";
 const CLIENT_NAME: &str = "agent-hq-host";
 const MCP_SERVER_NAME: &str = "agent-hq";
 const NO_LOAD_SESSION: &str =
@@ -188,6 +190,9 @@ impl AcpPane {
             events: l.events,
             on_exit: l.on_exit,
             synced: seed.synced(),
+            awaiting: None,
+            retry: None,
+            no_answer: false,
         };
         std::thread::spawn(move || driver.run());
         Ok(Self {
@@ -417,6 +422,17 @@ struct Driver {
     events: Arc<EventLog>,
     on_exit: ExitHook,
     synced: Synced,
+    /// The prompt whose turn has not ended yet, and whether it is already the retry.
+    awaiting: Option<Awaited>,
+    /// A prompt to send again first because its turn ended with no answer.
+    retry: Option<String>,
+    /// The last turn ended with no answer even after the retry.
+    no_answer: bool,
+}
+
+struct Awaited {
+    text: String,
+    retried: bool,
 }
 
 impl Driver {
@@ -431,6 +447,7 @@ impl Driver {
                 Ok(heard) => heard,
                 Err(_) => break self.conn.kill_group() as u32,
             };
+            self.check_answer();
             self.send_next_prompt(&mut queue);
             self.sync(&mut synced, heard);
         };
@@ -468,12 +485,51 @@ impl Driver {
         if self.conn.tracker.state() != WireState::Idle {
             return;
         }
-        if let Some(text) = queue.pop_front()
-            && let Err(e) = self.conn.prompt(&text)
-        {
-            self.conn
+        let (text, retried) = match self.retry.take() {
+            Some(text) => (text, true),
+            None => match queue.pop_front() {
+                Some(text) => (text, false),
+                None => return,
+            },
+        };
+        match self.conn.prompt(&text) {
+            Ok(_) => {
+                self.awaiting = Some(Awaited { text, retried });
+                self.no_answer = false;
+            }
+            Err(e) => self
+                .conn
                 .tracker
-                .record_failure(&format!("prompt not sent: {e}"));
+                .record_failure(&format!("prompt not sent: {e}")),
+        }
+    }
+
+    /// A turn that ends normally with no words and no edits is an agent that dropped the prompt
+    /// (a login that lapsed, a context it could not fit). It is sent once more; a second empty
+    /// turn is reported as having no answer instead of as a clean finish.
+    fn check_answer(&mut self) {
+        let t = &self.conn.tracker;
+        if self.awaiting.is_none() || t.state() != WireState::Idle || t.end().is_none() {
+            return;
+        }
+        let clean = matches!(
+            t.end(),
+            Some(TurnEnd::Stopped {
+                reason: StopReason::EndTurn,
+                ..
+            })
+        );
+        let empty = clean && t.text().trim().is_empty() && t.touched().is_empty();
+        let Some(asked) = self.awaiting.take() else {
+            return;
+        };
+        if !empty {
+            return;
+        }
+        if asked.retried {
+            self.no_answer = true;
+        } else {
+            self.retry = Some(asked.text);
         }
     }
 
@@ -509,6 +565,9 @@ impl Driver {
                 option_ids,
                 decline,
             });
+        }
+        if self.no_answer {
+            v.facts.stop_reason = Some(NO_ANSWER.to_string());
         }
         let (n, dropped, partial) = (t.lines().len(), t.dropped(), t.partial().len());
         if (n, dropped, partial) != (synced.lines, synced.dropped, synced.partial) {

@@ -82,6 +82,33 @@ fn lockdown_stops_acp_agents_too() {
     assert!(matches!(again, Err(HostError::LockedDown(_))));
 }
 
+fn acp_facts(host: &Host, name: &str) -> hq_host::AcpFacts {
+    host.info(name).unwrap().acp.unwrap()
+}
+
+#[test]
+fn a_turn_that_ends_with_no_answer_is_sent_once_more() {
+    let host = Host::new();
+    host.spawn(spec("empty1", "empty-once")).unwrap();
+    host.prompt("empty1", "say something").unwrap();
+    until("the retried answer", || {
+        acp_facts(&host, "empty1").result.as_deref() == Some("RETRIED")
+    });
+    host.kill("empty1").unwrap();
+}
+
+#[test]
+fn a_second_empty_turn_is_reported_as_no_answer() {
+    let host = Host::new();
+    host.spawn(spec("empty2", "empty-always")).unwrap();
+    host.prompt("empty2", "say something").unwrap();
+    until("the no-answer report", || {
+        acp_facts(&host, "empty2").stop_reason.as_deref() == Some("no answer after one retry")
+    });
+    assert!(acp_facts(&host, "empty2").result.is_none());
+    host.kill("empty2").unwrap();
+}
+
 #[test]
 fn agents_launching_together_cannot_pass_the_cap_or_share_a_name() {
     const CAP: usize = 2;

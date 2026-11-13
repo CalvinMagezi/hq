@@ -128,6 +128,7 @@ fn main() {
     let mut lines = stdin().lock().lines().map_while(Result::ok);
     let mut mcp_seen = String::new();
     let mut model = String::from("m-old");
+    let mut prompts = 0u32;
     while let Some(m) = next_line(&mut lines) {
         let id = m.get("id").cloned().unwrap_or(Value::Null);
         match m["method"].as_str() {
@@ -173,6 +174,14 @@ fn main() {
                     false => json!({}),
                 };
                 reply(&id, loaded)
+            }
+            Some("session/prompt") if scenario.starts_with("empty") => {
+                // `empty-once` drops the first prompt and answers the second; `empty-always` never answers.
+                prompts += 1;
+                if scenario == "empty-once" && prompts > 1 {
+                    chunk("RETRIED");
+                }
+                reply(&id, json!({"stopReason": "end_turn"}));
             }
             Some("session/prompt") if scenario.starts_with("model") => {
                 chunk(&format!("MODEL:{model}"));
