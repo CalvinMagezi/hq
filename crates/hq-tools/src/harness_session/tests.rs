@@ -4962,3 +4962,31 @@ fn a_finished_acp_turn_adds_its_report_to_a_session_view() {
         "no result before a turn ends"
     );
 }
+
+#[test]
+fn waiting_for_many_reports_each_session_and_one_failure_does_not_hide_the_rest() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    seed_watched(&db, "hs-known", None);
+    let ids: Vec<String> = ["hs-known", "hs-missing", "hs-denied"]
+        .map(String::from)
+        .to_vec();
+    let may_reach = |id: &str| {
+        if id == "hs-denied" {
+            anyhow::bail!("this caller may not wait on that session");
+        }
+        Ok(())
+    };
+    let report = control::wait_all(&db, &ids, &[], Duration::from_secs(1), &may_reach);
+    let results = report["results"].as_array().unwrap();
+    assert_eq!(results.len(), 3, "{report}");
+    assert_eq!(report["settled"], false);
+    assert_eq!(results[0]["session_id"], "hs-known");
+    assert!(results[1]["error"].as_str().is_some(), "{report}");
+    assert!(
+        results[2]["error"]
+            .as_str()
+            .unwrap()
+            .contains("may not wait"),
+        "{report}"
+    );
+}

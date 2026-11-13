@@ -990,6 +990,37 @@ pub fn wait(
     }
 }
 
+/// Fewest seconds a session in a fan-in gets, however little of the shared deadline is left, so
+/// one that already settled is still read.
+const FAN_IN_MIN_WAIT: Duration = Duration::from_secs(1);
+
+/// Waits for several sessions against one deadline and returns each one's report. A session the
+/// caller may not reach, or that cannot be waited on, reports its error and does not fail the others.
+pub fn wait_all(
+    db: &Arc<Database>,
+    session_ids: &[String],
+    until: &[AgentStatus],
+    timeout: Duration,
+    may_reach: &dyn Fn(&str) -> Result<()>,
+) -> Value {
+    let deadline = std::time::Instant::now() + timeout;
+    let results: Vec<Value> = session_ids
+        .iter()
+        .map(|id| {
+            let left = deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .max(FAN_IN_MIN_WAIT);
+            may_reach(id)
+                .and_then(|()| wait(db, id, until, left))
+                .unwrap_or_else(
+                    |e| json!({ "session_id": id, "settled": false, "error": e.to_string() }),
+                )
+        })
+        .collect();
+    let settled = results.iter().all(|r| r["settled"] == json!(true));
+    json!({ "settled": settled, "results": results })
+}
+
 pub fn stop(db: &Arc<Database>, session_id: &str) -> Result<Value> {
     let row = get_row(db, session_id)?;
     let (host, agent) = locate(&row)?;
