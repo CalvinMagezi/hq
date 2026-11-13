@@ -167,7 +167,12 @@ fn main() {
                     "title": "Old edit", "locations": [{"path": "/old/file"}]}),
                 );
                 mcp_seen = m["params"]["mcpServers"].to_string();
-                reply(&id, json!({}))
+                // Newer agents answer a load with the same menu a new session gets.
+                let loaded = match scenario.starts_with("model") {
+                    true => new_session_result(&scenario),
+                    false => json!({}),
+                };
+                reply(&id, loaded)
             }
             Some("session/prompt") if scenario.starts_with("model") => {
                 chunk(&format!("MODEL:{model}"));

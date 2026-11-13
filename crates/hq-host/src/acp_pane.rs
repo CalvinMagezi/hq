@@ -104,6 +104,8 @@ pub(crate) struct AcpPane {
     pub started: Instant,
     pid: u32,
     session_id: String,
+    /// The model the session is on, kept so a restart can choose it again.
+    pub model: Option<String>,
     view: Arc<Mutex<View>>,
     cmds: Sender<Cmd>,
 }
@@ -134,7 +136,16 @@ impl AcpPane {
                     }
                     Some(id) => conn
                         .load_session(id, &cwd, servers, HANDSHAKE_TIMEOUT)
-                        .map(|()| id.clone()),
+                        .map(|()| {
+                            // Best effort: a saved model the agent no longer offers must not cost
+                            // the session, which keeps the model it stored itself.
+                            if let Some(model) =
+                                l.model.as_deref().filter(|_| conn.models().is_some())
+                            {
+                                let _ = conn.select_model(model, HANDSHAKE_TIMEOUT);
+                            }
+                            id.clone()
+                        }),
                     None => conn
                         .new_session(&cwd, servers, HANDSHAKE_TIMEOUT)
                         .and_then(|id| {
@@ -147,6 +158,10 @@ impl AcpPane {
             });
         let session_id = started.map_err(|e| spawn_error(with_stderr(&e.to_string(), &conn)))?;
         let pid = conn.pid();
+        let model = conn
+            .models()
+            .and_then(|m| m.current.clone())
+            .or_else(|| l.model.clone());
         let now = Instant::now();
         let seed = Seed::of(&conn.tracker);
         let view = Arc::new(Mutex::new(View {
@@ -184,6 +199,7 @@ impl AcpPane {
             started: now,
             pid,
             session_id,
+            model,
             view,
             cmds: tx,
         })

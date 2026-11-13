@@ -312,8 +312,8 @@ impl Connection {
         Ok(id.to_owned())
     }
 
-    /// The models the session offered when it was opened; None for a loaded session or an agent
-    /// that offers no choice.
+    /// The models the session offered when it was opened or loaded; None for an agent that offers
+    /// no choice.
     pub fn models(&self) -> Option<&ModelMenu> {
         self.models.as_ref()
     }
@@ -361,7 +361,8 @@ impl Connection {
         self.tracker.set_replaying(true);
         let loaded = self.call("session/load", params, timeout);
         self.tracker.set_replaying(false);
-        loaded?;
+        let result = loaded?;
+        self.models = parse_model_menu(&result);
         self.session_id = Some(session_id.to_owned());
         self.tracker.set_cwd(cwd);
         self.tracker.record_restored(session_id);
