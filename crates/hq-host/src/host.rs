@@ -15,7 +15,7 @@ use crate::report;
 use crate::sandbox::{self, Mode, SandboxSpec};
 use crate::state::{PaneRecord, StateFile};
 use crate::token;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -309,6 +309,9 @@ pub struct Host {
     panes: Registry,
     acp: AcpRegistry,
     awaiting: Awaiting,
+    /// ACP agents still launching: they hold a place under the cap and their name before they
+    /// are registered, which takes seconds.
+    starting: Arc<Mutex<BTreeSet<String>>>,
     max_agents: usize,
     events: Arc<EventLog>,
     /// Per-agent secret each pane gets so its hooks can report on itself and
@@ -388,6 +391,7 @@ impl Host {
             panes: Arc::new(Mutex::new(BTreeMap::new())),
             acp: Arc::new(Mutex::new(BTreeMap::new())),
             awaiting: Arc::new(Mutex::new(BTreeMap::new())),
+            starting: Arc::new(Mutex::new(BTreeSet::new())),
             max_agents: MAX_AGENTS,
             events: Arc::new(EventLog::from_clock()),
             pane_tokens: Mutex::new(BTreeMap::new()),
@@ -567,14 +571,39 @@ impl Host {
         lock(&self.acp).get(name).cloned()
     }
 
-    fn agent_count(&self) -> usize {
+    fn registered_count(&self) -> usize {
         lock(&self.panes).len() + lock(&self.acp).len() + lock(&self.awaiting).len()
     }
 
-    fn name_in_use(&self, name: &str) -> bool {
+    fn agent_count(&self) -> usize {
+        self.registered_count() + lock(&self.starting).len()
+    }
+
+    fn registered_name(&self, name: &str) -> bool {
         lock(&self.panes).contains_key(name)
             || lock(&self.acp).contains_key(name)
             || lock(&self.awaiting).contains_key(name)
+    }
+
+    fn name_in_use(&self, name: &str) -> bool {
+        self.registered_name(name) || lock(&self.starting).contains(name)
+    }
+
+    /// Takes a place under the cap and the name for an ACP agent that is about to launch, so
+    /// concurrent starts cannot pass the cap or take the same name. Freed when dropped.
+    fn reserve_slot(&self, name: &str) -> Result<StartSlot, HostError> {
+        let mut starting = lock(&self.starting);
+        if self.registered_count() + starting.len() >= self.max_agents {
+            return Err(HostError::TooManyAgents(self.max_agents));
+        }
+        if self.registered_name(name) || starting.contains(name) {
+            return Err(HostError::NameTaken(name.to_string()));
+        }
+        starting.insert(name.to_string());
+        Ok(StartSlot {
+            starting: self.starting.clone(),
+            name: name.to_string(),
+        })
     }
 
     fn pane(&self, name: &str) -> Result<Arc<Pane>, HostError> {
@@ -751,12 +780,7 @@ impl Host {
         {
             return Err(HostError::TooLarge("the command line"));
         }
-        if self.agent_count() >= self.max_agents {
-            return Err(HostError::TooManyAgents(self.max_agents));
-        }
-        if self.name_in_use(&spec.name) {
-            return Err(HostError::NameTaken(spec.name));
-        }
+        let _slot = self.reserve_slot(&spec.name)?;
         let mut env = pane_env(&spec.env);
         let confined = match spec.sandbox.as_ref().filter(|s| s.mode == Mode::Process) {
             Some(sb) => {
@@ -1743,6 +1767,18 @@ impl Host {
 }
 
 /// Writes the resumable running agents to the state file, if there is one.
+/// A place under the agent cap held while an ACP agent launches.
+struct StartSlot {
+    starting: Arc<Mutex<BTreeSet<String>>>,
+    name: String,
+}
+
+impl Drop for StartSlot {
+    fn drop(&mut self) {
+        lock(&self.starting).remove(&self.name);
+    }
+}
+
 fn save_state(panes: &Registry, acp: &AcpRegistry, awaiting: &Awaiting, state: Option<&StateFile>) {
     let Some(state) = state else { return };
     let waiting: Vec<PaneRecord> = lock(awaiting).values().cloned().collect();

@@ -83,6 +83,50 @@ fn lockdown_stops_acp_agents_too() {
 }
 
 #[test]
+fn agents_launching_together_cannot_pass_the_cap_or_share_a_name() {
+    const CAP: usize = 2;
+    const CALLERS: usize = 6;
+    let host = Host::new().with_max_agents(CAP);
+    let results: Vec<_> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..CALLERS)
+            .map(|n| {
+                let host = &host;
+                scope.spawn(move || host.spawn(spec(&format!("cap{n}"), "turn")))
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let started = results.iter().filter(|r| r.is_ok()).count();
+    assert_eq!(started, CAP, "{results:?}");
+    assert!(
+        results
+            .iter()
+            .filter_map(|r| r.as_ref().err())
+            .all(|e| matches!(e, HostError::TooManyAgents(_))),
+        "{results:?}"
+    );
+    for n in 0..CALLERS {
+        let _ = host.kill(&format!("cap{n}"));
+    }
+
+    let roomy = Host::new();
+    let twins: Vec<_> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..2)
+            .map(|_| scope.spawn(|| roomy.spawn(spec("twin", "turn"))))
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    assert_eq!(twins.iter().filter(|r| r.is_ok()).count(), 1, "{twins:?}");
+    assert!(
+        twins
+            .iter()
+            .filter_map(|r| r.as_ref().err())
+            .all(|e| matches!(e, HostError::NameTaken(_)))
+    );
+    let _ = roomy.kill("twin");
+}
+
+#[test]
 fn too_many_waiting_prompts_are_refused() {
     let host = Host::new();
     host.spawn(spec("life5", "cancel")).unwrap();
