@@ -128,3 +128,51 @@ host reads the menu a new session offers (`models.availableModels`, or the confi
 `model`) and switches with `session/set_model` or `session/set_config_option`; an id not on the menu
 fails the start with the list. agy, for one, ignores the model its CLI settings file holds when driven
 over ACP and starts on its own default, so an ACP profile that wants a particular model must say so.
+
+## After a restart, in more detail (eighth slice)
+
+A restore holds back writes to `session.json` until every record has been dealt with, so a crash halfway
+leaves the file as it was. ACP agents start up to four at a time (each waits on its own server), in
+batches no larger than the room left under `max_agents`; an agent counts toward that cap, and holds its
+name, from the moment it starts launching. A record whose folder no longer exists is forgotten with the
+reason logged. The model a session was on is stored with its record and chosen again after
+`session/load` when the agent returns a model menu; a saved model the agent no longer offers is ignored,
+any other failure keeps the record for a later resume.
+
+## Driving it (ninth slice)
+
+- A turn that ends normally with no words and no edits is sent once more by the host; a second empty
+  turn reports `no answer after one retry` as its stop reason.
+- An automated caller (an agent session, a Drive turn, a connection, an `hq_ask` reply) may not press
+  `esc` or `ctrl+c` to stop a turn the owner started. The daemon remembers who gave each session its
+  latest prompt, in memory only, so after a restart nothing is refused.
+- `harness_session_wait` takes `session_ids` (up to 10) and returns one report per session, each with
+  its own `turn`, against one deadline.
+- The MCP token given by `hq_mcp` is scoped: the agent sees the session, task and vault tools, not
+  `harness_session_spawn`. An agent cannot start other sessions through it.
+
+## Measured and recipes (2026-11-13)
+
+One session at a time, a marker prompt, the answer must appear as well as the prompt echo:
+
+| Lane | Runs | Answered | Unknown status seen |
+|---|---|---|---|
+| opencode over ACP | 20 | 20 | 0 |
+| agy over ACP | 20 | 20 | 0 |
+| Copilot CLI over ACP | 20 | 20 | 0 |
+| agy in a terminal | 20 | 20 | 0 |
+| Hermes in a terminal (with its rules) | 10 | 10 | 0 |
+| opencode in a terminal (no rules) | 3 | 0 | 3 of 3 |
+
+An agent with no detection rules (opencode, cursor, kimi, qwen) reads `unknown` in a terminal, so the
+host never types the first prompt: use ACP for those. Per agent:
+
+- **opencode**: `transport: acp`; give it a lean config through `XDG_CONFIG_HOME` in the profile's
+  `env` so its own MCP servers and plugins do not fill the context.
+- **agy**: `transport: acp` and a `model:`, since the CLI setting is ignored.
+- **Copilot CLI**: `acp_args` must switch off its built-in MCP servers, custom instructions and every
+  server in its own config (`--disable-builtin-mcps --no-custom-instructions --disable-mcp-server
+  <name> ...`), or a small-context model answers with a static-context error as ordinary text.
+- **Hermes**: stays in a terminal. Over ACP it fails under the process sandbox (its gateway cannot run
+  inside it). It needs its gateway started first (`hermes gateway ensure`) and stopped after. It has no
+  HQ token, so it cannot write the vault itself.
