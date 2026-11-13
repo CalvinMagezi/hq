@@ -1,0 +1,37 @@
+# Agent HQ's own rules for opencode, written from screens of an opencode 1.19.5 session on
+# Claude Haiku 5.5 captured on 2026-11-13 (tests/fixtures/opencode).
+#
+# opencode shows a hint line under its input box. While it works the line starts with a spinner and
+# "esc interrupt"; otherwise it carries only "ctrl+p commands" (with the token and cost figures
+# once a turn has run). Its permission questions are not covered yet: a screen none of the rules
+# recognise reads unknown, never idle. Driving opencode over ACP (`transport: acp`) does not need
+# any of this.
+id = "opencode"
+version = "2026.11.13.1"
+min_engine_version = 4
+updated_at = "2026-11-13T00:00:00Z"
+
+[[rules]]
+id = "working_interrupt_hint"
+state = "working"
+priority = 960
+region = "bottom_non_empty_lines(3)"
+visible_working = true
+# "⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt        tab agents  ctrl+p commands"
+line_regex = ['\besc interrupt\b']
+
+[[rules]]
+id = "idle_hint"
+state = "idle"
+priority = 900
+region = "bottom_non_empty_lines(2)"
+visible_idle = true
+# "tab agents  ctrl+p commands" just above the folder and version line at startup, and
+# "30.0K (3%) · $0.00  ctrl+p commands" as the last line after a turn.
+line_regex = ['ctrl\+p commands']
+
+[[rules]]
+id = "unrecognised"
+state = "unknown"
+priority = 0
+# No gate: a screen none of the rules above know reads unknown.
