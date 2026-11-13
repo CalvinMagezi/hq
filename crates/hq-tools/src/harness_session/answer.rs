@@ -247,7 +247,7 @@ pub(super) fn answer_with(
         );
         match settled {
             Ok(_) => {
-                send(db, session_id, message, chat)?;
+                send(db, session_id, message, chat, who)?;
                 report["message_sent"] = json!(true);
             }
             Err(_) => {

@@ -1017,7 +1017,14 @@ pub fn deliver_if_idle(
         return Ok(None);
     }
     deliver_next(db, session_id, |text| {
-        crate::harness_session::send(db, session_id, text, None).map(|_| ())
+        crate::harness_session::send(
+            db,
+            session_id,
+            text,
+            None,
+            crate::harness_session::answer::Answerer::Automated("an agent message"),
+        )
+        .map(|_| ())
     })
 }
 
@@ -1032,7 +1039,14 @@ pub fn deliver_to(
         return Ok(None);
     }
     deliver_next(db, session_id, |text| {
-        crate::harness_session::send(db, session_id, text, None).map(|_| ())
+        crate::harness_session::send(
+            db,
+            session_id,
+            text,
+            None,
+            crate::harness_session::answer::Answerer::Automated("an agent message"),
+        )
+        .map(|_| ())
     })
 }
 

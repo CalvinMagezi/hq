@@ -359,6 +359,12 @@ impl HqTool for HarnessSessionSpawnTool {
             report["cwd_note"] = json!(note);
         }
         super::tag_origin(&self.db, &report, origin);
+        if !prompt.is_empty()
+            && let Some(id) = report["session_id"].as_str()
+        {
+            let who = super::answer::Answerer::of(&args, self.chat.as_ref());
+            super::turn_origin::note_prompt(id, who);
+        }
         let brief = super::with_observed(
             super::connector_brief(&args, &["prompt", "goal", "done_criteria"]),
             &observe,
@@ -607,7 +613,7 @@ impl HqTool for HarnessSessionSendTool {
         let who = super::answer::Answerer::of(&args, chat.as_ref());
         tokio::task::spawn_blocking(move || {
             if keys.is_empty() {
-                super::send(&db, &id, &text, chat.as_ref())
+                super::send(&db, &id, &text, chat.as_ref(), who)
             } else {
                 super::send_keys(&db, &id, &keys, chat.as_ref(), who)
             }

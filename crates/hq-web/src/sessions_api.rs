@@ -685,7 +685,7 @@ pub(crate) async fn send_handler(
     let result = tokio::task::spawn_blocking(move || {
         let (report, detail) = match (&text, &keys) {
             (Some(t), _) => (
-                harness::send(&db, &id, t, None)?,
+                harness::send(&db, &id, t, None, harness::answer::Answerer::Owner)?,
                 format!("text, {} characters", t.chars().count()),
             ),
             (_, Some(k)) => (

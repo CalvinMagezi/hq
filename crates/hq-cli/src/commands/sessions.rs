@@ -200,7 +200,13 @@ pub async fn run(
                 anyhow::anyhow!("usage: hq sessions send <session-id> --prompt '...'")
             })?;
             let text = prompt.ok_or_else(|| anyhow::anyhow!("--prompt is required for send"))?;
-            print_json(&hq_tools::harness_session::send(&db, &id, &text, None)?);
+            print_json(&hq_tools::harness_session::send(
+                &db,
+                &id,
+                &text,
+                None,
+                hq_tools::harness_session::answer::Answerer::Owner,
+            )?);
         }
         "stop" => {
             let id = arg1.ok_or_else(|| anyhow::anyhow!("usage: hq sessions stop <session-id>"))?;
