@@ -12,7 +12,8 @@ use crate::host::{AcpFacts, PaneInfo};
 use crate::pane::{ExitHook, PaneStatus};
 use crate::sandbox::{Mode, SandboxSpec};
 use hq_acp::{
-    AgentState as WireState, Choice, Connection, OptionKind, StopReason, ToolKind, TurnEnd,
+    AgentState as WireState, Choice, ClientError, Connection, OptionKind, StopReason, ToolKind,
+    TurnEnd,
 };
 use serde_json::json;
 use std::collections::VecDeque;
@@ -136,15 +137,16 @@ impl AcpPane {
                     }
                     Some(id) => conn
                         .load_session(id, &cwd, servers, HANDSHAKE_TIMEOUT)
-                        .map(|()| {
-                            // Best effort: a saved model the agent no longer offers must not cost
-                            // the session, which keeps the model it stored itself.
-                            if let Some(model) =
-                                l.model.as_deref().filter(|_| conn.models().is_some())
-                            {
-                                let _ = conn.select_model(model, HANDSHAKE_TIMEOUT);
+                        .and_then(|()| {
+                            // A saved model the agent no longer offers must not cost the session,
+                            // which keeps the model it stored itself. Any other failure is real.
+                            let saved = l.model.as_deref().filter(|_| conn.models().is_some());
+                            match saved.map(|m| conn.select_model(m, HANDSHAKE_TIMEOUT)) {
+                                Some(Err(e)) if !matches!(e, ClientError::UnknownModel { .. }) => {
+                                    Err(e)
+                                }
+                                _ => Ok(id.clone()),
                             }
-                            id.clone()
                         }),
                     None => conn
                         .new_session(&cwd, servers, HANDSHAKE_TIMEOUT)

@@ -1008,8 +1008,14 @@ impl Host {
         }
         for (rec, started) in self.start_records(to_start) {
             let name = rec.name.clone();
+            // Lockdown may have landed while the starts ran, after the check above.
+            let started = started.and_then(|info| self.undo_if_locked(&info.name).map(|()| info));
             match started {
                 Ok(_) => report.restored.push(name),
+                Err(HostError::LockedDown(reason)) => report.skipped.push((
+                    name,
+                    format!("the host is locked down, so it is forgotten: {reason}"),
+                )),
                 // Over the cap the record waits instead of being lost at the next save.
                 Err(e @ HostError::TooManyAgents(_)) => {
                     report.skipped.push((name, e.to_string()));
@@ -1047,7 +1053,14 @@ impl Host {
                 (rec, started)
             })
             .collect();
-        for batch in acp.chunks(MAX_PARALLEL_ACP_RESTORES) {
+        let mut waiting = acp.as_slice();
+        while !waiting.is_empty() {
+            // A start counts toward the cap only once it has launched, so a batch never holds
+            // more than the room left.
+            let room = self.max_agents.saturating_sub(self.agent_count());
+            let take = room.clamp(1, MAX_PARALLEL_ACP_RESTORES).min(waiting.len());
+            let (batch, rest) = waiting.split_at(take);
+            waiting = rest;
             std::thread::scope(|scope| {
                 let running: Vec<_> = batch
                     .iter()
