@@ -70,6 +70,52 @@ fn a_restarted_host_loads_the_stored_session_and_counts_none_of_its_history() {
 }
 
 #[test]
+fn a_restored_session_is_put_back_on_the_model_it_was_on() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (before, after) = (tmp.path().join("before"), tmp.path().join("after"));
+    let first = Host::new().with_state_dir(&before);
+    let mut chosen = spec("model1", "model-set");
+    chosen.model = Some("m-new".into());
+    first.spawn(chosen).unwrap();
+    crash_copy(&before, &after);
+    first.kill("model1").unwrap();
+    first.wait_exit("model1", WAIT).unwrap();
+
+    let second = Host::new().with_state_dir(&after);
+    assert_eq!(second.restore().restored, vec!["model1".to_string()]);
+    second.prompt("model1", "which model").unwrap();
+    until("the turn", || second.info("model1").unwrap().done);
+    let text = second.read("model1", ReadSource::Recent, 0).unwrap();
+    assert!(text.contains("MODEL:m-new"), "{text}");
+    second.kill("model1").unwrap();
+}
+
+#[test]
+fn several_acp_agents_come_back_together() {
+    const AGENTS: usize = 6;
+    let tmp = tempfile::tempdir().unwrap();
+    let (before, after) = (tmp.path().join("before"), tmp.path().join("after"));
+    let first = Host::new().with_state_dir(&before);
+    let names: Vec<String> = (0..AGENTS).map(|i| format!("many{i}")).collect();
+    for name in &names {
+        first.spawn(spec(name, "turn")).unwrap();
+    }
+    crash_copy(&before, &after);
+    for name in &names {
+        first.kill(name).unwrap();
+        first.wait_exit(name, WAIT).unwrap();
+    }
+
+    let second = Host::new().with_state_dir(&after);
+    let mut restored = second.restore().restored;
+    restored.sort();
+    assert_eq!(restored, names);
+    for name in &names {
+        second.kill(name).unwrap();
+    }
+}
+
+#[test]
 fn a_stopped_agent_is_not_brought_back() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("run");

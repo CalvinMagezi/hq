@@ -45,6 +45,10 @@ pub struct PaneRecord {
     /// session the protocol loads again.
     #[serde(default)]
     pub acp_session: Option<String>,
+    /// The model an ACP session was on, chosen again when the session is loaded (best effort: an
+    /// agent that offers no menu keeps the model its own session stored).
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -64,6 +68,9 @@ pub(crate) struct StateFile {
     /// Once set, nothing is written: the host is shutting down and the file
     /// must keep describing what was running before the processes are stopped.
     frozen: AtomicBool,
+    /// While set, writes are skipped but the file is kept as it is, so a restore that crashes
+    /// halfway still finds every record it had not started yet.
+    held: AtomicBool,
 }
 
 impl StateFile {
@@ -73,7 +80,16 @@ impl StateFile {
             path: dir.join(STATE_FILE),
             write_lock: Mutex::new(()),
             frozen: AtomicBool::new(false),
+            held: AtomicBool::new(false),
         }
+    }
+
+    pub(crate) fn hold(&self) {
+        self.held.store(true, Ordering::SeqCst);
+    }
+
+    pub(crate) fn release(&self) {
+        self.held.store(false, Ordering::SeqCst);
     }
 
     pub(crate) fn freeze(&self) {
@@ -83,7 +99,7 @@ impl StateFile {
     /// Replaces the file with `records`, atomically.
     pub(crate) fn write(&self, records: &[PaneRecord]) -> std::io::Result<()> {
         let _guard = self.write_lock.lock().unwrap_or_else(|p| p.into_inner());
-        if self.frozen.load(Ordering::SeqCst) {
+        if self.frozen.load(Ordering::SeqCst) || self.held.load(Ordering::SeqCst) {
             return Ok(());
         }
         token::ensure_dir(&self.dir)?;
@@ -163,6 +179,7 @@ mod tests {
             sandbox: None,
             idle_ttl_secs: None,
             acp_session: None,
+            model: None,
         }
     }
 
@@ -219,6 +236,19 @@ mod tests {
             fs::read_to_string(state.dir.join("session.json.unreadable")).unwrap(),
             "{ not json"
         );
+    }
+
+    #[test]
+    fn a_held_file_keeps_its_records_until_released() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = StateFile::new(&dir.path().join("run"));
+        state.write(&[record("a"), record("b")]).unwrap();
+        state.hold();
+        state.write(&[record("a")]).unwrap();
+        assert_eq!(state.read().unwrap().len(), 2);
+        state.release();
+        state.write(&[record("a")]).unwrap();
+        assert_eq!(state.read().unwrap().len(), 1);
     }
 
     #[test]

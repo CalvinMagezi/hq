@@ -21,6 +21,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 const MAX_NAME_LEN: usize = 32;
+/// How many ACP agents a restore starts at once.
+const MAX_PARALLEL_ACP_RESTORES: usize = 4;
 const DEFAULT_ROWS: u16 = 40;
 const DEFAULT_COLS: u16 = 120;
 const DEFAULT_SCROLLBACK_ROWS: usize = 10_000;
@@ -982,7 +984,11 @@ impl Host {
                 return report;
             }
         };
+        // Nothing is written until every record has been dealt with, so a crash halfway leaves
+        // the file as it was and the records not yet started are still there at the next start.
+        state.hold();
         let mut locked = None;
+        let mut to_start = Vec::new();
         for rec in records {
             // Read each time: `hq host lockdown` may land while this runs.
             locked = locked.or_else(|| self.lockdown_status());
@@ -994,14 +1000,15 @@ impl Host {
                         held.reason
                     ),
                 ));
-                continue;
-            }
-            if !rec.env_keys.is_empty() {
+            } else if !rec.env_keys.is_empty() {
                 lock(&self.awaiting).insert(rec.name.clone(), rec);
-                continue;
+            } else {
+                to_start.push(rec);
             }
+        }
+        for (rec, started) in self.start_records(to_start) {
             let name = rec.name.clone();
-            match self.start(spec_of(rec.clone(), Vec::new())) {
+            match started {
                 Ok(_) => report.restored.push(name),
                 // Over the cap the record waits instead of being lost at the next save.
                 Err(e @ HostError::TooManyAgents(_)) => {
@@ -1019,11 +1026,45 @@ impl Host {
                 Err(e) => report.skipped.push((name, e.to_string())),
             }
         }
-        if locked.is_some() {
-            self.save();
-        }
+        state.release();
+        self.save();
         self.sweep_agent_files();
         report
+    }
+
+    /// Starts the records: terminal agents one by one (a start is quick), ACP agents a few at a
+    /// time because each waits on its server to initialize and load its session.
+    fn start_records(
+        &self,
+        records: Vec<PaneRecord>,
+    ) -> Vec<(PaneRecord, Result<PaneInfo, HostError>)> {
+        let (acp, terminal): (Vec<_>, Vec<_>) =
+            records.into_iter().partition(|r| r.acp_session.is_some());
+        let mut done: Vec<_> = terminal
+            .into_iter()
+            .map(|rec| {
+                let started = self.start(spec_of(rec.clone(), Vec::new()));
+                (rec, started)
+            })
+            .collect();
+        for batch in acp.chunks(MAX_PARALLEL_ACP_RESTORES) {
+            std::thread::scope(|scope| {
+                let running: Vec<_> = batch
+                    .iter()
+                    .map(|rec| scope.spawn(|| self.start(spec_of(rec.clone(), Vec::new()))))
+                    .collect();
+                for (rec, handle) in batch.iter().zip(running) {
+                    let started = handle.join().unwrap_or_else(|_| {
+                        Err(HostError::Spawn {
+                            command: rec.name.clone(),
+                            detail: "the restore thread panicked".to_string(),
+                        })
+                    });
+                    done.push((rec.clone(), started));
+                }
+            });
+        }
+        done
     }
 
     /// Agents restored from the state file that wait for their environment.
@@ -1701,6 +1742,7 @@ fn save_state(panes: &Registry, acp: &AcpRegistry, awaiting: &Awaiting, state: O
                 sandbox: pane.sandbox.clone(),
                 idle_ttl_secs: pane.idle_ttl.map(|t| t.as_secs()),
                 acp_session: None,
+                model: None,
             })
         })
         .chain(acp_records(acp))
@@ -1728,6 +1770,7 @@ fn acp_records(acp: &AcpRegistry) -> Vec<PaneRecord> {
             sandbox: pane.sandbox.clone(),
             idle_ttl_secs: pane.idle_ttl.map(|t| t.as_secs()),
             acp_session: Some(pane.session_id().to_string()),
+            model: pane.model.clone(),
         })
         .collect()
 }
@@ -1785,6 +1828,7 @@ fn spec_of(rec: PaneRecord, env: Vec<(String, String)>) -> SpawnSpec {
         spec.transport = Transport::Acp;
         spec.resume_session = Some(session);
         spec.resume_argv = None;
+        spec.model = rec.model;
     }
     spec
 }
