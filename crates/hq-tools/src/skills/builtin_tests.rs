@@ -6,6 +6,7 @@ const ACTIVE_NOW: &[&str] = &[NAME];
 const BRIEF: &str = "hq-task-brief";
 const WAYFINDER: &str = "hq-wayfinder";
 const DIAGNOSE: &str = "hq-diagnose";
+const REVIEW_LOOP: &str = "hq-review-loop";
 const ENGINEERING: &str = "hq-engineering-core";
 const EDGE_ENGINEERING: &str = "hq-engineering-edge";
 const CALENDAR: &str = CALENDAR_CREATION_SKILL;
@@ -102,6 +103,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             EDGE_ENGINEERING,
             WAYFINDER,
             DIAGNOSE,
+            REVIEW_LOOP,
             CALENDAR,
             READING,
             EDITING,
@@ -118,6 +120,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             EDGE_ENGINEERING,
             WAYFINDER,
             DIAGNOSE,
+            REVIEW_LOOP,
             CALENDAR,
             READING,
             EDITING,
@@ -132,6 +135,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             EDGE_ENGINEERING,
             WAYFINDER,
             DIAGNOSE,
+            REVIEW_LOOP,
             CALENDAR,
             READING,
             EDITING,
