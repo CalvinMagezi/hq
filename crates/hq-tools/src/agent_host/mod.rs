@@ -169,6 +169,9 @@ pub struct AcpFacts {
     /// What the agent said in its last finished turn (the end of it when long): its words.
     #[serde(default)]
     pub result: Option<String>,
+    /// Why the last turn failed, when it did: `auth`, `billing` or `other`.
+    #[serde(default)]
+    pub failure: Option<String>,
 }
 
 /// A dialog an agent waits at, as the host read it off the screen.

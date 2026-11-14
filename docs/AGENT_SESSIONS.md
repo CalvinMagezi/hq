@@ -950,10 +950,18 @@ model flag in a terminal, a switch in the session over ACP (through `session/set
 config option). A caller's own `model` wins, and an id the agent does not offer fails the start with the list
 it offers. An alias finds the profile of its canonical name, so one `antigravity` profile serves `agy` too.
 
+`fallback: [lane, ...]` on a profile lists the lanes to try, in order (at most four), when a start fails
+because the lane is unavailable: a login that ran out, a quota or rate limit, the agent cap. The reply of
+the spawn that fell back has `fell_back: {from, to, reason}`. Any other failure (a bad folder, a refused
+policy) stops there, since another lane would fail the same way. A turn that fails for the same reason
+midway is not retried by HQ, because it may already have changed files: the `turn` object carries
+`failure` (`auth`, `billing` or `other`) and, for the first two, the reply of `harness_session_wait` adds
+`next_lane`, the first fallback, so the caller can start the work again there.
+
 Built-in ACP commands: `opencode acp`, `agy acp`, `cursor-agent acp`, `kimi acp`, `hermes acp`,
 `copilot --acp --stdio`. A base without one (or a different command) sets `acp_args`. Not supported over
-ACP: a wrapper `command`, one-shot runs, command-policy
-hooks, and coming back after a host restart. `hq_mcp: true` on the profile gives the agent HQ's MCP
+ACP: a wrapper `command`, one-shot runs and command-policy
+hooks. An ACP agent comes back after a host restart (its stored session is loaded again). `hq_mcp: true` on the profile gives the agent HQ's MCP
 connection (tasks, vault, handing work on) in its session, with a token of its own, if the agent says
 it can use an HTTP MCP server; without it the agent gets none. A message sent while a turn
 runs waits for it to end; `esc` stops the turn. Hermes over ACP is not confined by the process sandbox

@@ -209,6 +209,8 @@ pub struct AcpFacts {
     pub context_size: Option<u64>,
     /// What the agent said in its last finished turn, the end of it when long. Its words, not HQ's.
     pub result: Option<String>,
+    /// Why the last turn failed, when it did: `auth`, `billing` or `other`.
+    pub failure: Option<String>,
 }
 
 /// Most agents the host runs at once, and the most bytes of command line one

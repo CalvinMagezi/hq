@@ -4964,6 +4964,24 @@ fn a_finished_acp_turn_adds_its_report_to_a_session_view() {
 }
 
 #[test]
+fn a_failed_turn_reports_why_and_only_a_lane_problem_names_a_next_lane() {
+    let Liveness::Alive(mut agent) = alive("hs-failed") else {
+        unreachable!()
+    };
+    let mut view = json!({});
+    agent.acp = Some(crate::agent_host::AcpFacts {
+        stop_reason: Some("failed: out of credit".into()),
+        failure: Some("billing".into()),
+        ..Default::default()
+    });
+    with_turn(&mut view, &agent);
+    assert_eq!(view["turn"]["failure"], "billing");
+    // No profile names a lane after this one, so there is none to offer.
+    with_next_lane(&mut view, "no-such-profile");
+    assert!(view.get("next_lane").is_none());
+}
+
+#[test]
 fn waiting_for_many_reports_each_session_and_one_failure_does_not_hide_the_rest() {
     let db = Arc::new(Database::open_memory().unwrap());
     seed_watched(&db, "hs-known", None);

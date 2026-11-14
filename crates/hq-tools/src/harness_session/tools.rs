@@ -310,10 +310,10 @@ impl HqTool for HarnessSessionSpawnTool {
         )
         .await?;
         macro_rules! launch {
-            ($cwd:expr) => {
+            ($cwd:expr, $lane:expr) => {
                 super::SpawnRequest {
                     host: Some(host.as_str()).filter(|h| !h.is_empty()),
-                    harness: &harness,
+                    harness: $lane,
                     prompt: Some(prompt.as_str()).filter(|p| !p.is_empty()),
                     cwd: $cwd,
                     label: &label,
@@ -334,7 +334,12 @@ impl HqTool for HarnessSessionSpawnTool {
             };
         }
         let mut note = start.note;
-        let mut report = super::spawn_on(&self.db, host_handle.clone(), launch!(&start.path)).await;
+        let mut report = super::spawn_on(
+            &self.db,
+            host_handle.clone(),
+            launch!(&start.path, &harness),
+        )
+        .await;
         // A remote host cannot be asked whether a folder exists; its launch error says so, and
         // nothing was started, so the one retry is in the machine's own HQ folder.
         if let (Err(e), Some(asked), None) = (&report, requested, &note)
@@ -355,9 +360,40 @@ impl HqTool for HarnessSessionSpawnTool {
                 host_handle.name(),
                 fallback.path.display()
             ));
-            report = super::spawn_on(&self.db, host_handle.clone(), launch!(&fallback.path)).await;
+            report = super::spawn_on(
+                &self.db,
+                host_handle.clone(),
+                launch!(&fallback.path, &harness),
+            )
+            .await;
+        }
+        let mut fell_back = None;
+        if let Err(first) = &report
+            && super::fallback::lane_unavailable(&first.to_string())
+        {
+            let why = first.to_string();
+            for lane in super::fallback::fallbacks_of(&cfg, &harness) {
+                let tried =
+                    super::spawn_on(&self.db, host_handle.clone(), launch!(&start.path, &lane))
+                        .await;
+                match tried {
+                    Ok(started) => {
+                        fell_back = Some(json!({ "from": harness, "to": lane, "reason": why }));
+                        report = Ok(started);
+                        break;
+                    }
+                    Err(e) if super::fallback::lane_unavailable(&e.to_string()) => continue,
+                    Err(e) => {
+                        report = Err(e);
+                        break;
+                    }
+                }
+            }
         }
         let mut report = report?;
+        if let Some(fell_back) = fell_back {
+            report["fell_back"] = fell_back;
+        }
         if let Some(note) = note {
             report["cwd_note"] = json!(note);
         }
