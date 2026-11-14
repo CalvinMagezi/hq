@@ -420,6 +420,12 @@ pub struct HarnessProfileConfig {
     #[serde(default)]
     pub model: Option<String>,
 
+    /// Lanes to try, in order, when a start of this one fails because the lane is unavailable (a
+    /// login that ran out, a quota or rate limit, the agent cap). Each is a profile or built-in
+    /// harness name. The reply of the spawn that fell back says which lane failed and why.
+    #[serde(default)]
+    pub fallback: Vec<String>,
+
     /// Environment for the pane's shell, and so for the launched CLI.
     #[serde(default)]
     pub env: BTreeMap<String, String>,

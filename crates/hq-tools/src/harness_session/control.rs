@@ -226,7 +226,26 @@ pub(super) fn with_turn(view: &mut Value, agent: &AgentInfo) {
     if facts.stop_reason.is_some() {
         turn["result"] = json!(facts.result);
     }
+    if let Some(failure) = &facts.failure {
+        turn["failure"] = json!(failure);
+    }
     view["turn"] = turn;
+}
+
+/// After a turn that failed because the lane is unavailable (a login or a quota), names the lane its
+/// profile says to use next, so the caller can start the work again there. HQ does not do it for
+/// the caller: the failed turn may have changed files.
+pub(super) fn with_next_lane(report: &mut Value, harness: &str) {
+    let unavailable = matches!(report["turn"]["failure"].as_str(), Some("auth" | "billing"));
+    if !unavailable {
+        return;
+    }
+    let Ok(cfg) = hq_core::config::HqConfig::load() else {
+        return;
+    };
+    if let Some(next) = super::fallback::fallbacks_of(&cfg, harness).first() {
+        report["next_lane"] = json!(next);
+    }
 }
 
 pub(super) fn with_pending(view: &mut Value, agent: &AgentInfo) {
@@ -981,6 +1000,7 @@ pub fn wait(
                 json!({ "session_id": session_id, "settled": true, "agent_status": agent.status });
             with_pending(&mut report, &agent);
             with_turn(&mut report, &agent);
+            with_next_lane(&mut report, &row.harness);
             Ok(report)
         }
         Err(AgentHostError::Api { code, .. }) if code == "timeout" => Ok(

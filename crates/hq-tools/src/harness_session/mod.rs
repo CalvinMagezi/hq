@@ -20,6 +20,7 @@ mod cwd;
 pub mod decisions;
 pub mod dismiss;
 pub mod events;
+mod fallback;
 mod folder_request;
 pub mod handoff;
 mod launch;

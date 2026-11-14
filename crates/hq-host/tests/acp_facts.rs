@@ -50,6 +50,23 @@ fn a_finished_turn_reports_its_edits_tokens_and_context() {
 }
 
 #[test]
+fn a_turn_that_failed_on_the_plan_reports_a_billing_failure() {
+    let host = Host::new();
+    host.spawn(spec("fact4", "error")).unwrap();
+    host.prompt("fact4", "anything").unwrap();
+    until("the failure", || {
+        host.info("fact4")
+            .unwrap()
+            .acp
+            .is_some_and(|f| f.failure.is_some())
+    });
+    let facts = host.info("fact4").unwrap().acp.unwrap();
+    assert_eq!(facts.failure.as_deref(), Some("billing"));
+    assert!(facts.stop_reason.unwrap().starts_with("failed:"));
+    host.kill("fact4").unwrap();
+}
+
+#[test]
 fn a_declined_edit_is_not_reported_and_a_terminal_agent_has_no_facts() {
     let host = Host::new();
     host.spawn(spec("fact2", "permission")).unwrap();

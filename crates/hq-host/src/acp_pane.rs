@@ -12,8 +12,8 @@ use crate::host::{AcpFacts, PaneInfo};
 use crate::pane::{ExitHook, PaneStatus};
 use crate::sandbox::{Mode, SandboxSpec};
 use hq_acp::{
-    AgentState as WireState, Choice, ClientError, Connection, OptionKind, StopReason, ToolKind,
-    TurnEnd,
+    AgentState as WireState, Choice, ClientError, Connection, FailureKind, OptionKind, StopReason,
+    ToolKind, TurnEnd,
 };
 use serde_json::json;
 use std::collections::VecDeque;
@@ -632,10 +632,14 @@ fn facts_of(t: &hq_acp::Tracker) -> AcpFacts {
         .end()
         .is_some()
         .then(|| tail_chars(t.text(), RESULT_MAX_CHARS));
-    let (stop_reason, turn_tokens) = match t.end() {
-        Some(TurnEnd::Stopped { reason, usage }) => (Some(stop_label(reason)), usage.total),
-        Some(TurnEnd::Failed { error, .. }) => (Some(format!("failed: {}", error.message)), None),
-        None => (None, None),
+    let (stop_reason, turn_tokens, failure) = match t.end() {
+        Some(TurnEnd::Stopped { reason, usage }) => (Some(stop_label(reason)), usage.total, None),
+        Some(TurnEnd::Failed { kind, error }) => (
+            Some(format!("failed: {}", error.message)),
+            None,
+            Some(failure_label(*kind)),
+        ),
+        None => (None, None, None),
     };
     AcpFacts {
         touched: t.touched().into_iter().collect(),
@@ -644,7 +648,17 @@ fn facts_of(t: &hq_acp::Tracker) -> AcpFacts {
         context_used,
         context_size,
         result: result.filter(|r| !r.is_empty()),
+        failure,
     }
+}
+
+fn failure_label(kind: FailureKind) -> String {
+    match kind {
+        FailureKind::Auth => "auth",
+        FailureKind::Billing => "billing",
+        FailureKind::Other => "other",
+    }
+    .to_string()
 }
 
 /// The last `max` characters of `text`.

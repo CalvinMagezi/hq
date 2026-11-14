@@ -1227,6 +1227,7 @@ fn info_json(i: &PaneInfo) -> Value {
             "context_used": a.context_used,
             "context_size": a.context_size,
             "result": a.result,
+            "failure": a.failure,
         })),
     })
 }
