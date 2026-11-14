@@ -22,6 +22,7 @@ pub mod model_switch;
 mod profile;
 pub mod protected;
 mod quota;
+mod quota_alerts;
 mod relay;
 mod self_update;
 mod skills;
@@ -75,6 +76,7 @@ pub use profile::{
     egress_report, enforce_lite, lite_violations, process_env,
 };
 pub use quota::QuotaConfig;
+pub use quota_alerts::QuotaAlertsConfig;
 pub use relay::*;
 pub use self_update::SelfUpdateConfig;
 pub use skills::{BuiltinSkillsConfig, SkillsConfig};
@@ -338,6 +340,9 @@ pub struct HqConfig {
     /// Reading each lane's remaining allowance on the machine its agent runs on.
     #[serde(default)]
     pub quota: QuotaConfig,
+    /// Inbox alerts when a usage quota window crosses a configured percentage.
+    #[serde(default)]
+    pub quota_alerts: QuotaAlertsConfig,
 
     /// Budget configuration for LLM spending
     #[serde(default)]
@@ -549,6 +554,7 @@ impl Default for HqConfig {
             tasks: TasksConfig::default(),
             copilot_usage: CopilotUsageConfig::default(),
             quota: QuotaConfig::default(),
+            quota_alerts: QuotaAlertsConfig::default(),
             agent_host: AgentHostConfig::default(),
             stack: StackConfig::default(),
             budget: BudgetConfig::default(),

@@ -129,6 +129,12 @@ How the gate decides, per attempt against one provider:
 `GET /api/budgets` shows each budget against the ledger; `PUT /api/budgets` replaces them after
 validation. `hq usage budgets` prints the same view.
 
+**Quota-window alerts.** For subscription quotas that reset on a schedule (such as `copilot:credits`),
+the `quota_alerts` section in `config.yaml` sends one inbox item per crossed percentage threshold in
+each reset window, and keeps that dedup across daemon restarts. Set `quota_alerts.enabled: true`
+and `quota_alerts.thresholds` (for example `copilot:credits: [80, 95]`, clamped to `1..=100`); both
+default to off and empty so unconfigured installs emit nothing.
+
 ## Forecasting (phase 4)
 
 `hq_llm::forecast` is pure (events and a clock in, a forecast out), like `copilot_burn` but fed by the

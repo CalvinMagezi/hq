@@ -136,14 +136,14 @@ impl LedgerBudgetGate {
     fn alert(&self, budget: &Budget, status: &BudgetStatus) {
         let thresholds = budget.soft_pct.iter().copied().chain([FULL_PCT]);
         for t in thresholds.filter(|t| status.pct >= f64::from(*t)) {
-            let first = self.cache.lock().unwrap().alerted.insert((
-                budget.name.clone(),
-                status.period_start,
-                t,
-            ));
+            let first = self
+                .cache()
+                .alerted
+                .insert((budget.name.clone(), status.period_start, t));
             if !first {
                 continue;
             }
+            let dedup_key = format!("budget:{}:{}:{t}", budget.name, status.period_start);
             let item = ValueItem::new(
                 "budget",
                 ValueKind::Fyi,
@@ -160,12 +160,17 @@ impl LedgerBudgetGate {
                     budget.action
                 ),
             )
-            .with_dedup_key(format!(
-                "budget:{}:{}:{t}",
-                budget.name, status.period_start
-            ));
+            .with_dedup_key(dedup_key.clone());
             let db = self.db.clone();
             tokio::task::spawn_blocking(move || {
+                match hq_db::value_items::find_active_by_dedup(&db, ValueKind::Fyi, &dedup_key) {
+                    Ok(Some(_)) => return,
+                    Ok(None) => {}
+                    Err(e) => {
+                        warn!(error = %e, "budget alert dedup check failed");
+                        return;
+                    }
+                }
                 if let Err(e) = hq_db::value_items::emit(&db, &item) {
                     warn!(error = %e, "budget alert could not be recorded");
                 }
@@ -407,6 +412,57 @@ mod tests {
         let titles: Vec<&str> = items.iter().map(|i| i.title.as_str()).collect();
         assert_eq!(titles.len(), 1, "{titles:?}");
         assert!(titles[0].contains("80%"));
+    }
+
+    async fn wait_for_pending(db: &Database, expected: usize) -> Vec<ValueItem> {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let items =
+                hq_db::value_items::list_by_state(db, hq_core::types::ValueState::Pending).unwrap();
+            if items.len() >= expected || Instant::now() >= deadline {
+                return items;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn budget_soft_alert_is_not_repeated_after_restart() {
+        let db = db_with_spend("chat", 9.0);
+        let first_gate = gate(db.clone(), MONTH_BLOCK);
+        first_gate
+            .admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+            .await;
+
+        let items = wait_for_pending(&db, 1).await;
+        assert_eq!(items.len(), 1);
+
+        // A new gate over the same database simulates a daemon restart.
+        let restarted_gate = gate(db.clone(), MONTH_BLOCK);
+        restarted_gate
+            .admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+            .await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let items_after =
+            hq_db::value_items::list_by_state(&db, hq_core::types::ValueState::Pending).unwrap();
+        assert_eq!(items_after.len(), 1);
+
+        // Dismissing the alert still claims the persisted dedup key across restarts.
+        hq_db::value_items::set_delivered(&db, &items_after[0].id).unwrap();
+        assert!(
+            hq_db::value_items::record_engagement_by_token(&db, &items_after[0].id, "dismissed")
+                .unwrap()
+        );
+        let third_gate = gate(db.clone(), MONTH_BLOCK);
+        third_gate
+            .admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+            .await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            hq_db::value_items::list_by_state(&db, hq_core::types::ValueState::Pending)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]

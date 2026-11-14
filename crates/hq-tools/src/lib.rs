@@ -41,6 +41,7 @@ pub mod model_control;
 pub mod notify;
 pub mod prose_lint;
 pub mod provenance;
+pub mod quota_windows;
 pub mod registry;
 pub mod remote_mcp;
 pub mod self_update;

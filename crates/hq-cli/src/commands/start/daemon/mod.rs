@@ -452,6 +452,7 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("heartbeat", Duration::from_secs(300)),
         // Value Bus delivery: rank + deliver pending value items every 5 minutes
         DaemonTask::with_default_timeout("value-bus-deliver", Duration::from_secs(300)),
+        DaemonTask::with_default_timeout("quota-alerts", Duration::from_secs(300)),
         // Time-gated fallback for gws-backed companies: /hooks/gmail (Pub/Sub
         // push) is primary but requires one-time external setup
         // (docs/runbooks/gmail-pubsub-ingress.md); this tick covers inboxes
@@ -655,6 +656,7 @@ async fn dispatch_task(
         "disk-watchdog" => tasks_periodic::run_disk_watchdog(vault_path, db, config).await,
         "backup" => tasks_periodic::run_backup(config).await,
         "copilot-usage" => tasks_periodic::run_copilot_usage(db, config).await,
+        "quota-alerts" => tasks_periodic::run_quota_alerts(db, config).await,
         "usage-ledger" => tasks_periodic::run_usage_ledger(db, config).await,
         "harness-usage" => tasks_periodic::run_harness_usage(db).await,
         "skill-outcomes" => tasks_periodic::run_skill_outcomes(db),
