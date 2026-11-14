@@ -811,6 +811,8 @@ pub(crate) async fn note_update_handler(
     if !state.resolved_allowed(&abs) {
         return ApiError::not_found().into_response();
     }
+    // Read, compare and write happen with no await in between, under the note's lock.
+    let _held = crate::note_undo::lock_note(rel);
     let existing = match std::fs::read_to_string(&abs) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {

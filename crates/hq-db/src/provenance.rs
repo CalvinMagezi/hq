@@ -404,6 +404,7 @@ pub fn move_path(conn: &Connection, from: &str, to: &str) -> Result<usize> {
         [from, to],
     )?;
     conn.execute("DELETE FROM note_seen WHERE path = ?1", [from])?;
+    crate::note_keep::move_path(conn, from, to)?;
     Ok(moved)
 }
 
@@ -429,12 +430,17 @@ pub fn purge_deleted(conn: &Connection, days: i64) -> Result<usize> {
     let cutoff = (Utc::now() - chrono::Duration::days(days)).to_rfc3339();
     let purged = conn.execute(
         "DELETE FROM note_provenance WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
-        [cutoff],
+        [&cutoff],
     )?;
     conn.execute(
         "DELETE FROM note_seen WHERE path NOT IN (SELECT path FROM note_provenance)",
         [],
     )?;
+    conn.execute(
+        "DELETE FROM note_prev WHERE path NOT IN (SELECT path FROM note_provenance)",
+        [],
+    )?;
+    crate::note_keep::prune_trash_meta(conn, &cutoff)?;
     Ok(purged)
 }
 

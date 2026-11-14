@@ -110,6 +110,13 @@ impl HqTool for VaultWriteNoteTool {
             modified_at: chrono::Utc::now(),
         };
 
+        crate::provenance::keep_before_tool_write(
+            self.db.as_ref(),
+            self.vault.vault_path(),
+            &path,
+            &args,
+        )
+        .await;
         let vault = self.vault.clone();
         let path_ret = path.clone();
         tokio::task::spawn_blocking(move || vault.write_note(&path, &note)).await??;
@@ -183,6 +190,13 @@ impl HqTool for VaultAppendNoteTool {
 
         validate_write_path(self.vault.vault_path(), &path)?;
 
+        crate::provenance::keep_before_tool_write(
+            self.db.as_ref(),
+            self.vault.vault_path(),
+            &path,
+            &args,
+        )
+        .await;
         let vault = self.vault.clone();
         let path_owned = path.clone();
         let content_owned = content.clone();
@@ -268,6 +282,13 @@ impl HqTool for VaultPatchSectionTool {
 
         validate_write_path(self.vault.vault_path(), &path)?;
 
+        crate::provenance::keep_before_tool_write(
+            self.db.as_ref(),
+            self.vault.vault_path(),
+            &path,
+            &args,
+        )
+        .await;
         let vault = self.vault.clone();
         let path_owned = path.clone();
         let heading_owned = heading.clone();

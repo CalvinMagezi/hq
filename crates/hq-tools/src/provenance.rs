@@ -251,6 +251,20 @@ pub async fn record_tool_write(
     let _ = tokio::task::spawn_blocking(move || recorder.after_write(&rel, &args)).await;
 }
 
+/// Keep, off the async thread, the text the tool call whose arguments are `args` is about to
+/// replace. Call it before the write. Does nothing when there is no database.
+pub async fn keep_before_tool_write(
+    db: Option<&Arc<Database>>,
+    vault_path: &Path,
+    rel: &str,
+    args: &Value,
+) {
+    let Some(db) = db else { return };
+    let recorder = Recorder::new(db.clone(), vault_path.to_path_buf());
+    let (rel, args) = (rel.to_string(), args.clone());
+    let _ = tokio::task::spawn_blocking(move || recorder.before_write(&rel, &args)).await;
+}
+
 /// Records writes. Best effort: a failure here is logged and never fails the write it describes.
 #[derive(Clone)]
 pub struct Recorder {
@@ -283,6 +297,13 @@ impl Recorder {
         let result = self.db.with_conn(|conn| {
             hq_db::provenance::record(conn, rel, &hash, &writer.attribution())?;
             hq_db::provenance::clear_deleted(conn, rel)?;
+            if writer.source_kind == SourceKind::Agent {
+                hq_db::note_keep::tie_or_drop(conn, rel, &hash)?;
+            } else {
+                // The owner (or anyone who is not HQ) wrote it: what HQ's change replaced may be
+                // older than this, so it is never offered again.
+                hq_db::note_keep::remove(conn, rel)?;
+            }
             if let Some(task) = writer.task_id.as_deref() {
                 // Idempotent: the same link added again returns the existing one. A task already
                 // at its link limit just does not get another.
@@ -352,16 +373,114 @@ impl Recorder {
         }
     }
 
-    /// A note was deleted: keep who wrote it for a retention period.
+    /// A note was deleted: keep who wrote it for a retention period, and its earlier text goes.
     pub fn after_delete(&self, rel: &str) {
         let rel_owned = rel.to_string();
-        if let Err(e) = self
-            .db
-            .with_conn(move |conn| hq_db::provenance::mark_deleted(conn, &rel_owned))
-        {
+        let marked = self.db.with_conn(move |conn| {
+            hq_db::note_keep::remove(conn, &rel_owned)?;
+            hq_db::provenance::mark_deleted(conn, &rel_owned)
+        });
+        if let Err(e) = marked {
             tracing::warn!(path = rel, error = %e, "provenance: could not mark the note deleted");
         }
     }
+
+    /// Before the tool call whose arguments are `args` changes the note: if HQ is the caller, keep
+    /// the text it is about to replace so the owner can put it back. Text HQ itself wrote (and the
+    /// owner has not kept) is not kept over the owner's, so the kept text stays the owner's
+    /// version from before HQ's first change. The path comes from the model, so it is checked
+    /// here, at the one place that reads it. Best effort, like the rest of this.
+    pub fn before_write(&self, rel: &str, args: &Value) {
+        if resolve(args, &self.db).source_kind != SourceKind::Agent {
+            return;
+        }
+        let raw = match self.read_for_keeping(rel) {
+            Kept::Text(raw) => raw,
+            Kept::TooBig => {
+                let rel = rel.to_string();
+                let _ = self
+                    .db
+                    .with_conn(move |c| hq_db::note_keep::remove(c, &rel));
+                return;
+            }
+            Kept::Nothing => return,
+        };
+        let hash = hq_db::search::content_hash(&raw);
+        let kept = self.db.with_conn(|conn| {
+            // Text the owner kept counts as theirs again.
+            let ours = hq_db::provenance::current(conn, rel, &hash)?.is_some_and(|p| {
+                p.source_kind == SourceKind::Agent
+                    && p.review_state != hq_db::provenance::ReviewState::Accepted
+            });
+            if ours {
+                hq_db::note_keep::arm(conn, rel)?;
+                return Ok(());
+            }
+            hq_db::note_keep::keep(conn, rel, &raw)?;
+            Ok(())
+        });
+        if let Err(e) = kept {
+            tracing::warn!(path = rel, error = %e, "provenance: could not keep the earlier text");
+        }
+    }
+
+    /// The note's text if it is a regular `.md` file the note tools may write, reached through no
+    /// symlink, read through a bound so a huge or endless file costs nothing.
+    fn read_for_keeping(&self, rel: &str) -> Kept {
+        use std::io::Read;
+        if !rel.ends_with(".md")
+            || crate::vault::validate_write_path(&self.vault_path, rel).is_err()
+        {
+            return Kept::Nothing;
+        }
+        let Ok(parsed) = hq_vault::rel_path::RelPath::parse(rel) else {
+            return Kept::Nothing;
+        };
+        let mut at = self.vault_path.clone();
+        for part in parsed.normalized().split('/') {
+            at.push(part);
+            match std::fs::symlink_metadata(&at) {
+                Ok(m) if !m.file_type().is_symlink() => {}
+                _ => return Kept::Nothing,
+            }
+        }
+        // A FIFO or device would block or never end on open, so only a regular file is opened,
+        // and without waiting in case it was swapped for one since this check.
+        if !std::fs::symlink_metadata(&at).is_ok_and(|m| m.is_file()) {
+            return Kept::Nothing;
+        }
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NONBLOCK);
+        }
+        let Ok(file) = options.open(&at) else {
+            return Kept::Nothing;
+        };
+        // The file may have been swapped since the check; the handle says what it really is.
+        if !file.metadata().is_ok_and(|m| m.is_file()) {
+            return Kept::Nothing;
+        }
+        let limit = hq_db::note_keep::MAX_PREV_BYTES as u64 + 1;
+        let mut bytes = Vec::new();
+        if file.take(limit).read_to_end(&mut bytes).is_err() {
+            return Kept::Nothing;
+        }
+        if bytes.len() > hq_db::note_keep::MAX_PREV_BYTES {
+            return Kept::TooBig;
+        }
+        String::from_utf8(bytes).map_or(Kept::Nothing, Kept::Text)
+    }
+}
+
+/// What reading a note to keep it found.
+enum Kept {
+    Text(String),
+    /// Over the size cap: nothing is kept, and a text kept earlier no longer describes the note.
+    TooBig,
+    Nothing,
 }
 
 #[cfg(test)]
@@ -966,5 +1085,106 @@ mod tests {
         );
         let links = fx.db.with_conn(|c| t::list_task_links(c, "tk-1")).unwrap();
         assert!(links.iter().all(|l| l.reference != rel));
+    }
+
+    fn agent_args() -> Value {
+        json!({ NATIVE_SESSION_ARG: "s1", NATIVE_AGENT_ARG: "helper" })
+    }
+
+    fn kept(fx: &Fixture, rel: &str) -> Option<hq_db::note_keep::Prev> {
+        fx.db.with_conn(|c| hq_db::note_keep::get(c, rel)).unwrap()
+    }
+
+    #[test]
+    fn before_write_keeps_only_a_real_note_inside_the_vault() {
+        let fx = Fixture::new();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.md"), "outside text").unwrap();
+        std::fs::create_dir_all(fx.dir.path().join("Notebooks")).unwrap();
+        std::fs::write(fx.dir.path().join("Notebooks/real.md"), "mine").unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("secret.md"),
+            fx.dir.path().join("Notebooks/link.md"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(outside.path(), fx.dir.path().join("Notebooks/dir")).unwrap();
+        let absolute = outside
+            .path()
+            .join("secret.md")
+            .to_string_lossy()
+            .into_owned();
+        for rel in [
+            absolute.as_str(),
+            "../secret.md",
+            "Notebooks/../../secret.md",
+            "Notebooks/link.md",
+            "Notebooks/dir/secret.md",
+            "_data/vault.db",
+            "Notebooks/not-a-note.txt",
+            "",
+        ] {
+            fx.recorder().before_write(rel, &agent_args());
+            assert!(kept(&fx, rel).is_none(), "kept {rel:?}");
+        }
+        fx.recorder()
+            .before_write("Notebooks/real.md", &agent_args());
+        assert_eq!(kept(&fx, "Notebooks/real.md").unwrap().text, "mine");
+        // An owner call keeps nothing.
+        std::fs::write(fx.dir.path().join("Notebooks/own.md"), "x").unwrap();
+        fx.recorder().before_write("Notebooks/own.md", &json!({}));
+        assert!(kept(&fx, "Notebooks/own.md").is_none());
+    }
+
+    #[test]
+    fn before_write_never_opens_a_fifo_or_reads_past_the_cap() {
+        let fx = Fixture::new();
+        std::fs::create_dir_all(fx.dir.path().join("Notebooks")).unwrap();
+        let fifo = fx.dir.path().join("Notebooks/pipe.md");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        // Opening a FIFO with no writer would block this test forever.
+        fx.recorder()
+            .before_write("Notebooks/pipe.md", &agent_args());
+        assert!(kept(&fx, "Notebooks/pipe.md").is_none());
+
+        // A sparse file far over the cap costs no memory and keeps nothing; an older kept text goes.
+        let huge = fx.dir.path().join("Notebooks/huge.md");
+        let file = std::fs::File::create(&huge).unwrap();
+        file.set_len(4 * 1024 * 1024 * 1024).unwrap();
+        fx.db
+            .with_conn(|c| hq_db::note_keep::keep(c, "Notebooks/huge.md", "old"))
+            .unwrap();
+        fx.recorder()
+            .before_write("Notebooks/huge.md", &agent_args());
+        assert!(kept(&fx, "Notebooks/huge.md").is_none());
+    }
+
+    #[test]
+    fn a_write_that_did_not_keep_serves_no_stale_text() {
+        let fx = Fixture::new();
+        std::fs::create_dir_all(fx.dir.path().join("Notebooks")).unwrap();
+        let path = fx.dir.path().join("Notebooks/a.md");
+        let rel = "Notebooks/a.md";
+        std::fs::write(&path, "owner v1").unwrap();
+        fx.recorder().record(rel, &Writer::owner());
+        fx.recorder().before_write(rel, &agent_args());
+        std::fs::write(&path, "hq v1").unwrap();
+        fx.recorder().after_write(rel, &agent_args());
+        assert_eq!(kept(&fx, rel).unwrap().text, "owner v1");
+        // The owner edits; what HQ replaced is older than that, so it is gone.
+        std::fs::write(&path, "owner v2").unwrap();
+        fx.recorder().record(rel, &Writer::owner());
+        assert!(kept(&fx, rel).is_none());
+        // An HQ write that skipped the keeping step cannot revive or leave a stale row.
+        fx.recorder().before_write(rel, &agent_args());
+        std::fs::write(&path, "hq v2").unwrap();
+        fx.recorder().after_write(rel, &agent_args());
+        assert_eq!(kept(&fx, rel).unwrap().text, "owner v2");
+        std::fs::write(&path, "hq v3, no keeping step").unwrap();
+        fx.recorder().after_write(rel, &agent_args());
+        assert!(kept(&fx, rel).is_none());
     }
 }

@@ -35,7 +35,8 @@ const TRASH_DAY_FORMAT: &str = "%Y-%m-%d";
 /// The trash also holds repair backups (`_trash/<day>/nested-frontmatter/`); those are not notes
 /// the owner deleted, so the Trash shows and restores only what came out of `Notebooks/`.
 const TRASHED_NOTES_ROOT: &str = "Notebooks";
-const MAX_TRASH_LISTED: usize = 1000;
+/// Most items the Trash lists at once.
+pub const MAX_TRASH_LISTED: usize = 1000;
 
 /// A deleted note as the Trash shows it.
 #[derive(Debug, Clone, Serialize)]
@@ -347,6 +348,31 @@ fn checked_trash_path(vault_path: &Path, rel: &str) -> Result<(String, String, S
 pub(crate) fn read_trashed(vault_path: &Path, trash_rel: &str) -> Result<String> {
     let (normalized, _, _) = checked_trash_path(vault_path, trash_rel)?;
     Ok(std::fs::read_to_string(vault_path.join(normalized))?)
+}
+
+/// Delete one note in the trash for good, and the folders it leaves empty up to its day folder.
+/// Returns where the note lived before it was deleted. Nothing outside `_trash/<day>/Notebooks/`
+/// can be removed this way.
+pub(crate) fn purge_trashed(vault_path: &Path, trash_rel: &str) -> Result<String> {
+    let (normalized, day, inner) = checked_trash_path(vault_path, trash_rel)?;
+    let day_dir = vault_path.join(TRASH_DIR).join(&day);
+    let original = original_of(&day_dir, &inner);
+    let file = vault_path.join(&normalized);
+    // Looked at again right before removing, so a link put in its place since the first check is
+    // refused. A window of a few instructions remains between this and the removal.
+    if !std::fs::symlink_metadata(&file)?.file_type().is_file() {
+        bail!("'{trash_rel}' is not a note in the trash");
+    }
+    std::fs::remove_file(&file)?;
+    let mut dir = file.parent().map(Path::to_path_buf);
+    while let Some(d) = dir.filter(|d| d.starts_with(&day_dir)) {
+        // `remove_dir` only removes an empty folder, which is the point.
+        if std::fs::remove_dir(&d).is_err() {
+            break;
+        }
+        dir = d.parent().map(Path::to_path_buf);
+    }
+    Ok(original)
 }
 
 /// Refuses a destination whose real folder is outside the vault or in a protected one, however

@@ -176,6 +176,10 @@ impl HqTool for VaultNoteShortcut {
             "---\ntitle: {}\ncreated: {}\n---\n\n{}",
             title, date, content
         );
+        if let Some(recorder) = self.recorder.clone() {
+            let (rel, args) = (relative_path.clone(), args.clone());
+            let _ = tokio::task::spawn_blocking(move || recorder.before_write(&rel, &args)).await;
+        }
         tokio::fs::write(&note_path, body).await?;
 
         if let Some(recorder) = self.recorder.clone() {
