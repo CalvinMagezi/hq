@@ -10,6 +10,7 @@ use tracing::{debug, info, warn};
 use super::injection::{injection_denial, without_default_drive};
 use super::paths::{PATH_TOOLS, path_args_for_tool, path_values};
 use super::taint::{TaintTracker, is_untrusted_source};
+use super::tainted_calls::drive_after_untrusted_reads;
 use super::tainted_calls::{always_ask_reason, tainted_reason, unasked_denial};
 use super::{DenialNotifier, DenialTracker, RepeatCallTracker};
 use crate::coding::text_result;
@@ -357,6 +358,14 @@ impl GovernedTool {
         Some(denial)
     }
 
+    /// A tainted chat's send to a session it drives is not asked per send
+    /// (`agent_host.drive_after_untrusted_reads`, an accepted risk); any other send still asks.
+    fn sends_to_own_driven_session(&self, approval: &super::OwnerApproval, args: &Value) -> bool {
+        self.inner.name() == "harness_session_send"
+            && drive_after_untrusted_reads()
+            && approval.drives_target(args)
+    }
+
     /// In `PermissionMode::Default`, a call that needs the owner runs only once they approve
     /// exactly it; so does, in any mode but bypass, a call a tainted session needs the owner for
     /// (`tainted_reason`) or always (`always_ask_reason`). `Some` carries what the model gets instead.
@@ -368,7 +377,8 @@ impl GovernedTool {
         let asks = (matches!(self.permission_mode, PermissionMode::Default)
             && self.needs_owner(args))
             || always_ask_reason(tool_name, args).is_some()
-            || tainted_reason(tool_name, args, &self.taint).is_some();
+            || (tainted_reason(tool_name, args, &self.taint).is_some()
+                && !self.sends_to_own_driven_session(approval, args));
         let site_allowed = super::tainted_calls::fetch_site(tool_name, args)
             .is_some_and(|s| approval.site_allowed(&s));
         if !asks || site_allowed {

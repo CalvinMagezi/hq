@@ -632,8 +632,17 @@ never turn Drive back on once the user switched it off:
 
 - A chat watching a session again keeps its switch where the user left it.
 - A session taken over from another chat starts with Drive off.
-- A turn that has read untrusted content (pane text, the web, mail, vault notes) starts its
-  new watches with Drive off: governance marks those calls (`untrusted_turn`).
+- A turn the owner typed that has read untrusted content (pane text, the web, mail, vault
+  notes) still starts its new watches with Drive on when the gate passes. This is an accepted
+  prompt-injection risk, by the owner's decision: HQ is meant to drive a session to its goal
+  and ask the owner only for key decisions. `agent_host.drive_after_untrusted_reads: false`
+  restores the old rule, where governance marks those calls (`untrusted_turn`) and such a turn
+  starts its watches with Drive off and can only give Drive up. The goal, the 48-turns-a-day
+  cap, the nudge and loop limits and the driver's ask-in-chat rules do not change, and Drive
+  never marks a task complete. Changing a session's goal from such a turn stays refused.
+- Every Drive-on HQ chooses (a watch that starts driving, or `harness_session_mode`) records a
+  `drive_on` event with actor `hq` and posts one fixed-text notice in the chat, so the owner can
+  see it and switch it off in the Watching panel.
 - A turn the session driver started never starts a new watch driving.
 - A turn in a chat that `hq_ask` opened never starts a new watch driving, and neither does a
   handoff made from one.
@@ -896,7 +905,9 @@ the goal and criteria in force at the time (`registry::list_events`).
   session the chat watches. `observe` always works and takes effect at once: the driver reads
   the row before every turn, so at most the step already in flight finishes. `drive` needs a
   live agent (an ended session or an unreachable host is refused, since HQ cannot confirm
-  what it would steer), a passing gate, and a turn that has not read untrusted content. The
+  what it would steer), a passing gate, and, only when `agent_host.drive_after_untrusted_reads`
+  is false, a turn that has not read untrusted content (by default an owner turn that did read
+  some may turn Drive on, an accepted risk). The
   Drive switch in the panel is the same mode change.
 - Switching mode never touches the agent: it is not paused or stopped. `harness_session_stop`
   is the only tool that ends it, and it is never called as a side effect of a mode change.

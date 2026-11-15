@@ -13,6 +13,9 @@ pub struct WatchingChat {
     /// `agent_host.drive_new_watches` default, never for a turn the driver started
     /// or one answering an `hq_ask`.
     pub drive_new: bool,
+    /// `agent_host.drive_after_untrusted_reads`: a turn that read outside text may still start
+    /// or turn on Drive. Off, such a turn only loses the default and can give Drive up.
+    pub drive_after_untrusted: bool,
     /// The session driver started this turn, so its sends are budgeted and it
     /// may steer only the session its chat drives.
     pub driver_turn: bool,
@@ -286,15 +289,22 @@ pub(crate) fn metered<T>(
 
 impl WatchingChat {
     /// The watch one call makes. `drive=false` opts out of Drive (and stops it
-    /// on a session this chat already drives); an untrusted turn only loses the default.
+    /// on a session this chat already drives); an untrusted turn loses the default only when
+    /// `drive_after_untrusted` is off.
     pub fn new_watch(&self, args: &Value) -> NewWatch<'_> {
         let opted_out = args.get("drive").and_then(Value::as_bool) == Some(false);
-        let untrusted = args.get(UNTRUSTED_TURN_ARG).and_then(Value::as_bool) == Some(true);
         NewWatch {
             thread: &self.thread,
-            drive: self.drive_new && !opted_out && !untrusted,
+            drive: self.drive_new && !opted_out && !self.untrusted_blocks_drive(args),
             opted_out,
         }
+    }
+
+    /// The turn read outside text and the owner has not accepted that risk for Drive, so it
+    /// may only give Drive up. The goal and dialog-answer rules do not read this.
+    pub fn untrusted_blocks_drive(&self, args: &Value) -> bool {
+        args.get(UNTRUSTED_TURN_ARG).and_then(Value::as_bool) == Some(true)
+            && !self.drive_after_untrusted
     }
 }
 
@@ -339,8 +349,53 @@ pub fn start_watch_capped(
                 ),
             )?;
         }
+        announce_automatic_drive(c, session_id, &w, was_driven)?;
     }
     Ok(found)
+}
+
+/// Fixed text, so nothing a session or a page said can reach the owner's chat through it.
+pub const AUTO_DRIVE_NOTICE: &str = "HQ started driving a session for this chat. It follows the goal and asks you before anything outside the task, destructive, credentials, production deploys or spending. Switch it off in the Watching panel.";
+
+/// A default-on watch that left a session driven is an automatic Drive-on: the audit trail
+/// and the chat both say so, so the owner can see it and switch it off.
+fn announce_automatic_drive(
+    c: &rusqlite::Connection,
+    session_id: &str,
+    w: &NewWatch<'_>,
+    was_driven: bool,
+) -> Result<()> {
+    let driven_now = registry::get(c, session_id)?.is_some_and(|r| r.drive);
+    if !w.drive || was_driven || !driven_now {
+        return Ok(());
+    }
+    registry::record_event(
+        c,
+        session_id,
+        registry::EVENT_DRIVE_ON,
+        registry::ACTOR_HQ,
+        Some("started with the watch (agent_host.drive_new_watches)"),
+    )?;
+    announce_drive_on(c, session_id, w.thread)
+}
+
+/// The chat notice for a Drive-on HQ chose; the audit event is written by the caller.
+pub(super) fn announce_drive_on(
+    c: &rusqlite::Connection,
+    session_id: &str,
+    thread: &str,
+) -> Result<()> {
+    // Best effort: a missing thread must not undo a session that is already running.
+    if let Err(e) = hq_db::chat::add_message_with_meta(
+        c,
+        thread,
+        "assistant",
+        AUTO_DRIVE_NOTICE,
+        Some(&json!({ "kind": "drive_on", "session_id": session_id })),
+    ) {
+        tracing::warn!("drive notice for {session_id} was not posted: {e:#}");
+    }
+    Ok(())
 }
 
 /// The goal and definition of done a session is launched or linked with.

@@ -97,7 +97,16 @@ normal and the `BypassPermissions` paths.
      into a search box;
    - `harness_session_send`, which types into a running coding agent. A
      tainted turn may also type into or answer (`harness_session_answer`) only a
-     session its own web chat watches; a relay chat or an MCP client has none.
+     session its own web chat watches; a relay chat or an MCP client has none. A tainted
+     owner chat is not asked per send to a session it drives itself (the driver is the sender);
+     a send to any other session still asks.
+   - Accepted risk, by the owner's decision: with `agent_host.drive_after_untrusted_reads`
+     (default true) an owner chat turn that read outside text may start or turn on Drive for
+     sessions its chat watches, so injected text could steer a driven session within the goal
+     gate, the daily turn cap and the nudge and loop limits. Each automatic Drive-on is logged
+     as a `drive_on` event (actor `hq`) and announced in the chat. Setting it to false restores
+     Drive-off after untrusted reads and per-send asks. Changing a goal from such a turn stays
+     refused, and a driver turn or `hq_ask` reply never starts driving.
    - `calendar_create_event`, which adds an event to the owner's phone calendar
      (`CALENDAR_CREATION.md`). A clean turn creates it with no approval, by the
      owner's choice; once the turn has read outside text, the owner is asked. Reading the

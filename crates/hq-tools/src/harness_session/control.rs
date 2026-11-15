@@ -462,6 +462,9 @@ pub(super) fn set_mode_with(
     match change {
         registry::DriveChange::Changed(on) => {
             report["mode"] = json!(mode_name(on));
+            if on && !row.drive {
+                db.with_conn(|c| announce_drive_on(c, &row.id, req.thread))?;
+            }
         }
         registry::DriveChange::Refused(gaps) => {
             report["mode"] = json!(MODE_OBSERVE);

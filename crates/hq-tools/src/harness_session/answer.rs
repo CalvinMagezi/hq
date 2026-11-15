@@ -349,6 +349,7 @@ mod tests {
         let chat = |driver_turn, from_ask| WatchingChat {
             thread: "t".into(),
             drive_new: false,
+            drive_after_untrusted: true,
             driver_turn,
             from_ask,
         };

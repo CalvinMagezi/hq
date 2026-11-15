@@ -213,8 +213,13 @@ async fn bypass_permissions_still_enforces_the_injection_policy() {
 }
 
 /// The real watch tool, as a web chat session registers it, behind governance.
-fn governed_watch(session: &Session, db: &std::sync::Arc<hq_db::Database>) -> Box<dyn AgentTool> {
+fn governed_watch(
+    session: &Session,
+    db: &std::sync::Arc<hq_db::Database>,
+    drive_after_untrusted: bool,
+) -> Box<dyn AgentTool> {
     let chat = hq_tools::harness_session::WatchingChat {
+        drive_after_untrusted,
         thread: "th-1".into(),
         drive_new: true,
         driver_turn: false,
@@ -235,11 +240,11 @@ fn governed_watch(session: &Session, db: &std::sync::Arc<hq_db::Database>) -> Bo
 }
 
 #[tokio::test]
-async fn a_watch_started_after_untrusted_content_starts_with_drive_off() {
+async fn a_watch_started_after_untrusted_content_drives_only_when_the_owner_accepts_that() {
     use hq_db::harness_sessions_registry::{self as registry, NewSession, Placement};
     let db = std::sync::Arc::new(hq_db::Database::open_memory().unwrap());
     db.with_conn(|c| {
-        for id in ["hs-clean", "hs-tainted"] {
+        for id in ["hs-clean", "hs-tainted", "hs-accepted"] {
             let placement = Placement {
                 host: "local",
                 agent_name: id,
@@ -274,7 +279,8 @@ async fn a_watch_started_after_untrusted_content_starts_with_drive_off() {
             .drive
     };
     let session = Session::new();
-    let watch = governed_watch(&session, &db);
+    let watch = governed_watch(&session, &db, false);
+    let accepting = governed_watch(&session, &db, true);
 
     watch
         .execute("id", json!({"session_id": "hs-clean"}))
@@ -294,7 +300,15 @@ async fn a_watch_started_after_untrusted_content_starts_with_drive_off() {
     );
     assert!(
         !drive("hs-tainted"),
-        "an injected page must not buy prompt approvals"
+        "with drive_after_untrusted_reads off an injected page must not buy prompt approvals"
+    );
+    accepting
+        .execute("id", json!({"session_id": "hs-accepted"}))
+        .await
+        .unwrap();
+    assert!(
+        drive("hs-accepted"),
+        "with it on (the default) the owner's turn still starts Drive"
     );
     assert!(
         drive("hs-clean"),
