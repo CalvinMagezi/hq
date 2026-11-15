@@ -161,6 +161,21 @@ impl SessionBuilder {
                 hq_tools::vault::scope_vault_tools(tools, std::sync::Arc::new(vault), &id.scope);
         }
 
+        // The owner's own web chat may read its own thread's messages through `context_packet`.
+        if let (Some(thread), Ok(vault)) = (
+            self.identity.as_ref().and_then(|id| id.web_thread()),
+            hq_vault::VaultClient::new(vault_path.to_path_buf()),
+        ) {
+            tools.retain(|t| t.name() != "context_packet");
+            tools.push(Box::new(
+                hq_tools::vault::ContextPacketTool::new(
+                    std::sync::Arc::new(vault),
+                    shared_db.clone(),
+                )
+                .with_chat_thread(thread.to_string()),
+            ));
+        }
+
         // Mailbox messaging (relay and local agent mailboxes).
         tools.extend(hq_tools::agent_comm::create_agent_comm_tools(
             vault_path.to_path_buf(),

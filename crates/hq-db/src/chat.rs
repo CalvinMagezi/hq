@@ -374,6 +374,11 @@ pub fn is_evidence_ref(evidence: &str) -> bool {
     parse_evidence_ref(evidence).is_some()
 }
 
+/// The thread a `chat:` evidence ref points into, for scoping a read to the threads a caller may see.
+pub fn evidence_thread(evidence: &str) -> Option<&str> {
+    parse_evidence_ref(evidence).map(|(thread, _)| thread)
+}
+
 fn parse_evidence_ref(evidence: &str) -> Option<(&str, &str)> {
     let (thread, message) = evidence.trim().strip_prefix("chat:")?.split_once('/')?;
     let ok = |s: &str| s.len() >= 8 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-');

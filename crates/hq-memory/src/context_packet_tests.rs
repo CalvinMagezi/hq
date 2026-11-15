@@ -996,3 +996,82 @@ fn the_task_id_survives_merging_with_a_skills_declared_need() {
     assert_eq!(bare.task_id.as_deref(), Some("tk-2"));
     assert!(!bare.is_empty());
 }
+
+fn chat_ref(f: &Fixture, text: &str) -> (String, String) {
+    f.db.with_conn(|c| {
+        let thread = hq_db::chat::create_thread(c, "t", "owner", "chat")?;
+        let msg = hq_db::chat::add_message(c, &thread.thread_id, "user", text)?;
+        Ok((
+            thread.thread_id.clone(),
+            hq_db::chat::evidence_ref(&thread.thread_id, &msg.message_id),
+        ))
+    })
+    .unwrap()
+}
+
+#[test]
+fn a_chat_ref_in_another_thread_is_denied_and_counted_never_read() {
+    let f = fixture();
+    let (mine, mine_ref) = chat_ref(&f, "my own words");
+    let (_, other_ref) = chat_ref(&f, "someone elses secret words");
+    let (_, third_ref) = chat_ref(&f, "a third thread");
+    let mut need = refs(&[&mine_ref, &other_ref, &third_ref]);
+    need.chat_threads = vec![mine];
+    let p = build_packet(&f.vault, Some(&f.db), "x", &need, Utc::now());
+
+    assert_eq!(p.entries.len(), 1);
+    assert!(p.render().contains("my own words"));
+    assert!(!p.render().contains("secret words"));
+    assert!(!p.render().contains("third thread"));
+    let denied: Vec<_> = p
+        .gaps
+        .iter()
+        .filter(|g| matches!(g.kind, GapKind::Denied { .. }))
+        .collect();
+    assert_eq!(denied.len(), 1);
+    assert!(
+        denied[0].detail.starts_with("2 chat reference(s)"),
+        "{}",
+        denied[0].detail
+    );
+}
+
+#[test]
+fn with_no_threads_granted_every_chat_ref_is_refused() {
+    let f = fixture();
+    let (_, chat) = chat_ref(&f, "private chat text");
+    let p = build_packet(&f.vault, Some(&f.db), "x", &refs(&[&chat]), Utc::now());
+    assert!(p.entries.is_empty());
+    assert!(!p.render().contains("private chat text"));
+    assert!(
+        p.gaps
+            .iter()
+            .any(|g| matches!(g.kind, GapKind::Denied { .. }))
+    );
+}
+
+#[test]
+fn a_need_from_json_cannot_grant_itself_a_thread() {
+    let f = fixture();
+    let (thread, chat) = chat_ref(&f, "private chat text");
+    let need: ContextNeed =
+        serde_json::from_value(serde_json::json!({"refs": [chat], "chat_threads": [thread]}))
+            .unwrap();
+    assert!(need.chat_threads.is_empty());
+    let p = build_packet(&f.vault, Some(&f.db), "x", &need, Utc::now());
+    assert!(p.entries.is_empty());
+}
+
+#[test]
+fn citations_to_a_chat_message_outside_the_granted_threads_do_not_verify() {
+    let f = fixture();
+    let (thread, chat) = chat_ref(&f, "my own words");
+    let mut need = refs(&[&chat]);
+    need.chat_threads = vec![thread];
+    let mut p = build_packet(&f.vault, Some(&f.db), "x", &need, Utc::now());
+    let ok = verify_citations_in("[S1]", &p, &f.vault, Some(&f.db));
+    assert_eq!(ok.verified, vec!["S1".to_string()]);
+    p.need.chat_threads.clear();
+    let revoked = verify_citations_in("[S1]", &p, &f.vault, Some(&f.db));
+    assert_eq!(revoked.changed, vec!["S1".to_string()]);
+}

@@ -49,6 +49,11 @@ pub struct ContextNeed {
     /// Build the need from this HQ task (id or display id): its record, the notes it links, and
     /// the notes written under it. Explicit `refs` and `queries` still apply and come first.
     pub task_id: Option<String>,
+    /// Chat threads whose messages a `chat:` ref may be read from. Never deserialized: a model,
+    /// a skill or a caller's JSON must not grant itself a thread, only the code that builds the
+    /// need for a known caller. Empty refuses every chat ref.
+    #[serde(skip)]
+    pub chat_threads: Vec<String>,
 }
 
 impl ContextNeed {
@@ -722,6 +727,7 @@ pub fn build_packet(
     let mut entries: Vec<PacketEntry> = Vec::new();
     let mut used = 0usize;
     let mut dropped = 0usize;
+    let mut denied = 0usize;
     for mut cand in candidates {
         if !seen.insert(cand.path.clone()) {
             continue;
@@ -731,8 +737,12 @@ pub fn build_packet(
             dropped += 1;
             continue;
         }
-        let note = match read_or_locate(vault, db, &mut cand) {
+        let note = match read_or_locate(vault, db, &mut cand, &need.chat_threads) {
             Ok(note) => note,
+            Err(gap) if matches!(gap.kind, GapKind::Denied { .. }) => {
+                denied += 1;
+                continue;
+            }
             Err(gap) => {
                 gaps.push(gap);
                 continue;
@@ -745,6 +755,14 @@ pub fn build_packet(
         entries.push(build_entry(
             &note, &cand, id, excerpt, need, now, provenance,
         ));
+    }
+    if denied > 0 {
+        gaps.push(PacketGap {
+            kind: GapKind::Denied { count: denied },
+            detail: format!(
+                "{denied} chat reference(s) outside the threads this caller may read were not read"
+            ),
+        });
     }
     if dropped > 0 {
         gaps.push(PacketGap {
@@ -767,10 +785,10 @@ pub fn build_packet(
 }
 
 /// A chat message cited as evidence (`chat:<thread>/<message>`, written by a fold), read as a
-/// note so a packet can carry what the owner actually said. `None` for any other path, or when
-/// the message is gone.
-fn chat_source(db: Option<&Database>, path: &str) -> Option<Note> {
-    if !hq_db::chat::is_evidence_ref(path) {
+/// note so a packet can carry what the owner actually said. `None` for any other path, when the
+/// message is gone, or when its thread is not one of `allowed`.
+fn chat_source(db: Option<&Database>, path: &str, allowed: &[String]) -> Option<Note> {
+    if !chat_allowed(path, allowed) {
         return None;
     }
     let message = db?
@@ -795,12 +813,25 @@ fn chat_source(db: Option<&Database>, path: &str) -> Option<Note> {
     })
 }
 
+/// False only for a chat ref whose thread is not in `allowed`; other paths are not chat's to judge.
+fn chat_allowed(path: &str, allowed: &[String]) -> bool {
+    hq_db::chat::evidence_thread(path).is_none_or(|thread| allowed.iter().any(|t| t == thread))
+}
+
 fn read_or_locate(
     vault: &VaultClient,
     db: Option<&Database>,
     cand: &mut Candidate,
+    allowed_threads: &[String],
 ) -> std::result::Result<Note, PacketGap> {
-    if let Some(note) = chat_source(db, &cand.path) {
+    if hq_db::chat::is_evidence_ref(&cand.path) && !chat_allowed(&cand.path, allowed_threads) {
+        // The detail never names the thread or message: even that would say the ref exists.
+        return Err(PacketGap {
+            kind: GapKind::Denied { count: 1 },
+            detail: "chat reference outside the permitted threads".to_string(),
+        });
+    }
+    if let Some(note) = chat_source(db, &cand.path, allowed_threads) {
         return Ok(note);
     }
     if let Ok(note) = vault.read_note(&cand.path) {
@@ -1019,7 +1050,8 @@ pub fn verify_citations_in(
             report.unknown.push(id);
             continue;
         };
-        let reread = chat_source(db, &entry.path).or_else(|| vault.read_note(&entry.path).ok());
+        let reread = chat_source(db, &entry.path, &packet.need.chat_threads)
+            .or_else(|| vault.read_note(&entry.path).ok());
         let unchanged = reread.is_some_and(|n| hash_content(&n.content) == entry.content_hash);
         if unchanged {
             report.verified.push(id);
