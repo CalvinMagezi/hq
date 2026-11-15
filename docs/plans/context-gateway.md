@@ -38,7 +38,16 @@ Denied sources appear only as `GapKind::Denied { count }`. The gap names nothing
 (`DbGrantResolver`). `Freshness`, `EntryProvenance` and `PacketGap` are reused from
 `hq_memory::context_packet`, which gained `GapKind::Denied { count }` and `GapKind::RateLimited`.
 
-## Not in phase 1
+## Phase 2: retrieval
 
-Retrieval, the `context_*` MCP tools, adapters, rate limiting itself (only its gap kind), the
-audit row per operation, and `include_task_links`.
+`context_gateway::retrieval` is the one front door: `Retriever::run(grant, op, now)`. A missing or
+expired grant returns `Unavailable` and reads nothing. Every candidate is parsed as a `SourceId`
+and checked against the grant before it is read, including each edge of a graph chain; a chain is
+cut at its first out-of-scope edge and its text names only the kept nodes. The excerpt budget is
+split per source and what does not fit is an `OverBudget` gap. Calls are rate limited per grant
+(`RATE_MAX_CALLS`, `RATE_MAX_CHARS` per `RATE_WINDOW_SECS`, in memory) and every call writes one
+`context_gateway_audit` row with counts only. `Read.section` is not honoured yet.
+
+## Not yet built
+
+The `context_*` MCP tools, adapters, `ask_hq`, `include_task_links`, and evaluation.
