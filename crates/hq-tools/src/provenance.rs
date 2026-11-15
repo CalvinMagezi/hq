@@ -183,6 +183,24 @@ pub fn task_for_leases(db: &Database, lease_ids: &[String]) -> Option<String> {
         .flatten()
 }
 
+fn lease_ids(args: &Value) -> Vec<String> {
+    args.get(NATIVE_LEASES_ARG)
+        .and_then(Value::as_array)
+        .map(|ids| {
+            ids.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The one task the calling native session holds a live lease on, from the leases the runtime
+/// attested on this call. The model cannot name it: `_hq_*` keys it sends are dropped.
+pub fn leased_task(args: &Value, db: &Database) -> Option<String> {
+    task_for_leases(db, &lease_ids(args))
+}
+
 /// Work out who made the tool call whose arguments are `args`.
 pub fn resolve(args: &Value, db: &Database) -> Writer {
     if let Some(label) = connector_label(args) {
@@ -197,16 +215,7 @@ pub fn resolve(args: &Value, db: &Database) -> Writer {
         return from_harness_session(db, session);
     }
     if let Some(session) = text_arg(args, NATIVE_SESSION_ARG) {
-        let leases: Vec<String> = args
-            .get(NATIVE_LEASES_ARG)
-            .and_then(Value::as_array)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let leases = lease_ids(args);
         let task_id = if leases.is_empty() {
             None
         } else {

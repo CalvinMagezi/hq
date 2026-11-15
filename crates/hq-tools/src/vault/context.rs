@@ -13,11 +13,23 @@ use crate::registry::HqTool;
 pub struct ContextPacketTool {
     vault: Arc<VaultClient>,
     db: Option<Arc<Database>>,
+    chat_thread: Option<String>,
 }
 
 impl ContextPacketTool {
     pub fn new(vault: Arc<VaultClient>, db: Option<Arc<Database>>) -> Self {
-        Self { vault, db }
+        Self {
+            vault,
+            db,
+            chat_thread: None,
+        }
+    }
+
+    /// The owner's own chat thread, whose messages a `chat:` ref may be read from. Every other
+    /// caller (MCP, sub-agents, relays) reads no chat at all.
+    pub fn with_chat_thread(mut self, thread: String) -> Self {
+        self.chat_thread = Some(thread);
+        self
     }
 
     /// Explicit needs win; a named skill's declaration fills the rest.
@@ -94,6 +106,7 @@ impl HqTool for ContextPacketTool {
             .unwrap_or_default()
             .to_string();
         let mut need = self.resolve_need(&args)?;
+        need.chat_threads = self.chat_thread.iter().cloned().collect();
         let task = match (task.trim().is_empty(), need.task_id.as_deref()) {
             (true, Some(id)) => format!("work on task {id}"),
             _ => task,

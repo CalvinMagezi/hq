@@ -446,8 +446,8 @@ impl HqTool for CoderContextTool {
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
-            "properties": {"task": {"type": "string", "description": "The job's task id"}},
-            "required": ["task"]
+            "properties": {"task": {"type": "string", "description": "Optional. The job is the task you claimed; any other id is refused"}},
+            "required": []
         })
     }
 
@@ -456,9 +456,18 @@ impl HqTool for CoderContextTool {
     }
 
     async fn execute(&self, args: Value) -> Result<Value> {
-        let reference = text(&args, "task").context("`task` is required")?;
+        let leased = crate::provenance::leased_task(&args, &self.db)
+            .context("claim your task first: the job is the task you hold a lease on")?;
         let links = self.db.with_conn(|c| {
-            let task = task_of(c, reference)?;
+            let task = task_of(c, &leased)?;
+            if let Some(named) = text(&args, "task")
+                && task_of(c, named)?.id != task.id
+            {
+                bail!(
+                    "that is not your job: you may read only the notes linked to {}",
+                    task.display_id
+                );
+            }
             if coder_jobs::get(c, &task.id)?.is_none() {
                 bail!("{} is not a coding job", task.display_id);
             }
@@ -576,6 +585,27 @@ mod tests {
         assert!(tool.execute(args).await.is_err());
     }
 
+    fn lease_on(db: &Database, task: &str) -> String {
+        db.with_conn(|c| {
+            let who = hq_db::tasks::LeaseIdentity {
+                actor: "worker",
+                harness: "native",
+                external_session_ref: "worker",
+                ..Default::default()
+            };
+            Ok(t::claim(c, task, &who, 900, false)?.session.id)
+        })
+        .unwrap()
+    }
+
+    fn worker_args(task: Option<&str>, lease: &str) -> Value {
+        let mut args = json!({ crate::provenance::NATIVE_LEASES_ARG: [lease] });
+        if let Some(task) = task {
+            args["task"] = json!(task);
+        }
+        args
+    }
+
     #[tokio::test]
     async fn a_worker_reads_only_the_notes_linked_to_its_job() {
         let dir = tempfile::tempdir().unwrap();
@@ -592,10 +622,58 @@ mod tests {
             Ok(())
         })
         .unwrap();
+        let lease = lease_on(&db, "tk-1");
         let tool = CoderContextTool::new(db, vault);
-        let out = tool.execute(json!({"task": "tk-1"})).await.unwrap();
+        let out = tool.execute(worker_args(None, &lease)).await.unwrap();
         let text = out.to_string();
         assert!(text.contains("linked text"));
         assert!(!text.contains("private text"));
+    }
+
+    #[tokio::test]
+    async fn the_model_cannot_name_another_task_or_skip_the_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("other.md"), "other job text").unwrap();
+        let vault = Arc::new(VaultClient::new(dir.path().to_path_buf()).unwrap());
+        let db = db();
+        db.with_conn(|c| {
+            t::create_task(
+                c,
+                "tk-2",
+                "in-1",
+                &t::NewTask {
+                    title: "other job",
+                    created_by: "test",
+                    ..Default::default()
+                },
+            )?;
+            coder_jobs::ensure(
+                c,
+                &coder_jobs::NewJob {
+                    task_id: "tk-2",
+                    repo: "o/r",
+                    budget_usd: 1.0,
+                    credit_cap: None,
+                    model: None,
+                    origin_thread: None,
+                },
+            )?;
+            t::add_task_link(c, "tk-2", t::LINK_VAULT_NOTE, "other.md", "", None, ACTOR)?;
+            Ok(())
+        })
+        .unwrap();
+        let lease = lease_on(&db, "tk-1");
+        let tool = CoderContextTool::new(db, vault);
+
+        let named = tool.execute(worker_args(Some("tk-2"), &lease)).await;
+        assert!(named.unwrap_err().to_string().contains("not your job"));
+        let no_claim = tool.execute(json!({"task": "tk-2"})).await;
+        assert!(no_claim.is_err());
+        let forged = tool
+            .execute(json!({"task": "tk-2", "_hq_native_leases": ["no-such-lease"]}))
+            .await;
+        assert!(forged.is_err());
+        let own = tool.execute(worker_args(Some("tk-1"), &lease)).await;
+        assert!(own.is_ok());
     }
 }

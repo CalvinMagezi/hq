@@ -108,6 +108,7 @@ async fn a_folded_decision_is_a_graph_edge_until_its_message_goes() {
     let need = hq_memory::context_packet::ContextNeed {
         why: "what bank".into(),
         refs: vec![relations[0].evidence.clone()],
+        chat_threads: vec![t.clone()],
         ..Default::default()
     };
     let packet = hq_memory::context_packet::build_packet(
