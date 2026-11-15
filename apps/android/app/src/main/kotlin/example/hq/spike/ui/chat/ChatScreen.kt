@@ -177,6 +177,8 @@ private fun Conversation(state: ChatUiState, actions: ChatActions) {
     example.hq.spike.ui.shell.ReselectEffect(Place.Chat, list, readsAgain = false)
     val away by remember { derivedStateOf { list.firstVisibleItemIndex > LATEST_AFTER } }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(state.scrollToBottom) { if (state.scrollToBottom > 0) list.animateScrollToItem(0) }
+    LaunchedEffect(state.live) { if (state.live != null && list.firstVisibleItemIndex <= LATEST_AFTER) list.scrollToItem(0) }
     LaunchedEffect(list, state.hasOlder, state.threadId) {
         snapshotFlow { list.layoutInfo.visibleItemsInfo.lastOrNull()?.index to list.layoutInfo.totalItemsCount }
             .collect { (last, total) -> if (last != null && last >= total - OLDER_AHEAD) actions.onLoadOlder() }
