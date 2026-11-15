@@ -447,6 +447,11 @@ async fn a_check_in_on_a_task_that_left_in_progress_switches_drive_off() {
         .with_conn(|c| {
             registry::claim_wake(c, "hs-w", "blocked")?;
             registry::set_seen(c, "hs-w", "idle")?;
+            // Setting the goal logged an event; the session has been quiet since long before it.
+            c.execute(
+                "DELETE FROM harness_session_events WHERE session_id = 'hs-w'",
+                [],
+            )?;
             Ok(c.execute(
                 "UPDATE harness_sessions SET last_driven_at = NULL WHERE id = 'hs-w'",
                 [],
@@ -620,5 +625,164 @@ fn an_update_names_the_session_and_its_task() {
     assert!(
         text.contains("hs-1") && text.contains("finished a turn"),
         "{text}"
+    );
+}
+
+fn drive_on(state: &WsState, id: &str) {
+    state
+        .db
+        .with_conn(|c| {
+            registry::set_goal(c, id, Some(GOAL), Some(DONE), registry::ACTOR_USER)?;
+            registry::set_drive(c, id, true)
+        })
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_blocked_dialog_behind_a_running_turn_is_answered_when_the_turn_ends_not_on_the_tick() {
+    let state = test_state();
+    let thread = watched_with_wake(&state);
+    state
+        .active_chat_turns
+        .write()
+        .await
+        .insert(thread.clone(), crate::ws::ChatTurnSlot::never_ending());
+    spawn_session_driver(state.clone());
+
+    // The first pass runs at once and skips the busy chat, leaving the wake on the row.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let wake = |s: &WsState| {
+        s.db.with_conn(|c| registry::get(c, "hs-w"))
+            .unwrap()
+            .unwrap()
+            .pm_wake
+    };
+    assert_eq!(wake(&state).as_deref(), Some("blocked"));
+    assert!(messages(&state, &thread).is_empty());
+
+    state.active_chat_turns.write().await.remove(&thread);
+    turn_ended();
+
+    let waited = tokio::time::timeout(PASS_EVERY / 4, async {
+        while wake(&state).is_some() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    assert!(waited.is_ok(), "the wake waited for the next tick");
+    let last = messages(&state, &thread).pop().unwrap();
+    assert!(
+        last.content.contains("waiting at a prompt"),
+        "{}",
+        last.content
+    );
+}
+
+#[tokio::test]
+async fn a_finished_driven_sessions_slot_goes_to_the_oldest_one_the_cap_held_back() {
+    let state = test_state();
+    let thread = watched_with_wake(&state);
+    state
+        .db
+        .with_conn(|c| {
+            c.execute("UPDATE harness_sessions SET pm_wake = NULL WHERE id = 'hs-w'", [])?;
+            for id in ["hs-b", "hs-c"] {
+                registry::insert(
+                    c,
+                    &registry::NewSession {
+                        id,
+                        harness: "pi",
+                        label: "",
+                        cwd: "/repo",
+                        mission_id: None,
+                        placement: registry::Placement {
+                            host: "laptop",
+                            agent_name: id,
+                            workspace_id: "w1",
+                            pane_id: "w1:p1",
+                        },
+                        purpose: None,
+                    },
+                )?;
+                registry::set_owner(c, id, Some(&thread))?;
+                registry::set_goal(c, id, Some(GOAL), Some(DONE), registry::ACTOR_USER)?;
+                registry::set_drive(c, id, true)?;
+                registry::stop_drive(
+                    c,
+                    id,
+                    registry::ACTOR_GUARD,
+                    &format!("{}1 running sessions", registry::CAP_HOLD_PREFIX),
+                )?;
+            }
+            c.execute(
+                "UPDATE harness_sessions SET created_at = datetime('now', '-1 hours') WHERE id = 'hs-c'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    drive_on(&state, "hs-w");
+
+    // The cap is one and hs-w holds it: nothing is promoted.
+    slots::rebalance_with(&state, 1, None);
+    let driven = |s: &WsState, id: &str| {
+        s.db.with_conn(|c| registry::get(c, id))
+            .unwrap()
+            .unwrap()
+            .drive
+    };
+    assert!(!driven(&state, "hs-b") && !driven(&state, "hs-c"));
+
+    // hs-w finishes its task and Drive goes off: the oldest waiting session, hs-c, takes the slot.
+    state
+        .db
+        .with_conn(|c| registry::stop_drive(c, "hs-w", registry::ACTOR_GUARD, "task done"))
+        .unwrap();
+    slots::rebalance_with(&state, 1, None);
+    assert!(driven(&state, "hs-c"));
+    assert!(!driven(&state, "hs-b"), "only one slot was free");
+    let last = messages(&state, &thread).pop().unwrap();
+    assert!(
+        last.content.contains("Drive switched on"),
+        "{}",
+        last.content
+    );
+}
+
+#[tokio::test]
+async fn an_idle_driven_session_gives_its_slot_back_and_says_so() {
+    let state = test_state();
+    let thread = watched_with_wake(&state);
+    drive_on(&state, "hs-w");
+    state
+        .db
+        .with_conn(|c| {
+            c.execute("UPDATE harness_sessions SET pm_wake = NULL WHERE id = 'hs-w'", [])?;
+            registry::set_seen(c, "hs-w", "idle")?;
+            // Setting the goal logged an event; the session has been quiet since long before it.
+            c.execute("DELETE FROM harness_session_events WHERE session_id = 'hs-w'", [])?;
+            c.execute(
+                "UPDATE harness_sessions SET created_at = datetime('now', '-5 hours'), updated_at = datetime('now', '-5 hours') WHERE id = 'hs-w'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    slots::rebalance_with(&state, 8, Some(Duration::from_secs(3 * 3600)));
+
+    let row = state
+        .db
+        .with_conn(|c| registry::get(c, "hs-w"))
+        .unwrap()
+        .unwrap();
+    assert!(!row.drive, "{row:?}");
+    assert_eq!(row.status, "running", "the session itself is left alone");
+    assert!(
+        messages(&state, &thread)
+            .pop()
+            .unwrap()
+            .content
+            .contains("Drive released")
     );
 }

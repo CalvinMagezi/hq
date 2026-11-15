@@ -21,6 +21,7 @@ pub mod decisions;
 pub mod dismiss;
 pub mod events;
 mod fallback;
+pub mod fleet;
 mod folder_request;
 pub mod handoff;
 mod launch;

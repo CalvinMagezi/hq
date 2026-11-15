@@ -1385,6 +1385,7 @@ pub fn create_harness_session_tools(
         }),
         Box::new(HarnessSessionListTool { db: db.clone() }),
         Box::new(HarnessSessionStatusTool { db: db.clone() }),
+        Box::new(super::fleet::HarnessFleetStatusTool { db: db.clone() }),
         Box::new(HarnessSessionLogsTool { db: db.clone() }),
         Box::new(HarnessSessionSendTool {
             db: db.clone(),

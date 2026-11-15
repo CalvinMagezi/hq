@@ -100,6 +100,9 @@ pub const MAX_OBSERVED: usize = 10;
 
 const COLS: &str = "id, harness, label, host, agent_name, workspace_id, pane_id, cwd, status, resume_token, mission_id, created_at, updated_at, owner_thread, drive, pm_wake, last_driven_at, last_agent_status, last_seen_at, goal, done_criteria, nudges_sent, last_wake_nudges, no_progress_streak, progress_mark, drive_off_reason, keys_sent, origin, dismissals, last_dismiss_tail, parent_session_id, spawn_depth, purpose, model";
 
+mod slots;
+pub use slots::*;
+
 type ChangeHook = Box<dyn Fn(&str) + Send + Sync>;
 
 static CHANGE_HOOKS: std::sync::RwLock<Vec<ChangeHook>> = std::sync::RwLock::new(Vec::new());
@@ -578,7 +581,7 @@ pub fn request_drive_capped(
         && actor != ACTOR_USER
         && count_driven_running(conn)? >= cap
     {
-        blockers.push(format!("HQ already drives {cap} running sessions (agent_host.max_driven_sessions); only the user can add another"));
+        blockers.push(format!("{CAP_HOLD_PREFIX}{cap} running sessions (agent_host.max_driven_sessions); only the user can add another"));
     }
     if !blockers.is_empty() {
         record_event(

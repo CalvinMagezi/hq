@@ -28,6 +28,18 @@ use crate::WsState;
 /// Fallback pass for wakes written by another process and for due check-ins.
 const PASS_EVERY: Duration = Duration::from_secs(60);
 
+/// Set when a chat turn ends. `notify_one` keeps one permit while the loop is busy, so a turn
+/// that ends mid-pass still earns the next pass. The pass itself is the only place a driver
+/// turn starts, and `start_driver_turn` refuses a busy chat under the turn map's lock, so a
+/// pass run from here cannot start a second turn in a chat.
+static TURN_ENDED: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Ask for a drive pass now: a wake skipped because its chat was mid-turn would otherwise wait
+/// for the next `PASS_EVERY` tick.
+pub(crate) fn turn_ended() {
+    TURN_ENDED.notify_one();
+}
+
 pub(crate) const CHECK_IN: &str = "check-in";
 
 const MODE_UPDATE: &str = "update";
@@ -48,6 +60,7 @@ pub(crate) fn spawn_session_driver(state: Arc<WsState>) {
             tokio::select! {
                 Some(id) = rx.recv() => announce(&state, &id),
                 _ = pass.tick() => {}
+                _ = TURN_ENDED.notified() => {}
             }
             while let Ok(id) = rx.try_recv() {
                 announce(&state, &id);
@@ -99,6 +112,7 @@ fn checkin_minutes(cfg: &hq_core::config::AgentHostConfig) -> u64 {
 
 async fn drive_due(state: &Arc<WsState>) {
     let cfg = agent_host_config(state);
+    slots::rebalance(state, &cfg);
     let every = checkin_minutes(&cfg);
     let due = match state
         .db
@@ -544,6 +558,8 @@ pub(crate) fn driver_prompt(
         cwd = row.cwd,
     )
 }
+
+mod slots;
 
 #[cfg(test)]
 mod tests;

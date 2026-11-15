@@ -28,6 +28,18 @@ pub(crate) struct ChatTurnSlot {
     ask_id: Option<String>,
 }
 
+impl ChatTurnSlot {
+    /// A reply that never ends on its own, for tests of what waits on a busy chat.
+    #[cfg(test)]
+    pub(crate) fn never_ending() -> Self {
+        Self {
+            abort: tokio::spawn(std::future::pending::<()>()).abort_handle(),
+            record: Arc::new(std::sync::Mutex::new(TurnRecord::default())),
+            ask_id: None,
+        }
+    }
+}
+
 pub(crate) type ChatTurnMap =
     Arc<tokio::sync::RwLock<std::collections::HashMap<String, ChatTurnSlot>>>;
 
@@ -238,6 +250,7 @@ pub(crate) async fn stop_chat_turn(state: &Arc<WsState>, thread_id: &str) {
         ask::settle_failed(&state.db, ask_id, ask::STOPPED_REASON);
     }
     let slot = state.active_chat_turns.write().await.remove(thread_id);
+    crate::session_driver::turn_ended();
     let mut message_id = None;
     if let Some(slot) = slot {
         slot.abort.abort();
@@ -1053,6 +1066,9 @@ impl ChatTurn {
         if guard.get(t).is_some_and(|slot| slot.abort.id() == task_id) {
             guard.remove(t);
         }
+        drop(guard);
+        // After the slot is gone, so a wake the driver skipped for this turn finds the chat free.
+        crate::session_driver::turn_ended();
     }
 }
 
