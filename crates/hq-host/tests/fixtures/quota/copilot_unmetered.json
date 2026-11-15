@@ -1,0 +1,14 @@
+{
+  "login": "free-user",
+  "copilot_plan": "individual",
+  "quota_reset_date": "2026-12-01",
+  "quota_snapshots": {
+    "premium_interactions": {
+      "entitlement": 0,
+      "remaining": 0,
+      "percent_remaining": 100.0,
+      "has_quota": false,
+      "unlimited": true
+    }
+  }
+}

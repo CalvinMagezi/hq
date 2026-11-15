@@ -126,6 +126,29 @@ fn a_full_agent_round_trip_over_the_socket() {
 }
 
 #[test]
+fn host_quota_runs_a_profile_reader_over_the_socket() {
+    let host = Running::start();
+    let mut c = host.client();
+    let printed =
+        r#"{"account":"team","windows":[{"label":"month","kind":"dollars","used_percent":12.5}]}"#;
+    let reply = c
+        .call(
+            "host.quota",
+            json!({ "lane": "gateway", "custom": [{
+                "lane": "gateway",
+                "command": ["/bin/sh", "-c", format!("echo '{printed}'")],
+                "timeout_secs": 5
+            }] }),
+        )
+        .unwrap();
+    let quotas = reply["quotas"].as_array().unwrap();
+    assert_eq!(quotas.len(), 1);
+    assert_eq!(quotas[0]["lane"], "gateway");
+    assert_eq!(quotas[0]["source"], "command");
+    assert_eq!(quotas[0]["windows"][0]["used_percent"], 12.5);
+}
+
+#[test]
 fn keys_resize_and_quiet_work_remotely() {
     let host = Running::start();
     let mut c = host.client();

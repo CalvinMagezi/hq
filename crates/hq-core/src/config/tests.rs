@@ -684,4 +684,18 @@ mod phone_keys_tests {
             assert_eq!(other.default_model, "relay", "{profile:?}");
         }
     }
+
+    /// The quota section's documented defaults, and an old config with no `quota:` key.
+    #[test]
+    fn quota_defaults_are_on_and_documented() {
+        let config = HqConfig::default();
+        assert!(config.quota.enabled);
+        assert_eq!(config.quota.interval_minutes, 10);
+        assert_eq!(config.quota.warn_percent, 80.0);
+        assert_eq!(config.quota.block_percent, 95.0);
+        assert!(config.quota.lanes.is_empty());
+        let profile: crate::config::HarnessProfileConfig =
+            serde_yaml::from_str("base: claude-code").unwrap();
+        assert!(profile.quota.is_none());
+    }
 }

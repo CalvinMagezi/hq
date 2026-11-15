@@ -1,0 +1,4 @@
+{"type": "event_msg", "payload": {"type": "token_count", "info": null, "rate_limits": {"primary": {"used_percent": 10.0, "window_minutes": 300, "resets_at": 1794823200}, "secondary": {"used_percent": 5.0, "window_minutes": 10080, "resets_at": 1795300000}, "plan_type": "plus"}}}
+{"type": "event_msg", "payload": {"type": "agent_message"}}
+{"type": "event_msg", "payload": {"type": "token_count", "info": null, "rate_limits": {"primary": {"used_percent": 31.0, "window_minutes": 300, "resets_at": 1794823200}, "secondary": {"used_percent": 5.0, "window_minutes": 10080, "resets_at": 1795300000}, "plan_type": "plus"}}}
+{"type": "event_msg", "payload": {"type": "agent_message"}}

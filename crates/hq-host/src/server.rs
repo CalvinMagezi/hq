@@ -503,6 +503,12 @@ impl Conn {
                     .unwrap_or_default();
                 Ok(json!({ "found": crate::programs::installed(&names) }))
             }
+            // Readings of each lane's remaining allowance, taken here because the agent's login
+            // lives on this machine and never crosses the gate.
+            "host.quota" => {
+                let req: crate::quota::Request = parse(&params)?;
+                Ok(json!({ "quotas": crate::quota::collect(&req) }))
+            }
             "host.workspace" => self.workspace_call(|root| Ok(crate::workspace::describe(root))),
             "host.dirs" => {
                 let path = params.get("path").and_then(Value::as_str);
