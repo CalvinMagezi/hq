@@ -104,6 +104,12 @@ pub enum GapKind {
     OverBudget,
     NoMatch,
     GraphUnavailable,
+    /// Sources outside the reader's scope were left out. Only how many, never which.
+    Denied {
+        count: usize,
+    },
+    /// The reader hit its call or size rate limit and got less than it asked for.
+    RateLimited,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

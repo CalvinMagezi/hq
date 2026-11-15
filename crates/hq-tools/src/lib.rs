@@ -22,6 +22,7 @@ pub mod capabilities;
 pub mod coding;
 pub mod collection_tip;
 pub mod contacts;
+pub mod context_gateway;
 pub mod convert;
 pub mod copilot_credits;
 pub mod device_actions;
