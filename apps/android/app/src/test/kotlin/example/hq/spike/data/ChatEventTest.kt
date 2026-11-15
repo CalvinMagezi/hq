@@ -49,4 +49,9 @@ class ChatEventTest {
         assertEquals(listOf(ToolStep("c1", "task_list", "{}", "2 tasks", 120L)), m.tools)
         assertTrue(m.stopped)
     }
+
+    @Test
+    fun aSessionsSyncFrameNamesTheChatItChanged() {
+        assertEquals(ChatEvent.SessionsChanged("t1"), ChatEvent.parse("""{"type":"sessions:sync","thread_id":"t1"}"""))
+    }
 }

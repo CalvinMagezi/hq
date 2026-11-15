@@ -16,6 +16,9 @@ sealed interface ChatEvent {
     data class Titled(val threadId: String, val title: String) : ChatEvent
     data class Lagged(val skipped: Int) : ChatEvent
 
+    /** A watched agent session of this chat changed (status, Drive, or it was added or dropped). */
+    data class SessionsChanged(val threadId: String?) : ChatEvent
+
     /** HQ's answer to `resume`: while [running] the reply so far, else the id of the thread's last saved message. */
     data class ReplySoFar(val threadId: String?, val running: Boolean, val content: String, val messageId: String?) : ChatEvent
 
@@ -38,6 +41,7 @@ sealed interface ChatEvent {
                 "error" -> Failed(thread, o.optString("content"))
                 "chat_rejected" -> Rejected(o.optStringOrNull("client_id"), thread, o.optString("reason"), o.optBoolean("running", false))
                 "thread_title" -> thread?.let { Titled(it, o.optString("title")) }
+                "sessions:sync" -> SessionsChanged(thread)
                 "stream_lag" -> Lagged(o.optInt("skipped"))
                 "reply_so_far" -> ReplySoFar(thread, o.optBoolean("running", false), o.optString("content"), o.optStringOrNull("message_id"))
                 "device_action" -> deviceAction(o)

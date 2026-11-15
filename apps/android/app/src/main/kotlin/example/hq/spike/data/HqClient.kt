@@ -529,6 +529,21 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         EdgeWorker(o.optBoolean("enabled"), o.optString("tag", "edge-task"), o.optJSONArray("repos").strings(), runs, o.optDouble("task_budget_usd", 0.0))
     }
 
+    /** The agent sessions this chat watches. */
+    suspend fun watchedSessions(threadId: String): List<WatchedSession> =
+        send(authed("/api/threads/${java.net.URLEncoder.encode(threadId, "UTF-8")}/sessions").build()) { example.hq.spike.data.watchedSessions(it) }
+
+    /** Turns Drive on or off for a watched session and returns it as saved. 409 means HQ refused to turn it on; 404 that it is no longer watched. */
+    suspend fun setSessionDrive(id: String, drive: Boolean): WatchedSession =
+        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/drive").post(JSONObject().put("drive", drive).toString().toRequestBody("application/json".toMediaType())).build()) {
+            WatchedSession.from(JSONObject(it).getJSONObject("session"))
+        }
+
+    /** Stops the chat watching a session; the server also switches its Drive off. */
+    suspend fun unwatchSession(id: String) {
+        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/unwatch").post(EMPTY_JSON).build()) { }
+    }
+
     /** Every helper, newest first, including stopped ones. */
     suspend fun helpers(): List<HelperRow> = send(authed("/api/harness-sessions").build()) { helperRows(it) }
 
