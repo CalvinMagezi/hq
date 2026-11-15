@@ -19,10 +19,11 @@ pub const GATE_DENIED_EXIT: i32 = 64;
 /// not end the host), and so is `agent.report`, which belongs to the agent's own
 /// hooks on the machine where it runs. `host.lockdown` is in so HQ can stop a
 /// machine's agents from anywhere; unlocking has no method at all.
-const ALLOWED: [&str; 31] = [
+const ALLOWED: [&str; 32] = [
     "host.status",
     "host.programs",
     "host.lockdown",
+    "host.quota",
     "host.workspace",
     "host.dirs",
     "host.mkdir",
@@ -107,6 +108,11 @@ mod tests {
     fn a_remote_caller_can_lock_a_host_but_never_unlock_it() {
         assert!(parse_request(&request("host.lockdown", r#"{"reason":"r"}"#)).is_ok());
         assert!(parse_request(&request("host.unlock", "{}")).is_err());
+    }
+
+    #[test]
+    fn a_remote_caller_can_read_lane_quota() {
+        assert!(parse_request(&request("host.quota", "{}")).is_ok());
     }
 
     #[test]
