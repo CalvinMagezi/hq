@@ -20,6 +20,7 @@ pub mod harness_sessions_registry;
 pub mod host_outages;
 pub mod inbox_prefs;
 pub mod inbox_tidy;
+pub mod lane_quota_alerts;
 pub mod lane_quota_samples;
 pub mod link_captures;
 pub mod mcp_connector;

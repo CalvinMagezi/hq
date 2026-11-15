@@ -5,6 +5,8 @@
 //! reading marked `stale` with its age. Unknown is never turned into zero. Owner-only data: it
 //! is shown to the owner and to a session the owner drives, and goes nowhere else.
 
+pub mod alerts;
+pub mod gate;
 pub mod pace;
 
 use std::collections::BTreeMap;

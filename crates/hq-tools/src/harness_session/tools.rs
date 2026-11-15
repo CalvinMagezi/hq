@@ -345,10 +345,19 @@ impl HqTool for HarnessSessionSpawnTool {
             Some(_) => None,
         };
         let mut note = start.note;
+        let plan = super::quota_gate::Plan::new(
+            &self.db,
+            &cfg,
+            host_handle.name(),
+            &harness,
+            chrono::Utc::now(),
+        );
+        let first_lane = plan.chain[plan.begin].clone();
+        let mut started_lane = first_lane.clone();
         let mut report = super::spawn_on(
             &self.db,
             host_handle.clone(),
-            launch!(&start.path, &harness),
+            launch!(&start.path, &first_lane),
         )
         .await;
         // A remote host cannot be asked whether a folder exists; its launch error says so, and
@@ -374,22 +383,33 @@ impl HqTool for HarnessSessionSpawnTool {
             report = super::spawn_on(
                 &self.db,
                 host_handle.clone(),
-                launch!(&fallback.path, &harness),
+                launch!(&fallback.path, &first_lane),
             )
             .await;
         }
-        let mut fell_back = None;
+        // A lane skipped for its quota is a fallback too, whether or not the start then worked.
+        let mut fell_back = plan
+            .skipped_reason()
+            .map(|why| json!({ "from": harness, "to": first_lane, "reason": why }));
         if let Err(first) = &report
             && super::fallback::lane_unavailable(&first.to_string())
         {
-            let why = first.to_string();
-            for lane in super::fallback::fallbacks_of(&cfg, &harness) {
+            let why = match plan.skipped_reason() {
+                Some(quota) => format!("{quota}; {first_lane}: {first}"),
+                None => first.to_string(),
+            };
+            let open = plan.any_open();
+            for lane in plan.chain.iter().skip(plan.begin + 1) {
+                if open && plan.is_blocked(lane) {
+                    continue;
+                }
                 let tried =
-                    super::spawn_on(&self.db, host_handle.clone(), launch!(&start.path, &lane))
+                    super::spawn_on(&self.db, host_handle.clone(), launch!(&start.path, lane))
                         .await;
                 match tried {
                     Ok(started) => {
                         fell_back = Some(json!({ "from": harness, "to": lane, "reason": why }));
+                        started_lane = lane.clone();
                         report = Ok(started);
                         break;
                     }
@@ -405,6 +425,9 @@ impl HqTool for HarnessSessionSpawnTool {
         let mut report = report?;
         if let Some(fell_back) = fell_back {
             report["fell_back"] = fell_back;
+        }
+        if let Some(warning) = plan.warning(&started_lane) {
+            report["quota_warning"] = warning;
         }
         if let Some(note) = note {
             report["cwd_note"] = json!(note);

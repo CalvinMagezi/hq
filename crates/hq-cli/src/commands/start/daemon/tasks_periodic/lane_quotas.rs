@@ -36,16 +36,23 @@ pub async fn run_lane_quotas(db: &Database, config: &HqConfig) -> Result<()> {
     };
     let read = tokio::task::spawn_blocking(move || {
         let report = lane_quotas::read_all(&db, &cfg, &opts);
-        lane_quotas::prune(&db, Utc::now());
-        report
+        let now = Utc::now();
+        lane_quotas::prune(&db, now);
+        let raised = report
+            .as_ref()
+            .map(|r| lane_quotas::alerts::raise(&db, r, now))
+            .unwrap_or(0);
+        lane_quotas::alerts::prune(&db, now);
+        report.map(|r| (r, raised))
     })
     .await;
     match read {
-        Ok(Ok(report)) => {
+        Ok(Ok((report, raised))) => {
             let silent = report.hosts.iter().filter(|h| !h.reachable).count();
             debug!(
                 lanes = report.lanes.len(),
                 unreachable_hosts = silent,
+                alerts = raised,
                 "lane quotas sampled"
             );
         }

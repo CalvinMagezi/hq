@@ -94,9 +94,39 @@ The command does not set the lane or the source. Print no credential: the accoun
 agents, with a `status` per row (`available`, `stale`, `not_exposed`, `check_failed`), under a
 per-host time limit.
 
+## What HQ does with a reading
+
+**Spawn gate.** `harness_session_spawn` reads the stored reading of the lane it is about to start on
+(the host the session runs on; no host call, no network) and takes its worst window that has not
+reset. A harness maps to its reader lane (`claude-code` to `claude`, `github-copilot` to `copilot`,
+`antigravity` to `agy`, `codex`, `cursor`; a profile with `quota.command` is its own lane; a profile
+without one shares its base's lane; anything else has no lane and is never checked).
+
+- Used percent at or above `quota.block_percent`: the start falls through the profile's `fallback`
+  list, each lane checked the same way, and `fell_back.reason` names the window, percent and reset.
+- Every lane blocked, or no fallback: the start still goes ahead on the lane asked for, with
+  `quota_warning`. HQ never refuses: the vendor is the one to refuse, and a stale or wrong reading
+  must not strand someone who chose the lane.
+- At or above `quota.warn_percent`: a normal start with `quota_warning`.
+- Unknown, missing, or older than twice `quota.interval_minutes`: no block. An old reading may warn,
+  marked `stale: true`.
+- `quota.enabled: false` or `quota.lanes.<lane>: false`: no check.
+
+**Driver prompt.** It tells the driver to call `lane_quotas` before choosing a lane or moving a failed
+turn. No balance is put in the prompt.
+
+**Alerts.** After each sample the `lane-quotas` task looks at each live lane's worst open window. When
+it first reaches `quota.warn_percent` it puts one item in the owner's inbox (topic `upkeep`, source
+`lane-quota`) naming the lane, percent, reset and pace; at `quota.block_percent` one more. The edge is
+kept in `lane_quota_alerts` per host, lane, window, level and reset time, so it does not repeat across
+passes or restarts until the window's reset time (cut to the minute, so seconds of jitter do not
+count) changes. An item that was dismissed or expired is not raised again for the same window, and a
+failed write of the edge raises nothing and is retried on the next pass. A window with no reset time raises nothing.
+These items are device only: no web push, like the adoption digest.
+
 ## Privacy
 
 Readings are owner-only. They are kept in the local database, shown to the owner by the CLI and
 the web app, and returned by `lane_quotas` to a session the owner drives. They are not put into
-a model's prompt by HQ, not pushed, and not sent to a third party. Slice C (spawn gate, driver
-prompt block, alerts) is not part of this.
+a model's prompt by HQ, not pushed, and not sent to a third party. The driver prompt names the tool and
+carries no figure; the alert item stays on the owner's devices.

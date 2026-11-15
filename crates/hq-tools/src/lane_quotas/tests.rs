@@ -254,3 +254,227 @@ fn the_tool_is_read_only_and_the_report_has_a_stable_shape() {
     assert_eq!(v["hosts"][0]["reachable"], true);
     assert_eq!(v["warn_percent"], 80.0);
 }
+
+mod gate_and_alerts {
+    use super::*;
+    use crate::lane_quotas::{alerts, gate};
+    use hq_core::config::{HarnessProfileConfig, QuotaCommandConfig};
+    use hq_db::value_items;
+
+    fn sample(host: &str, lane: &str, used: f64, observed: DateTime<Utc>) -> store::Sample {
+        store::Sample {
+            host: host.into(),
+            quota: reading(lane, used, observed),
+        }
+    }
+
+    fn profile(base: &str, command: bool) -> HarnessProfileConfig {
+        HarnessProfileConfig {
+            base: base.into(),
+            quota: command.then(|| QuotaCommandConfig {
+                command: vec!["usage".into()],
+                timeout_secs: 5,
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_harness_maps_to_its_reader_lane() {
+        let mut cfg = HqConfig::default().agent_host;
+        cfg.harness_profiles
+            .insert("work".into(), profile("claude-code", false));
+        cfg.harness_profiles
+            .insert("gateway".into(), profile("claude-code", true));
+        let lane = |h: &str| gate::lane_for(&cfg, h);
+        assert_eq!(lane("claude-code").as_deref(), Some("claude"));
+        assert_eq!(lane("github-copilot").as_deref(), Some("copilot"));
+        assert_eq!(lane("copilot").as_deref(), Some("copilot"));
+        assert_eq!(lane("antigravity").as_deref(), Some("agy"));
+        assert_eq!(lane("agy").as_deref(), Some("agy"));
+        assert_eq!(lane("codex").as_deref(), Some("codex"));
+        assert_eq!(lane("cursor").as_deref(), Some("cursor"));
+        assert_eq!(lane("work").as_deref(), Some("claude"));
+        assert_eq!(lane("gateway").as_deref(), Some("gateway"));
+        assert_eq!(lane("opencode"), None);
+        assert_eq!(lane("nonsense"), None);
+    }
+
+    fn verdict(q: &QuotaConfig, stored: &[store::Sample]) -> gate::Verdict {
+        gate::check(q, stored, "h", "claude", now())
+    }
+
+    #[test]
+    fn each_gate_branch() {
+        let q = QuotaConfig::default();
+        let fresh = |used| vec![sample("h", "claude", used, now() - Duration::minutes(1))];
+        assert!(verdict(&q, &fresh(96.0)).is_block());
+        let warn = verdict(&q, &fresh(85.0));
+        assert!(matches!(&warn, gate::Verdict::Warn(n) if !n.stale && n.window == "week"));
+        assert_eq!(verdict(&q, &fresh(10.0)), gate::Verdict::Clear);
+        assert_eq!(verdict(&q, &[]), gate::Verdict::Clear);
+        let other_host = vec![sample("x", "claude", 99.0, now())];
+        assert_eq!(verdict(&q, &other_host), gate::Verdict::Clear);
+
+        let mut unknown = fresh(99.0);
+        unknown[0].quota.confidence = Confidence::Unknown;
+        assert_eq!(verdict(&q, &unknown), gate::Verdict::Clear);
+
+        // Twice the interval is the limit: older never blocks, but still warns, marked stale.
+        let old = vec![sample("h", "claude", 99.0, now() - Duration::minutes(21))];
+        assert!(matches!(verdict(&q, &old), gate::Verdict::Warn(n) if n.stale));
+
+        let off: QuotaConfig = serde_yaml::from_str("lanes: {claude: false}").unwrap();
+        assert_eq!(verdict(&off, &fresh(99.0)), gate::Verdict::Clear);
+        let none: QuotaConfig = serde_yaml::from_str("enabled: false").unwrap();
+        assert_eq!(verdict(&none, &fresh(99.0)), gate::Verdict::Clear);
+    }
+
+    #[test]
+    fn the_worst_open_window_decides_and_a_reset_one_is_ignored() {
+        let mut s = sample("h", "claude", 50.0, now());
+        let mut hot = s.quota.windows[0].clone();
+        hot.label = "5h".into();
+        hot.used_percent = Some(97.0);
+        let mut gone = hot.clone();
+        gone.label = "old".into();
+        gone.used_percent = Some(100.0);
+        gone.resets_at = Some(now() - Duration::hours(1));
+        s.quota.windows.extend([hot, gone]);
+        let v = verdict(&QuotaConfig::default(), &[s]);
+        let gate::Verdict::Block(n) = v else {
+            panic!("{v:?}")
+        };
+        assert_eq!(n.window, "5h");
+        assert!(n.reason().starts_with("quota: 5h at 97% until 2026-11-18"));
+    }
+
+    fn report(used: f64, resets: DateTime<Utc>) -> Report {
+        let mut q = reading("claude", used, now());
+        q.windows[0].resets_at = Some(resets);
+        Report {
+            enabled: true,
+            generated_at: now(),
+            warn_percent: 80.0,
+            block_percent: 95.0,
+            hosts: Vec::new(),
+            lanes: vec![LaneView::from_reading(
+                "h",
+                q,
+                now(),
+                &QuotaConfig::default(),
+            )],
+        }
+    }
+
+    fn inbox(db: &Database) -> Vec<hq_core::types::ValueItem> {
+        use hq_core::types::ValueState;
+        value_items::list_by_state(db, ValueState::Pending).unwrap()
+    }
+
+    #[test]
+    fn a_warn_alert_is_raised_once_per_window_and_again_after_a_reset() {
+        let db = Database::open_memory().unwrap();
+        let reset = now() + Duration::days(3);
+        assert_eq!(alerts::raise(&db, &report(50.0, reset), now()), 0);
+        assert_eq!(alerts::raise(&db, &report(82.0, reset), now()), 1);
+        assert_eq!(alerts::raise(&db, &report(83.0, reset), now()), 0);
+        assert_eq!(alerts::raise(&db, &report(40.0, reset), now()), 0);
+        assert_eq!(alerts::raise(&db, &report(88.0, reset), now()), 0);
+        let items = inbox(&db);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].source_task, "lane-quota");
+        assert!(items[0].title.contains("claude") && items[0].title.contains("82%"));
+        assert!(items[0].body.contains("reaches about"), "{}", items[0].body);
+        assert!(items[0].is_device_only());
+        // The window resets and the lane climbs again: a new window, a new alert.
+        let next = reset + Duration::days(7);
+        assert_eq!(alerts::raise(&db, &report(81.0, next), now()), 1);
+    }
+
+    #[test]
+    fn a_block_alert_follows_the_warn_one_once_and_a_jump_raises_only_the_block() {
+        let db = Database::open_memory().unwrap();
+        let reset = now() + Duration::days(3);
+        assert_eq!(alerts::raise(&db, &report(85.0, reset), now()), 1);
+        assert_eq!(alerts::raise(&db, &report(96.0, reset), now()), 1);
+        assert_eq!(alerts::raise(&db, &report(97.0, reset), now()), 0);
+        assert_eq!(inbox(&db).len(), 2);
+
+        let db = Database::open_memory().unwrap();
+        assert_eq!(alerts::raise(&db, &report(99.0, reset), now()), 1);
+        assert_eq!(alerts::raise(&db, &report(99.0, reset), now()), 0);
+        assert_eq!(alerts::raise(&db, &report(85.0, reset), now()), 0);
+        assert_eq!(inbox(&db).len(), 1);
+    }
+
+    #[test]
+    fn a_dismissed_or_expired_item_is_not_raised_again_in_the_same_window() {
+        let db = Database::open_memory().unwrap();
+        let reset = now() + Duration::days(3);
+        assert_eq!(alerts::raise(&db, &report(85.0, reset), now()), 1);
+        let id = inbox(&db)[0].id.clone();
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE value_items SET state = 'expired' WHERE id = ?1",
+                [&id],
+            )?;
+            // Even with the edge forgotten, the item's own key keeps the window quiet.
+            c.execute("DELETE FROM lane_quota_alerts", [])?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(alerts::raise(&db, &report(86.0, reset), now()), 0);
+        let total: i64 = db
+            .with_conn(|c| Ok(c.query_row("SELECT COUNT(*) FROM value_items", [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(total, 1);
+    }
+
+    #[test]
+    fn a_reset_time_that_jitters_by_seconds_is_one_window() {
+        let db = Database::open_memory().unwrap();
+        let reset = now() + Duration::days(3);
+        assert_eq!(alerts::raise(&db, &report(85.0, reset), now()), 1);
+        for jitter in [1, 7, 29] {
+            let r = report(85.0, reset + Duration::seconds(jitter));
+            assert_eq!(alerts::raise(&db, &r, now()), 0, "jitter {jitter}s");
+        }
+        assert_eq!(inbox(&db).len(), 1);
+    }
+
+    #[test]
+    fn a_failed_edge_write_alerts_on_a_later_pass_instead_of_never() {
+        let db = Database::open_memory().unwrap();
+        let reset = now() + Duration::days(3);
+        db.with_conn(|c| {
+            c.execute(
+                "ALTER TABLE lane_quota_alerts RENAME TO lane_quota_alerts_off",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(alerts::raise(&db, &report(85.0, reset), now()), 0);
+        assert!(inbox(&db).is_empty());
+        db.with_conn(|c| {
+            c.execute(
+                "ALTER TABLE lane_quota_alerts_off RENAME TO lane_quota_alerts",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(alerts::raise(&db, &report(85.0, reset), now()), 1);
+    }
+
+    #[test]
+    fn a_stale_or_unknown_reading_raises_nothing() {
+        let db = Database::open_memory().unwrap();
+        let mut r = report(99.0, now() + Duration::days(3));
+        r.lanes[0].confidence = Confidence::Stale;
+        assert_eq!(alerts::raise(&db, &r, now()), 0);
+        r.lanes[0].confidence = Confidence::Unknown;
+        assert_eq!(alerts::raise(&db, &r, now()), 0);
+    }
+}

@@ -122,7 +122,11 @@ pub const COLLECTION_TIP_SOURCE: &str = "collection_tip";
 pub const SCHEDULED_OFFER_SOURCE: &str = "scheduled_offer";
 /// Source of the one rolling item per day that counts finished and stopped helpers.
 pub const FLEET_DIGEST_SOURCE: &str = "fleet-digest";
+/// Source of the item that says a coding-agent lane's allowance is running low. How much of a
+/// vendor allowance the owner has used stays on their own devices too.
+pub const LANE_QUOTA_SOURCE: &str = "lane-quota";
 pub const DEVICE_ONLY_SOURCES: &[&str] = &[
+    LANE_QUOTA_SOURCE,
     FLEET_DIGEST_SOURCE,
     ADOPTION_DIGEST_SOURCE,
     COLLECTION_TIP_SOURCE,
