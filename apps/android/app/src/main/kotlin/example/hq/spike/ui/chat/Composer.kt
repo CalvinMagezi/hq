@@ -145,8 +145,10 @@ private fun MessageRow(state: ChatUiState, actions: ChatActions, onVoice: () -> 
             Icon(HqIcons.Plus, null, Modifier.size(24.dp), tint = Mts.Ink)
         }
         val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
         val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
         LaunchedEffect(state.focusDraft) { if (state.focusDraft > 0) { focus.requestFocus(); keyboard?.show() } }
+        LaunchedEffect(state.composerSent) { if (state.composerSent > 0) { focusManager.clearFocus(); keyboard?.hide() } }
         BasicTextField(
             value = state.draft, onValueChange = actions.onDraft, textStyle = HqType.Body.copy(color = Mts.Ink),
             cursorBrush = SolidColor(Mts.Ink), maxLines = MAX_LINES,
