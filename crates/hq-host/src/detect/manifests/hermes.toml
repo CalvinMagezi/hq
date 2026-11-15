@@ -5,13 +5,42 @@
 # Hermes keeps a status footer (" ☤ model · context · ...") under its input box
 # whether it works or waits. While it works, the line above the box reads
 # "☤ ❯ type to redirect this turn · Tab queues it for after", so working is read
-# from the bottom few lines and idle only from the footer with no such line. Its
-# approval questions are not covered yet: a screen none of the rules recognise
-# reads unknown, never idle.
+# from the bottom few lines and idle only from the footer with no such line.
+#
+# A question Hermes asks (a dangerous command, captured 2026-11-15) is a rounded box
+# with numbered options and the hint "↑/↓ to select, Enter to confirm" under it, drawn
+# above the status footer. The footer is still on screen then, so the dialog rule must
+# outrank the idle rule. A screen none of the rules recognise reads unknown, never idle.
 id = "hermes"
-version = "2026.11.13.1"
-min_engine_version = 4
-updated_at = "2026-11-13T00:00:00Z"
+version = "2026.11.15.1"
+min_engine_version = 5
+updated_at = "2026-11-15T00:00:00Z"
+
+[dialogs.approval]
+kind = "command"
+top = '^╭'
+footer = '(?i)to select, enter to confirm'
+# Under the hint Hermes keeps a spinner line, the input line, a rule and the status footer.
+footer_slack = 4
+question = '(?i)dangerous command'
+command_block = ['(?i)dangerous command', '^\s*(?:❯\s*)?\d+\.\s']
+# The engine strips the box borders before it reads these lines.
+option = '^\s*(?:❯\s*)?(?P<num>\d+)\.\s+(?P<label>\S.*?)\s*$'
+selected = '^\s*❯'
+remember = '(?i)for this session|permanent allowlist'
+answer = "arrows"
+decline = ["esc"]
+
+[[rules]]
+id = "approval_dialog"
+state = "blocked"
+priority = 990
+region = "bottom_non_empty_lines(16)"
+visible_blocker = true
+# "↑/↓ to select, Enter to confirm  (297s)" under a box titled "Dangerous Command".
+contains = ["to select, Enter to confirm"]
+line_regex = ['^\s*│\s*(?:❯\s*)?\d+\.\s+\S']
+dialog = "approval"
 
 [[rules]]
 id = "working_redirect_hint"

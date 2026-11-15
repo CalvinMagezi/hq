@@ -78,7 +78,7 @@ fn pi_screens_from_real_sessions_are_detected_correctly() {
 
 #[test]
 fn hermes_screens_from_real_sessions_are_detected_correctly() {
-    assert!(check_agent("hermes") >= 3);
+    assert!(check_agent("hermes") >= 4);
 }
 
 #[test]

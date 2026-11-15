@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// The newest rule-file features this engine understands.
-pub const ENGINE_VERSION: u32 = 4;
+pub const ENGINE_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

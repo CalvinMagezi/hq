@@ -77,8 +77,18 @@ Under the open sandbox profile agy and Copilot CLI complete a turn (agent kinds 
 under the sandbox, and the reason matters for the design: `hermes acp` is a thin client of a Hermes
 gateway daemon (a websocket on a unix socket under `~/.hermes`) that it starts detached when none is
 running, and the gateway, not the client, runs the tools. The sandbox stops the start, and a gateway
-that already runs outside it would run the tools outside it. So Hermes over ACP is for hosts that do
-not require a sandbox, and Hermes stays on the terminal transport where one is required.
+that already runs outside it runs the tools outside it.
+
+Probed on 2026-11-15 with the gateway already running (`hermes gateway ensure`) and the open
+profile: both a Hermes ACP session and a Hermes terminal session answered a prompt, and in both a
+shell command the model ran could read `~/.hq/config.yaml` (HQ's own config, which the open profile
+walls off from every other agent kind). So with a running gateway Hermes' tools are not confined by
+the process sandbox on either transport, and the earlier -32603 was the sandboxed client failing to
+start a gateway. Consequences: (1) Hermes is a trusted agent, not a sandboxed one, and
+`agents_unsandboxed` in the host report does not count it; (2) the transport is no safer than the
+terminal, so the choice between them is about state and dialogs, not isolation; (3) confining Hermes
+means running its gateway under the sandbox profile as an agent of its own, which is not built (see
+TECHDEBT.md). Until then, give Hermes only work that may run with the owner's own file access.
 
 Run a real agent through the host with `HQ_ACP_LIVE="<command>" cargo test -p hq-host --test
 acp_live -- --ignored --nocapture` (see the file header for the sandbox switches).
@@ -173,6 +183,7 @@ host never types the first prompt: use ACP for those. Per agent:
 - **Copilot CLI**: `acp_args` must switch off its built-in MCP servers, custom instructions and every
   server in its own config (`--disable-builtin-mcps --no-custom-instructions --disable-mcp-server
   <name> ...`), or a small-context model answers with a static-context error as ordinary text.
-- **Hermes**: stays in a terminal. Over ACP it fails under the process sandbox (its gateway cannot run
-  inside it). It needs its gateway started first (`hermes gateway ensure`) and stopped after. It has no
-  HQ token, so it cannot write the vault itself.
+- **Hermes**: works on both transports once its gateway runs (`hermes gateway ensure` first, `hermes
+  gateway stop` after), and its tools then run outside the process sandbox on both (see the probe
+  above). A terminal session asking for an approval reads `blocked` since the dangerous-command
+  dialog was captured. It has no HQ token, so it cannot write the vault itself.

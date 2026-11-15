@@ -256,10 +256,31 @@ fn codex_update_and_hooks_dialogs() {
 }
 
 #[test]
+fn hermes_dangerous_command() {
+    let d = read("hermes", "blocked--dangerous-command");
+    assert_eq!(d.kind, DialogKind::Command);
+    assert!(
+        d.question
+            .as_deref()
+            .is_some_and(|q| q.ends_with("Dangerous Command")),
+        "{:?}",
+        d.question
+    );
+    let opts = options(&d);
+    assert_eq!(opts[0], (1, "Allow once", true, false, false));
+    assert_eq!((opts[1].0, opts[1].3), (2, true), "{opts:?}");
+    assert_eq!((opts[2].0, opts[2].3), (3, true), "{opts:?}");
+    assert_eq!(opts[3], (4, "Deny", false, false, false));
+    assert_eq!(opts.len(), 4);
+    let command = d.command.as_deref().unwrap_or_default();
+    assert!(command.contains("rm -rf /tmp/hq-hermes-"), "{command:?}");
+}
+
+#[test]
 fn every_blocked_fixture_reads_as_a_dialog() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let mut seen = 0;
-    for agent in ["claude", "codex", "copilot", "antigravity"] {
+    for agent in ["claude", "codex", "copilot", "antigravity", "hermes"] {
         for entry in std::fs::read_dir(root.join(agent)).unwrap() {
             let path = entry.unwrap().path();
             let name = path.file_stem().unwrap().to_string_lossy().to_string();
@@ -270,5 +291,5 @@ fn every_blocked_fixture_reads_as_a_dialog() {
             }
         }
     }
-    assert!(seen >= 11, "{seen}");
+    assert!(seen >= 12, "{seen}");
 }
