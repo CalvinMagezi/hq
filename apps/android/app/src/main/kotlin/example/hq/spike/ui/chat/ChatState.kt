@@ -111,6 +111,8 @@ data class ChatUiState(
     val pillsCleared: Boolean = false,
     /** False once HQ has no fewer or never route, so a pill's long-press menu is not offered. */
     val pillChoices: Boolean = true,
+    /** The agent sessions this chat watches, and whether their sheet is open. */
+    val sessions: SessionsUi = SessionsUi(),
 ) {
     /** The newest message when it is a finished reply carrying an offer that is still open. */
     val offered: UiMessage? get() = messages.lastOrNull()?.takeIf { it.speaker == Speaker.Reply && it.offer != null && live == null && !failed }

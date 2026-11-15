@@ -3944,4 +3944,23 @@
     <string name="settings_suggests_clear_confirm">Clear</string>
     <string name="settings_suggests_cleared">HQ forgot what it remembered.</string>
     <string name="settings_suggests_clear_failed">Couldn\'t clear that. Try again.</string>
+    <string name="sessions_title">Agents in this chat</string>
+    <string name="sessions_button_label">Agents in this chat, %1$s watched</string>
+    <string name="sessions_button_label_waiting">Agents in this chat, %1$s watched, %2$s waiting for an answer</string>
+    <string name="sessions_empty">This chat isn\'t watching any agents.</string>
+    <string name="sessions_drive_note">While this is on, HQ answers the agent\'s prompts after reading what is on its screen.</string>
+    <string name="sessions_let_hq_drive">Let HQ drive</string>
+    <string name="sessions_drive_label">Let HQ drive %1$s</string>
+    <string name="sessions_stop_watching">Stop watching</string>
+    <string name="sessions_stop_watching_named">Stop watching %1$s</string>
+    <string name="sessions_status_working">Working</string>
+    <string name="sessions_status_idle">Idle</string>
+    <string name="sessions_status_blocked">Waiting for an answer</string>
+    <string name="sessions_status_done">Done</string>
+    <string name="sessions_status_unknown">Not running</string>
+    <string name="sessions_unnamed">Agent</string>
+    <string name="sessions_drive_refused">Drive stays off until this agent has a goal and a way to tell it is done.</string>
+    <string name="sessions_drive_failed">Couldn\'t change that. Try again.</string>
+    <string name="sessions_unwatch_failed">Couldn\'t stop watching. Try again.</string>
+    <string name="sessions_load_failed">Couldn\'t load the agents. Try again.</string>
 </resources>

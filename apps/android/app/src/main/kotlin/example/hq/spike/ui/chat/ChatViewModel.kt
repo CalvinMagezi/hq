@@ -95,6 +95,11 @@ class ChatActions(
     val onNever: (String) -> Unit = {},
     /** Pins or unpins a chat in the chats sheet; the pins live on this phone only. */
     val onPinChat: (String) -> Unit = {},
+    val onOpenSessions: () -> Unit = {},
+    val onCloseSessions: () -> Unit = {},
+    /** Turns Drive on or off for a watched session, by its id. */
+    val onSessionDrive: (String, Boolean) -> Unit = { _, _ -> },
+    val onStopWatching: (String) -> Unit = {},
 )
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -139,7 +144,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         onNoteMenu = { open -> _state.update { it.copy(noteMenu = open) } }, onTogglePin = ::togglePin,
         onExport = { _state.value.note?.let { n -> _state.update { it.copy(noteMenu = false) }; exporter.choose(n.path, n.title, n.body) } }, onExportFormat = exporter::start, onExportClose = exporter::close, onExportAgain = exporter::again,
         onLoadOlder = ::loadOlder, onOffer = ::answerOffer, onScheduleOffer = ::scheduleOffer, onFewer = { id -> tellHq(id, "fewer", R.string.chat_pill_fewer_done) }, onNever = { id -> tellHq(id, "never", R.string.chat_pill_never_done) },
-        onPinChat = ::pinChat, onSlash = { name -> setDraft(if (name == "/topic") "/topic " else name) },
+        onPinChat = ::pinChat,
+        onOpenSessions = ::openSessions, onCloseSessions = ::closeSessions, onSessionDrive = ::setSessionDrive, onStopWatching = ::stopWatching,
+        onSlash = { name -> setDraft(if (name == "/topic") "/topic " else name) },
     )
 
     init {
@@ -181,6 +188,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             // A turn_end may be among the frames that were lost, so the running state is checked as after a reconnect.
             is ChatEvent.Lagged -> viewModelScope.launch { reconcile() }
+            is ChatEvent.SessionsChanged -> event.threadId?.takeIf { it == _state.value.threadId }?.let { id -> viewModelScope.launch { refreshSessions(id) } }
             else -> {}
         }
     }
@@ -330,6 +338,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun newChat(keepSheet: Boolean = false) {
+        sessionsPoll?.cancel()
         _state.update {
             ChatUiState(connected = it.connected, draft = drafts.getString(draftKey(null), "").orEmpty(), chats = it.chats, chatsOpen = keepSheet && it.chatsOpen, suggestions = it.suggestions, laterSupported = it.laterSupported, pillChoices = it.pillChoices, answeredOffers = it.answeredOffers, pillsCleared = it.pillsCleared)
         }
@@ -339,8 +348,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val row = _state.value.chats.firstOrNull { it.id == id }
         _state.update {
             it.copy(threadId = id, title = row?.title ?: it.title, messages = emptyList(), live = null, failed = false, chatsOpen = false,
-                draft = drafts.getString(draftKey(id), "").orEmpty(), contexts = emptyList(), files = emptyList(), editing = null, pressed = null, hasOlder = false, offerResult = null)
+                draft = drafts.getString(draftKey(id), "").orEmpty(), contexts = emptyList(), files = emptyList(), editing = null, pressed = null, hasOlder = false, offerResult = null, sessions = SessionsUi())
         }
+        sessionsPoll?.cancel()
         viewModelScope.launch { loadMessages(id) }
     }
 
@@ -373,6 +383,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun loadMessages(id: String) {
+        viewModelScope.launch { refreshSessions(id) }
         val page = try { client.messages(id) } catch (e: HqUnavailable) {
             // HQ says the chat is gone: its pin goes too. Any other failure keeps everything as it was.
             if (e.status == HTTP_NOT_FOUND) forgetPin(id)
@@ -558,6 +569,67 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(contexts = items.take(MAX_ATTACHED)) }
     }
 
+    private var sessionsPoll: Job? = null
+
+    private suspend fun refreshSessions(threadId: String) {
+        val fresh = try { client.watchedSessions(threadId) } catch (e: HqUnavailable) {
+            // Keep what is shown; only a person looking at the sheet needs to hear it failed.
+            if (_state.value.sessions.open && threadId == _state.value.threadId) notifySessions(R.string.sessions_load_failed)
+            return
+        }
+        _state.update { if (it.threadId != threadId) it else it.copy(sessions = SessionsReducer.loaded(it.sessions, fresh)) }
+    }
+
+    private fun notifySessions(text: Int) = _state.update { it.copy(notice = Notice(getApplication<Application>().getString(text))) }
+
+    /** While the sheet is open the list is read again every few seconds, so a status change shows without a sync event. */
+    private fun openSessions() {
+        val id = _state.value.threadId ?: return
+        _state.update { it.copy(sessions = it.sessions.copy(open = true)) }
+        sessionsPoll?.cancel()
+        sessionsPoll = viewModelScope.launch {
+            while (true) {
+                refreshSessions(id)
+                delay(SESSIONS_POLL_MS)
+            }
+        }
+    }
+
+    private fun closeSessions() {
+        sessionsPoll?.cancel()
+        _state.update { it.copy(sessions = it.sessions.copy(open = false)) }
+    }
+
+    private fun setSessionDrive(id: String, drive: Boolean) {
+        val before = _state.value.sessions
+        val was = before.sessions.firstOrNull { it.id == id }?.drive ?: return
+        if (id in before.busy) return
+        _state.update { it.copy(sessions = SessionsReducer.driveRequested(it.sessions, id, drive)) }
+        viewModelScope.launch {
+            try {
+                val saved = client.setSessionDrive(id, drive)
+                _state.update { it.copy(sessions = SessionsReducer.driveSaved(it.sessions, saved)) }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(sessions = SessionsReducer.driveFailed(it.sessions, id, was)) }
+                notifySessions(if (e.status == HTTP_CONFLICT) R.string.sessions_drive_refused else R.string.sessions_drive_failed)
+            }
+        }
+    }
+
+    private fun stopWatching(id: String) {
+        if (id in _state.value.sessions.busy) return
+        _state.update { it.copy(sessions = SessionsReducer.stopRequested(it.sessions, id)) }
+        viewModelScope.launch {
+            try {
+                client.unwatchSession(id)
+                _state.update { it.copy(sessions = SessionsReducer.stopped(it.sessions, id)) }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(sessions = SessionsReducer.stopFailed(it.sessions, id)) }
+                notifySessions(R.string.sessions_unwatch_failed)
+            }
+        }
+    }
+
     private fun openChats() {
         _state.update { it.copy(chatsOpen = true, chatSearch = "") }
         viewModelScope.launch { refreshChats() }
@@ -665,6 +737,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         const val PIN_KEY = "ids"
         const val RESULT_MS = 6_000L
         const val HTTP_NOT_FOUND = 404
+        const val HTTP_CONFLICT = 409
+        const val SESSIONS_POLL_MS = 5_000L
         const val NEW_CHAT_KEY = "new"
         const val MAX_ATTACHED = 10
         const val REPLY_PREVIEW_CHARS = 160

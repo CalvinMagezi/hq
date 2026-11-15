@@ -130,4 +130,32 @@ class HqClientTest {
         answer = { 200 to "not json" }
         assertEquals(null, client().backupStatus())
     }
+
+    private val sessionJson = """{"id":"s 1","harness":"claude-code","label":"Build","status":"running","agent_status":"blocked","drive":true,"pending_wake":null,"task":{"display_id":"T-7"}}"""
+
+    @Test fun theChatsWatchedSessionsAreListedAndReadForStatusDriveAndTask() = runBlocking {
+        answer = { 200 to """{"sessions":[$sessionJson]}""" }
+        val s = client().watchedSessions("th 1").single()
+        assertEquals("GET /api/threads/th+1/sessions HTTP/1.1", lines.single())
+        assertEquals("Build", s.label)
+        assertEquals("T-7", s.taskDisplayId)
+        assertTrue(s.drive && s.running && s.needsAnswer)
+    }
+
+    @Test fun turningDriveOnPostsTheFlagAndReturnsTheSavedSession() = runBlocking {
+        answer = { 200 to """{"session":$sessionJson}""" }
+        assertTrue(client().setSessionDrive("s 1", true).drive)
+        assertEquals("POST /api/harness-sessions/s+1/drive HTTP/1.1", lines.single())
+    }
+
+    @Test fun aRefusedDriveSurfacesTheConflictStatus() = runBlocking {
+        answer = { 409 to """{"error":"Drive stays off"}""" }
+        try { client().setSessionDrive("s1", true); fail("a 409 is an error") } catch (e: HqUnavailable) { assertEquals(409, e.status) }
+    }
+
+    @Test fun stoppingWatchingPostsToUnwatch() = runBlocking {
+        answer = { 200 to """{"ok":true}""" }
+        client().unwatchSession("s1")
+        assertEquals("POST /api/harness-sessions/s1/unwatch HTTP/1.1", lines.single())
+    }
 }

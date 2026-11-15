@@ -82,7 +82,10 @@ fun ChatScreen(
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             example.hq.spike.ui.connection.ChatBanner(status, onStartHq, onAiKeys)
-            NameRow(state.title, state.messages.any { it.spoken }, actions.onOpenChats)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                NameRow(state.title, state.messages.any { it.spoken }, actions.onOpenChats, Modifier.weight(1f))
+                if (state.sessions.count > 0) SessionsButton(state.sessions, actions.onOpenSessions)
+            }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (state.messages.isEmpty() && state.live == null) EmptyChat(Suggestions.visible(state.suggestions, state.pillsCleared), actions.onDraft, state.pillChoices, actions.onFewer, actions.onNever) else Conversation(state, actions)
                 SlashPalette(state.draft, actions.onSlash, Modifier.align(Alignment.BottomCenter))
@@ -143,11 +146,12 @@ fun ChatOverlays(state: ChatUiState, actions: ChatActions, onOpenInNotes: (Strin
         }
         state.export?.let { ExportOverlay(it, ExportActions(actions.onExportFormat, actions.onExportClose, actions.onExportAgain, actions.onNotice)) }
         if (state.chatsOpen) ChatsSheet(state, actions)
+        if (state.sessions.open) SessionsSheet(state.sessions, actions)
         if (state.addOpen) AddSheet(actions, pickers)
         state.picker?.let { PickerSheet(it, actions) }
         state.pressed?.let { id -> state.messages.firstOrNull { it.id == id }?.let { MessageActionsSheet(state, it, blocks, actions) } }
         // A page, a sheet or the picker hides the bar, so a notice from here sits at the screen edge, not over the bar.
-        val coversBar = state.page != null || state.note != null || state.export != null || state.chatsOpen || state.addOpen || state.picker != null || state.pressed != null
+        val coversBar = state.page != null || state.note != null || state.export != null || state.chatsOpen || state.sessions.open || state.addOpen || state.picker != null || state.pressed != null
         androidx.compose.runtime.CompositionLocalProvider(example.hq.spike.ui.shell.LocalCoversBar provides coversBar) {
             state.notice?.let { Snack(it, actions, Modifier.align(Alignment.BottomCenter)) }
         }
@@ -155,10 +159,10 @@ fun ChatOverlays(state: ChatUiState, actions: ChatActions, onOpenInNotes: (Strin
 }
 
 @Composable
-private fun NameRow(title: String, spoken: Boolean, onClick: () -> Unit) {
+private fun NameRow(title: String, spoken: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(24.dp)
     Row(
-        Modifier.padding(horizontal = 16.dp).fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape)
+        modifier.padding(start = 16.dp, end = 16.dp).heightIn(min = 48.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape)
             .clickable(role = Role.Button, onClickLabel = stringResource(R.string.chat_show_chats), onClick = onClick).padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
