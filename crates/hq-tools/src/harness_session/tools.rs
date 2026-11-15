@@ -1145,7 +1145,7 @@ impl HqTool for HarnessSessionModeTool {
                 "this turn cannot turn Drive on; only the user can, with the switch in the Watching panel"
             );
         }
-        let untrusted = args.get(super::UNTRUSTED_TURN_ARG).and_then(Value::as_bool) == Some(true);
+        let untrusted = chat.untrusted_blocks_drive(&args);
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
         tokio::task::spawn_blocking(move || {

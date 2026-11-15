@@ -26,6 +26,13 @@ const MAX_UNASKED_URL_DATA_BYTES: usize = 200;
 /// box rarely passes 100; a longer query is more likely text the model is carrying.
 const MAX_UNASKED_QUERY_CHARS: usize = 150;
 
+/// `agent_host.drive_after_untrusted_reads`, read when a send is judged so a config change applies at once.
+pub(super) fn drive_after_untrusted_reads() -> bool {
+    hq_core::config::HqConfig::load()
+        .map(|c| c.agent_host.drive_after_untrusted_reads)
+        .unwrap_or(true)
+}
+
 /// Why this call needs the owner whether or not the session is tainted, or `None`. Changing,
 /// deleting or sending on the phone is not something the owner can undo from their notes, so a
 /// device tool of that risk class always asks.

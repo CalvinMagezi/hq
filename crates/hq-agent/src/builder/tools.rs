@@ -635,6 +635,7 @@ fn watching_chat(
     Some(hq_tools::harness_session::WatchingChat {
         thread,
         drive_new: agent_host.drive_new_watches && !identity.is_web_driver_turn() && !from_ask,
+        drive_after_untrusted: agent_host.drive_after_untrusted_reads,
         driver_turn: identity.is_session_driver_turn(),
         from_ask,
     })
@@ -676,6 +677,18 @@ mod watching_chat_tests {
         )
         .unwrap();
         assert!((typed.drive_new, typed.driver_turn, typed.from_ask) == (true, false, false));
+        assert!(typed.drive_after_untrusted);
+        let strict_cfg = hq_core::config::AgentHostConfig {
+            drive_after_untrusted_reads: false,
+            ..Default::default()
+        };
+        let strict = watching_chat(
+            &RequestIdentity::from_web_thread("th-typed", false, false),
+            &strict_cfg,
+            &db,
+        )
+        .unwrap();
+        assert!(!strict.drive_after_untrusted);
         let driver = watching_chat(
             &RequestIdentity::from_web_thread("th-typed", true, true),
             &host_cfg,

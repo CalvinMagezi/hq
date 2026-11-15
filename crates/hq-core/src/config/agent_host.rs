@@ -102,6 +102,13 @@ pub struct AgentHostConfig {
     #[serde(default = "default_drive_new_watches")]
     pub drive_new_watches: bool,
 
+    /// Whether the owner's own chat turn may start or turn on Drive after it read text an
+    /// outsider could have written (pane text, vault notes, the web), and send to a session it
+    /// drives without asking each time. An accepted prompt-injection risk, by the owner's
+    /// decision; false keeps such a turn to giving Drive up only.
+    #[serde(default = "default_drive_after_untrusted_reads")]
+    pub drive_after_untrusted_reads: bool,
+
     /// Instructions (prompts, keys) the driver may send one session before Drive
     /// switches itself off, counted from the last time the user turned Drive on.
     /// Clamped to 1..=100 by `nudge_budget`.
@@ -604,6 +611,10 @@ fn default_drive_new_watches() -> bool {
     true
 }
 
+fn default_drive_after_untrusted_reads() -> bool {
+    true
+}
+
 pub const DEFAULT_DRIVER_NUDGE_BUDGET: u32 = 8;
 pub const DEFAULT_DRIVER_NO_PROGRESS_LIMIT: u32 = 3;
 /// Eight, up from three. Each driven session is a full agent turn on the chat model per wake,
@@ -727,6 +738,7 @@ impl Default for AgentHostConfig {
             driver_checkin_minutes: default_driver_checkin_minutes(),
             driver_grace_minutes: default_driver_grace_minutes(),
             drive_new_watches: default_drive_new_watches(),
+            drive_after_untrusted_reads: default_drive_after_untrusted_reads(),
             driver_nudge_budget: default_driver_nudge_budget(),
             driver_no_progress_limit: default_driver_no_progress_limit(),
             driver_key_allowance: default_driver_key_allowance(),
@@ -763,6 +775,10 @@ mod tests {
         );
         let off: AgentHostConfig = serde_yaml::from_str("drive_new_watches: false").unwrap();
         assert!(!off.drive_new_watches);
+        assert!(cfg.drive_after_untrusted_reads);
+        let strict: AgentHostConfig =
+            serde_yaml::from_str("drive_after_untrusted_reads: false").unwrap();
+        assert!(!strict.drive_after_untrusted_reads);
         assert!(
             cfg.spawn_cwd_deny.is_empty(),
             "nothing is denied unless configured"

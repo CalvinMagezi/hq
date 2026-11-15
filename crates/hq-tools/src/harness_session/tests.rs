@@ -712,8 +712,16 @@ fn only_a_clean_submit_goes_without_a_note() {
     assert!(timed_out.unwrap().contains("timed out"));
 }
 
+fn strict_chat(drive_new: bool) -> WatchingChat {
+    WatchingChat {
+        drive_after_untrusted: false,
+        ..chat(drive_new)
+    }
+}
+
 fn chat(drive_new: bool) -> WatchingChat {
     WatchingChat {
+        drive_after_untrusted: true,
         thread: "th-1".into(),
         drive_new,
         driver_turn: false,
@@ -1129,8 +1137,14 @@ fn a_new_watch_drives_unless_opted_out_untrusted_or_started_by_the_driver() {
     assert!(on.new_watch(&json!({"drive": false})).opted_out);
     let untrusted = on.new_watch(&json!({ UNTRUSTED_TURN_ARG: true }));
     assert!(
-        !untrusted.drive && !untrusted.opted_out,
-        "an untrusted turn loses the default but stops nothing"
+        untrusted.drive,
+        "an owner turn that read outside text still starts Drive by default"
+    );
+    let strict_chat = strict_chat(true);
+    let strict = strict_chat.new_watch(&json!({ UNTRUSTED_TURN_ARG: true }));
+    assert!(
+        !strict.drive && !strict.opted_out,
+        "with drive_after_untrusted_reads off an untrusted turn loses the default but stops nothing"
     );
     assert!(
         !chat(false).new_watch(&json!({})).drive,
@@ -1142,7 +1156,7 @@ fn a_new_watch_drives_unless_opted_out_untrusted_or_started_by_the_driver() {
 async fn the_watch_tool_defaults_drive_on_and_never_turns_it_back_on() {
     let db = Arc::new(Database::open_memory().unwrap());
     db.with_conn(|c| {
-        for id in ["hs-a", "hs-b"] {
+        for id in ["hs-a", "hs-b", "hs-c"] {
             registry::insert(
                 c,
                 &registry::NewSession {
@@ -1162,6 +1176,15 @@ async fn the_watch_tool_defaults_drive_on_and_never_turns_it_back_on() {
             )?;
             registry::set_goal(c, id, Some(GOAL), Some(DONE), registry::ACTOR_USER)?;
         }
+        Ok(())
+    })
+    .unwrap();
+    db.with_conn(|c| {
+        c.execute(
+            "INSERT INTO chat_threads (thread_id, title, thread_type, initiated_by, status, created_at, updated_at)
+             VALUES ('th-1', 't', 'web', 'user', 'active', 'now', 'now')",
+            [],
+        )?;
         Ok(())
     })
     .unwrap();
@@ -1198,9 +1221,77 @@ async fn the_watch_tool_defaults_drive_on_and_never_turns_it_back_on() {
         .await
         .unwrap();
     assert!(
-        !drive("hs-b"),
-        "an untrusted turn's watch starts with Drive off"
+        drive("hs-b"),
+        "an owner turn that read outside text still starts Drive"
     );
+    let events = db
+        .with_conn(|c| registry::list_events(c, "hs-b", 10))
+        .unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| e.kind == registry::EVENT_DRIVE_ON && e.actor == registry::ACTOR_HQ),
+        "the automatic Drive-on is audited as HQ's"
+    );
+    let notices = db
+        .with_conn(|c| hq_db::chat::get_messages(c, "th-1", 10))
+        .unwrap();
+    assert!(
+        notices.iter().any(|m| m.content == AUTO_DRIVE_NOTICE),
+        "the chat is told in fixed text"
+    );
+
+    let strict_tools =
+        tools::create_harness_session_tools(db.clone(), Some(strict_chat(true)), None);
+    let strict_watch = strict_tools
+        .iter()
+        .find(|t| t.name() == "harness_session_watch")
+        .unwrap();
+    strict_watch
+        .execute(json!({"session_id": "hs-c", UNTRUSTED_TURN_ARG: true}))
+        .await
+        .unwrap();
+    assert!(
+        !drive("hs-c"),
+        "drive_after_untrusted_reads: false keeps today's behaviour"
+    );
+
+    let goal_tool = tools
+        .iter()
+        .find(|t| t.name() == "harness_session_goal")
+        .unwrap();
+    let refused = goal_tool
+        .execute(json!({"session_id": "hs-b", "goal": "other", UNTRUSTED_TURN_ARG: true}))
+        .await;
+    assert!(
+        refused.is_err(),
+        "changing a goal from an untrusted turn stays refused"
+    );
+}
+
+#[test]
+fn only_a_strict_chat_stops_an_untrusted_turn_turning_drive_on() {
+    let tainted = json!({ UNTRUSTED_TURN_ARG: true });
+    assert!(!chat(true).untrusted_blocks_drive(&tainted));
+    assert!(strict_chat(true).untrusted_blocks_drive(&tainted));
+    assert!(!strict_chat(true).untrusted_blocks_drive(&json!({})));
+}
+
+#[test]
+fn a_driver_turn_and_an_ask_reply_never_start_drive_even_after_untrusted_reads() {
+    let tainted = json!({ UNTRUSTED_TURN_ARG: true });
+    let driver = WatchingChat {
+        drive_new: false,
+        driver_turn: true,
+        ..chat(true)
+    };
+    let ask = WatchingChat {
+        drive_new: false,
+        from_ask: true,
+        ..chat(true)
+    };
+    assert!(!driver.new_watch(&tainted).drive);
+    assert!(!ask.new_watch(&tainted).drive);
 }
 
 #[test]
@@ -1229,7 +1320,7 @@ fn linking_from_a_chat_reports_whether_it_drives() {
             Ok(id)
         })
         .unwrap();
-    let web = chat(true);
+    let web = strict_chat(true);
     let linked = link(
         &db,
         "hs-l",
@@ -2464,6 +2555,7 @@ fn tool(
 
 fn driver_chat() -> WatchingChat {
     WatchingChat {
+        drive_after_untrusted: true,
         driver_turn: true,
         ..chat(false)
     }
@@ -2768,6 +2860,7 @@ async fn chats_an_ask_started_may_own_only_so_many_running_sessions() {
         tag_origin(&db, &json!({"session_id": id}), registry::ORIGIN_ASK);
     }
     let from_ask = WatchingChat {
+        drive_after_untrusted: true,
         from_ask: true,
         ..chat(false)
     };
@@ -2799,6 +2892,7 @@ async fn a_driver_turn_cannot_start_attach_or_link_sessions_and_an_ask_reply_can
         );
     }
     let from_ask = WatchingChat {
+        drive_after_untrusted: true,
         from_ask: true,
         ..chat(false)
     };
@@ -2827,6 +2921,7 @@ async fn an_ask_reply_cannot_turn_drive_on() {
     let db = Arc::new(Database::open_memory().unwrap());
     seed_watched(&db, "hs-ask-m", Some(goal_text()));
     let from_ask = WatchingChat {
+        drive_after_untrusted: true,
         from_ask: true,
         ..chat(false)
     };
@@ -2894,6 +2989,7 @@ fn sessions_started_without_a_chat_or_from_an_ask_are_capped_by_origin() {
     assert_eq!(start_origin(Some(&chat(true))), registry::ORIGIN_USER);
     assert_eq!(
         start_origin(Some(&WatchingChat {
+            drive_after_untrusted: true,
             from_ask: true,
             ..chat(false)
         })),
@@ -2935,6 +3031,7 @@ async fn a_marked_caller_cannot_resume_and_may_type_only_into_its_own_session() 
 fn a_handoff_over_the_handoff_key_or_from_an_ask_never_starts_driven() {
     let scoped = json!({HANDOFF_SCOPE_ARG: true});
     let from_ask = WatchingChat {
+        drive_after_untrusted: true,
         from_ask: true,
         ..chat(true)
     };

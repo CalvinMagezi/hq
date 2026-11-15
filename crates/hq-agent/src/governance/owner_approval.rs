@@ -121,6 +121,19 @@ impl OwnerApproval {
             })
     }
 
+    /// Whether `args` send to a session this chat itself drives: there the driver is the
+    /// sender, so a tainted chat is not asked per send. A store that cannot be read means asking.
+    pub fn drives_target(&self, args: &Value) -> bool {
+        let Some(id) = args.get("session_id").and_then(Value::as_str) else {
+            return false;
+        };
+        self.db
+            .with_conn(|c| hq_db::harness_sessions_registry::get(c, id))
+            .ok()
+            .flatten()
+            .is_some_and(|r| r.drive && r.owner_thread.as_deref() == Some(self.scope.as_str()))
+    }
+
     pub fn new(db: Arc<Database>, scope: impl Into<String>) -> Arc<Self> {
         Self::for_turn(db, scope, None)
     }

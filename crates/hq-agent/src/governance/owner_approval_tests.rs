@@ -285,3 +285,40 @@ async fn a_calendar_change_request_shows_the_event_the_change_and_binds_to_both(
     assert_ne!(key(&args), key(&other_event));
     assert_ne!(key(&args), key(&other_change));
 }
+
+#[test]
+fn only_a_session_this_chat_drives_counts_as_its_own_send_target() {
+    use hq_db::harness_sessions_registry::{self as registry, NewSession, Placement};
+    let (db, approval) = approval();
+    db.with_conn(|c| {
+        for id in ["hs-own", "hs-other", "hs-observed"] {
+            registry::insert(
+                c,
+                &NewSession {
+                    id,
+                    harness: "pi",
+                    label: "",
+                    cwd: "/t",
+                    mission_id: None,
+                    placement: Placement {
+                        host: "local",
+                        agent_name: id,
+                        workspace_id: "w1",
+                        pane_id: "w1:p1",
+                    },
+                    purpose: None,
+                },
+            )?;
+        }
+        registry::watch_from_chat(c, "hs-own", "web:t1", true)?;
+        registry::watch_from_chat(c, "hs-other", "web:t2", true)?;
+        registry::watch_from_chat(c, "hs-observed", "web:t1", false)?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(approval.drives_target(&json!({"session_id": "hs-own"})));
+    assert!(!approval.drives_target(&json!({"session_id": "hs-other"})));
+    assert!(!approval.drives_target(&json!({"session_id": "hs-observed"})));
+    assert!(!approval.drives_target(&json!({"session_id": "hs-missing"})));
+    assert!(!approval.drives_target(&json!({})));
+}
