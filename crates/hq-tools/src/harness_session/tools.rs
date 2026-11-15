@@ -333,6 +333,17 @@ impl HqTool for HarnessSessionSpawnTool {
                 }
             };
         }
+        // A start that joins no team claims a slot here, after any folder approval, and keeps
+        // it only until the session row is written, so a waiting approval never blocks others.
+        let slot = match &team {
+            None => Some(super::spawn_limits::reserve(
+                &self.db,
+                &cfg.agent_host.spawn_limits,
+                &cfg.budgets,
+                chrono::Utc::now().timestamp(),
+            )?),
+            Some(_) => None,
+        };
         let mut note = start.note;
         let mut report = super::spawn_on(&self.db, host_handle.clone(), launch!(&start.path)).await;
         // A remote host cannot be asked whether a folder exists; its launch error says so, and
@@ -357,6 +368,7 @@ impl HqTool for HarnessSessionSpawnTool {
             ));
             report = super::spawn_on(&self.db, host_handle.clone(), launch!(&fallback.path)).await;
         }
+        drop(slot);
         let mut report = report?;
         if let Some(note) = note {
             report["cwd_note"] = json!(note);

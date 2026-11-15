@@ -518,6 +518,28 @@ second transport limit, with an orphan pane behind it. Now:
 `task_create` takes the same `external_id`: unique per space, 200 characters at most, a repeat
 returns the existing task with `deduplicated: true`. The REST `POST /api/tasks` accepts it too.
 
+
+#### Spawn limits outside a team
+
+A `harness_session_spawn` that names no team used to skip every limit. It now checks
+`agent_host.spawn_limits` before anything starts, and holds a lock until the start finishes, so
+two simultaneous starts cannot both pass the cap. Sessions inside a team keep the
+`agent_host.teams` limits.
+
+- `max_live_sessions` (default 12, clamped to 1..=100): running sessions that have no parent and
+  whose agent is active (working, blocked, or not yet seen by a sweep). Sessions sitting idle or
+  done do not count, so a host that keeps many idle sessions open is not locked out.
+- `max_spawns_per_hour` (default 60, clamped to 1..=600): sessions with no parent started in the
+  last 60 minutes, running or ended.
+- `count_harness_in_global` (default false): global budgets leave harness spend out of their sum.
+  Set this to true to make a used-up hard global budget stop starts too. An `origin:harness`
+  budget is always checked.
+
+A start is also refused when a hard (`action: block`) budget that covers harness spend is used up.
+The error names the budget and the time it resets. Soft budgets (`notify`, `downgrade`) never stop
+a start. Each refusal files one inbox item (an FYI) per limit and period: per hour for the two
+caps, per budget period for a budget, so a loop retrying a refused start does not flood the inbox.
+
 ### Refusing working directories
 
 Every `cwd` must be an absolute path with no `..` component and none of `~`, `$`, a backtick
