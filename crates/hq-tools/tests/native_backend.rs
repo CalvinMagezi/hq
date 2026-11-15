@@ -4,6 +4,7 @@
 use hq_host::{Host, Server, StopHandle};
 use hq_tools::agent_host::{
     AgentHostError, AgentStatus, HostBackend, LaunchRequest, NativeBackend, PromptOutcome,
+    QuotaAsk, QuotaProfile,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -72,6 +73,26 @@ fn read_until(b: &NativeBackend, name: &str, needle: &str) -> String {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[test]
+fn quota_runs_a_profile_reader_on_the_host() {
+    let host = Running::start();
+    let printed =
+        r#"{"account":"team","windows":[{"label":"month","kind":"dollars","used_percent":12.5}]}"#;
+    let ask = QuotaAsk {
+        lane: Some("gateway".into()),
+        disabled: Vec::new(),
+        custom: vec![QuotaProfile {
+            lane: "gateway".into(),
+            command: vec!["/bin/sh".into(), "-c".into(), format!("echo '{printed}'")],
+            timeout_secs: 5,
+        }],
+    };
+    let quotas = host.backend().quota(&ask).unwrap();
+    assert_eq!(quotas.len(), 1);
+    assert_eq!(quotas[0].lane, "gateway");
+    assert_eq!(quotas[0].windows[0].used_percent, Some(12.5));
 }
 
 #[test]

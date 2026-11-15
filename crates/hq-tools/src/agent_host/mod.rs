@@ -32,12 +32,15 @@ use hq_core::config::{AgentHostConfig, HqConfig, LOCAL_HOST, NATIVE_HOST};
 use hq_core::config::{
     HostTransport, MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS, RemoteHostConfig, native_host_dir,
 };
+use hq_core::quota::LaneQuota;
 use serde::Serialize;
 #[cfg(unix)]
 use std::sync::Arc;
 use std::time::Duration;
 
-pub use backend::{AwaitingAgent, Host, HostBackend, HostEvent, HostEvents};
+pub use backend::{
+    AwaitingAgent, Host, HostBackend, HostEvent, HostEvents, QuotaAsk, QuotaProfile,
+};
 
 #[cfg(unix)]
 pub use native::{NATIVE_GATE_COMMAND, NativeBackend};
@@ -314,6 +317,19 @@ pub(crate) fn bad_reply(method: &str, e: impl std::fmt::Display) -> AgentHostErr
         code: "bad_reply".into(),
         message: format!("the host's {method} reply could not be read: {e}"),
     }
+}
+
+/// The readings in a `host.quota` reply. A reading this build cannot read (a newer host) is
+/// skipped rather than failing the others.
+pub(crate) fn parse_quotas(reply: &serde_json::Value) -> Result<Vec<LaneQuota>, AgentHostError> {
+    let list = reply
+        .get("quotas")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| bad_reply("host.quota", "no `quotas` list"))?;
+    Ok(list
+        .iter()
+        .filter_map(|q| serde_json::from_value(q.clone()).ok())
+        .collect())
 }
 
 /// A dialog read whole, with what an answer needs.

@@ -7,9 +7,10 @@ use super::backend::HostBackend;
 use super::transport::{RawOutput, run_with_deadline};
 use super::{
     AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, GitHead, Host, INVALID_KEYS_CODE,
-    LaunchRequest, Launched, PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo,
+    LaunchRequest, Launched, PendingRead, PromptOutcome, QuotaAsk, WorktreeBase, WorktreeInfo,
     WorktreeRemoved, WorktreeStatus, bad_reply, validate_keys,
 };
+use hq_core::quota::LaneQuota;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Command;
@@ -63,6 +64,12 @@ impl ScriptedHost {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// For tests that stand in for a second machine.
+    pub fn named(mut self, name: &str) -> Self {
+        self.name = name.to_string();
+        self
     }
 
     /// Whether HQ can look for a harness binary itself. A remote host answers
@@ -553,6 +560,13 @@ impl ScriptedHost {
         serde_json::from_value(v).map_err(|e| bad_reply("worktree status", e))
     }
 
+    /// The script gets the request as one JSON argument and prints the `host.quota` reply.
+    pub fn quota(&self, ask: &QuotaAsk) -> Result<Vec<LaneQuota>, AgentHostError> {
+        let params = serde_json::to_string(ask).map_err(|e| bad_reply("quota", e))?;
+        let v = self.json(&["quota", &params], self.command_timeout)?;
+        super::parse_quotas(&v)
+    }
+
     pub fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
         let v = self.json(&["agent", "head", target], self.command_timeout)?;
         serde_json::from_value(v.get("head").cloned().unwrap_or(Value::Null))
@@ -740,6 +754,9 @@ impl HostBackend for ScriptedHost {
     }
     fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
         ScriptedHost::head(self, target)
+    }
+    fn quota(&self, ask: &QuotaAsk) -> Result<Vec<LaneQuota>, AgentHostError> {
+        ScriptedHost::quota(self, ask)
     }
     fn with_launch_bound_dyn(&self, bound: Duration) -> Host {
         Arc::new(self.clone().with_launch_bound(bound))

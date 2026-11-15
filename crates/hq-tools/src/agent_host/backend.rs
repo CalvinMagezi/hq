@@ -3,8 +3,27 @@ use super::{
     LogsSince, PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo, WorktreeRemoved,
     WorktreeStatus,
 };
+use hq_core::quota::LaneQuota;
+use serde::Serialize;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// A profile's own quota reader, in the shape `host.quota` takes under `custom`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct QuotaProfile {
+    pub lane: String,
+    pub command: Vec<String>,
+    pub timeout_secs: u64,
+}
+
+/// What `host.quota` is asked: one lane or all, the kinds the owner turned off, and the profile
+/// readers. The host skips what it is told to and never gets a credential.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct QuotaAsk {
+    pub lane: Option<String>,
+    pub disabled: Vec<String>,
+    pub custom: Vec<QuotaProfile>,
+}
 
 /// What HQ needs from whatever hosts coding agents: the host protocol today, a
 /// built-in host later. Calls block, like the host protocol they wrap, so async
@@ -223,6 +242,15 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
         Ok(serde_json::Value::Null)
     }
 
+    /// Each lane's remaining allowance as this host reads it from the logins on its own machine.
+    /// Only the built-in host can.
+    fn quota(&self, _ask: &QuotaAsk) -> Result<Vec<LaneQuota>, AgentHostError> {
+        Err(AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' cannot read lane quotas", self.name()),
+        })
+    }
+
     fn no_workspace(&self) -> AgentHostError {
         AgentHostError::Api {
             code: "unsupported".into(),
@@ -400,6 +428,9 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     }
     fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
         (**self).head(target)
+    }
+    fn quota(&self, ask: &QuotaAsk) -> Result<Vec<LaneQuota>, AgentHostError> {
+        (**self).quota(ask)
     }
     fn awaiting(&self) -> Result<Vec<AwaitingAgent>, AgentHostError> {
         (**self).awaiting()

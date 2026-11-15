@@ -2,9 +2,10 @@ use super::transport::Transport;
 use super::{
     AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, AwaitingAgent, GitHead, Host,
     HostBackend, HostEvent, HostEvents, INVALID_KEYS_CODE, LaunchRequest, Launched, LogsSince,
-    PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo, WorktreeRemoved, WorktreeStatus,
-    bad_reply, shell_line, validate_keys,
+    PendingRead, PromptOutcome, QuotaAsk, WorktreeBase, WorktreeInfo, WorktreeRemoved,
+    WorktreeStatus, bad_reply, parse_quotas, shell_line, validate_keys,
 };
+use hq_core::quota::LaneQuota;
 use hq_host::{Client, ClientError};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -22,6 +23,8 @@ const SUBMIT_CONFIRM: Duration = Duration::from_secs(10);
 const SUBMIT_ECHO_WITHIN: Duration = Duration::from_secs(2);
 /// A state must hold this long before a wait reports it, so a flicker is ignored.
 const STABLE_MS: u64 = 700;
+/// The host's own deadline for `host.quota` is 15 s; this leaves room for a remote hop.
+const QUOTA_CALL_TIMEOUT: Duration = Duration::from_secs(25);
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_LAUNCH_BOUND: Duration = Duration::from_secs(60);
 /// Silence after the first output that counts as "finished drawing".
@@ -555,6 +558,12 @@ impl HostBackend for NativeBackend {
         // A host too old to know this method fails the call, which reads as "cannot say".
         let reply = self.call("host.programs", json!({ "names": names })).ok()?;
         serde_json::from_value(reply.get("found")?.clone()).ok()
+    }
+
+    fn quota(&self, ask: &QuotaAsk) -> Result<Vec<LaneQuota>, AgentHostError> {
+        let params = serde_json::to_value(ask).map_err(|e| bad_reply("host.quota", e))?;
+        let reply = self.call_within("host.quota", params, QUOTA_CALL_TIMEOUT)?;
+        parse_quotas(&reply)
     }
 
     fn workspace(&self) -> Result<Value, AgentHostError> {

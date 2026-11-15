@@ -421,6 +421,7 @@ pub fn create_host_tools(db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
         Box::new(HostAddTool),
         Box::new(HostCheckTool),
         Box::new(HostListTool),
+        Box::new(crate::lane_quotas::LaneQuotasTool::new(db.clone())),
         Box::new(HostLockdownTool),
         Box::new(HostAgentsTool { db }),
         Box::new(HostReadTool),

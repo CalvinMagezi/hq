@@ -606,6 +606,23 @@ enum Commands {
         sub: String,
     },
 
+    // ─── Lane quotas ─────────────────────────────────────────────────
+    /// Show what is left of each coding-agent lane's allowance, per host
+    Quota {
+        /// Print the readings as JSON
+        #[arg(long)]
+        json: bool,
+        /// Ask the hosts now instead of using a recent stored reading
+        #[arg(long)]
+        refresh: bool,
+        /// Only this lane (claude, codex, copilot, agy, cursor, or a profile name)
+        #[arg(long)]
+        lane: Option<String>,
+        /// Only this host (see `hq host list`)
+        #[arg(long)]
+        host: Option<String>,
+    },
+
     // ─── Usage ───────────────────────────────────────────────────────
     /// Show LLM cost and tokens from recorded calls
     Usage {
@@ -1011,6 +1028,7 @@ fn lite_rule(command: &Commands) -> LiteRule {
         | Commands::Sessions { .. }
         | Commands::Stack { .. }
         | Commands::Host { .. }
+        | Commands::Quota { .. }
         | Commands::SelfApply { .. }
         | Commands::Agents { .. }
         | Commands::Models { .. }
@@ -1324,6 +1342,12 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         // Tools, models and usage
         Commands::Tools => commands::tools::run(config).await,
         Commands::Models { sub } => commands::models::run(config, &sub).await,
+        Commands::Quota {
+            json,
+            refresh,
+            lane,
+            host,
+        } => commands::quota::run(config, json, refresh, lane, host).await,
         Commands::Usage { sub } => commands::usage::run(config, &sub).await,
         Commands::Cost => commands::usage::run(config, "summary").await,
         Commands::Summary => commands::usage::run(config, "daily").await,
