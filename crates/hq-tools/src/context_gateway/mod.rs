@@ -3,6 +3,7 @@
 //! module only decides identity and scope. See `docs/plans/context-gateway.md`.
 
 mod resolver;
+mod retrieval;
 mod scope;
 
 use chrono::{DateTime, Utc};
@@ -10,6 +11,7 @@ use hq_memory::context_packet::{EntryProvenance, Freshness, PacketGap};
 use serde::{Deserialize, Serialize};
 
 pub use resolver::DbGrantResolver;
+pub use retrieval::{RateLimiter, Retriever};
 pub use scope::{PrefixScope, SourceId};
 
 pub const DEFAULT_MAX_GRAPH_DEPTH: u8 = 2;
