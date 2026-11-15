@@ -133,6 +133,12 @@ pub struct AgentHostConfig {
     #[serde(default = "default_max_driven_sessions")]
     pub max_driven_sessions: u32,
 
+    /// Minutes a driven session may sit idle or done, with nothing happening to it, before it
+    /// gives its Drive slot back (the session keeps running). 0 keeps slots until the host's
+    /// own idle limit. Clamped to at most 7 days by `driver_idle_release`.
+    #[serde(default = "default_driver_idle_release_minutes")]
+    pub driver_idle_release_minutes: u64,
+
     /// Running sessions that chats started by `hq_ask` may own at once, which
     /// bounds an agent asking HQ to start agents. 0 refuses them. Clamped to 0..=20.
     #[serde(default = "default_max_ask_spawned_sessions")]
@@ -520,7 +526,15 @@ fn default_drive_new_watches() -> bool {
 
 pub const DEFAULT_DRIVER_NUDGE_BUDGET: u32 = 8;
 pub const DEFAULT_DRIVER_NO_PROGRESS_LIMIT: u32 = 3;
-pub const DEFAULT_MAX_DRIVEN_SESSIONS: u32 = 3;
+/// Eight, up from three. Each driven session is a full agent turn on the chat model per wake,
+/// at most `MAX_DRIVE_TURNS_PER_DAY` (48) a day, and the nudge budget (default 8) ends a
+/// session's Drive long before that, so eight sessions cost at most 64 instructions between
+/// owner top-ups. Three was below what one chat steering a small team of agents needs.
+pub const DEFAULT_MAX_DRIVEN_SESSIONS: u32 = 8;
+/// A driven session that sat idle or done for three hours has stopped being steered in any
+/// useful way; longer than a lunch or a review, shorter than a night.
+pub const DEFAULT_DRIVER_IDLE_RELEASE_MINUTES: u64 = 180;
+const MAX_DRIVER_IDLE_RELEASE_MINUTES: u64 = 7 * 24 * 60;
 pub const DEFAULT_MAX_ASK_SPAWNED_SESSIONS: u32 = 2;
 pub const DEFAULT_DRIVER_KEY_ALLOWANCE: u32 = 40;
 pub const DEFAULT_MAX_MCP_STARTED_SESSIONS: u32 = 3;
@@ -544,6 +558,10 @@ fn default_driver_nudge_budget() -> u32 {
 
 fn default_driver_no_progress_limit() -> u32 {
     DEFAULT_DRIVER_NO_PROGRESS_LIMIT
+}
+
+fn default_driver_idle_release_minutes() -> u64 {
+    DEFAULT_DRIVER_IDLE_RELEASE_MINUTES
 }
 
 fn default_max_driven_sessions() -> u32 {
@@ -577,6 +595,17 @@ impl AgentHostConfig {
 
     pub fn driven_session_cap(&self) -> i64 {
         i64::from(self.max_driven_sessions.clamp(1, 50))
+    }
+
+    /// How long a driven session may sit idle before it gives up its slot, or `None` when off.
+    pub fn driver_idle_release(&self) -> Option<std::time::Duration> {
+        (self.driver_idle_release_minutes > 0).then(|| {
+            std::time::Duration::from_secs(
+                self.driver_idle_release_minutes
+                    .min(MAX_DRIVER_IDLE_RELEASE_MINUTES)
+                    * 60,
+            )
+        })
     }
 
     pub fn ask_spawned_session_cap(&self) -> i64 {
@@ -618,6 +647,7 @@ impl Default for AgentHostConfig {
             max_mcp_started_sessions: default_max_mcp_started_sessions(),
             max_full_asks: default_max_full_asks(),
             max_driven_sessions: default_max_driven_sessions(),
+            driver_idle_release_minutes: default_driver_idle_release_minutes(),
             max_ask_spawned_sessions: default_max_ask_spawned_sessions(),
             spawn_cwd_deny: Vec::new(),
             handoff_cwd_allow: Vec::new(),
@@ -719,7 +749,7 @@ mod tests {
                 cfg.driven_session_cap(),
                 cfg.ask_spawned_session_cap()
             ),
-            (8, 3, 3, 2)
+            (8, 3, DEFAULT_MAX_DRIVEN_SESSIONS as i64, 2)
         );
         let wild: AgentHostConfig = serde_yaml::from_str(
             "driver_nudge_budget: 0\ndriver_no_progress_limit: 1\nmax_driven_sessions: 0\nmax_ask_spawned_sessions: 999",

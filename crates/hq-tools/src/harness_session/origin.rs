@@ -334,7 +334,8 @@ pub fn start_watch_capped(
                 session_id,
                 registry::ACTOR_GUARD,
                 &format!(
-                    "HQ already drives {cap} running sessions (agent_host.max_driven_sessions), so this one starts observation-only."
+                    "{}{cap} running sessions (agent_host.max_driven_sessions), so this one starts observation-only.",
+                    registry::CAP_HOLD_PREFIX
                 ),
             )?;
         }

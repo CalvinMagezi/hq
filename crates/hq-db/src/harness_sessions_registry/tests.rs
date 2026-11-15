@@ -918,3 +918,90 @@ fn renaming_changes_the_label_and_reports_a_missing_session() {
     })
     .unwrap();
 }
+
+fn capped_out(c: &Connection, id: &str) -> Result<()> {
+    watched(c, id)?;
+    set_goal(c, id, Some(GOAL), Some(DONE), ACTOR_USER)?;
+    request_drive(c, id, true, ACTOR_USER)?;
+    stop_drive(
+        c,
+        id,
+        ACTOR_GUARD,
+        &format!("{CAP_HOLD_PREFIX}1 running sessions"),
+    )?;
+    Ok(())
+}
+
+#[test]
+fn the_oldest_session_the_cap_held_back_takes_a_freed_slot() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        for id in ["hs-1", "hs-2", "hs-3"] {
+            capped_out(c, id)?;
+        }
+        // hs-1 is the oldest; make the order explicit rather than rely on insert timing.
+        c.execute("UPDATE harness_sessions SET created_at = datetime('now', '-3 hours') WHERE id = 'hs-3'", [])?;
+        let order: Vec<String> = promotable(c)?.into_iter().map(|r| r.id).collect();
+        assert_eq!(order, ["hs-3", "hs-1", "hs-2"]);
+        assert!(promote(c, "hs-3", 1)?);
+        assert!(!promote(c, "hs-1", 1)?, "the cap is full again");
+        assert_eq!(count_driven_running(c)?, 1);
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn promotion_skips_what_the_owner_switched_off_and_origins_that_never_drive() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        capped_out(c, "hs-held")?;
+        capped_out(c, "hs-ask")?;
+        set_origin(c, "hs-ask", ORIGIN_ASK)?;
+        capped_out(c, "hs-nogoal")?;
+        c.execute(
+            "UPDATE harness_sessions SET goal = NULL WHERE id = 'hs-nogoal'",
+            [],
+        )?;
+        watched(c, "hs-optout")?;
+        set_goal(c, "hs-optout", Some(GOAL), Some(DONE), ACTOR_USER)?;
+        set_drive(c, "hs-optout", false)?;
+        // Another chat's driven session is not a candidate either.
+        watched(c, "hs-other")?;
+        set_goal(c, "hs-other", Some(GOAL), Some(DONE), ACTOR_USER)?;
+        request_drive(c, "hs-other", true, ACTOR_USER)?;
+        let ids: Vec<String> = promotable(c)?.into_iter().map(|r| r.id).collect();
+        assert_eq!(ids, ["hs-held"]);
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn an_idle_driven_session_releases_its_slot_after_the_configured_time() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        for id in ["hs-idle", "hs-busy", "hs-fresh"] {
+            watched(c, id)?;
+            set_goal(c, id, Some(GOAL), Some(DONE), ACTOR_USER)?;
+            request_drive(c, id, true, ACTOR_USER)?;
+        }
+        set_seen(c, "hs-idle", "idle")?;
+        set_seen(c, "hs-busy", "working")?;
+        set_seen(c, "hs-fresh", "done")?;
+        c.execute(
+            "UPDATE harness_sessions SET created_at = datetime('now', '-5 hours'), updated_at = datetime('now', '-5 hours')
+             WHERE id IN ('hs-idle', 'hs-busy')",
+            [],
+        )?;
+        c.execute("DELETE FROM harness_session_events WHERE session_id IN ('hs-idle', 'hs-busy')", [])?;
+        assert_eq!(release_idle(c, 180)?, ["hs-idle"]);
+        assert!(!get(c, "hs-idle")?.unwrap().drive);
+        assert_eq!(get(c, "hs-idle")?.unwrap().status, STATUS_RUNNING);
+        assert!(get(c, "hs-busy")?.unwrap().drive, "a working session keeps its slot");
+        assert!(get(c, "hs-fresh")?.unwrap().drive, "a recently active one too");
+        assert_eq!(count_driven_running(c)?, 2);
+        Ok(())
+    })
+    .unwrap();
+}

@@ -255,6 +255,9 @@ pub(super) fn with_pending(view: &mut Value, agent: &AgentInfo) {
     }
 }
 
+/// Rows `harness_session_list` shows; `harness_fleet_status` says how many it leaves out.
+pub const SESSION_LIST_LIMIT: usize = 50;
+
 pub fn list(db: &Arc<Database>, status_filter: Option<String>) -> Result<Value> {
     list_with(db, status_filter, false, &|_| true)
 }
@@ -267,7 +270,8 @@ pub fn list_with(
     worktree_status: bool,
     keep: &dyn Fn(&HarnessSessionRow) -> bool,
 ) -> Result<Value> {
-    let rows = db.with_conn(move |c| registry::list(c, status_filter.as_deref(), 50))?;
+    let rows =
+        db.with_conn(move |c| registry::list(c, status_filter.as_deref(), SESSION_LIST_LIMIT))?;
     let rows: Vec<HarnessSessionRow> = rows.into_iter().filter(|r| keep(r)).collect();
     let mut views = session_views(&rows);
     if worktree_status {

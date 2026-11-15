@@ -646,6 +646,30 @@ process). If the web server is not running, wakes wait on the row. Driving appro
 after reading pane text, which can carry instructions planted by content the agent read;
 turn it on only for sessions whose work you would approve yourself.
 
+### Slots, passes and the fleet roll-up
+
+A pass of the driver runs every minute, whenever the supervisor writes a wake in the same process,
+and whenever any chat turn ends. A wake that arrived while its chat was mid-reply is therefore
+answered when that reply ends, not up to a minute later. The turn map still decides who starts a
+turn, so a pass cannot start a second one in a busy chat.
+
+Each pass also tidies the slots counted by `agent_host.max_driven_sessions`: a driven session
+that has reported idle or done with nothing happening for `agent_host.driver_idle_release_minutes`
+has Drive switched off (the chat gets one notice and the reason shows in the panel), and then the
+oldest observe-only session with a goal that passes the drive gate takes any free slot. Only a
+session the cap itself held back (a default-on watch that started observing, `drive_off_reason`
+starting "HQ already drives") is promoted: one you switched off by hand, one an MCP client, an
+`hq_ask` or a connector started, and one released for idleness stay as they are. A session another
+chat drives is never touched. A slot also frees when a driven session exits, or when a guard or
+the task ending switches its Drive off.
+
+`harness_fleet_status` (read-only) answers "what needs me" in one small reply when many sessions
+run: counts by registry status and by live agent status, the blocked sessions (at most 10, longest
+wait first, with the dialog kind and number for `harness_session_pending`, the task and the team
+root), the driven sessions against the cap (at most 20 named), and `list_hides`, the number of
+rows `harness_session_list` leaves out past its 50. `harness_session_wait` still takes at most 10
+sessions at once; use the roll-up to pick which.
+
 ### Limits on driving
 
 What wakes a driven turn: a finished turn, a block or an exit that the supervisor turns into a
@@ -665,7 +689,8 @@ row (`drive_off_reason`, in the sessions payload and shown under the Drive switc
 | Finished turns in a row that show no new tool activity on the screen the supervisor stored (`Bash(...)`, `Update(...)`, `Ran ...` lines). A tool line the last turn did not show, or one shown more times, counts as work, so re-running a test is not a stall. A finished turn that follows something other than a driver instruction (you typing in the chat) is not judged. A harness that prints none is never judged stalled; the budget covers it | 3 (2 to 20) | `agent_host.driver_no_progress_limit` |
 | The linked task is complete, or is not in progress at a check-in while the agent is not working (a working agent means someone is typing in the pane). A finished turn itself moves the task to ready for review, so that is not a stop | none | none |
 | The session exited or was stopped (Drive goes off in the registry write, and the exit is reported as an update) | none | none |
-| Running sessions HQ drives at once. A default-on watch past it starts observing and says so, and `harness_session_mode` from HQ cannot go past it (the user can); a session the user already switched on is never switched off by it | 3 (1 to 50) | `agent_host.max_driven_sessions` |
+| Running sessions HQ drives at once. A default-on watch past it starts observing and says so, and `harness_session_mode` from HQ cannot go past it (the user can); a session the user already switched on is never switched off by it. Eight by default: each driven session costs a full agent turn on the chat model per wake (at most 48 a day, and the instruction budget above ends a session's Drive after 8 instructions), so eight sessions cap near 64 steering turns between your top-ups | 8 (1 to 50) | `agent_host.max_driven_sessions` |
+| Minutes a driven session may report idle or done, with no event, wake or driver turn, before it gives up its slot (the session keeps running; switch Drive back on to continue). 0 turns it off | 180 (0 to 10080) | `agent_host.driver_idle_release_minutes` |
 | Running sessions started by an MCP client with no chat (`harness_session_spawn`, `harness_session_handoff`), recorded in `harness_sessions.origin` | 3 (1 to 50) | `agent_host.max_mcp_started_sessions` |
 | Running sessions started from a chat an `hq_ask` created, including by handoff | 2 (0 to 20) | `agent_host.max_ask_spawned_sessions` |
 | Full-mode `hq_ask` questions waiting at once | 2 (1 to 10) | `agent_host.max_full_asks` |
