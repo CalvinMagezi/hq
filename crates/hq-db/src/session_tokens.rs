@@ -27,14 +27,58 @@ fn new_token() -> String {
 /// A new secret for `session_id`, replacing any earlier one. Returned once;
 /// only its hash is kept.
 pub fn mint(conn: &Connection, session_id: &str) -> Result<String> {
+    mint_with_ttl(conn, session_id, None)
+}
+
+/// Like [`mint`], but the secret also stops working `ttl_seconds` from now.
+pub fn mint_with_ttl(
+    conn: &Connection,
+    session_id: &str,
+    ttl_seconds: Option<i64>,
+) -> Result<String> {
     let token = new_token();
+    let expires_at: Option<String> = ttl_seconds
+        .map(|s| {
+            conn.query_row(
+                "SELECT datetime('now', ?1)",
+                params![format!("+{s} seconds")],
+                |row| row.get(0),
+            )
+        })
+        .transpose()?;
     conn.execute(
-        "INSERT INTO harness_session_tokens (session_id, token_hash) VALUES (?1, ?2)
+        "INSERT INTO harness_session_tokens (session_id, token_hash, expires_at) VALUES (?1, ?2, ?3)
          ON CONFLICT(session_id) DO UPDATE SET token_hash = excluded.token_hash,
+                                               expires_at = excluded.expires_at,
                                                created_at = datetime('now')",
-        params![session_id, hash(&token)],
+        params![session_id, hash(&token), expires_at],
     )?;
     Ok(token)
+}
+
+/// What a session's secret row says: `None` when it has none (revoked or never
+/// minted), otherwise its deadline (`None` inside) and whether that deadline has passed.
+pub fn standing(conn: &Connection, session_id: &str) -> Result<Option<Standing>> {
+    Ok(conn
+        .query_row(
+            "SELECT expires_at, COALESCE(expires_at <= datetime('now'), 0)
+             FROM harness_session_tokens WHERE session_id = ?1",
+            params![session_id],
+            |row| {
+                Ok(Standing {
+                    expires_at: row.get(0)?,
+                    expired: row.get(1)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
+/// A secret row's deadline, as stored (UTC, `YYYY-MM-DD HH:MM:SS`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Standing {
+    pub expires_at: Option<String>,
+    pub expired: bool,
 }
 
 /// Drops the secret of a session, for a launch that failed.
@@ -74,6 +118,7 @@ pub fn session_for_token(conn: &Connection, token: &str) -> Result<Option<String
             "SELECT t.session_id FROM harness_session_tokens t
              LEFT JOIN harness_sessions s ON s.id = t.session_id
              WHERE t.token_hash = ?1
+               AND (t.expires_at IS NULL OR t.expires_at > datetime('now'))
                AND (s.status = 'running'
                     OR (s.id IS NULL AND t.created_at >= datetime('now', ?2)))",
             params![hash(token), format!("-{LAUNCH_GRACE_SECONDS} seconds")],
@@ -202,6 +247,30 @@ mod tests {
                 None,
                 "a fresh token is not a way back in"
             );
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_secret_stops_working_at_its_deadline_and_a_remint_clears_it() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            session(c, "hs-a");
+            let token = mint_with_ttl(c, "hs-a", Some(600))?;
+            assert_eq!(session_for_token(c, &token)?.as_deref(), Some("hs-a"));
+            assert!(!standing(c, "hs-a")?.unwrap().expired);
+
+            c.execute(
+                "UPDATE harness_session_tokens SET expires_at = datetime('now', '-1 seconds')",
+                [],
+            )?;
+            assert_eq!(session_for_token(c, &token)?, None);
+            assert!(standing(c, "hs-a")?.unwrap().expired);
+
+            let again = mint(c, "hs-a")?;
+            assert_eq!(session_for_token(c, &again)?.as_deref(), Some("hs-a"));
+            assert_eq!(standing(c, "hs-a")?.unwrap().expires_at, None);
             Ok(())
         })
         .unwrap();
