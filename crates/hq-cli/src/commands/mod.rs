@@ -93,6 +93,7 @@ pub mod self_apply {
     }
 }
 pub mod agent_skill;
+pub mod quota;
 pub mod service;
 pub mod sessions;
 pub mod sessions_watch;

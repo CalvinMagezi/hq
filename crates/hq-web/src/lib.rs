@@ -22,6 +22,7 @@ mod error;
 mod fetch_sites_api;
 pub mod github_connect_api;
 pub mod gmail_ingest;
+mod lane_quotas_api;
 mod mcp_http;
 mod note_ids;
 mod note_trash;
@@ -429,6 +430,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/copilot-usage",
             get(copilot_usage_api::copilot_usage_handler),
+        )
+        .route(
+            "/api/lane-quotas",
+            get(lane_quotas_api::lane_quotas_handler),
         )
         .route(
             "/api/openrouter-usage",

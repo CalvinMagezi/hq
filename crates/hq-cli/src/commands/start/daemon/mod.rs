@@ -445,6 +445,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         // Detaches its pass, so the one-minute timeout only covers starting it.
         DaemonTask::with_default_timeout("verify-dispatch", Duration::from_secs(60)),
         DaemonTask::with_default_timeout("copilot-usage", Duration::from_secs(60)),
+        // Asks the hosts at `quota.interval_minutes`; the scheduler tick only checks the clock.
+        DaemonTask::with_default_timeout("lane-quotas", Duration::from_secs(60)),
         // Starts a reply and returns; the work runs in its chat thread.
         DaemonTask::with_default_timeout("edge-worker-dispatch", Duration::from_secs(120)),
         DaemonTask::with_default_timeout("subagent-supervisor", Duration::from_secs(60)),
@@ -655,6 +657,7 @@ async fn dispatch_task(
         "disk-watchdog" => tasks_periodic::run_disk_watchdog(vault_path, db, config).await,
         "backup" => tasks_periodic::run_backup(config).await,
         "copilot-usage" => tasks_periodic::run_copilot_usage(db, config).await,
+        "lane-quotas" => tasks_periodic::run_lane_quotas(db, config).await,
         "usage-ledger" => tasks_periodic::run_usage_ledger(db, config).await,
         "harness-usage" => tasks_periodic::run_harness_usage(db).await,
         "skill-outcomes" => tasks_periodic::run_skill_outcomes(db),
@@ -873,6 +876,7 @@ mod lite_tests {
             "email-poll",
             "session-supervisor",
             "copilot-usage",
+            "lane-quotas",
             "inbox-triage",
         ] {
             assert!(!lite.contains(&reaches_out), "{reaches_out}");
@@ -1010,6 +1014,7 @@ mod lite_tests {
             "subagent-supervisor",
             "verify-dispatch",
             "copilot-usage",
+            "lane-quotas",
             "harness-usage",
             "usage-ledger",
             "disk-watchdog",

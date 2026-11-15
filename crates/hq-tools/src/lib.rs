@@ -10,6 +10,7 @@ pub mod agent_comm;
 pub mod agents;
 pub mod ask;
 pub mod background_turns;
+pub mod lane_quotas;
 pub mod subagent_runs;
 
 pub mod agent_host;

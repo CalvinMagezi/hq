@@ -12,6 +12,7 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     report_machine_profile(config);
     report_search_index(config);
     report_agent_hosts(config);
+    super::quota::doctor(config).await;
     report_web_search(config).await;
     report_import_tools();
     report_code_signature();
