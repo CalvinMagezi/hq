@@ -8,11 +8,37 @@ use tracing::debug;
 
 use crate::frontmatter;
 
+/// Refuses a path that leaves the vault: absolute, with `..`, or resolving through a symlink to
+/// somewhere else. Callers such as the context packet pass model-chosen paths here.
+fn ensure_inside_vault(vault_path: &Path, rel_path: &str) -> Result<()> {
+    use std::path::Component;
+    let escapes = Path::new(rel_path).components().any(|c| {
+        matches!(
+            c,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    });
+    if escapes {
+        anyhow::bail!("path escapes the vault: {rel_path}");
+    }
+    let Ok(real) = vault_path.join(rel_path).canonicalize() else {
+        return Ok(());
+    };
+    let root = vault_path
+        .canonicalize()
+        .unwrap_or_else(|_| vault_path.to_path_buf());
+    if !real.starts_with(&root) {
+        anyhow::bail!("path escapes the vault: {rel_path}");
+    }
+    Ok(())
+}
+
 /// Read a note from the vault by relative path.
 ///
 /// If the path has no extension and the exact file doesn't exist, tries
 /// appending `.md` automatically (Obsidian-style wikilink tolerance).
 pub(crate) fn read_note(vault_path: &Path, rel_path: &str) -> Result<Note> {
+    ensure_inside_vault(vault_path, rel_path)?;
     let exact = vault_path.join(rel_path);
     let (full_path, effective_rel) = if exact.exists() {
         (exact, rel_path.to_string())
@@ -571,5 +597,31 @@ mod section_and_link_tests {
             "Check out [[Project Alpha]] and [[Architecture|Arch Doc]] or [Link](docs/beta.md).";
         let links = extract_links(content);
         assert_eq!(links, vec!["Project Alpha", "Architecture", "docs/beta"]);
+    }
+
+    #[test]
+    fn read_note_refuses_paths_that_leave_the_vault() {
+        let root = tempfile::TempDir::new().unwrap();
+        let vault = root.path().join("vault");
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::write(root.path().join("secret.md"), "outside").unwrap();
+        std::fs::write(vault.join("inside.md"), "inside").unwrap();
+        let absolute = root.path().join("secret.md");
+
+        assert!(read_note(&vault, "../secret.md").is_err());
+        assert!(read_note(&vault, absolute.to_str().unwrap()).is_err());
+        assert!(read_note(&vault, "inside.md").is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_note_refuses_a_symlink_that_points_outside() {
+        let root = tempfile::TempDir::new().unwrap();
+        let vault = root.path().join("vault");
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::write(root.path().join("secret.md"), "outside").unwrap();
+        std::os::unix::fs::symlink(root.path().join("secret.md"), vault.join("link.md")).unwrap();
+
+        assert!(read_note(&vault, "link.md").is_err());
     }
 }
