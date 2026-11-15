@@ -526,10 +526,10 @@ A `harness_session_spawn` that names no team used to skip every limit. It now ch
 two simultaneous starts cannot both pass the cap. Sessions inside a team keep the
 `agent_host.teams` limits.
 
-- `max_live_sessions` (default 12, clamped to 1..=100): running sessions that have no parent and
+- `max_live_sessions` (default 12, clamped to 1..=500): running sessions that have no parent and
   whose agent is active (working, blocked, or not yet seen by a sweep). Sessions sitting idle or
   done do not count, so a host that keeps many idle sessions open is not locked out.
-- `max_spawns_per_hour` (default 60, clamped to 1..=600): sessions with no parent started in the
+- `max_spawns_per_hour` (default 60, clamped to 1..=6000): sessions with no parent started in the
   last 60 minutes, running or ended.
 - `count_harness_in_global` (default false): global budgets leave harness spend out of their sum.
   Set this to true to make a used-up hard global budget stop starts too. An `origin:harness`
@@ -711,10 +711,10 @@ row (`drive_off_reason`, in the sessions payload and shown under the Drive switc
 | Finished turns in a row that show no new tool activity on the screen the supervisor stored (`Bash(...)`, `Update(...)`, `Ran ...` lines). A tool line the last turn did not show, or one shown more times, counts as work, so re-running a test is not a stall. A finished turn that follows something other than a driver instruction (you typing in the chat) is not judged. A harness that prints none is never judged stalled; the budget covers it | 3 (2 to 20) | `agent_host.driver_no_progress_limit` |
 | The linked task is complete, or is not in progress at a check-in while the agent is not working (a working agent means someone is typing in the pane). A finished turn itself moves the task to ready for review, so that is not a stop | none | none |
 | The session exited or was stopped (Drive goes off in the registry write, and the exit is reported as an update) | none | none |
-| Running sessions HQ drives at once. A default-on watch past it starts observing and says so, and `harness_session_mode` from HQ cannot go past it (the user can); a session the user already switched on is never switched off by it. Eight by default: each driven session costs a full agent turn on the chat model per wake (at most 48 a day, and the instruction budget above ends a session's Drive after 8 instructions), so eight sessions cap near 64 steering turns between your top-ups | 8 (1 to 50) | `agent_host.max_driven_sessions` |
+| Running sessions HQ drives at once. A default-on watch past it starts observing and says so, and `harness_session_mode` from HQ cannot go past it (the user can); a session the user already switched on is never switched off by it. Eight by default: each driven session costs a full agent turn on the chat model per wake (at most 48 a day, and the instruction budget above ends a session's Drive after 8 instructions), so eight sessions cap near 64 steering turns between your top-ups | 8 (1 to 500) | `agent_host.max_driven_sessions` |
 | Minutes a driven session may report idle or done, with no event, wake or driver turn, before it gives up its slot (the session keeps running; switch Drive back on to continue). 0 turns it off | 180 (0 to 10080) | `agent_host.driver_idle_release_minutes` |
-| Running sessions started by an MCP client with no chat (`harness_session_spawn`, `harness_session_handoff`), recorded in `harness_sessions.origin` | 3 (1 to 50) | `agent_host.max_mcp_started_sessions` |
-| Running sessions started from a chat an `hq_ask` created, including by handoff | 2 (0 to 20) | `agent_host.max_ask_spawned_sessions` |
+| Running sessions started by an MCP client with no chat (`harness_session_spawn`, `harness_session_handoff`), recorded in `harness_sessions.origin` | 3 (1 to 500) | `agent_host.max_mcp_started_sessions` |
+| Running sessions started from a chat an `hq_ask` created, including by handoff | 2 (0 to 100) | `agent_host.max_ask_spawned_sessions` |
 | Full-mode `hq_ask` questions waiting at once | 2 (1 to 10) | `agent_host.max_full_asks` |
 
 Known harmless prompts are not left to the model. Claude Code's optional feedback survey
@@ -1146,7 +1146,7 @@ agent_host:
   command_timeout_secs: 30
   driver_nudge_budget: 8        # instructions the driver may send one session (1-100)
   driver_no_progress_limit: 3   # finished turns without new tool activity before Drive stops (2-20)
-  max_driven_sessions: 3        # running sessions HQ drives at once (1-50)
+  max_driven_sessions: 3        # running sessions HQ drives at once (1-500)
   max_ask_spawned_sessions: 2   # running sessions hq_ask chats may start (0-20)
   max_mcp_started_sessions: 3   # running sessions MCP clients with no chat may start (1-50)
   driver_key_allowance: 40      # key presses the driver may send one session (1-500)

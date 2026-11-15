@@ -563,7 +563,11 @@ resume one on purpose (`harness_session_resume`).
   over but stops nothing already running. Only starts that succeeded count;
   agents restored or resumed after a restart do not.
 - **The cap.** `--max-agents` (default 64) bounds the agents running or waiting
-  at once, so a slow leak stops at a known number. Saved agents over the cap at
+  at once, so a slow leak stops at a known number. A host running a large fleet (more than 64 agents,
+  or a burst of more than 50 starts in 10 minutes) passes higher values to
+  `hq host serve`, for example `--max-agents 256 --max-starts 300`, and raises the
+  matching `agent_host` ceilings (`spawn_limits`, `teams`, `max_driven_sessions`), which go up to
+  500 live sessions and 6000 starts an hour. Saved agents over the cap at
   startup wait instead of being dropped.
 - **Alerts.** A lockdown is an event (`kind: lockdown`, the reason in `rule`).
   HQ's daemon raises an action-needed inbox item and an interrupting relay
