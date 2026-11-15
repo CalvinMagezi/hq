@@ -472,8 +472,12 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../sql/129_lane_quota_samples.sql"),
     ),
     (
-        "130_lane_quota_alerts",
-        include_str!("../sql/130_lane_quota_alerts.sql"),
+        "130_context_gateway",
+        include_str!("../sql/130_context_gateway.sql"),
+    ),
+    (
+        "131_lane_quota_alerts",
+        include_str!("../sql/131_lane_quota_alerts.sql"),
     ),
 ];
 

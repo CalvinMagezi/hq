@@ -16,6 +16,7 @@ mod backend;
 pub mod bridge_hosts;
 #[cfg(unix)]
 mod native;
+pub mod overview;
 #[cfg(unix)]
 pub mod pairing;
 // Builds on the SSH transport, which is Unix-only.

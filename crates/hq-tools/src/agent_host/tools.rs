@@ -173,7 +173,7 @@ impl HqTool for HostAgentsTool {
 }
 
 /// (host, agent name) -> session id for every running HQ session.
-fn managed_names(db: &Database) -> Result<Vec<(String, String, String)>> {
+pub(super) fn managed_names(db: &Database) -> Result<Vec<(String, String, String)>> {
     let rows = db.with_conn(|c| hq_db::harness_sessions_registry::list(c, Some("running"), 200))?;
     Ok(rows
         .into_iter()
@@ -182,23 +182,32 @@ fn managed_names(db: &Database) -> Result<Vec<(String, String, String)>> {
 }
 
 fn agents_on(h: &dyn HostBackend, managed: &[(String, String, String)]) -> Value {
-    let agents = match h.agents() {
-        Ok(a) => a,
-        Err(e) => return json!({ "host": h.name(), "reachable": false, "error": e.to_string() }),
-    };
-    let rows: Vec<Value> = agents
+    match h.agents() {
+        Ok(agents) => {
+            json!({ "host": h.name(), "reachable": true, "agents": agent_rows(h.name(), &agents, managed) })
+        }
+        Err(e) => json!({ "host": h.name(), "reachable": false, "error": e.to_string() }),
+    }
+}
+
+/// Agent rows with `hq_session_id` set for the ones HQ launched.
+pub(super) fn agent_rows(
+    host: &str,
+    agents: &[super::AgentInfo],
+    managed: &[(String, String, String)],
+) -> Vec<Value> {
+    agents
         .iter()
         .map(|a| {
             let session = managed
                 .iter()
-                .find(|(host, name, _)| host == h.name() && a.name.as_deref() == Some(name))
+                .find(|(h, name, _)| h == host && a.name.as_deref() == Some(name))
                 .map(|(_, _, id)| id.clone());
             let mut row = serde_json::to_value(a).unwrap_or(Value::Null);
             row["hq_session_id"] = json!(session);
             row
         })
-        .collect();
-    json!({ "host": h.name(), "reachable": true, "agents": rows })
+        .collect()
 }
 
 pub struct HostReadTool;
@@ -421,6 +430,7 @@ pub fn create_host_tools(db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
         Box::new(HostAddTool),
         Box::new(HostCheckTool),
         Box::new(HostListTool),
+        Box::new(super::overview::HostOverviewTool::new(db.clone())),
         Box::new(crate::lane_quotas::LaneQuotasTool::new(db.clone())),
         Box::new(HostLockdownTool),
         Box::new(HostAgentsTool { db }),

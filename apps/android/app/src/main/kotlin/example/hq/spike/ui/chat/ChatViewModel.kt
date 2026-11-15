@@ -1,18 +1,25 @@
 package example.hq.spike.ui.chat
 
+import android.Manifest
 import android.app.Application
+import android.app.NotificationManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import androidx.core.content.FileProvider
 import java.io.File
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import example.hq.spike.AlertPoster
+import example.hq.spike.NoticeWords
 import example.hq.spike.data.ChatEvent
 import example.hq.spike.data.HqClient
 import example.hq.spike.R
 import example.hq.spike.data.HqServices
+import example.hq.spike.update.AppVisibility
 import example.hq.spike.ui.shell.ClientRestore
 import example.hq.spike.ui.shell.Undo
 import example.hq.spike.ui.shell.UndoKind
@@ -164,10 +171,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 // A first message was sent before its chat had an id; Retry finds it by that id.
                 lastQuestion = lastQuestion?.let { q -> if (q.threadId == null && event.threadId != null && event.clientId != null && event.clientId in pending) LastQuestion(event.threadId, q.text, q.files, q.contexts) else q }
             }
-            is ChatEvent.TurnEnd -> if (event.threadId == _state.value.threadId) viewModelScope.launch {
-                // The live copy has tool arguments cut at 4000 characters and no ids; the saved one is whole.
-                event.threadId?.let { loadMessages(it) }
-                refreshChats()
+            is ChatEvent.TurnEnd -> {
+                if (event.threadId == _state.value.threadId) viewModelScope.launch {
+                    // The live copy has tool arguments cut at 4000 characters and no ids; the saved one is whole.
+                    event.threadId?.let { loadMessages(it) }
+                    refreshChats()
+                }
+                maybeNotifyReply(event)
             }
             // A turn_end may be among the frames that were lost, so the running state is checked as after a reconnect.
             is ChatEvent.Lagged -> viewModelScope.launch { reconcile() }
@@ -217,7 +227,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (fromComposer) { sentContexts[clientId] = sendContexts; sentFiles[clientId] = s.files }
         if (replaceFrom != null) sentReplace[clientId] = replaceFrom
         _state.update {
-            val sent = it.copy(messages = kept + UiMessage(clientId, Speaker.User, text, sending = true, files = sendFiles), failed = false, editing = null, offerResult = null)
+            val sent = it.copy(
+                messages = kept + UiMessage(clientId, Speaker.User, text, sending = true, files = sendFiles),
+                failed = false,
+                editing = null,
+                offerResult = null,
+                scrollToBottom = it.scrollToBottom + 1,
+                composerSent = if (fromComposer) it.composerSent + 1 else it.composerSent,
+            )
             if (fromComposer) sent.copy(draft = "", contexts = emptyList(), files = emptyList()) else sent
         }
         if (fromComposer) drafts.edit().remove(draftKey(s.threadId)).apply()
@@ -605,6 +622,41 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun maybeNotifyReply(event: ChatEvent.TurnEnd) {
+        val threadId = event.threadId ?: return
+        if (!shouldNotifyReply(AppVisibility.visible, AppVisibility.inChat, _state.value.threadId, threadId, event.stopped, event.waitingForOwner)) return
+        val app = getApplication<Application>()
+        if (!hasNotificationPermission(app)) return
+        val words = NoticeWords.answered(app)
+        if (!AlertPoster.detailsNow(app)) {
+            postReplyNotice(app, threadId, words.title, words.body)
+            return
+        }
+        viewModelScope.launch {
+            postReplyNotice(app, threadId, words.title, replyPreview(threadId) ?: words.body)
+        }
+    }
+
+    private suspend fun replyPreview(threadId: String): String? {
+        val local = if (threadId == _state.value.threadId) _state.value.messages.lastOrNull { it.speaker == Speaker.Reply }?.text else null
+        val raw = local ?: try {
+            client.messages(threadId, limit = REPLY_PREVIEW_MESSAGES).lastOrNull { it.role != "user" }?.content
+        } catch (e: HqUnavailable) {
+            null
+        }
+        return raw?.trim()?.take(REPLY_PREVIEW_CHARS)?.ifBlank { null }
+    }
+
+    private fun postReplyNotice(c: Context, threadId: String, title: String, body: String) {
+        val tap = AlertPoster.open(c, "hq://chat/$threadId", counted = true)
+        val notice = AlertPoster.simpleNotice(c, AlertPoster.UPDATES, title, body, tap)
+        c.getSystemService(NotificationManager::class.java)?.notify(AlertPoster.notificationId("$REPLY_NOTICE_PREFIX$threadId"), notice)
+    }
+
+    private fun hasNotificationPermission(c: Context): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            c.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
     private fun draftKey(threadId: String?) = threadId ?: NEW_CHAT_KEY
 
     private companion object {
@@ -615,12 +667,29 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         const val HTTP_NOT_FOUND = 404
         const val NEW_CHAT_KEY = "new"
         const val MAX_ATTACHED = 10
+        const val REPLY_PREVIEW_CHARS = 160
+        const val REPLY_PREVIEW_MESSAGES = 10
+        const val REPLY_NOTICE_PREFIX = "reply:"
         const val NOTE_GONE = "That note is not in your Vault any more"
         const val OFFER_SCHEDULED = "I will bring this back then."
         const val OFFER_NOT_SCHEDULED = "Could not schedule that. Try again."
         const val CHAT_GONE = "That chat is not in your list"
     }
 }
+
+/** True when a finished reply should post a local notification instead of being silently read in place. */
+internal fun shouldNotifyReply(
+    appVisible: Boolean,
+    inChatPlace: Boolean,
+    openThreadId: String?,
+    replyThreadId: String?,
+    stopped: Boolean,
+    waitingForOwner: Boolean = false,
+): Boolean =
+    replyThreadId != null &&
+        !stopped &&
+        !waitingForOwner &&
+        (!appVisible || !inChatPlace || replyThreadId != openThreadId)
 
 /** [text] added after what is already typed, or alone when the field is empty; typing is never replaced. */
 internal fun draftWith(now: String, text: String): String = if (now.isBlank()) text else now.trimEnd() + "\n\n" + text

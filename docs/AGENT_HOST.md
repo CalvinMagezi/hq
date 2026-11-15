@@ -672,6 +672,33 @@ on, so changing the default never moves a running session. After a host restart 
 supervisor starts any held agent again with the env HQ built for it at launch
 (profile variables and the session id), once per sweep.
 
+### `host_overview`: one snapshot of every host
+
+`host_overview` (read-only, `crates/hq-tools/src/agent_host/overview.rs`) asks every
+configured host at once and returns one row each: `reachability` (`reachable`,
+`unreachable` or `unknown`), `checked_at`, `version`, a short `reason` when it is not
+reachable, the agents the host sees (only for a reachable host), which harness programs
+the host can start (`true`, `false`, or `"unknown"` where the host cannot tell), and the
+lane quota rows.
+
+- Each host runs on its own blocking thread with its own time limit (`HOST_TIMEOUT`), and
+  the whole call is capped by `OVERALL_BOUND`. A host that says nothing in time is `unknown`
+  with the reason `no answer from the host within the time limit`; it is never shown as
+  reachable. Reachability comes from a live call, never from config.
+- A host reports in steps (version, agents, quota) and what finished before the deadline is
+  kept, so one slow step or one failing host never hides the others.
+- Reachable means the host answered. It does not mean an agent is signed in or that a
+  session can start.
+- Quota rows carry `status`: `available` (read now or within the sampling interval),
+  `stale` (an earlier reading, with its age; also anything older than the sampling
+  interval), `not_exposed` (the lane has no balance to read, such as the spend ledger) or
+  `check_failed` (the reader failed, with the reason). Each row names `metric`, `units`,
+  `observed_at` and `source`. A configured limit is not a remaining balance, and unknown
+  is never turned into zero. See `docs/LANE_QUOTAS.md`.
+- `mode`: `cached` (default; reuses readings taken within the sampling interval) or
+  `refresh` (asks the hosts now). Both obey the time limits.
+- It does not scan any filesystem and reads no credentials.
+
 ## A host on another machine
 
 HQ on a server reaches a host on your laptop (or any machine) over ssh. Pair it with

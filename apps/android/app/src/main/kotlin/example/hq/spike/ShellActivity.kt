@@ -494,6 +494,7 @@ class ShellActivity : ComponentActivity() {
                     aboveBar = { place -> if (place != Place.Tasks) tasksState.line?.let { Snack(it, tasks.actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) } },
                     overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); CompositionLocalProvider(example.hq.spike.ui.shell.LocalCoversBar provides true) { SettingsHost(settingsState, settings.actions); SearchHost(searchState, shown); if (tasksState.away.open) AwayHost(tasksState); web?.let { page -> WebHostScreen(page, onClose = { web = null }, onStartHq = ::tryStartAgain, onNotes = { web = null; requested = Place.Notes }) } } },
                 ) { place ->
+                    LaunchedEffect(place) { example.hq.spike.update.AppVisibility.inChat = place == Place.Chat }
                     when (place) {
                         Place.Chat -> ChatScreen(chatState, chat.actions, status = shown, onStartHq = ::tryStartAgain, onAiKeys = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Keys) }, needs = { ChatNeeds(needsOfChat(inboxState.shownNeeds, chatState.threadId), inboxState, inbox.actions) }, hasNeeds = needsOfChat(inboxState.shownNeeds, chatState.threadId).isNotEmpty(), onVoice = ::speakToHq)
                         Place.Notes -> NotesPlace(notesState)

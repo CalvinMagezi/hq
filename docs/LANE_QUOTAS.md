@@ -90,6 +90,10 @@ agent_host:
 
 The command does not set the lane or the source. Print no credential: the account is a label.
 
+`host_overview` (`docs/AGENT_HOST.md`) shows these readings next to each host's reachability and
+agents, with a `status` per row (`available`, `stale`, `not_exposed`, `check_failed`), under a
+per-host time limit.
+
 ## What HQ does with a reading
 
 **Spawn gate.** `harness_session_spawn` reads the stored reading of the lane it is about to start on

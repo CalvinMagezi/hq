@@ -72,6 +72,10 @@ data class ChatUiState(
     val draft: String = "",
     /** Goes up each time a link asks for the composer (hq://chat?compose=1); the field takes focus and the keyboard on every change. */
     val focusDraft: Int = 0,
+    /** Goes up each time a message is sent from the composer, so the field clears focus and hides the keyboard. */
+    val composerSent: Int = 0,
+    /** Goes up each time a message is sent, so the conversation scrolls back to the newest item. */
+    val scrollToBottom: Int = 0,
     /** The empty chat's chips from HQ (`GET /api/capabilities`); null until it answers. */
     val suggestions: List<Suggestion>? = null,
     val notice: Notice? = null,
