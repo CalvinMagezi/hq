@@ -28,3 +28,35 @@ fn every_catalog_tool_is_registered() {
         .collect();
     assert!(missing.is_empty(), "not registered: {missing:?}");
 }
+
+/// A connector asks approval only for tools in its confirm list and never writes through a
+/// read-only tool, so the context tools must exist, say they only read, and stay off that list.
+#[test]
+fn the_context_tools_are_registered_read_only_and_need_no_approval() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Arc::new(hq_db::Database::open_memory().unwrap());
+    let vault_client = Arc::new(hq_vault::VaultClient::new(dir.path().to_path_buf()).unwrap());
+    let registry = create_default_registry(
+        vault_client,
+        db,
+        dir.path().join("skills"),
+        dir.path().join("Agents"),
+        None,
+    );
+    for name in [
+        "context_orient",
+        "context_search",
+        "context_read",
+        "context_expand",
+        "context_related",
+    ] {
+        let tool = registry
+            .get(name)
+            .unwrap_or_else(|| panic!("{name} missing"));
+        assert!(tool.is_read_only(), "{name}");
+        assert!(
+            !hq_mcp::gateway::needs_owner_confirmation(&registry, name, &serde_json::json!({})),
+            "{name}"
+        );
+    }
+}

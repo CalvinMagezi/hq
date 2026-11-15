@@ -33,6 +33,10 @@ pub fn create_default_registry(
         vault_path.clone(),
         Some(db.clone()),
     ));
+    tools.extend(hq_tools::context_gateway::create_context_tools(
+        vault_client.clone(),
+        db.clone(),
+    ));
     if let Some(cfg) = config.filter(|c| c.self_update.enabled) {
         tools.extend(self_update::create_self_update_tools(cfg, db.clone()));
     }
@@ -292,6 +296,11 @@ mod tests {
             "vault_inventory",
             "memory_entity_graph",
             "context_packet",
+            "context_orient",
+            "context_search",
+            "context_read",
+            "context_expand",
+            "context_related",
             "list_agents",
             "load_agent",
         ] {

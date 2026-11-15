@@ -50,4 +50,13 @@ split per source and what does not fit is an `OverBudget` gap. Calls are rate li
 
 ## Not yet built
 
-The `context_*` MCP tools, adapters, `ask_hq`, `include_task_links`, and evaluation.
+Adapters for other harnesses, `ask_hq`, `include_task_links`, and evaluation.
+
+## Phase 3: the tools
+
+`context_orient`, `context_search`, `context_read`, `context_expand` and `context_related`
+(`context_gateway::tools`) are read-only wrappers over `Retriever`, in `SESSION_ALLOWLIST` so a
+session token can call them. The session comes only from the id the gateway attested from the
+`hqs_` token; the schemas carry no task, session or scope field. A call with no proven session, or
+one whose grant cannot be resolved, returns a typed `unavailable` result and reads nothing. One
+rate limiter is shared across the five tools.
