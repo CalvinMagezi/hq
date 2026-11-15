@@ -12,6 +12,7 @@ use hq_db::value_items;
 pub const COPILOT_CREDITS_WINDOW_ID: &str = "copilot:credits";
 const QUOTA_ALERT_SOURCE: &str = "quota_alerts";
 const PERCENT_SCALE: f64 = 100.0;
+const SECS_PER_MINUTE: i64 = 60;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct QuotaWindow {
@@ -38,6 +39,7 @@ impl CopilotQuotaReader {
     pub fn read_at(&self, now: DateTime<Utc>) -> Result<Vec<QuotaWindow>> {
         let since = now - Duration::days(store::RETENTION_DAYS);
         let samples = self.db.with_conn(|c| store::list_samples_since(c, since))?;
+        // Accepted limit: uses only the newest stored sample (assumes a single Copilot seat).
         let Some(latest) = samples.into_iter().last() else {
             return Ok(Vec::new());
         };
@@ -51,6 +53,10 @@ impl CopilotQuotaReader {
             // A sample whose reset boundary has passed belongs to the previous cycle.
             Some(r) if r <= now => return Ok(Vec::new()),
             Some(r) => r,
+            // Without reset_at, only samples from the current UTC month belong to this cycle.
+            None if latest.ts.year() != now.year() || latest.ts.month() != now.month() => {
+                return Ok(Vec::new());
+            }
             None => next_month_start(now),
         };
         let percent_used = ((latest.credits_used / latest.entitlement) * PERCENT_SCALE).max(0.0);
@@ -85,7 +91,9 @@ fn next_month_start(now: DateTime<Utc>) -> DateTime<Utc> {
 }
 
 pub fn quota_dedup_key(window_id: &str, threshold: u8, resets_at: DateTime<Utc>) -> String {
-    format!("quota:{window_id}:{threshold}:{}", resets_at.timestamp())
+    // Truncate to the minute so small provider-reported reset_at wobble does not re-arm alerts.
+    let reset_minute = resets_at.timestamp().div_euclid(SECS_PER_MINUTE) * SECS_PER_MINUTE;
+    format!("quota:{window_id}:{threshold}:{reset_minute}")
 }
 
 fn build_alert_item(window: &QuotaWindow, threshold: u8, dedup_key: String) -> ValueItem {
@@ -117,7 +125,8 @@ pub async fn check_quota_alerts(
                 continue;
             }
             let dedup_key = quota_dedup_key(&window.id, threshold, window.resets_at);
-            if value_items::find_active_by_dedup(db, ValueKind::Fyi, &dedup_key)?.is_some() {
+            // Check every state (including expired) so one threshold fires at most once per cycle.
+            if value_items::any_with_dedup(db, &dedup_key)? {
                 continue;
             }
             let item = build_alert_item(window, threshold, dedup_key);
@@ -335,5 +344,158 @@ mod tests {
         assert_eq!(windows[0].id, COPILOT_CREDITS_WINDOW_ID);
         assert!((windows[0].percent_used - 85.0).abs() < 1e-9);
         assert_eq!(windows[0].resets_at.timestamp(), reset.timestamp());
+    }
+
+    #[tokio::test]
+    async fn expired_item_does_not_reemit() {
+        let db = Database::open_memory().unwrap();
+        let cfg = cfg_with(true, &[("copilot:credits", &[80])]);
+        let resets_at = Utc::now() + Duration::days(20);
+        let reader = FakeReader::new(vec![QuotaWindow {
+            id: "copilot:credits".into(),
+            percent_used: 85.0,
+            resets_at,
+        }]);
+
+        assert_eq!(check_quota_alerts(&db, &cfg, &reader).await.unwrap(), 1);
+        let items = value_items::list_by_state(&db, ValueState::Pending).unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(value_items::retire(&db, &items[0].id).unwrap());
+
+        assert_eq!(check_quota_alerts(&db, &cfg, &reader).await.unwrap(), 0);
+        assert!(
+            value_items::list_by_state(&db, ValueState::Pending)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn stale_sample_without_reset_at_returns_no_windows() {
+        let db = Database::open_memory().unwrap();
+        let now = Utc.with_ymd_and_hms(2026, 11, 15, 12, 0, 0).unwrap();
+        let prev_month = Utc.with_ymd_and_hms(2026, 10, 28, 12, 0, 0).unwrap();
+        db.with_conn(|c| {
+            insert_sample(
+                c,
+                &UsageSample {
+                    ts: prev_month,
+                    login: Some("seat".into()),
+                    credits_used: 900.0,
+                    remaining: 100.0,
+                    entitlement: 1000.0,
+                    reset_at: None,
+                },
+            )
+        })
+        .unwrap();
+
+        let reader = CopilotQuotaReader::new(db.clone());
+        assert!(reader.read_at(now).unwrap().is_empty());
+
+        // Same UTC month without reset_at still produces a window ending at next month start.
+        let same_month = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+        db.with_conn(|c| {
+            insert_sample(
+                c,
+                &UsageSample {
+                    ts: same_month,
+                    login: Some("seat".into()),
+                    credits_used: 900.0,
+                    remaining: 100.0,
+                    entitlement: 1000.0,
+                    reset_at: None,
+                },
+            )
+        })
+        .unwrap();
+        let windows = reader.read_at(now).unwrap();
+        assert_eq!(windows.len(), 1);
+        assert_eq!(
+            windows[0].resets_at,
+            Utc.with_ymd_and_hms(2026, 12, 1, 0, 0, 0).unwrap()
+        );
+    }
+
+    #[test]
+    fn sample_with_passed_or_current_reset_at_returns_no_windows() {
+        let db = Database::open_memory().unwrap();
+        let now = Utc.with_ymd_and_hms(2026, 11, 15, 12, 0, 0).unwrap();
+        db.with_conn(|c| {
+            insert_sample(
+                c,
+                &UsageSample {
+                    ts: now - Duration::minutes(5),
+                    login: Some("seat".into()),
+                    credits_used: 900.0,
+                    remaining: 100.0,
+                    entitlement: 1000.0,
+                    reset_at: Some(now),
+                },
+            )
+        })
+        .unwrap();
+
+        let reader = CopilotQuotaReader::new(db.clone());
+        assert!(reader.read_at(now).unwrap().is_empty());
+
+        db.with_conn(|c| {
+            insert_sample(
+                c,
+                &UsageSample {
+                    ts: now - Duration::minutes(1),
+                    login: Some("seat".into()),
+                    credits_used: 900.0,
+                    remaining: 100.0,
+                    entitlement: 1000.0,
+                    reset_at: Some(now - Duration::seconds(1)),
+                },
+            )
+        })
+        .unwrap();
+        assert!(reader.read_at(now).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn jumping_across_two_thresholds_emits_both_once() {
+        let db = Database::open_memory().unwrap();
+        let cfg = cfg_with(true, &[("copilot:credits", &[80, 95])]);
+        let resets_at = Utc::now() + Duration::days(5);
+        let reader = FakeReader::new(vec![QuotaWindow {
+            id: "copilot:credits".into(),
+            percent_used: 97.0,
+            resets_at,
+        }]);
+
+        assert_eq!(check_quota_alerts(&db, &cfg, &reader).await.unwrap(), 2);
+        assert_eq!(check_quota_alerts(&db, &cfg, &reader).await.unwrap(), 0);
+        let items = value_items::list_by_state(&db, ValueState::Pending).unwrap();
+        assert_eq!(items.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn reset_at_wobble_within_minute_keeps_same_dedup_key() {
+        let base = Utc.with_ymd_and_hms(2026, 12, 1, 0, 0, 5).unwrap();
+        let wobbled = base + Duration::seconds(30);
+        assert_eq!(
+            quota_dedup_key(COPILOT_CREDITS_WINDOW_ID, 80, base),
+            quota_dedup_key(COPILOT_CREDITS_WINDOW_ID, 80, wobbled)
+        );
+
+        let db = Database::open_memory().unwrap();
+        let cfg = cfg_with(true, &[("copilot:credits", &[80])]);
+        let reader = FakeReader::new(vec![QuotaWindow {
+            id: "copilot:credits".into(),
+            percent_used: 85.0,
+            resets_at: base,
+        }]);
+        assert_eq!(check_quota_alerts(&db, &cfg, &reader).await.unwrap(), 1);
+
+        reader.set_windows(vec![QuotaWindow {
+            id: "copilot:credits".into(),
+            percent_used: 86.0,
+            resets_at: wobbled,
+        }]);
+        assert_eq!(check_quota_alerts(&db, &cfg, &reader).await.unwrap(), 0);
     }
 }

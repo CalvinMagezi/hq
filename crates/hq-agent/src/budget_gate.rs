@@ -35,7 +35,14 @@ pub struct LedgerBudgetGate {
     db: Arc<Database>,
     instruments: Arc<hq_llm::Instruments>,
     load: ConfigLoader,
-    cache: Mutex<Cache>,
+    cache: Arc<Mutex<Cache>>,
+}
+
+fn lock_cache(cache: &Mutex<Cache>) -> std::sync::MutexGuard<'_, Cache> {
+    // A panic elsewhere must not turn every later LLM call into a panic.
+    cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl LedgerBudgetGate {
@@ -52,20 +59,17 @@ impl LedgerBudgetGate {
             db,
             instruments,
             load,
-            cache: Mutex::new(Cache {
+            cache: Arc::new(Mutex::new(Cache {
                 config: None,
                 last_good: None,
                 status: HashMap::new(),
                 alerted: HashSet::new(),
-            }),
+            })),
         })
     }
 
     fn cache(&self) -> std::sync::MutexGuard<'_, Cache> {
-        // A panic elsewhere must not turn every later LLM call into a panic.
-        self.cache
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        lock_cache(&self.cache)
     }
 
     fn budgets(&self) -> BudgetsConfig {
@@ -134,12 +138,11 @@ impl LedgerBudgetGate {
 
     /// Alert once per period for each threshold the spend has reached.
     fn alert(&self, budget: &Budget, status: &BudgetStatus) {
+        // Accepted limit: alerted keys stay for the process lifetime and DB writes are fire-and-forget.
         let thresholds = budget.soft_pct.iter().copied().chain([FULL_PCT]);
         for t in thresholds.filter(|t| status.pct >= f64::from(*t)) {
-            let first = self
-                .cache()
-                .alerted
-                .insert((budget.name.clone(), status.period_start, t));
+            let alert_key = (budget.name.clone(), status.period_start, t);
+            let first = self.cache().alerted.insert(alert_key.clone());
             if !first {
                 continue;
             }
@@ -162,17 +165,21 @@ impl LedgerBudgetGate {
             )
             .with_dedup_key(dedup_key.clone());
             let db = self.db.clone();
+            let cache = self.cache.clone();
             tokio::task::spawn_blocking(move || {
-                match hq_db::value_items::find_active_by_dedup(&db, ValueKind::Fyi, &dedup_key) {
-                    Ok(Some(_)) => return,
-                    Ok(None) => {}
+                // Check every state (including expired) so one threshold fires at most once per period.
+                match hq_db::value_items::any_with_dedup(&db, &dedup_key) {
+                    Ok(true) => return,
+                    Ok(false) => {}
                     Err(e) => {
                         warn!(error = %e, "budget alert dedup check failed");
+                        lock_cache(&cache).alerted.remove(&alert_key);
                         return;
                     }
                 }
                 if let Err(e) = hq_db::value_items::emit(&db, &item) {
                     warn!(error = %e, "budget alert could not be recorded");
+                    lock_cache(&cache).alerted.remove(&alert_key);
                 }
             });
         }
@@ -491,5 +498,64 @@ mod tests {
             Admission::Deny(_)
         ));
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn expired_budget_alert_does_not_reemit() {
+        let db = db_with_spend("chat", 9.0);
+        let first_gate = gate(db.clone(), MONTH_BLOCK);
+        first_gate
+            .admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+            .await;
+
+        let items = wait_for_pending(&db, 1).await;
+        assert_eq!(items.len(), 1);
+        assert!(hq_db::value_items::retire(&db, &items[0].id).unwrap());
+
+        let restarted_gate = gate(db.clone(), MONTH_BLOCK);
+        restarted_gate
+            .admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+            .await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            hq_db::value_items::list_by_state(&db, hq_core::types::ValueState::Pending)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_persist_lets_budget_alert_retry() {
+        let db = db_with_spend("chat", 9.0);
+        db.with_conn(|c| {
+            c.execute_batch(
+                "CREATE TRIGGER fail_value_items_insert BEFORE INSERT ON value_items
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected failure');
+                 END;",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let g = gate(db.clone(), MONTH_BLOCK);
+        g.admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+            .await;
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !g.cache().alerted.is_empty() && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(g.cache().alerted.is_empty());
+
+        db.with_conn(|c| {
+            c.execute_batch("DROP TRIGGER fail_value_items_insert;")?;
+            Ok(())
+        })
+        .unwrap();
+        g.admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+            .await;
+        let items = wait_for_pending(&db, 1).await;
+        assert_eq!(items.len(), 1);
     }
 }
