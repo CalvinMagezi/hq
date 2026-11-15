@@ -477,6 +477,24 @@ pub struct HarnessProfileConfig {
     /// Environment for the pane's shell, and so for the launched CLI.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+
+    /// How HQ reads this lane's remaining allowance when no built-in reader fits (a private
+    /// gateway, say). Optional.
+    #[serde(default)]
+    pub quota: Option<QuotaCommandConfig>,
+}
+
+/// A command that prints one `LaneQuota` JSON object on stdout.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuotaCommandConfig {
+    /// The program and its arguments. Run without a shell.
+    pub command: Vec<String>,
+    #[serde(default = "default_quota_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+fn default_quota_timeout_secs() -> u64 {
+    10
 }
 
 /// How HQ reaches a remote host: through `ssh` (the default) or the signed TCP gate on a tunnel.

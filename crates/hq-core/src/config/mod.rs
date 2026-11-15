@@ -21,6 +21,7 @@ mod memory;
 pub mod model_switch;
 mod profile;
 pub mod protected;
+mod quota;
 mod relay;
 mod self_update;
 mod skills;
@@ -33,9 +34,9 @@ mod web_push;
 pub use agent::*;
 pub use agent_host::{
     AgentHostConfig, HOST_SOCKET_FILE, HarnessProfileConfig, HostTransport, KeepAwake, LOCAL_HOST,
-    MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS, NATIVE_HOST, RemoteHostConfig, SandboxConfig,
-    SandboxMode, SandboxProfile, SpawnLimitsConfig, TEAM_MAX_LIVE_CHILDREN_CEILING, TeamsConfig,
-    detect_overrides_dir, native_host_dir,
+    MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS, NATIVE_HOST, QuotaCommandConfig,
+    RemoteHostConfig, SandboxConfig, SandboxMode, SandboxProfile, SpawnLimitsConfig,
+    TEAM_MAX_LIVE_CHILDREN_CEILING, TeamsConfig, detect_overrides_dir, native_host_dir,
 };
 pub use backends::{
     BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, SHARED_MODEL_ENDPOINT,
@@ -73,6 +74,7 @@ pub use profile::{
     EgressItem, EnvLookup, LiteConfig, MOBILE_REMOVED_TOOL_CATEGORIES, MobileConfig, Profile,
     egress_report, enforce_lite, lite_violations, process_env,
 };
+pub use quota::QuotaConfig;
 pub use relay::*;
 pub use self_update::SelfUpdateConfig;
 pub use skills::{BuiltinSkillsConfig, SkillsConfig};
@@ -333,6 +335,10 @@ pub struct HqConfig {
     #[serde(default)]
     pub copilot_usage: CopilotUsageConfig,
 
+    /// Reading each lane's remaining allowance on the machine its agent runs on.
+    #[serde(default)]
+    pub quota: QuotaConfig,
+
     /// Budget configuration for LLM spending
     #[serde(default)]
     pub budget: BudgetConfig,
@@ -542,6 +548,7 @@ impl Default for HqConfig {
             budgets: BudgetsConfig::default(),
             tasks: TasksConfig::default(),
             copilot_usage: CopilotUsageConfig::default(),
+            quota: QuotaConfig::default(),
             agent_host: AgentHostConfig::default(),
             stack: StackConfig::default(),
             budget: BudgetConfig::default(),

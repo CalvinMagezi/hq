@@ -48,6 +48,8 @@ mod pane;
 mod programs;
 mod proto;
 #[cfg(unix)]
+mod quota;
+#[cfg(unix)]
 mod relay;
 #[cfg(unix)]
 mod report;

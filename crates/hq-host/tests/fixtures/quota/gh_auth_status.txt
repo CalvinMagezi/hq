@@ -1,0 +1,8 @@
+github.com
+  ✓ Logged in to github.com account seat-user (keyring)
+  - Active account: true
+  - Git operations protocol: https
+  - Token scopes: 'repo', 'read:org'
+
+  ✓ Logged in to github.com account free-user (keyring)
+  - Active account: false
