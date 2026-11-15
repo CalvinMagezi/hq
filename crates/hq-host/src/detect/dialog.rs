@@ -79,6 +79,10 @@ pub(super) struct RawDialog {
     top: String,
     /// The dialog's key hints, found by searching up from the bottom. It is not part of the dialog.
     footer: String,
+    /// Non-empty lines allowed below the footer (an agent that keeps a status bar under its
+    /// dialog needs more than the default).
+    #[serde(default = "default_footer_slack")]
+    footer_slack: usize,
     question: Option<String>,
     /// `[from, to]`: the command is the lines strictly between the first line matching `from`
     /// and the next one matching `to`.
@@ -104,6 +108,13 @@ pub(super) struct RawDialog {
     decline: Vec<String>,
 }
 
+/// Non-empty lines that may sit under a dialog's footer unless its table says otherwise.
+const DEFAULT_FOOTER_SLACK: usize = 2;
+
+fn default_footer_slack() -> usize {
+    DEFAULT_FOOTER_SLACK
+}
+
 fn default_decline() -> Vec<String> {
     vec!["esc".to_string()]
 }
@@ -115,6 +126,7 @@ pub struct DialogSpec {
     kind_when: Vec<(DialogKind, Regex)>,
     top: Regex,
     footer: Regex,
+    footer_slack: usize,
     question: Option<Regex>,
     command_block: Option<(Regex, Regex)>,
     command_line: Option<Regex>,
@@ -161,6 +173,7 @@ impl DialogSpec {
                 .collect::<Result<_, String>>()?,
             top: pattern(&raw.top)?,
             footer: pattern(&raw.footer)?,
+            footer_slack: raw.footer_slack,
             question: optional(&raw.question)?,
             command_block,
             command_line: optional(&raw.command_line)?,
@@ -294,7 +307,7 @@ pub fn extract(spec: &DialogSpec, lines: &[String]) -> Option<Dialog> {
         .iter()
         .filter(|l| !unbox(l).is_empty())
         .count()
-        > 2
+        > spec.footer_slack
     {
         return None;
     }

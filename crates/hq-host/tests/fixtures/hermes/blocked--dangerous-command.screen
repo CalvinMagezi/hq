@@ -1,0 +1,27 @@
+Welcome to Hermes Agent! Type your message or /help for commands.
+✦ Tip: execute_code helpers require explicit imports: from hermes_tools import json_parse, shell_quote, retry.
+
+
+
+────────────────────────────────────────
+❯ Use your terminal tool to run exactly: mkdir -p /tmp/hq-hermes-approval && rm -rf /tmp/hq-hermes-approval . Then say done.
+────────────────────────────────────────
+╭────────────────────────────────────────────────────────────────╮
+│ ⚠️  Dangerous Command                                           │
+│                                                                │
+│ mkdir -p /tmp/hq-hermes-approval && rm -rf /tmp/hq-hermes-     │
+│ approval .                                                     │
+│                                                                │
+│ ❯ 1. Allow once                                                │
+│   2. Allow for this session                                    │
+│   3. Add to permanent allowlist                                │
+│   4. Deny                                                      │
+│                                                                │
+│ delete in root path                                            │
+╰────────────────────────────────────────────────────────────────╯
+
+  ↑/↓ to select, Enter to confirm  (297s)
+── ⠙ 💻 mkdir -p /tmp/hq-hermes-approval + 1 command · 15s · ↓ 259 tok ────────── Create and remove approval directory ─
+⚠ ❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☤ gpt-6-luna · 11.1K/272K · [░░░░░░░░░░] 4% · ◷ 5.6s · ↑ 46 t/s · 19s · ⏱ 14s · ~/Documents/HQ
