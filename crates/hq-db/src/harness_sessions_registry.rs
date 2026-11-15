@@ -745,6 +745,29 @@ pub fn count_running_with_origin(conn: &Connection, origin: &str) -> Result<i64>
     )?)
 }
 
+/// Running sessions with no parent whose agent is not idle or done. A session no sweep has seen
+/// yet (no status) counts, so a fresh start is never missed. Idle sessions left open for days
+/// do not.
+pub fn count_active_unparented(conn: &Connection) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM harness_sessions WHERE status = 'running' \
+         AND parent_session_id IS NULL \
+         AND (last_agent_status IS NULL OR last_agent_status NOT IN ('idle', 'done'))",
+        [],
+        |r| r.get(0),
+    )?)
+}
+
+/// Sessions with no parent started in the last `minutes`, running or not.
+pub fn count_unparented_started_since(conn: &Connection, minutes: i64) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM harness_sessions WHERE parent_session_id IS NULL \
+         AND created_at >= datetime('now', ?1)",
+        params![format!("-{} minutes", minutes.max(0))],
+        |r| r.get(0),
+    )?)
+}
+
 /// Sessions with this origin and label started in the last `minutes`, whatever
 /// their status now: how a specialist's daily run budget is counted.
 pub fn count_started_since(

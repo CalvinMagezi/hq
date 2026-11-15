@@ -170,6 +170,10 @@ pub struct AgentHostConfig {
     #[serde(default)]
     pub teams: TeamsConfig,
 
+    /// Limits on sessions started outside any team, and the spend gate on starting one.
+    #[serde(default)]
+    pub spawn_limits: SpawnLimitsConfig,
+
     /// Minutes a host with running sessions may go without answering before HQ raises one
     /// "not answering" alert (a laptop that slept, a machine off the network). A notice
     /// follows when it answers again. 0 turns the alert off. Clamped to 1..=1440.
@@ -269,6 +273,50 @@ impl TeamsConfig {
     }
     pub fn spawns_per_hour(&self) -> i64 {
         i64::from(self.max_spawns_per_hour.clamp(1, 120))
+    }
+}
+
+/// Limits on `harness_session_spawn` calls that name no team, so a runaway caller cannot start
+/// sessions without bound. Values are clamped on read; zero is not allowed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnLimitsConfig {
+    /// Running sessions started outside a team. Default 12, clamped to 1..=100.
+    #[serde(default = "default_spawn_max_live")]
+    pub max_live_sessions: u32,
+    /// Sessions started outside a team per hour, running or ended. Default 60,
+    /// clamped to 1..=600.
+    #[serde(default = "default_spawn_per_hour")]
+    pub max_spawns_per_hour: u32,
+    /// Also refuse a start when a hard-limited global budget is used up. Global budgets leave
+    /// harness spend out of their sum, so this is off by default; an `origin:harness` budget
+    /// is always checked.
+    #[serde(default)]
+    pub count_harness_in_global: bool,
+}
+
+fn default_spawn_max_live() -> u32 {
+    12
+}
+fn default_spawn_per_hour() -> u32 {
+    60
+}
+
+impl Default for SpawnLimitsConfig {
+    fn default() -> Self {
+        Self {
+            max_live_sessions: default_spawn_max_live(),
+            max_spawns_per_hour: default_spawn_per_hour(),
+            count_harness_in_global: false,
+        }
+    }
+}
+
+impl SpawnLimitsConfig {
+    pub fn live_sessions(&self) -> usize {
+        self.max_live_sessions.clamp(1, 100) as usize
+    }
+    pub fn spawns_per_hour(&self) -> i64 {
+        i64::from(self.max_spawns_per_hour.clamp(1, 600))
     }
 }
 
@@ -624,6 +672,7 @@ impl Default for AgentHostConfig {
             sandbox: SandboxConfig::default(),
             idle_reap_hours: default_idle_reap_hours(),
             teams: TeamsConfig::default(),
+            spawn_limits: SpawnLimitsConfig::default(),
             unreachable_alert_minutes: default_unreachable_alert_minutes(),
             keep_awake: KeepAwake::Off,
             command_policies: BTreeMap::new(),
@@ -756,6 +805,19 @@ mod tests {
         );
         let huge: AgentHostConfig = serde_yaml::from_str("driver_nudge_budget: 5000").unwrap();
         assert_eq!(huge.nudge_budget(), 100);
+    }
+
+    #[test]
+    fn spawn_limits_default_and_clamp() {
+        let d = AgentHostConfig::default().spawn_limits;
+        assert_eq!((d.live_sessions(), d.spawns_per_hour()), (12, 60));
+        assert!(!d.count_harness_in_global);
+        let wild: AgentHostConfig = serde_yaml::from_str(
+            "spawn_limits:\n  max_live_sessions: 0\n  max_spawns_per_hour: 99999",
+        )
+        .unwrap();
+        let l = &wild.spawn_limits;
+        assert_eq!((l.live_sessions(), l.spawns_per_hour()), (1, 600));
     }
 
     #[test]
