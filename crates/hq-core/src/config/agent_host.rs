@@ -115,7 +115,7 @@ pub struct AgentHostConfig {
     pub driver_key_allowance: u32,
 
     /// Running sessions started by an MCP client with no chat (spawn or handoff) at once.
-    /// Clamped to 1..=50 by `mcp_started_session_cap`.
+    /// Clamped to 1..=500 by `mcp_started_session_cap`.
     #[serde(default = "default_max_mcp_started_sessions")]
     pub max_mcp_started_sessions: u32,
 
@@ -129,7 +129,7 @@ pub struct AgentHostConfig {
     pub driver_no_progress_limit: u32,
 
     /// Running sessions HQ may drive at once. A watch that would exceed it
-    /// starts observation-only. Clamped to 1..=50 by `driven_session_cap`.
+    /// starts observation-only. Clamped to 1..=500 by `driven_session_cap`.
     #[serde(default = "default_max_driven_sessions")]
     pub max_driven_sessions: u32,
 
@@ -140,7 +140,7 @@ pub struct AgentHostConfig {
     pub driver_idle_release_minutes: u64,
 
     /// Running sessions that chats started by `hq_ask` may own at once, which
-    /// bounds an agent asking HQ to start agents. 0 refuses them. Clamped to 0..=20.
+    /// bounds an agent asking HQ to start agents. 0 refuses them. Clamped to 0..=100.
     #[serde(default = "default_max_ask_spawned_sessions")]
     pub max_ask_spawned_sessions: u32,
 
@@ -219,15 +219,15 @@ pub struct TeamsConfig {
     /// leaf). Default 3, clamped to 1..=8.
     #[serde(default = "default_team_max_depth")]
     pub max_depth: u32,
-    /// Running sessions in one team, the root included. Default 8, clamped to 2..=40.
+    /// Running sessions in one team, the root included. Default 8, clamped to 2..=400.
     #[serde(default = "default_team_max_live")]
     pub max_live_per_tree: u32,
     /// Running children of one session, so one node cannot take the whole
-    /// team. Default 5, clamped to 1..=20.
+    /// team. Default 5, clamped to 1..=40.
     #[serde(default = "default_team_max_children")]
     pub max_live_children: u32,
     /// Sessions a team may start per hour, running or ended. Default 30,
-    /// clamped to 1..=120.
+    /// clamped to 1..=2400.
     #[serde(default = "default_team_spawns_per_hour")]
     pub max_spawns_per_hour: u32,
     /// Agents (built-in harnesses or `harness_profiles` names) a delegator may
@@ -239,7 +239,18 @@ pub struct TeamsConfig {
 }
 
 /// Upper bound on `max_live_children`, which callers can rely on at compile time.
-pub const TEAM_MAX_LIVE_CHILDREN_CEILING: u32 = 20;
+pub const TEAM_MAX_LIVE_CHILDREN_CEILING: u32 = 40;
+/// Ceilings, not defaults: an owner running a large fleet raises the setting, and a stranger's
+/// install keeps the small default. Counts of running sessions are bounded by the machine's
+/// memory and the model spend, which `agent_host.spawn_limits` and the driver budgets guard.
+pub const CEILING_TEAM_DEPTH: u32 = 8;
+pub const CEILING_TEAM_LIVE_PER_TREE: u32 = 400;
+pub const CEILING_TEAM_SPAWNS_PER_HOUR: u32 = 2400;
+pub const CEILING_SPAWN_LIVE_SESSIONS: u32 = 500;
+pub const CEILING_SPAWN_PER_HOUR: u32 = 6000;
+pub const CEILING_DRIVEN_SESSIONS: u32 = 500;
+pub const CEILING_MCP_STARTED_SESSIONS: u32 = 500;
+pub const CEILING_ASK_SPAWNED_SESSIONS: u32 = 100;
 
 fn default_team_max_depth() -> u32 {
     3
@@ -268,17 +279,20 @@ impl Default for TeamsConfig {
 
 impl TeamsConfig {
     pub fn depth_limit(&self) -> i64 {
-        i64::from(self.max_depth.clamp(1, 8))
+        i64::from(self.max_depth.clamp(1, CEILING_TEAM_DEPTH))
     }
     pub fn live_per_tree(&self) -> usize {
-        self.max_live_per_tree.clamp(2, 40) as usize
+        self.max_live_per_tree.clamp(2, CEILING_TEAM_LIVE_PER_TREE) as usize
     }
     pub fn live_children(&self) -> usize {
         self.max_live_children
             .clamp(1, TEAM_MAX_LIVE_CHILDREN_CEILING) as usize
     }
     pub fn spawns_per_hour(&self) -> i64 {
-        i64::from(self.max_spawns_per_hour.clamp(1, 120))
+        i64::from(
+            self.max_spawns_per_hour
+                .clamp(1, CEILING_TEAM_SPAWNS_PER_HOUR),
+        )
     }
 }
 
@@ -286,11 +300,11 @@ impl TeamsConfig {
 /// sessions without bound. Values are clamped on read; zero is not allowed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnLimitsConfig {
-    /// Running sessions started outside a team. Default 12, clamped to 1..=100.
+    /// Running sessions started outside a team. Default 12, clamped to 1..=500.
     #[serde(default = "default_spawn_max_live")]
     pub max_live_sessions: u32,
     /// Sessions started outside a team per hour, running or ended. Default 60,
-    /// clamped to 1..=600.
+    /// clamped to 1..=6000.
     #[serde(default = "default_spawn_per_hour")]
     pub max_spawns_per_hour: u32,
     /// Also refuse a start when a hard-limited global budget is used up. Global budgets leave
@@ -319,10 +333,10 @@ impl Default for SpawnLimitsConfig {
 
 impl SpawnLimitsConfig {
     pub fn live_sessions(&self) -> usize {
-        self.max_live_sessions.clamp(1, 100) as usize
+        self.max_live_sessions.clamp(1, CEILING_SPAWN_LIVE_SESSIONS) as usize
     }
     pub fn spawns_per_hour(&self) -> i64 {
-        i64::from(self.max_spawns_per_hour.clamp(1, 600))
+        i64::from(self.max_spawns_per_hour.clamp(1, CEILING_SPAWN_PER_HOUR))
     }
 }
 
@@ -648,7 +662,10 @@ impl AgentHostConfig {
     }
 
     pub fn mcp_started_session_cap(&self) -> i64 {
-        i64::from(self.max_mcp_started_sessions.clamp(1, 50))
+        i64::from(
+            self.max_mcp_started_sessions
+                .clamp(1, CEILING_MCP_STARTED_SESSIONS),
+        )
     }
 
     pub fn full_ask_cap(&self) -> i64 {
@@ -660,7 +677,7 @@ impl AgentHostConfig {
     }
 
     pub fn driven_session_cap(&self) -> i64 {
-        i64::from(self.max_driven_sessions.clamp(1, 50))
+        i64::from(self.max_driven_sessions.clamp(1, CEILING_DRIVEN_SESSIONS))
     }
 
     /// How long a driven session may sit idle before it gives up its slot, or `None` when off.
@@ -675,7 +692,10 @@ impl AgentHostConfig {
     }
 
     pub fn ask_spawned_session_cap(&self) -> i64 {
-        i64::from(self.max_ask_spawned_sessions.min(20))
+        i64::from(
+            self.max_ask_spawned_sessions
+                .min(CEILING_ASK_SPAWNED_SESSIONS),
+        )
     }
 
     /// How long a driving chat gets to clear a helper's prompt before the owner is told.
@@ -793,7 +813,12 @@ mod tests {
                 t.live_children(),
                 t.spawns_per_hour()
             ),
-            (1, 40, TEAM_MAX_LIVE_CHILDREN_CEILING as usize, 1)
+            (
+                1,
+                CEILING_TEAM_LIVE_PER_TREE as usize,
+                TEAM_MAX_LIVE_CHILDREN_CEILING as usize,
+                1
+            )
         );
         assert_eq!(t.harnesses, ["pi", "copilot-lean"]);
     }
@@ -829,7 +854,7 @@ mod tests {
                 wild.driven_session_cap(),
                 wild.ask_spawned_session_cap()
             ),
-            (1, 2, 1, 20)
+            (1, 2, 1, CEILING_ASK_SPAWNED_SESSIONS as i64)
         );
         assert_eq!(
             (
@@ -865,7 +890,10 @@ mod tests {
         )
         .unwrap();
         let l = &wild.spawn_limits;
-        assert_eq!((l.live_sessions(), l.spawns_per_hour()), (1, 600));
+        assert_eq!(
+            (l.live_sessions(), l.spawns_per_hour()),
+            (1, CEILING_SPAWN_PER_HOUR as i64)
+        );
     }
 
     #[test]
