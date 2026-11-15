@@ -144,6 +144,12 @@ pub const SESSION_ALLOWLIST: &[&str] = &[
     "agent_message_send",
     "agent_delegate",
     "team_roster",
+    // Scoped reads: each resolves the proven session to its task's folders and nothing wider.
+    "context_orient",
+    "context_search",
+    "context_read",
+    "context_expand",
+    "context_related",
 ];
 
 /// Build the two MCP `Tool` definitions for the gateway.
@@ -1552,5 +1558,6 @@ mod tests {
             assert!(!SESSION_ALLOWLIST.contains(&denied), "{denied}");
         }
         assert!(SESSION_ALLOWLIST.contains(&"task_comment_add"));
+        assert!(SESSION_ALLOWLIST.contains(&"context_read"));
     }
 }
