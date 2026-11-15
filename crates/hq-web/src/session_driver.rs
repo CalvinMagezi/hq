@@ -550,6 +550,7 @@ pub(crate) fn driver_prompt(
          - It is working and making progress: leave it alone.\n\
          - The goal looks met against the definition of done, or you cannot tell: send nothing. Say what the session reports and what is unverified, and let the user decide. Do not mark the task complete yourself: the user completes it, or HQ does when its own checks of the work pass. A session that exited, went idle or says it is done has not shown the goal is met.\n\
          - Never send an instruction that repeats one the session already answered (such as asking again for a wrap-up or a final report) without new evidence. HQ switches Drive off by itself when the instruction budget is used (you have {instructions_left} left), when finished turns show no new tool activity, or when the session or task ends.\n\
+         Before you choose a lane for new work, or move a failed turn to another lane, call the read-only `lane_quotas` tool and avoid a lane near its limit.\n\n\
          3. Do not act, and ask the user in your reply instead, when the next step is outside the goal, deletes or overwrites data, force-pushes, touches credentials or secrets, deploys or pushes to production unless the goal says to, spends money, or you are unsure what the user wants.\n\n\
          Reply in one to four short lines: what the session is doing and what you did, or what you need from the user.",
         id = row.id,

@@ -1005,6 +1005,18 @@ midway is not retried by HQ, because it may already have changed files: the `tur
 `failure` (`auth`, `billing` or `other`) and, for the first two, the reply of `harness_session_wait` adds
 `next_lane`, the first fallback, so the caller can start the work again there.
 
+A lane that is nearly out is skipped before it starts. HQ reads the stored lane quota reading of the lane
+on the host (never the network, never the host: `docs/LANE_QUOTAS.md`), and when its worst window is at or
+above `quota.block_percent`, the start goes to the next lane of the list, checked the same way. The reply
+has `fell_back` with a reason such as `quota: week at 97% until 2026-11-18T09:00:00Z`. When every lane of
+the list is at the line, or the lane has no fallback, the start still goes ahead on the lane asked for and
+the reply carries `quota_warning: {lane, window, used_percent, resets_at, stale}`: the vendor is the one to
+refuse, and HQ does not strand an owner who chose the lane. At or above `quota.warn_percent` the start is
+normal and carries the same `quota_warning`. An unknown or missing reading, or one older than twice
+`quota.interval_minutes`, never blocks (an old one may warn, with `stale: true`), and `quota.enabled: false`
+or `quota.lanes.<lane>: false` turns the check off. The driver prompt tells a driver to call the read-only
+`lane_quotas` tool before choosing a lane; no balance is put in the prompt.
+
 Built-in ACP commands: `opencode acp`, `agy acp`, `cursor-agent acp`, `kimi acp`, `hermes acp`,
 `copilot --acp --stdio`. A base without one (or a different command) sets `acp_args`. Not supported over
 ACP: a wrapper `command`, one-shot runs and command-policy

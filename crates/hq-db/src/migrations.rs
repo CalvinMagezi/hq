@@ -471,6 +471,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "129_lane_quota_samples",
         include_str!("../sql/129_lane_quota_samples.sql"),
     ),
+    (
+        "130_lane_quota_alerts",
+        include_str!("../sql/130_lane_quota_alerts.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

@@ -620,6 +620,14 @@ fn a_driver_prompt_carries_the_goal_and_the_escalation_limits() {
 }
 
 #[test]
+fn a_driver_prompt_points_at_lane_quotas_and_carries_no_balance() {
+    let prompt = driver_prompt(&row(true), None, "finished", 8);
+    assert!(prompt.contains("call the read-only `lane_quotas` tool"));
+    assert!(prompt.contains("move a failed turn to another lane"));
+    assert!(!prompt.contains("used_percent") && !prompt.contains('%'));
+}
+
+#[test]
 fn an_update_names_the_session_and_its_task() {
     let text = update_text(&row(false), None, "finished");
     assert!(

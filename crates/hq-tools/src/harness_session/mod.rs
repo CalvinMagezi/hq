@@ -32,6 +32,7 @@ mod preflight;
 pub(crate) mod spawn_limits;
 mod turn_origin;
 pub use preflight::plain_binary;
+mod quota_gate;
 pub mod spec;
 pub mod stack;
 pub mod stats;
