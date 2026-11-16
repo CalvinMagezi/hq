@@ -142,13 +142,11 @@ M0, then made a hard CI limit.
 ## Next
 
 1. **Cold sinks (M3).** The original can only go to the vault's trash today.
-2. **Web screens** for the same bar (milestone M2), and Android fixtures for the bar's states.
+2. **Web screens** for the same bar (milestone M2).
 3. **Adoption beyond the neighbour.** A note an import placed under another name, or in
    `Notebooks/Imports/<month>/` for a file outside `Notebooks/`, is not adopted: the lookup is
    the note beside the file. An index lookup by `source_sha256` would close that.
-4. **Capability catalog.** `office_file` is not yet in `crates/hq-tools/assets/capabilities.yaml`,
-   so the empty chat does not offer "make a document smaller".
-5. PNG sources that are photographs stay lossless and often do not shrink; measure and decide.
+4. PNG sources that are photographs stay lossless and often do not shrink; measure and decide.
 
 Then M2 (Docs, the importer mapping that puts pictures where they sat, docx and pdf render, the
 regenerate check, the editor spike on WebView 111).

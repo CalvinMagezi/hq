@@ -64,6 +64,13 @@
   tools: [vault_import]
   needs: [model]
 
+- id: shrink-document
+  group: documents
+  says: Make a document take less room
+  example: Make the quarterly report smaller
+  tools: [office_file]
+  needs: [model]
+
 - id: note-to-file
   group: documents
   says: Turn a note into a PDF or Word file

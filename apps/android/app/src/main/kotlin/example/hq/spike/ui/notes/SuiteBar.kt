@@ -83,7 +83,25 @@ fun SuiteBar(source: SuiteSource, onNotice: (String) -> Unit, onChanged: () -> U
         }
     }
 
-    val f = file ?: return
+    val fixed = SuiteBarFixture.state
+    val f = fixed?.first ?: file ?: return
+    SuiteBarView(
+        f, busy, fixed?.second ?: refusal,
+        onShrink = { run { client.suiteShrink(source.path) } },
+        onConfirm = { run { client.suiteConfirm(f.job.orEmpty()) } },
+        onAbandon = { run { client.suiteAbandon(f.job.orEmpty()) } },
+        onUndo = { run { client.suiteUndo(f.job.orEmpty()) } },
+    )
+}
+
+/** What a fixed screen (`--es fixture n-suite-ready`, `-prepared`, `-shrunk`, `-refused`) shows in the bar, so each state can be checked with no hq. */
+object SuiteBarFixture {
+    var state: Pair<SuiteFile, String?>? = null
+}
+
+/** The bar for a state, with no hq behind it. */
+@Composable
+fun SuiteBarView(f: SuiteFile, busy: Boolean, refusal: String?, onShrink: () -> Unit, onConfirm: () -> Unit, onAbandon: () -> Unit, onUndo: () -> Unit) {
     Column(Modifier.fillMaxWidth().background(Mts.Surface100).padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)) {
         Text(
             refusal ?: f.headline, style = HqType.BodySm, color = Mts.Ink,
@@ -93,12 +111,12 @@ fun SuiteBar(source: SuiteSource, onNotice: (String) -> Unit, onChanged: () -> U
         if (refusal == null) Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
             when {
                 busy -> Text(stringResource(R.string.suite_bar_working), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(vertical = 14.dp))
-                f.canShrink -> BarButton(stringResource(R.string.suite_bar_make_smaller)) { run { client.suiteShrink(source.path) } }
+                f.canShrink -> BarButton(stringResource(R.string.suite_bar_make_smaller), onShrink)
                 f.canConfirm -> {
-                    BarButton(stringResource(R.string.suite_bar_move)) { run { client.suiteConfirm(f.job.orEmpty()) } }
-                    if (f.canAbandon) BarButton(stringResource(R.string.suite_bar_not_now)) { run { client.suiteAbandon(f.job.orEmpty()) } }
+                    BarButton(stringResource(R.string.suite_bar_move), onConfirm)
+                    if (f.canAbandon) BarButton(stringResource(R.string.suite_bar_not_now), onAbandon)
                 }
-                f.canUndo -> BarButton(stringResource(R.string.suite_bar_undo)) { run { client.suiteUndo(f.job.orEmpty()) } }
+                f.canUndo -> BarButton(stringResource(R.string.suite_bar_undo), onUndo)
             }
         }
     }
