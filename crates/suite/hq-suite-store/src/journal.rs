@@ -96,6 +96,11 @@ pub struct Job {
     /// Original size minus the record's size (note plus new pictures), once known.
     pub saved_bytes: Option<i64>,
     pub failure: Option<String>,
+    /// Set when the note is one that already existed (made by `hq vault import`, or by an earlier
+    /// shrink that was undone): the hash of its text as it was, which the draft was built from.
+    /// The text itself is kept beside the job so that giving up can put it back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adopted_note_sha256: Option<String>,
 }
 
 fn valid_id(id: &str) -> bool {
@@ -241,6 +246,10 @@ impl Journal {
         self.file(id).map(|f| f.with_extension("md"))
     }
 
+    fn prior_file(&self, id: &str) -> Result<PathBuf> {
+        self.file(id).map(|f| f.with_extension("prior"))
+    }
+
     /// Keeps the drafted note's text beside the job, so a resumed job writes exactly it.
     pub fn write_draft(&self, id: &str, text: &str) -> Result<()> {
         fsx::atomic_write(&self.draft_file(id)?, text.as_bytes())
@@ -255,6 +264,28 @@ impl Journal {
                 StoreError::io(&path, e)
             }
         })
+    }
+
+    /// Keeps the text an adopted note had before this job changed it.
+    pub fn write_prior(&self, id: &str, text: &str) -> Result<()> {
+        fsx::atomic_write(&self.prior_file(id)?, text.as_bytes())
+    }
+
+    pub fn read_prior(&self, id: &str) -> Result<String> {
+        let path = self.prior_file(id)?;
+        fs::read_to_string(&path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                StoreError::Missing(format!("earlier note of job {id}"))
+            } else {
+                StoreError::io(&path, e)
+            }
+        })
+    }
+
+    pub fn remove_prior(&self, id: &str) {
+        if let Ok(path) = self.prior_file(id) {
+            let _ = fs::remove_file(path);
+        }
     }
 
     /// Removes a draft once its job is finished. Missing is fine.
@@ -297,6 +328,7 @@ mod tests {
             step: Step::Planned,
             saved_bytes: None,
             failure: None,
+            adopted_note_sha256: None,
         }
     }
 

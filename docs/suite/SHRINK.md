@@ -81,12 +81,20 @@ suite relies on rename being atomic and on flushing files and folders before and
 (`hq-suite-store::fsx`); the unfinished `.partial-` files such a cut can leave are swept at the
 next run.
 
+## A note that already exists
+
+If `hq vault import` already made a note for the file (it carries the file's `source_sha256`),
+or an earlier shrink of the same file was undone, the shrink updates that note instead of writing
+a second one. Your own text in it is returned byte for byte; the suite's keys are set and any
+picture the note does not show yet is added in a "Pictures" section at the end. The earlier text
+is kept beside the job, so `abandon` puts the note back exactly as it was, and a note you edited
+after the preview is never overwritten and never reverted.
+
 ## Known limits (M1)
 
-- Shrinking a file again after an undo writes a second note next to the first.
-- A note that already exists for the file (from `hq vault import`) is not adopted; the shrink
-  writes its own. Adopting it is next.
+- Only the note named after the file is looked at (`report.docx` and `report.md`). A note an
+  import placed under a different name is not adopted.
 - Moving the original to a cold place you own (another device, an SD card) is milestone M3; today
   the only destination is the vault's trash.
-- The trash's own 30-day clean-up deletes the original. The note then still says
-  `suite_original_state: trash`; reconciling it to `gone` belongs to the storage governor.
+- When the trash's own 30-day clean-up deletes the original, the storage governor marks the note
+  `suite_original_state: gone` on its next pass (every six hours, or `hq suite storage --tidy`).

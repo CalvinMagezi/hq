@@ -556,5 +556,165 @@ fn a_damaged_job_file_is_reported_and_blocks_nothing_else() {
     assert!(rt.block_on(s.prepare(SOURCE, DAY)).is_ok());
 }
 
+// ---------------------------------------------------------------------------------------------
+// Adopting a note an import already made
+
+const OWN_WORDS: &str = "My own words, written by hand.";
+const IMPORTED_NOTE: &str = "Notebooks/Inbox/Imports/report.md";
+
+fn seed_imported_note(d: &tempfile::TempDir, original: &[u8]) -> String {
+    let text = format!(
+        "---\ntitle: Report\nsource: {SOURCE}\nsource_sha256: {}\n---\n\n{OWN_WORDS}\n",
+        fsx::sha256_bytes(original)
+    );
+    std::fs::write(d.path().join(IMPORTED_NOTE), &text).unwrap();
+    text
+}
+
+fn markdown_files(d: &tempfile::TempDir) -> Vec<String> {
+    let dir = d.path().join("Notebooks/Inbox/Imports");
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".md"))
+        .collect();
+    v.sort();
+    v
+}
+
+#[tokio::test]
+async fn a_file_already_imported_gets_its_note_updated_not_a_second_one() {
+    let original = docx("Report", &big_pictures());
+    let (d, paths) = vault_with(SOURCE, &original);
+    seed_imported_note(&d, &original);
+    let notes = FolderNotes(paths.clone());
+    let s = shrinker(&paths, &notes, &NoFaults);
+    let preview = s.prepare(SOURCE, DAY).await.unwrap();
+    assert_eq!(preview.note, IMPORTED_NOTE);
+    s.confirm(&preview.job, DAY).unwrap();
+    assert_eq!(markdown_files(&d), vec!["report.md"]);
+    let note = std::fs::read_to_string(d.path().join(IMPORTED_NOTE)).unwrap();
+    assert!(note.contains(OWN_WORDS));
+    assert!(note.contains("suite_original_state: trash"));
+    assert!(!references_in(&note).is_empty(), "the pictures are linked");
+
+    // Undo, then shrink again: still the one note.
+    s.undo(&preview.job).unwrap();
+    let again = s.prepare(SOURCE, DAY).await.unwrap();
+    assert_eq!(again.note, IMPORTED_NOTE);
+    s.confirm(&again.job, DAY).unwrap();
+    assert_eq!(markdown_files(&d), vec!["report.md"]);
+    let note = std::fs::read_to_string(d.path().join(IMPORTED_NOTE)).unwrap();
+    assert_eq!(note.matches("## Pictures").count(), 1);
+}
+
+#[tokio::test]
+async fn a_note_for_some_other_file_is_not_adopted() {
+    let original = docx("Report", &big_pictures());
+    let (d, paths) = vault_with(SOURCE, &original);
+    std::fs::write(
+        d.path().join(IMPORTED_NOTE),
+        "---\nsource_sha256: nope\n---\n\nSomeone else's.\n",
+    )
+    .unwrap();
+    let notes = FolderNotes(paths.clone());
+    let s = shrinker(&paths, &notes, &NoFaults);
+    let preview = s.prepare(SOURCE, DAY).await.unwrap();
+    assert_eq!(preview.note, "Notebooks/Inbox/Imports/report-2.md");
+}
+
+#[tokio::test]
+async fn abandoning_an_adopted_shrink_puts_the_note_back_as_it_was() {
+    let original = docx("Report", &big_pictures());
+    let (d, paths) = vault_with(SOURCE, &original);
+    let before = seed_imported_note(&d, &original);
+    let notes = FolderNotes(paths.clone());
+    let s = shrinker(&paths, &notes, &NoFaults);
+    let preview = s.prepare(SOURCE, DAY).await.unwrap();
+    assert_ne!(
+        std::fs::read_to_string(d.path().join(IMPORTED_NOTE)).unwrap(),
+        before
+    );
+    s.abandon(&preview.job).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(d.path().join(IMPORTED_NOTE)).unwrap(),
+        before
+    );
+}
+
+#[tokio::test]
+async fn a_note_edited_since_the_draft_is_never_overwritten_or_reverted() {
+    let original = docx("Report", &big_pictures());
+    let (d, paths) = vault_with(SOURCE, &original);
+    seed_imported_note(&d, &original);
+    let notes = FolderNotes(paths.clone());
+    let s = shrinker(&paths, &notes, &NoFaults);
+    let preview = s.prepare(SOURCE, DAY).await.unwrap();
+    let mut edited = std::fs::read_to_string(d.path().join(IMPORTED_NOTE)).unwrap();
+    edited.push_str("\nA line added after the preview.\n");
+    std::fs::write(d.path().join(IMPORTED_NOTE), &edited).unwrap();
+    assert!(s.confirm(&preview.job, DAY).is_err());
+    s.abandon(&preview.job).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(d.path().join(IMPORTED_NOTE)).unwrap(),
+        edited,
+        "the person's edit survives both the refused move and the abandon"
+    );
+}
+
+#[test]
+fn a_crash_at_any_point_with_an_adopted_note_keeps_the_persons_words_and_the_original() {
+    let original = docx("Crash test", &big_pictures());
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let points = {
+        let (d, paths) = vault_with(SOURCE, &original);
+        seed_imported_note(&d, &original);
+        let notes = FolderNotes(paths.clone());
+        let faults = CrashAt::never();
+        let s = shrinker(&paths, &notes, &faults);
+        let preview = rt.block_on(s.prepare(SOURCE, DAY)).unwrap();
+        s.confirm(&preview.job, DAY).unwrap();
+        faults.names().len()
+    };
+    for k in 0..points {
+        let (d, paths) = vault_with(SOURCE, &original);
+        seed_imported_note(&d, &original);
+        let notes = FolderNotes(paths.clone());
+        let faults = CrashAt::at(k);
+        let s = shrinker(&paths, &notes, &faults);
+        let crashed = match rt.block_on(s.prepare(SOURCE, DAY)) {
+            Ok(preview) => s.confirm(&preview.job, DAY).err(),
+            Err(e) => Some(e),
+        };
+        assert!(
+            matches!(crashed, Some(ShrinkError::Crashed(_))),
+            "point {k}"
+        );
+        let note = std::fs::read_to_string(d.path().join(IMPORTED_NOTE)).unwrap();
+        assert!(
+            note.contains(OWN_WORDS),
+            "point {k}: the person's words are gone"
+        );
+
+        let after = shrinker(&paths, &notes, &NoFaults);
+        after.recover();
+        match Journal::new(&paths).list().0.into_iter().next() {
+            None => after_prepare_again(&rt, &after, &d),
+            Some(job) if job.step != Step::Done => {
+                after.confirm(&job.id, DAY).unwrap();
+            }
+            Some(_) => {}
+        }
+        assert_finished(&paths, &original);
+        let note = std::fs::read_to_string(d.path().join(IMPORTED_NOTE)).unwrap();
+        assert!(note.contains(OWN_WORDS), "point {k}");
+        assert_eq!(markdown_files(&d), vec!["report.md"], "point {k}");
+    }
+}
+
 #[allow(dead_code)]
 fn unused(_: &Path) {}

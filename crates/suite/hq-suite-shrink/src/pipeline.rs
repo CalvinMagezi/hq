@@ -517,7 +517,11 @@ impl<'a> Shrinker<'a> {
         };
         self.point("pictures_stored")?;
 
-        let note_rel = note_rel_for(source, |c| self.notes.read(c).ok().flatten().is_some());
+        let adoptable = self.adoptable_note(source, &sha)?;
+        let note_rel = match &adoptable {
+            Some((rel, _)) => rel.clone(),
+            None => note_rel_for(source, |c| self.notes.read(c).ok().flatten().is_some()),
+        };
         let title = doc
             .title
             .as_deref()
@@ -527,16 +531,21 @@ impl<'a> Shrinker<'a> {
                 let name = source.rsplit('/').next().unwrap_or(source);
                 one_line(name.rsplit_once('.').map_or(name, |(s, _)| s))
             });
-        let text = self.draft_note(
-            source,
-            &note_rel,
-            &sha,
-            data.len() as u64,
-            &title,
-            day,
-            &doc,
-            &pictures,
-        )?;
+        let text = match &adoptable {
+            Some((_, existing)) => {
+                self.draft_adopted(existing, &note_rel, data.len() as u64, day, &doc, &pictures)?
+            }
+            None => self.draft_note(
+                source,
+                &note_rel,
+                &sha,
+                data.len() as u64,
+                &title,
+                day,
+                &doc,
+                &pictures,
+            )?,
+        };
 
         let parsed = Document::parse(&text);
         let diags = validate(&parsed);
@@ -547,8 +556,13 @@ impl<'a> Shrinker<'a> {
             )));
         }
 
-        let record_bytes = text.len() as u64 + pictures.new_bytes;
-        let saved = data.len() as i64 - record_bytes as i64;
+        // An adopted note already took its own bytes; only what this job adds counts against
+        // the original.
+        let note_added = match &adoptable {
+            Some((_, existing)) => text.len() as i64 - existing.len() as i64,
+            None => text.len() as i64,
+        };
+        let saved = data.len() as i64 - note_added - pictures.new_bytes as i64;
         if saved <= 0 {
             return Err(refuse(Refusal::NotSmaller { saved_bytes: saved }));
         }
@@ -577,7 +591,11 @@ impl<'a> Shrinker<'a> {
             step: Step::Planned,
             saved_bytes: Some(saved),
             failure: None,
+            adopted_note_sha256: adoptable.as_ref().map(|(_, t)| sha256_bytes(t.as_bytes())),
         };
+        if let Some((_, existing)) = &adoptable {
+            journal.write_prior(&id, existing)?;
+        }
         journal.write_draft(&id, &text)?;
         self.point("draft_written")?;
         // A finished job under this id (undone or abandoned) is replaced by the new one.
@@ -590,6 +608,78 @@ impl<'a> Shrinker<'a> {
 
         self.run_to_verified(&mut job)?;
         Ok(self.preview_of(&job))
+    }
+
+    /// The note an earlier import (or an undone shrink) already made for this exact file, if the
+    /// name a new record would take is held by one. Its text is returned as it is now.
+    fn adoptable_note(
+        &self,
+        source: &str,
+        sha: &str,
+    ) -> Result<Option<(String, String)>, ShrinkError> {
+        let rel = note_rel_for(source, |_| false);
+        let Some(text) = self.notes.read(&rel)? else {
+            return Ok(None);
+        };
+        let same_file = frontmatter::get(Document::parse(&text).frontmatter(), "source_sha256")
+            .is_some_and(|v| v == sha);
+        Ok(same_file.then_some((rel, text)))
+    }
+
+    /// The existing note with the suite's keys set and any picture it does not yet show added in a
+    /// "Pictures" section at the end. Every other byte of the note is the person's and stays.
+    fn draft_adopted(
+        &self,
+        existing: &str,
+        note_rel: &str,
+        bytes: u64,
+        day: &str,
+        doc: &hq_suite_ingest::DocumentText,
+        pictures: &Stored1,
+    ) -> Result<String, ShrinkError> {
+        let set = |key: &str, value: Scalar| Op::SetMeta {
+            key: key.into(),
+            value,
+        };
+        let patch = Patch {
+            base_revision: None,
+            ops: vec![
+                set(KEY_KIND, Scalar::Str("doc".into())),
+                set(
+                    KEY_FIDELITY,
+                    Scalar::Str(doc.projection.fidelity.as_str().into()),
+                ),
+                set(KEY_ORIGINAL_STATE, Scalar::Str("kept".into())),
+                set(KEY_ORIGINAL_BYTES, Scalar::Int(bytes as i64)),
+                set(KEY_SHRUNK_AT, Scalar::Str(day.to_string())),
+            ],
+        };
+        let mut text = apply(&Document::parse(existing), &patch)
+            .map_err(|e| ShrinkError::Notes(e.to_string()))?
+            .render();
+        let linked = references_in(&text);
+        let missing: Vec<_> = pictures
+            .plans
+            .iter()
+            .filter(|p| !linked.contains(&p.cas))
+            .collect();
+        if !missing.is_empty() {
+            if !text.ends_with('\n') {
+                text.push('\n');
+            }
+            if !text.contains("\n## Pictures\n") {
+                text.push_str("\n## Pictures\n");
+            }
+            for (i, p) in missing.iter().enumerate() {
+                text.push('\n');
+                text.push_str(
+                    &p.cas
+                        .markdown_image(note_rel, &format!("Picture {}", i + 1)),
+                );
+                text.push('\n');
+            }
+        }
+        Ok(text)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -656,10 +746,24 @@ impl<'a> Shrinker<'a> {
                     "the saved draft was changed".into(),
                 ));
             }
-            match self.notes.read(&job.note)? {
-                None => self.notes.write(&job.note, &draft)?,
-                Some(existing) if sha256_bytes(existing.as_bytes()) == job.note_sha256 => {}
-                Some(_) => return Err(ShrinkError::NoteConflict(job.note.clone())),
+            match &job.adopted_note_sha256 {
+                // The note was there before: replace it only if it is still exactly what the
+                // draft was built from, under the note's own lock.
+                Some(before) => self.notes.modify(&job.note, &|existing| {
+                    let now = sha256_bytes(existing.as_bytes());
+                    if now == job.note_sha256 {
+                        Ok(None)
+                    } else if &now == before {
+                        Ok(Some(draft.clone()))
+                    } else {
+                        Err(ShrinkError::NoteConflict(job.note.clone()))
+                    }
+                })?,
+                None => match self.notes.read(&job.note)? {
+                    None => self.notes.write(&job.note, &draft)?,
+                    Some(existing) if sha256_bytes(existing.as_bytes()) == job.note_sha256 => {}
+                    Some(_) => return Err(ShrinkError::NoteConflict(job.note.clone())),
+                },
             }
             self.point("note_written")?;
             job.advance(Step::NoteWritten)?;
@@ -757,6 +861,7 @@ impl<'a> Shrinker<'a> {
             job.advance(Step::Done)?;
             journal.save(&job)?;
             journal.remove_draft(&job.id);
+            journal.remove_prior(&job.id);
             self.point("done_saved")?;
         }
         Ok(Outcome {
@@ -814,11 +919,21 @@ impl<'a> Shrinker<'a> {
                 "the original has already moved; use undo",
             ));
         }
-        self.notes
-            .remove_if_unchanged(&job.note, &job.note_sha256)?;
+        if job.adopted_note_sha256.is_some() {
+            // The note was the person's before this job: put its text back, if nobody has
+            // edited it since the draft was written.
+            let prior = journal.read_prior(&job.id)?;
+            self.notes.modify(&job.note, &|text| {
+                Ok((sha256_bytes(text.as_bytes()) == job.note_sha256).then(|| prior.clone()))
+            })?;
+        } else {
+            self.notes
+                .remove_if_unchanged(&job.note, &job.note_sha256)?;
+        }
         job.advance(Step::Abandoned)?;
         journal.save(&job)?;
         journal.remove_draft(&job.id);
+        journal.remove_prior(&job.id);
         Ok(())
     }
 

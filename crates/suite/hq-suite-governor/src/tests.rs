@@ -76,6 +76,7 @@ fn job(id: &str, step: Step, day: &str, media: Vec<MediaPlan>) -> Job {
         step,
         saved_bytes: Some(10),
         failure: None,
+        adopted_note_sha256: None,
     }
 }
 
