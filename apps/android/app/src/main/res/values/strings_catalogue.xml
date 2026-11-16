@@ -3174,6 +3174,24 @@
     <string name="tasks_task_added_edge">Task added. HQ starts on it in a few minutes.</string>
     <string name="tasks_task_added_no_code">Task added, but HQ will not code it. %1$s is no longer on its list.</string>
     <string name="tasks_task_added">Task added</string>
+    <string name="tasks_no_initiative">No initiative</string>
+    <string name="tasks_old">Old</string>
+    <string name="tasks_show_all">Show all %1$s</string>
+    <plurals name="tasks_group_cd">
+        <item quantity="one">%1$s, %2$s task</item>
+        <item quantity="other">%1$s, %2$s tasks</item>
+    </plurals>
+    <string name="tasks_mark_old_reviewed">Mark old ones reviewed</string>
+    <string name="tasks_mark_old_reviewed_cd">Mark %1$s old tasks in %2$s reviewed</string>
+    <string name="tasks_mark_old_title">Mark %1$s old tasks in %2$s reviewed\?</string>
+    <string name="tasks_mark_old_body">Only tasks ready to check are moved. Blocked tasks stay as they are. Undo puts them back for 8 seconds.</string>
+    <string name="tasks_mark_old_act">Mark %1$s reviewed</string>
+    <string name="tasks_marked_reviewed">Marked %1$s reviewed</string>
+    <plurals name="tasks_marked_reviewed_partial">
+        <item quantity="one">%1$s, %2$s could not be updated</item>
+        <item quantity="other">%1$s, %2$s could not be updated</item>
+    </plurals>
+    <string name="tasks_undo_partial_fail">%1$s could not be restored</string>
     <string name="notes_ask_hq">Ask HQ</string>
     <string name="notes_make_task">Make a task</string>
     <string name="notes_pin">Pin</string>

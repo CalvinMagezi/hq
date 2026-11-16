@@ -38,6 +38,14 @@ object ConfirmCopy {
 
     fun bulkDone(c: Context, n: Int) = ask(c, c.getString(R.string.bulk_done_title, n.toString()), c.getString(R.string.bulk_done_body), c.getString(R.string.bulk_done_keep), c.getString(R.string.bulk_done_act, n.toString()))
 
+    fun markOldReviewed(c: Context, n: Int, initiative: String) = ask(
+        c,
+        c.getString(R.string.tasks_mark_old_title, n.toString(), initiative),
+        c.getString(R.string.tasks_mark_old_body),
+        c.getString(R.string.bulk_done_keep),
+        c.getString(R.string.tasks_mark_old_act, n.toString()),
+    )
+
     fun restart(c: Context, title: String, body: String) = ask(c, title, body, c.getString(R.string.confirm_not_now), c.getString(R.string.restart_act))
 
     fun pause(c: Context, title: String, body: String) = ask(c, title, body, c.getString(R.string.mode_pause_keep), c.getString(R.string.mode_pause_act))

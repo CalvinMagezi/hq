@@ -48,6 +48,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -74,6 +75,8 @@ import example.hq.spike.ui.webhost.LocalOpenWeb
 import example.hq.spike.ui.webhost.WebPage
 import example.hq.spike.ui.theme.Mts
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 import kotlinx.coroutines.delay
 
 private const val LINE_MS = 4_000L
@@ -94,6 +97,13 @@ fun TasksScreen(shownUi: TasksUi, actions: TasksActions, onHelpers: () -> Unit =
         if (ui.selected.isEmpty()) NewTaskButton(Modifier.align(Alignment.BottomEnd).padding(16.dp)) { actions.onQuick(QuickState()) }
         ui.bulkAsk?.let { ask ->
             ConfirmDialog(ConfirmCopy.bulkDone(androidx.compose.ui.platform.LocalContext.current, ui.selected.size), onKeep = { actions.onBulkAsk(null) }, onAct = { actions.onBulkAsk(ask) })
+        }
+        ui.bulkReviewAsk?.let { group ->
+            ConfirmDialog(
+                ConfirmCopy.markOldReviewed(androidx.compose.ui.platform.LocalContext.current, group.oldReviewable.size, group.title),
+                onKeep = { actions.onBulkReviewAsk(null) },
+                onAct = { actions.onBulkReviewConfirm(group) },
+            )
         }
         when (ui.bulkPrompt) {
             "status" -> SheetFrame({ actions.onBulkPrompt(null) }, top = null) {
@@ -137,12 +147,30 @@ private fun Feed(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit) {
         if (groups.isEmpty() && ui.loaded && !ui.offline) item { Text(if (onAll && ui.chip == AllChip.Archived && !ui.archivedLoaded) w.s(R.string.tasks_asking_hq) else if (onAll) TasksLogic.emptyAll(w, ui.chip) else emptyWords(w, ui.tab), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
         groups.forEach { g ->
             if (g.title.isNotBlank()) item(key = "h-${g.key}") { GroupHeader(g, g.key in ui.expanded, actions.onToggleGroup) }
-            val open = g.key in ui.expanded
-            val shown = if (g.preview != null && !open) g.tasks.take(g.preview) else g.tasks
-            if (!g.collapsible || open) items(shown.size, key = { "${g.key}-${shown[it].id}" }) {
-                if (onAll) AllRow(shown[it], ui.today, shown[it].id in ui.workingIds, ui.selected, ui.chip != AllChip.Archived, actions) else TaskRow(shown[it], ui.today, actions)
+            if (g.key == "waiting" && !onAll) {
+                ui.waitingGroups.forEach { sg ->
+                    val open = sg.isOpen(ui.waitingOpen)
+                    val showAll = sg.isAllShown(ui.expanded)
+                    item(key = "h-${sg.key}") { WaitingGroupHeader(sg, open) { actions.onToggleWaitingGroup(sg.key) } }
+                    if (sg.canMarkOldReviewed) {
+                        item(key = "bulk-${sg.key}") { MarkOldReviewedRow(sg, ui.bulking) { actions.onBulkReviewAsk(sg) } }
+                    }
+                    if (open) {
+                        val shown = if (sg.tasks.size > TasksLogic.WAITING_PREVIEW && !showAll) sg.tasks.take(TasksLogic.WAITING_PREVIEW) else sg.tasks
+                        items(shown.size, key = { "${sg.key}-${shown[it].id}" }) { TaskRow(shown[it], ui.today, actions) }
+                        if (sg.tasks.size > TasksLogic.WAITING_PREVIEW) {
+                            item(key = "m-${sg.key}") { ShowAllRow(sg.tasks.size, showAll) { actions.onToggleGroup(sg.allKey) } }
+                        }
+                    }
+                }
+            } else {
+                val open = g.key in ui.expanded
+                val shown = if (g.preview != null && !open) g.tasks.take(g.preview) else g.tasks
+                if (!g.collapsible || open) items(shown.size, key = { "${g.key}-${shown[it].id}" }) {
+                    if (onAll) AllRow(shown[it], ui.today, shown[it].id in ui.workingIds, ui.selected, ui.chip != AllChip.Archived, actions) else TaskRow(shown[it], ui.today, actions)
+                }
+                if (g.preview != null && g.tasks.size > g.preview) item(key = "m-${g.key}") { MoreRow(g.tasks.size - g.preview, open) { actions.onToggleGroup(g.key) } }
             }
-            if (g.preview != null && g.tasks.size > g.preview) item(key = "m-${g.key}") { MoreRow(g.tasks.size - g.preview, open) { actions.onToggleGroup(g.key) } }
         }
     }
 }
@@ -277,6 +305,65 @@ private fun SelectionBar(ui: TasksUi, actions: TasksActions) {
     }
 }
 
+/** "Show all 12" under a long initiative group, and "Show fewer" once it is open. */
+@Composable
+private fun ShowAllRow(total: Int, open: Boolean, onToggle: () -> Unit) {
+    val w = rememberWords()
+    Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onToggle).padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
+        Text(if (open) w.s(R.string.tasks_show_fewer) else w.s(R.string.tasks_show_all, total.toString()), style = HqType.BodySmBold, color = Mts.BrandBlue)
+    }
+}
+
+@Composable
+internal fun WaitingGroupHeader(g: WaitingGroup, open: Boolean, onToggle: () -> Unit) {
+    val w = rememberWords()
+    val cd = w.n(R.plurals.tasks_group_cd, g.tasks.size, g.title, g.tasks.size.toString())
+    val toggleLabel = w.s(if (open) R.string.gs_hide else R.string.tasks_show)
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = 16.dp, top = 12.dp, end = 4.dp, bottom = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            Modifier.weight(1f).semantics(mergeDescendants = true) {
+                heading()
+                contentDescription = cd
+            },
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(g.title, style = HqType.BodySmBold, color = Mts.Ink, modifier = Modifier.weight(1f, fill = false))
+            Box(Modifier.defaultMinSize(minWidth = 20.dp, minHeight = 20.dp).background(Mts.Surface200, RoundedCornerShape(10.dp)).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
+                Text("${g.tasks.size}", style = HqType.Caption.copy(fontWeight = FontWeight.Bold, lineHeight = 20.sp), color = Mts.Ink)
+            }
+        }
+        Box(
+            Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClickLabel = toggleLabel, onClick = onToggle)
+                .semantics { contentDescription = "$toggleLabel ${g.title}" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(if (open) HqIcons.ChevronUp else HqIcons.ChevronDown, null, Modifier.size(18.dp), tint = Mts.InkMuted)
+        }
+    }
+}
+
+@Composable
+internal fun MarkOldReviewedRow(g: WaitingGroup, bulking: Boolean, onClick: () -> Unit) {
+    val w = rememberWords()
+    val cd = w.s(R.string.tasks_mark_old_reviewed_cd, g.oldReviewable.size.toString(), g.title)
+    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), contentAlignment = Alignment.CenterStart) {
+        Box(
+            Modifier.heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape)
+                .clickable(enabled = !bulking, role = Role.Button, onClick = onClick)
+                .semantics { contentDescription = cd }
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(if (bulking) w.s(R.string.tasks_working_ellipsis) else w.s(R.string.tasks_mark_old_reviewed), style = HqType.BodySmBold, color = Mts.BrandBlue)
+        }
+    }
+}
+
 /** "Show 69 more" under a long group, and "Show fewer" once it is open. */
 @Composable
 private fun MoreRow(hidden: Int, open: Boolean, onToggle: () -> Unit) {
@@ -300,7 +387,7 @@ private fun GroupHeader(g: TaskGroup, open: Boolean, onToggle: (String) -> Unit)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TaskRow(t: TaskItem, today: LocalDate, actions: TasksActions) {
+internal fun TaskRow(t: TaskItem, today: LocalDate, actions: TasksActions, now: LocalDateTime = LocalDateTime.now(ZoneOffset.UTC)) {
     val w = rememberWords()
     val latest by rememberUpdatedState(t)
     val swipe = rememberSwipeToDismissBoxState(confirmValueChange = {
@@ -333,11 +420,12 @@ private fun TaskRow(t: TaskItem, today: LocalDate, actions: TasksActions) {
             }
             Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
                 Text(t.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = TITLE_LINES, overflow = TextOverflow.Ellipsis)
-                val meta = TasksLogic.meta(w, t, today)
+                val meta = TasksLogic.meta(w, t, today, now)
                 if (meta.isNotEmpty()) Text(
                     buildAnnotatedString { meta.forEach { r -> withStyle(SpanStyle(color = if (r.amber) Mts.Amber else Mts.InkMuted, fontWeight = if (r.bold) FontWeight.Bold else FontWeight.Normal)) { append(r.text) } } },
                     style = HqType.BodySm, maxLines = META_LINES, overflow = TextOverflow.Ellipsis,
                 )
+                if (Aging.isOld(t.updatedAt, now)) Text(w.s(R.string.tasks_old), style = HqType.Caption.copy(fontWeight = FontWeight.Bold), color = Mts.Amber, modifier = Modifier.padding(top = 2.dp))
             }
             if (t.status == "ready_for_review") Box(
                 Modifier.padding(top = 14.dp, start = 8.dp).heightIn(min = 36.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button) { actions.onOpen(t) }.padding(horizontal = 14.dp),
@@ -357,5 +445,5 @@ private fun NewTaskButton(modifier: Modifier, onClick: () -> Unit) {
 
 @Composable
 internal fun Snack(line: TaskLine, actions: TasksActions, modifier: Modifier) {
-    AttentionOrInline(if (line.action != null) AttentionKind.UndoSnackbar else AttentionKind.Snackbar, rememberAttentionKey(), modifier, actions.onDismissLine, restartOn = line) { m -> SnackbarRow(line.text, line.action, actions.onUndo, m) }
+    AttentionOrInline(if (line.action != null) AttentionKind.UndoSnackbar else AttentionKind.Snackbar, rememberAttentionKey(), modifier, actions.onDismissLine, restartOn = line, timeoutMs = line.timeoutMs) { m -> SnackbarRow(line.text, line.action, actions.onUndo, m) }
 }
