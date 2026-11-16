@@ -1785,6 +1785,7 @@ export const en = {
   tasks_empty_review: "Nothing is waiting to be checked.",
   tasks_empty_done: "Nothing is done yet.",
   tasks_empty_archived: "Nothing is archived.",
+  tasks_empty_deleted: "Nothing is deleted.",
   tasks_empty_today: "Nothing for today.",
   tasks_empty_upcoming: "Nothing coming up.",
   tasks_priority_urgent: "Urgent",

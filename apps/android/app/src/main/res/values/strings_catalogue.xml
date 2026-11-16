@@ -3070,6 +3070,7 @@
     <string name="tasks_empty_review">Nothing is waiting to be checked.</string>
     <string name="tasks_empty_done">Nothing is done yet.</string>
     <string name="tasks_empty_archived">Nothing is archived.</string>
+    <string name="tasks_empty_deleted">Nothing is deleted.</string>
     <string name="tasks_empty_today">Nothing for today.</string>
     <string name="tasks_empty_upcoming">Nothing coming up.</string>
     <string name="tasks_blocked">Blocked</string>
