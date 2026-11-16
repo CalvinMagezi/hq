@@ -8,11 +8,17 @@ import example.hq.spike.R
 import example.hq.spike.ui.firstrun.FirstRunWords
 import example.hq.spike.ui.firstrun.StoredKeysPage
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,14 +53,21 @@ import androidx.lifecycle.Lifecycle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -203,7 +216,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Suggests -> SuggestsPage()
                 SettingsPage.Noticed -> NoticedPage(Counters.get(androidx.compose.ui.platform.LocalContext.current))
                 SettingsPage.Origins -> ReadOnlyList(ui, stringResource(R.string.settings_none_origins)) { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
-                SettingsPage.Computers -> ComputersAndTools(ui)
+                SettingsPage.Computers -> ComputersAndTools(ui, actions.onSectionConsumed)
             }
         }
         val context = androidx.compose.ui.platform.LocalContext.current
@@ -243,13 +256,88 @@ private fun OpenScreen(text: String, screen: Class<*>) {
     Text(text, style = HqType.BodyBold, color = Mts.BrandBlue, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { context.startActivity(android.content.Intent(context, screen)) }.padding(horizontal = 20.dp, vertical = 16.dp))
 }
 
+private const val HIGHLIGHT_ANIM_MS = 220
+
+/** Every (page, target) pair whose UI registers a [sectionTarget]; shared with placement/consistency tests. */
+internal val WIRED_SECTION_TARGETS: Set<Pair<SettingsPage, ScrollTarget>> = setOf(
+    SettingsPage.Keys to ScrollTarget.KeysModel,
+    SettingsPage.Keys to ScrollTarget.KeysWhichAnswers,
+    SettingsPage.Keys to ScrollTarget.KeysYourKeys,
+    SettingsPage.Keys to ScrollTarget.KeysStored,
+    SettingsPage.Assistant to ScrollTarget.AssistantRightNow,
+    SettingsPage.Assistant to ScrollTarget.AssistantSpeech,
+    SettingsPage.Background to ScrollTarget.BackgroundRightNow,
+    SettingsPage.Background to ScrollTarget.BackgroundKeepRunning,
+    SettingsPage.Safety to ScrollTarget.SafetyAllowedAddresses,
+    SettingsPage.Safety to ScrollTarget.SafetyTrustedSites,
+    SettingsPage.Computers to ScrollTarget.ComputersList,
+    SettingsPage.Computers to ScrollTarget.ComputersTools,
+)
+
+internal class SectionScroller(
+    val scrollState: ScrollState,
+    val machine: SectionScrollMachine,
+)
+
 @Composable
-internal fun Page(content: @Composable () -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) { content() }
+internal fun rememberSectionScroller(ui: SettingsUi, onSectionConsumed: () -> Unit = {}): SectionScroller {
+    val target = SettingsScroll.target(ui.page, ui.section)
+    val scrollState = remember(ui.page) { ScrollState(0) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val reducedMotion = remember(context) {
+        android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    }
+    val machine = remember(ui.page, target, reducedMotion) {
+        SectionScrollMachine(target, reducedMotion)
+    }
+    val scroller = remember(scrollState, machine) { SectionScroller(scrollState, machine) }
+    LaunchedEffect(machine, machine.layoutTick) {
+        machine.runIfReady(
+            scrollTo = { y -> if (reducedMotion) scrollState.scrollTo(y) else scrollState.animateScrollTo(y) },
+            onConsumed = onSectionConsumed,
+        )
+    }
+    return scroller
 }
 
 @Composable
-internal fun Label(text: String) = Text(text.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 20.dp, end = 16.dp, bottom = 4.dp))
+internal fun Modifier.sectionTarget(scroller: SectionScroller?, section: ScrollTarget?): Modifier {
+    if (scroller == null || section == null) return this
+    val active = scroller.machine.highlighted == section
+    val bg = if (scroller.machine.reducedMotion) {
+        if (active) Mts.Surface200 else Color.Transparent
+    } else {
+        animateColorAsState(
+            if (active) Mts.Surface200 else Color.Transparent,
+            animationSpec = tween(HIGHLIGHT_ANIM_MS),
+            label = "sectionHighlight",
+        ).value
+    }
+    return this
+        .onGloballyPositioned { scroller.machine.register(section, it.positionInRoot().y + scroller.scrollState.value) }
+        .clip(RoundedCornerShape(8.dp))
+        .background(bg)
+}
+
+@Composable
+internal fun Page(scroller: SectionScroller? = null, content: @Composable () -> Unit) {
+    val scroll = scroller?.scrollState ?: rememberScrollState()
+    Column(
+        Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { if (scroller != null) scroller.machine.setRootTop(it.positionInRoot().y.toInt()) }
+            .verticalScroll(scroll)
+            .padding(bottom = 24.dp),
+    ) { content() }
+}
+
+@Composable
+internal fun Label(text: String, modifier: Modifier = Modifier) = Text(
+    text.uppercase(),
+    style = HqType.Group.copy(letterSpacing = 0.06.em),
+    color = Mts.InkMuted,
+    modifier = modifier.padding(start = 16.dp, top = 20.dp, end = 16.dp, bottom = 4.dp),
+)
 
 @Composable
 internal fun Group(content: @Composable () -> Unit) {
@@ -289,10 +377,10 @@ private fun NavRow(row: HomeRow, first: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Fact(row: FactRow, first: Boolean, onOpen: (SettingsPage) -> Unit = {}) {
+private fun Fact(row: FactRow, first: Boolean, onOpen: (SettingsPage) -> Unit = {}, modifier: Modifier = Modifier) {
     if (!first) Divider()
     val tap = row.opens?.let { page -> Modifier.heightIn(min = 48.dp).clickable(role = Role.Button) { onOpen(page) } } ?: Modifier
-    Column(Modifier.fillMaxWidth().then(tap).padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(Modifier.fillMaxWidth().then(modifier).then(tap).padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(row.title, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
             Text(row.value, style = HqType.BodySm, color = if (row.good) Mts.BrandGreen else Mts.InkMuted, textAlign = TextAlign.End, modifier = Modifier.widthIn(max = VALUE_MAX))
@@ -303,7 +391,8 @@ private fun Fact(row: FactRow, first: Boolean, onOpen: (SettingsPage) -> Unit = 
 }
 
 @Composable
-internal fun Facts(rows: List<FactRow>, onOpen: (SettingsPage) -> Unit = {}) = Group { rows.forEachIndexed { i, r -> Fact(r, i == 0, onOpen) } }
+internal fun Facts(rows: List<FactRow>, onOpen: (SettingsPage) -> Unit = {}, scroller: SectionScroller? = null, targetFor: (FactRow) -> ScrollTarget? = { null }) =
+    Group { rows.forEachIndexed { i, r -> Fact(r, i == 0, onOpen, Modifier.sectionTarget(scroller, targetFor(r))) } }
 
 @Composable
 private fun Waiting(ui: SettingsUi) {
@@ -329,6 +418,77 @@ private fun NoAnswer(text: String = stringResource(R.string.settings_no_answer_s
 // ---------------------------------------------------------------- home
 
 @Composable
+internal fun SettingsSearchField(query: String, onQuery: (String) -> Unit, modifier: Modifier = Modifier) {
+    val label = stringResource(R.string.settings_search_hint)
+    val clearLabel = stringResource(R.string.search_clear)
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val shape = RoundedCornerShape(24.dp)
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .heightIn(min = 48.dp)
+            .clip(shape)
+            .background(Mts.Surface100)
+            .border(1.dp, Mts.Line, shape)
+            .padding(start = 16.dp, end = if (query.isNotEmpty()) 4.dp else 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(HqIcons.Search, label, Modifier.size(20.dp), tint = Mts.InkMuted)
+        BasicTextField(
+            value = query,
+            onValueChange = onQuery,
+            singleLine = true,
+            textStyle = HqType.Body.copy(color = Mts.Ink),
+            cursorBrush = SolidColor(Mts.Ink),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = {
+                keyboard?.hide()
+                focusManager.clearFocus()
+            }),
+            modifier = Modifier.weight(1f).padding(vertical = 10.dp),
+            decorationBox = { inner ->
+                Box {
+                    if (query.isEmpty()) Text(label, style = HqType.Body, color = Mts.InkMuted)
+                    inner()
+                }
+            },
+        )
+        if (query.isNotEmpty()) {
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .clickable(role = Role.Button, onClickLabel = clearLabel) { onQuery("") }
+                    .semantics { contentDescription = clearLabel },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(HqIcons.Close, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun SettingsSearchResultRow(label: String, first: Boolean, onClick: () -> Unit) {
+    if (!first) Divider()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
+        Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+    }
+}
+
+@Composable
 private fun Home(ui: SettingsUi, actions: SettingsActions) {
     val w = example.hq.spike.ui.shell.rememberWords()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -337,7 +497,40 @@ private fun Home(ui: SettingsUi, actions: SettingsActions) {
     val ready = readyManifest(ui)
     val card = SettingsWords.homeCard(ui.update is UpdateState.InstalledWithdrawn, if (keepToFix) PhoneWords.keepRunning(w, ui.keep, ui.now).checked.count { !it.ok } else 0, BackupWords.warns(ui.backup, ui.now), ready != null)
     val updates = SettingsWords.updatesHome(w, ui.update, ui.updateFacts.installedVersion, ready?.version)
+    val index = remember(w) { SettingsIndex.build(w) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     Page {
+        SettingsSearchField(ui.searchQuery, actions.onSearchQuery)
+        if (ui.searchQuery.isNotBlank()) {
+            val results = SettingsSearch.results(ui.searchQuery, index)
+            if (results.isEmpty()) {
+                Text(
+                    stringResource(R.string.settings_search_empty),
+                    style = HqType.BodySm,
+                    color = Mts.InkMuted,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            } else {
+                Text(
+                    w.n(R.plurals.settings_search_count, results.size, results.size),
+                    style = HqType.BodySm,
+                    color = Mts.InkMuted,
+                    modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                Group {
+                    results.forEachIndexed { i, entry ->
+                        SettingsSearchResultRow(SettingsIndex.rowLabel(w, entry), i == 0) {
+                            keyboard?.hide()
+                            focusManager.clearFocus()
+                            if (entry.page != null) actions.onPageSection(entry.page, entry.sectionKey)
+                            else actions.onPhoneRow(entry.rowKey)
+                        }
+                    }
+                }
+            }
+            return@Page
+        }
         // One card at most: Home never stacks a warning on a warning, and the plain Update card gives way to any of them.
         when (card) {
             SettingsWords.HomeCard.Withdrawn -> WithdrawnCard(ui, actions)
@@ -376,15 +569,16 @@ private fun KeepStopsCard(title: String, body: String, onOpen: () -> Unit) {
 
 /** Computers and Connected tools, once the two tabs of Safety and limits: one page, two sections, read only. */
 @Composable
-private fun ComputersAndTools(ui: SettingsUi) {
+private fun ComputersAndTools(ui: SettingsUi, onSectionConsumed: () -> Unit = {}) {
     val w = example.hq.spike.ui.shell.rememberWords()
-    Page {
+    val scroller = rememberSectionScroller(ui, onSectionConsumed)
+    Page(scroller) {
         Notice(stringResource(R.string.settings_read_only_notice))
         if (ui.snap.settings == null) { Unanswered(ui, "settings", false); return@Page }
-        Label(stringResource(R.string.settings_section_computers))
+        Label(stringResource(R.string.settings_section_computers), Modifier.sectionTarget(scroller, ScrollTarget.ComputersList))
         val computers = SettingsWords.computerRows(w, ui.snap.settings)
         if (computers.isEmpty()) Notice(stringResource(R.string.settings_none_computers), HqIcons.Info) else Facts(computers)
-        Label(stringResource(R.string.settings_tools_connected))
+        Label(stringResource(R.string.settings_tools_connected), Modifier.sectionTarget(scroller, ScrollTarget.ComputersTools))
         val tools = SettingsWords.toolRows(w, ui.snap.settings)
         if (tools.isEmpty()) Notice(stringResource(R.string.settings_none_tools), HqIcons.Info) else Facts(tools)
     }
@@ -395,6 +589,7 @@ private fun ComputersAndTools(ui: SettingsUi) {
 @Composable
 private fun Safety(ui: SettingsUi, actions: SettingsActions) {
     val w = example.hq.spike.ui.shell.rememberWords()
+    val scroller = rememberSectionScroller(ui, actions.onSectionConsumed)
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SettingsWords.SafetyTab.entries.forEach { t ->
@@ -407,11 +602,14 @@ private fun Safety(ui: SettingsUi, actions: SettingsActions) {
                 }
             }
         }
-        Page {
+        Page(scroller) {
             Notice(stringResource(R.string.settings_read_only_notice))
             val rows = SettingsWords.safetyRows(w, ui.snap.settings, ui.safetyTab)
-            Box(Modifier.padding(top = 12.dp)) { if (rows.isEmpty()) Unanswered(ui, "settings", false) else Facts(rows, actions.onPage) }
-            if (ui.safetyTab == SettingsWords.SafetyTab.Safety && ui.trustedSites.isNotEmpty()) TrustedSites(ui.trustedSites, actions.onForgetSite)
+            Box(Modifier.padding(top = 12.dp)) {
+                if (rows.isEmpty()) Unanswered(ui, "settings", false)
+                else Facts(rows, actions.onPage, scroller) { if (it.opens == SettingsPage.Origins) ScrollTarget.SafetyAllowedAddresses else null }
+            }
+            if (ui.safetyTab == SettingsWords.SafetyTab.Safety && ui.trustedSites.isNotEmpty()) TrustedSites(ui.trustedSites, actions.onForgetSite, scroller)
             if (ui.safetyTab == SettingsWords.SafetyTab.Helpers && rows.isNotEmpty()) HelperPolicy(SettingsWords.helperPolicy(ui.snap.settings))
         }
     }
@@ -445,8 +643,8 @@ private fun HelperPolicy(current: SettingsWords.HelperPolicy?) {
 }
 
 @Composable
-private fun TrustedSites(sites: List<String>, onForget: (String) -> Unit) {
-    Label(stringResource(R.string.sites_trusted_title))
+private fun TrustedSites(sites: List<String>, onForget: (String) -> Unit, scroller: SectionScroller? = null) {
+    Label(stringResource(R.string.sites_trusted_title), Modifier.sectionTarget(scroller, ScrollTarget.SafetyTrustedSites))
     Text(stringResource(R.string.sites_trusted_body), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(horizontal = 20.dp))
     sites.forEach { site ->
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -462,19 +660,20 @@ private fun TrustedSites(sites: List<String>, onForget: (String) -> Unit) {
 private fun Keys(ui: SettingsUi, actions: SettingsActions) {
     val w = example.hq.spike.ui.shell.rememberWords()
     val s = ui.snap.settings
-    Page {
+    val scroller = rememberSectionScroller(ui, actions.onSectionConsumed)
+    Page(scroller) {
         // HQ's part of the page needs HQ; the keys on this phone do not, so they show whatever HQ says.
         if (SettingsWords.KeysPart.Hq in SettingsWords.keysParts(s) && s != null) {
-            Label(stringResource(R.string.settings_label_model))
+            Label(stringResource(R.string.settings_label_model), Modifier.sectionTarget(scroller, ScrollTarget.KeysModel))
             Facts(listOf(FactRow(w.s(R.string.settings_which_ai_uses), SettingsWords.activeModel(w, s)), FactRow(w.s(R.string.settings_local_only), SettingsWords.onOff(w, s.optJSONObject("model")?.optBoolean("local_only") == true))))
             Text(stringResource(R.string.settings_the_model_is_set), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
             val ai = SettingsWords.aiRows(w, ui.snap)
             if (ai.isNotEmpty()) {
-                Label(stringResource(R.string.settings_label_which_answers))
+                Label(stringResource(R.string.settings_label_which_answers), Modifier.sectionTarget(scroller, ScrollTarget.KeysWhichAnswers))
                 Facts(ai)
                 Text(stringResource(R.string.settings_hq_tries_them_in), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
             }
-            Label(stringResource(R.string.settings_label_your_keys))
+            Label(stringResource(R.string.settings_label_your_keys), Modifier.sectionTarget(scroller, ScrollTarget.KeysYourKeys))
             Group {
                 SettingsWords.keyRows(s, ui.snap.copilot, ui.snap.providers).forEachIndexed { i, (name, set, source) ->
                     if (i > 0) Divider()
@@ -504,7 +703,7 @@ private fun Keys(ui: SettingsUi, actions: SettingsActions) {
                 }
             }
         } else Unanswered(ui, "settings", false)
-        Label(FirstRunWords.KEYS_TITLE)
+        Label(FirstRunWords.KEYS_TITLE, Modifier.sectionTarget(scroller, ScrollTarget.KeysStored))
         StoredKeysPage(ui, actions)
     }
 }
@@ -796,16 +995,17 @@ private fun BudgetCardView(c: SettingsWords.BudgetCard) {
 @Composable
 private fun Background(ui: SettingsUi, actions: SettingsActions) {
     val active = ui.mode == "active"
-    Page {
+    val scroller = rememberSectionScroller(ui, actions.onSectionConsumed)
+    Page(scroller) {
         Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             ModeCard(stringResource(R.string.settings_mode_active_title), stringResource(R.string.settings_mode_active_body), active, !ui.restarting) { actions.onMode(true) }
             ModeCard(stringResource(R.string.about_background_off), stringResource(R.string.settings_mode_standby_body), !active, !ui.restarting) { actions.onMode(false) }
         }
         Box(Modifier.padding(top = 12.dp)) { Notice(stringResource(R.string.settings_one_device_only), HqIcons.Warning, warn = true) }
-        Label(stringResource(R.string.assist_group_right_now))
+        Label(stringResource(R.string.assist_group_right_now), Modifier.sectionTarget(scroller, ScrollTarget.BackgroundRightNow))
         Facts(SettingsWords.rightNow(example.hq.spike.ui.shell.rememberWords(), ui.snap, active, ui.restarting))
         val keep = PhoneWords.keepRunning(example.hq.spike.ui.shell.rememberWords(), ui.keep, ui.now)
-        Label(stringResource(R.string.settings_keep_running_section))
+        Label(stringResource(R.string.settings_keep_running_section), Modifier.sectionTarget(scroller, ScrollTarget.BackgroundKeepRunning))
         Facts(listOf(FactRow(stringResource(R.string.settings_page_keep_running), PhoneWords.keepSummary(example.hq.spike.ui.shell.rememberWords(), ui.keep, ui.now), keep.noticeTitle, opens = SettingsPage.KeepRunning)), actions.onPage)
     }
 }

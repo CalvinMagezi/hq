@@ -67,6 +67,10 @@ data class KeySheet(val id: String, val name: String, val replace: Boolean, val 
 data class SettingsUi(
     val open: Boolean = false,
     val stack: List<SettingsPage> = emptyList(),
+    /** Optional section key to scroll to and briefly highlight on the current page. */
+    val section: String? = null,
+    /** On-device filter query on Settings Home. */
+    val searchQuery: String = "",
     val snap: SettingsSnapshot = SettingsSnapshot(),
     val loaded: Boolean = false,
     val phone: List<HomeRow> = emptyList(),
@@ -150,6 +154,9 @@ class SettingsActions(
     val onOpen: () -> Unit = {},
     val onBack: () -> Unit = {},
     val onPage: (SettingsPage) -> Unit = {},
+    val onPageSection: (SettingsPage, String?) -> Unit = { p, _ -> onPage(p) },
+    val onSectionConsumed: () -> Unit = {},
+    val onSearchQuery: (String) -> Unit = {},
     val onTab: (SettingsWords.SafetyTab) -> Unit = {},
     val onForgetSite: (String) -> Unit = {},
     val onPhoneRow: (String) -> Unit = {},
@@ -237,11 +244,11 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     val actions = SettingsActions(
         onOpen = ::open,
-        onBack = { _state.update { if (it.busyBehind()) it else if (it.stack.isEmpty()) it.copy(open = false) else it.copy(stack = it.stack.dropLast(1)) } },
-        onPage = { p ->
-            _state.update { it.copy(stack = it.stack + p) }
-            if (p == SettingsPage.Notifications) loadSilences()
-        },
+        onBack = { _state.update { if (it.busyBehind()) it else if (it.stack.isEmpty()) it.copy(open = false, section = null, searchQuery = "") else it.copy(stack = it.stack.dropLast(1), section = null) } },
+        onPage = { p -> openPage(p, null) },
+        onPageSection = ::openPage,
+        onSectionConsumed = { _state.update { it.copy(section = null) } },
+        onSearchQuery = { q -> _state.update { it.copy(searchQuery = q) } },
         onTab = { t -> _state.update { it.copy(safetyTab = t) } },
         onForgetSite = ::forgetSite,
         onPhoneRow = ::phoneRow,
@@ -367,7 +374,18 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Opens Settings on its home page. What is on it comes from [refreshNow], which the page runs while it is showing. */
     private fun open() {
-        _state.update { it.copy(open = true, stack = emptyList(), line = null, askMode = null, askRestart = false, phone = if (frozen) it.phone else phoneRows(), mode = if (frozen) it.mode else modeOf(), now = Instant.now()).withFacts().withDownloadFacts() }
+        _state.update { it.copy(open = true, stack = emptyList(), section = null, searchQuery = "", line = null, askMode = null, askRestart = false, phone = if (frozen) it.phone else phoneRows(), mode = if (frozen) it.mode else modeOf(), now = Instant.now()).withFacts().withDownloadFacts() }
+    }
+
+    private fun openPage(page: SettingsPage, section: String?) {
+        _state.update {
+            it.copy(
+                stack = it.stack + page,
+                section = section,
+                safetyTab = SettingsWords.safetyTabFor(page, section, it.safetyTab),
+            )
+        }
+        if (page == SettingsPage.Notifications) loadSilences()
     }
 
     /**
@@ -487,6 +505,11 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private fun modeOf(): String = try { File(ctx().filesDir, "mode").takeIf { it.length() <= MODE_MAX }?.readText()?.trim().orEmpty().ifEmpty { "standby" } } catch (e: java.io.IOException) { "standby" }
 
     /** The rows under "This phone": what Android says about HQ itself, read here rather than from the server. */
+    private fun phoneRow(c: Context, page: SettingsPage, status: String, warn: Boolean = false): HomeRow {
+        val spec = SettingsWords.phoneSpec(page)
+        return HomeRow(spec.page, spec.key, c.getString(spec.titleRes), status, warn)
+    }
+
     private fun phoneRows(): List<HomeRow> {
         val c = ctx()
         val active = modeOf() == "active"
@@ -497,12 +520,12 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val keepToFix = keepFixCount()
         // The page list is SettingsWords.PHONE_PAGES: a row for a page not in it is dropped, so Home and the placement test read one list.
         return SettingsWords.inPhoneOrder(listOfNotNull(
-            HomeRow(SettingsPage.Background, "background", c.getString(R.string.about_background), SettingsWords.backgroundHome(Words.of(c), active, keepToFix), warn = keepToFix > 0),
-            HomeRow(SettingsPage.Notifications, "notifications", c.getString(R.string.row_notifications), if (!allowed) c.getString(R.string.assist_mic_off) else homeNotifLine(listOf(R.string.notify_home_needs_on to on(AlertPoster.NEEDS), R.string.notify_home_updates_on to on(AlertPoster.UPDATES))), warn = SettingsWords.notificationsWarn(allowed, on(AlertPoster.NEEDS), on(AlertPoster.UPDATES))),
+            phoneRow(c, SettingsPage.Background, SettingsWords.backgroundHome(Words.of(c), active, keepToFix), warn = keepToFix > 0),
+            phoneRow(c, SettingsPage.Notifications, if (!allowed) c.getString(R.string.assist_mic_off) else homeNotifLine(listOf(R.string.notify_home_needs_on to on(AlertPoster.NEEDS), R.string.notify_home_updates_on to on(AlertPoster.UPDATES))), warn = SettingsWords.notificationsWarn(allowed, on(AlertPoster.NEEDS), on(AlertPoster.UPDATES))),
             assistantRow(c),
             calendarRow(c),
             contactsRow(c),
-            HomeRow(SettingsPage.CaptureWidgets, "capture", c.getString(R.string.settings_page_capture), PhoneWords.captureSummary(Words.of(c), captureFacts())),
+            phoneRow(c, SettingsPage.CaptureWidgets, PhoneWords.captureSummary(Words.of(c), captureFacts())),
         ))
     }
 
@@ -513,12 +536,12 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val allowed = example.hq.spike.calendar.AndroidCalendarStore.hasPermission(c)
         val chosen = example.hq.spike.calendar.CalendarPrefs(c).get()
         val status = c.getString(if (!allowed) R.string.cal_status_no_access else if (chosen == null) R.string.cal_status_none else R.string.cal_chosen)
-        return HomeRow(SettingsPage.Calendar, "calendar", c.getString(R.string.cal_row_title), status, warn = !allowed || chosen == null)
+        return phoneRow(c, SettingsPage.Calendar, status, warn = !allowed || chosen == null)
     }
 
     private fun contactsRow(c: Context): HomeRow {
         val allowed = example.hq.spike.contacts.AndroidContactsReader.hasPermission(c)
-        return HomeRow(SettingsPage.Contacts, "contacts", c.getString(R.string.contacts_row_title), c.getString(if (allowed) R.string.contacts_status_allowed else R.string.cal_status_no_access), warn = !allowed)
+        return phoneRow(c, SettingsPage.Contacts, c.getString(if (allowed) R.string.contacts_status_allowed else R.string.cal_status_no_access), warn = !allowed)
     }
 
     private fun assistantRow(c: Context): HomeRow {
@@ -527,7 +550,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val held = role.held(c)
         val mic = role.micState(c)
         val status = AssistantWords.status(Words.of(c), available, held, mic, example.hq.spike.voice.VoiceModels(c).ready())
-        return HomeRow(SettingsPage.Assistant, "assistant", c.getString(R.string.assist_row_title), status, warn = AssistantWords.warn(available, held, mic))
+        return phoneRow(c, SettingsPage.Assistant, status, warn = AssistantWords.warn(available, held, mic))
     }
 
     /** "Needs you on · Updates on · App updates on": a part that is off reads with the word off in place of on. */

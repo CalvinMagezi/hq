@@ -15,6 +15,17 @@ object SettingsRoutes {
         "updates" to SettingsPage.Update,
     )
 
+    /** Aliases that point to a section inside a page rather than the top of the page. */
+    val SECTION_ALIASES: Map<String, String> = mapOf(
+        "storedkeys" to "storedkeys",
+        "speech" to "speech",
+        "connectedtools" to "connectedtools",
+        "tools" to "connectedtools",
+    )
+
+    /** A resolved Settings route: the page stack to open, plus an optional section to scroll to. */
+    data class RouteTarget(val stack: List<SettingsPage>, val section: String? = null)
+
     /** The page that holds each page one level down; it is the page Back returns to. */
     val PARENT: Map<SettingsPage, SettingsPage> = mapOf(
         SettingsPage.KeepRunning to SettingsPage.Background,
@@ -39,6 +50,12 @@ object SettingsRoutes {
         if (page == SettingsPage.Home) return emptyList()
         return listOfNotNull(PARENT[page], page)
     }
+
+    /** The section key an alias points to, or null when the name opens the top of the page. */
+    fun section(name: String): String? = SECTION_ALIASES[name.trim().lowercase()]
+
+    /** The stack and optional section key for [name], or null for an unknown name. */
+    fun resolve(name: String): RouteTarget? = stack(name)?.let { RouteTarget(it, section(name)) }
 
     /** Pages a link cannot open: they need a pairing or setup in progress, or are reached from a page above. */
     private val NOT_LINKABLE = setOf(SettingsPage.SetupApp, SettingsPage.PairApp, SettingsPage.Technical, SettingsPage.Noticed)

@@ -22,7 +22,10 @@ class SettingsPlacementTest {
 
     @org.junit.Before fun english() = java.util.Locale.setDefault(java.util.Locale.ENGLISH)
 
-    private fun phoneRows() = SettingsWords.PHONE_PAGES.map { HomeRow(it, it.name.lowercase(), it.name, "On") }
+    private fun phoneRows() = SettingsWords.PHONE_PAGES.map {
+        val spec = SettingsWords.phoneSpec(it)
+        HomeRow(it, spec.key, it.name, "On")
+    }
 
     private fun home(snap: SettingsSnapshot = SettingsSnapshot()) = SettingsWords.home(testWords(), snap, now, phoneRows())
 
@@ -158,8 +161,20 @@ class SettingsPlacementTest {
         assertEquals(SettingsWords.HomeCard.None, SettingsWords.homeCard(false, 0, false, false))
     }
 
-    @Test fun homeHasNineteenRowsAndSearchIsNotBuilt() {
-        // The board counts 17 rows. What HQ suggests and Contacts shipped after it and have no other home, so Home has 19: over 15, and search is still not built.
-        assertEquals(19, home().sumOf { it.rows.size })
+    @Test fun homeHasNineteenRowsAndEveryOneIsInTheSearchIndex() {
+        val rows = home().flatMap { it.rows }
+        assertEquals(19, rows.size)
+        val indexedKeys = SettingsIndex.build(testWords()).filter { it.sectionTitle == null }.map { it.rowKey }
+        assertEquals(rows.map { it.key }, indexedKeys)
+    }
+
+    @Test fun everyIndexedSectionHasAScrollTargetAndIsWiredInScreens() {
+        val wired = SettingsIndex.SECTIONS.map { sec ->
+            val target = SettingsScroll.target(sec.page, sec.sectionKey)
+            assertTrue("${sec.page}/${sec.sectionKey} missing from SettingsScroll.MAP", target != ScrollTarget.Top)
+            assertTrue("${sec.page}/$target not wired in WIRED_SECTION_TARGETS", (sec.page to target) in WIRED_SECTION_TARGETS)
+            sec.page to target
+        }.toSet()
+        assertEquals(WIRED_SECTION_TARGETS, wired)
     }
 }
