@@ -99,6 +99,11 @@ class UsageWordsTest {
         assertTrue(soft.title.contains("Spending limit"))
     }
 
+    @Test fun aMeteredCopilotPlanStillShowsWhenTheOrderDoesNotListIt() {
+        val noCopilot = JSONObject("""{"backends":{"configured":true,"entries":[{"name":"deepseek","enabled":true,"primary":true,"endpoint_host":"api.deepseek.com","kind":"openai-compatible","model":"m"}]}}""")
+        assertEquals("Copilot 912 left", UsageWords.chip(testWords(), UsageSnapshot(settings = noCopilot, copilot = copilot))!!.label)
+    }
+
     @Test fun whenCopilotCannotBeReadTheNextServiceInTheChainShows() {
         val off = JSONObject("""{"active":false}""")
         assertEquals("OpenRouter $4.20 left", UsageWords.chip(testWords(), UsageSnapshot(settings = settings, providers = providers(4.2), copilot = off))!!.label)
