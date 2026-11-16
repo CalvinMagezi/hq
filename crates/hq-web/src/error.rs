@@ -16,6 +16,7 @@ pub(crate) enum ApiError {
     Forbidden(String),
     NotFound(String),
     Conflict(String),
+    Unprocessable(String),
     Unavailable(String),
     Internal(String),
 }
@@ -23,6 +24,10 @@ pub(crate) enum ApiError {
 impl ApiError {
     pub(crate) fn bad_request(msg: impl Into<String>) -> Self {
         Self::BadRequest(msg.into())
+    }
+
+    pub(crate) fn unprocessable(msg: impl Into<String>) -> Self {
+        Self::Unprocessable(msg.into())
     }
 
     pub(crate) fn not_found() -> Self {
@@ -39,6 +44,7 @@ impl ApiError {
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::Unprocessable(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -50,6 +56,7 @@ impl ApiError {
             | Self::Forbidden(m)
             | Self::NotFound(m)
             | Self::Conflict(m)
+            | Self::Unprocessable(m)
             | Self::Unavailable(m)
             | Self::Internal(m) => m,
         }

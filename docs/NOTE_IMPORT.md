@@ -11,8 +11,20 @@ the file it came from.
 |-------|-----|
 | Terminal | `hq vault inventory [folder]` lists the files that are not notes. `hq vault import <file>... \| <folder> \| --all [--apply]` converts them. |
 | Agents (MCP) | `vault_inventory` (read-only), then `vault_import` with `path`, `paths` or `directory`. `convert_to_markdown` converts any file and returns the Markdown without writing anything. |
+| Phone / Web API | `POST /api/note/import?name=<filename>` with the raw file bytes (owner-only, up to 64 MiB). |
 
 Both read only files inside the vault. Nothing outside it is touched.
+
+## From the phone
+
+"Import a file" and "Take a photo" in the mobile app send the file directly to
+`POST /api/note/import?name=<filename>` without going through chat. The server
+stages the file under `Notebooks/Inbox/Imports/` (adding a numeric suffix if a
+different file already has that name) and runs the same importer on it,
+recording the note as written by the owner. Sending the same file twice returns
+`status: "already_imported"` with the existing note's path. If conversion fails
+or the host lacks a required tool (such as OCR for a photo), the server removes
+the staged file and returns `422` with the reason.
 
 ## The cleanup flow
 
