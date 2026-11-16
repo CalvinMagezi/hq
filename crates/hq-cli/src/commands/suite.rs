@@ -17,7 +17,7 @@ pub enum SuiteCommand {
     Measure {
         /// The folder to look at (its sub-folders are included; links are not followed)
         folder: PathBuf,
-        /// A picture encoder to try, such as jpeg:75, png or webp-lossless. Repeat for several.
+        /// A picture encoder to try, such as jpeg:75, png, webp-lossless or webp:80. Repeat for several.
         /// Without it, every encoder this build has is tried.
         #[arg(long = "encoder", value_name = "NAME[:QUALITY]")]
         encoders: Vec<String>,
@@ -59,6 +59,16 @@ pub enum SuiteCommand {
     Jobs,
     /// Finish or resume jobs a crash or a restart interrupted
     Recover,
+    /// What the suite holds, in words; with --tidy also removes what nothing needs
+    ///
+    /// Tidying removes pictures no note links to, marks notes whose original the trash has
+    /// cleaned up, and, when `suite.budget_mb` is set and passed, clears temporary files and then
+    /// originals older than `suite.cold_window_days`.
+    Storage {
+        /// Run the governor's pass now
+        #[arg(long)]
+        tidy: bool,
+    },
 }
 
 #[cfg(feature = "suite")]
@@ -73,6 +83,24 @@ pub async fn run(config: &HqConfig, command: SuiteCommand) -> Result<()> {
         SuiteCommand::Undo { job } => shrink::undo(vault, &job),
         SuiteCommand::Jobs => shrink::jobs(vault),
         SuiteCommand::Recover => shrink::recover(vault),
+        SuiteCommand::Storage { tidy } => {
+            use hq_suite_adapter::governor;
+            let c = &config.suite;
+            if tidy {
+                let settings = governor::settings(c.budget_mb, c.cold_window_days);
+                let text = governor::outcome_text(&governor::run(vault, &settings)?);
+                println!(
+                    "{}",
+                    if text.is_empty() {
+                        "Nothing to tidy."
+                    } else {
+                        &text
+                    }
+                );
+            }
+            println!("{}", governor::storage_text(vault, c.budget_mb));
+            Ok(())
+        }
         SuiteCommand::Measure {
             folder,
             encoders,

@@ -91,6 +91,24 @@ pixels counted as errors. It is fixed, and a test keeps it fixed.
 Reading the per-encoder columns: they encode every picture lossily, while the policy is lossy for
 photographs only, so they are upper bounds on what the policy saves.
 
+### On the reference phone
+
+Run on a Galaxy A32 (SM-A325F, Android 13, 5.8 GB RAM) through a standalone `aarch64-linux-android`
+build, over 100 copied files (162 MB: decks, documents, spreadsheets, PDFs, pictures), with the
+three lossy candidates and JPEG. Median and 95th-percentile encode time per picture:
+
+| Encoder | Median | 95th percentile | Slowest |
+|---------|--------|-----------------|---------|
+| jpeg q75 | 7 to 113 ms | 112 to 137 ms | 198 ms |
+| webp (libwebp) q80 | 46 to 424 ms | 395 to 509 ms | 1.2 s |
+| webp pure Rust q80 | 0.6 to 1.7 s | 1.4 to 7 s | 11 s |
+| avif q55 | 0.7 to 3.7 s | 3.6 to 4.1 s | 6.7 s |
+
+(The range is across the classes of file the pictures came from: pictures inside decks are smaller
+and faster than loose photographs.) Peak memory while converting any one file stayed under 300 MB
+(`rss_kib_max`: 204 to 297 MB across the classes). The libwebp encoder keeps up on a phone, the
+pure-Rust one does not, and AVIF costs seconds per picture, which confirms the choice above.
+
 ## The measurement table
 
 Four sets of the owner's own files, read with `hq suite measure`. The projection is the record

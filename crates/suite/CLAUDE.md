@@ -37,6 +37,7 @@ to delete the guard first and say why in review.
 | `hq-suite-ingest` | Reads office files for the suite: pictures inside packages, fidelity tier projection from the importer's report | `hq-convert`, `hq-suite-md` |
 | `hq-suite-store` | Durable files: atomic writes, media stored by hash, trash in the vault's layout, the shrink journal | `hq-suite-md`, `sha2`, `serde*` |
 | `hq-suite-shrink` | Picture decoding with caps, the encoders (lossy WebP through libwebp for photographs), the measurement report, the shrink pipeline (prepare, confirm, undo, recover) | `hq-convert`, `hq-suite-ingest`, `hq-suite-md`, `hq-suite-store`, `image`, `webp` |
+| `hq-suite-governor` | Storage report in plain words, orphan media, originals that left the trash, the budget and its eviction order. The clock and budget come in as values | `hq-suite-md`, `hq-suite-store`, `hq-suite-shrink`, `chrono` |
 | `hq-suite-adapter` | The only crate that knows HQ: config, tools, CLI glue, daemon task, device actions, REST | everything |
 
 The plan names more crates (governor, sinks, render, calc, one per tool).

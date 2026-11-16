@@ -12,5 +12,5 @@ pub use codec::{CodecError, Encoder};
 pub use measure::{MeasureError, MeasureReport, Settings, measure};
 pub use pipeline::{
     Faults, ImagePolicy, NoFaults, Notes, Options, OriginalAt, Outcome, Preview, Recovered,
-    Refusal, ShrinkError, Shrinker,
+    Refusal, ShrinkError, Shrinker, set_original_state,
 };

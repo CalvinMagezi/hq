@@ -185,6 +185,36 @@ impl Default for Options {
     }
 }
 
+/// Sets a note's `suite_original_state` and `suite_saved_bytes`, leaving every other byte. Also
+/// used by the governor when an original has aged out of the trash.
+pub fn set_original_state(
+    notes: &dyn Notes,
+    note: &str,
+    state: &str,
+    saved: i64,
+) -> Result<(), ShrinkError> {
+    notes.modify(note, &|text| {
+        let doc = Document::parse(text);
+        let patch = Patch {
+            base_revision: None,
+            ops: vec![
+                Op::SetMeta {
+                    key: KEY_ORIGINAL_STATE.into(),
+                    value: Scalar::Str(state.into()),
+                },
+                Op::SetMeta {
+                    key: KEY_SAVED_BYTES.into(),
+                    value: Scalar::Int(saved),
+                },
+            ],
+        };
+        let next = apply(&doc, &patch)
+            .map_err(|e| ShrinkError::Notes(e.to_string()))?
+            .render();
+        Ok((next != text).then_some(next))
+    })
+}
+
 /// Where the original is right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -738,26 +768,7 @@ impl<'a> Shrinker<'a> {
 
     /// Sets the note's `suite_original_state` and `suite_saved_bytes`, leaving every other byte.
     fn mark_note(&self, job: &Job, state: &str, saved: i64) -> Result<(), ShrinkError> {
-        self.notes.modify(&job.note, &|text| {
-            let doc = Document::parse(text);
-            let patch = Patch {
-                base_revision: None,
-                ops: vec![
-                    Op::SetMeta {
-                        key: KEY_ORIGINAL_STATE.into(),
-                        value: Scalar::Str(state.into()),
-                    },
-                    Op::SetMeta {
-                        key: KEY_SAVED_BYTES.into(),
-                        value: Scalar::Int(saved),
-                    },
-                ],
-            };
-            let next = apply(&doc, &patch)
-                .map_err(|e| ShrinkError::Notes(e.to_string()))?
-                .render();
-            Ok((next != text).then_some(next))
-        })
+        set_original_state(self.notes, &job.note, state, saved)
     }
 
     // -----------------------------------------------------------------------------------------

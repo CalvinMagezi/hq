@@ -3831,6 +3831,7 @@ version = "0.9.1"
 dependencies = [
  "anyhow",
  "chrono",
+ "hq-suite-governor",
  "hq-suite-shrink",
  "hq-suite-store",
  "hq-vault",
@@ -3838,6 +3839,18 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml 0.8.2",
+]
+
+[[package]]
+name = "hq-suite-governor"
+version = "0.9.1"
+dependencies = [
+ "chrono",
+ "hq-suite-md",
+ "hq-suite-shrink",
+ "hq-suite-store",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

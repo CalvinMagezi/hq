@@ -33,6 +33,7 @@ members = [
     "crates/suite/hq-suite-ingest",
     "crates/suite/hq-suite-store",
     "crates/suite/hq-suite-shrink",
+    "crates/suite/hq-suite-governor",
     "crates/suite/hq-suite-adapter",
 ]
 
@@ -179,6 +180,7 @@ hq-suite-md = { path = "crates/suite/hq-suite-md" }
 hq-suite-ingest = { path = "crates/suite/hq-suite-ingest" }
 hq-suite-store = { path = "crates/suite/hq-suite-store" }
 hq-suite-shrink = { path = "crates/suite/hq-suite-shrink" }
+hq-suite-governor = { path = "crates/suite/hq-suite-governor" }
 hq-suite-adapter = { path = "crates/suite/hq-suite-adapter" }
 
 
