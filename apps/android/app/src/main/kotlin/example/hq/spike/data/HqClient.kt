@@ -44,6 +44,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     @Volatile private var bearer: String? = null
 
     /** Starting a helper answers only once the agent has settled, and an export of a large note is made before it is sent; both can take longer than any other call here. */
+    /** A shrink decodes and re-encodes every picture, about 25 seconds for a 3 MB document on a Galaxy A32. */
+    private val suiteHttp by lazy { http.newBuilder().readTimeout(SUITE_READ_SECONDS, TimeUnit.SECONDS).callTimeout(0, TimeUnit.SECONDS).build() }
     private val startHttp by lazy { http.newBuilder().readTimeout(START_READ_SECONDS, TimeUnit.SECONDS).build() }
 
     private val http = OkHttpClient.Builder()
@@ -768,7 +770,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     private suspend fun suiteAction(route: String, body: JSONObject): SuiteFile = withContext(Dispatchers.IO) {
         val request = authed(route).post(body.toString().toRequestBody("application/json".toMediaType())).build()
         try {
-            http.newCall(request).execute().use { r ->
+            suiteHttp.newCall(request).execute().use { r ->
                 if (r.code == HTTP_UNAUTHORIZED) refused()
                 val text = r.body.string()
                 if (r.code == HTTP_UNPROCESSABLE) throw SuiteRefused(SuiteWire.refusal(text) ?: "hq could not do that")
@@ -913,6 +915,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         private const val HTTP_BAD_REQUEST = 400
         private const val HTTP_UNAUTHORIZED = 401
         private const val HTTP_UNPROCESSABLE = 422
+        private const val SUITE_READ_SECONDS = 300L
         private const val BEARER = "Bearer "
         private const val CONNECT_SECONDS = 3L
         private const val READ_SECONDS = 20L

@@ -14,7 +14,7 @@
 //! was not. The rule it protects: the original is at its place or in the trash path the journal
 //! named, and the record is complete whenever the original is not at its place.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
@@ -29,7 +29,7 @@ use hq_suite_md::{Document, Op, Patch, Severity, apply, has_errors, validate};
 use hq_suite_store::cas::references_in;
 use hq_suite_store::fsx::sha256_bytes;
 use hq_suite_store::journal::MediaPlan;
-use hq_suite_store::{Cas, Disposition, Job, Journal, Step, StoreError, Stored, SuitePaths, trash};
+use hq_suite_store::{Cas, Disposition, Job, Journal, Step, StoreError, SuitePaths, trash};
 use serde::Serialize;
 
 use crate::codec::{self, Encoder};
@@ -314,6 +314,7 @@ fn store_pictures(
     cas: &Cas,
     policy: ImagePolicy,
     limits: &hq_convert::ingest::Limits,
+    shared: &HashSet<hq_suite_store::CasRef>,
 ) -> Result<Stored1, ShrinkError> {
     let mut out = Stored1 {
         plans: Vec::new(),
@@ -348,8 +349,11 @@ fn store_pictures(
             }
         }
         match cas.put(&chosen.0, chosen.1) {
-            Ok((r, stored)) => {
-                if stored == Stored::New {
+            Ok((r, _)) => {
+                // A picture another job's record already links costs this one nothing. One only an
+                // earlier, unfinished attempt of this job stored does cost it, so a retry never
+                // makes the saving look larger.
+                if !shared.contains(&r) {
                     out.new_bytes += chosen.0.len() as u64;
                 }
                 out.plans.push(MediaPlan {
@@ -505,15 +509,24 @@ impl<'a> Shrinker<'a> {
             })?;
 
         let pictures = {
+            let shared: HashSet<_> = journal
+                .list()
+                .0
+                .iter()
+                .filter(|j| j.id != id && j.step != Step::Abandoned)
+                .flat_map(|j| j.media.iter().map(|m| m.cas.clone()))
+                .collect();
             let (d, cas, policy, limits) = (
                 Arc::clone(&data),
                 self.cas(),
                 self.options.image,
                 self.options.convert.limits.clone(),
             );
-            tokio::task::spawn_blocking(move || store_pictures(&d, kind, &cas, policy, &limits))
-                .await
-                .map_err(|_| refuse(Refusal::Unreadable))??
+            tokio::task::spawn_blocking(move || {
+                store_pictures(&d, kind, &cas, policy, &limits, &shared)
+            })
+            .await
+            .map_err(|_| refuse(Refusal::Unreadable))??
         };
         self.point("pictures_stored")?;
 

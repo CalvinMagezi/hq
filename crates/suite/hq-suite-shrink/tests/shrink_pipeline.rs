@@ -556,6 +556,36 @@ fn a_damaged_job_file_is_reported_and_blocks_nothing_else() {
     assert!(rt.block_on(s.prepare(SOURCE, DAY)).is_ok());
 }
 
+#[test]
+fn a_retry_after_a_cancelled_attempt_reports_the_same_saving() {
+    let original = docx("Retry", &big_pictures());
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (_d, paths) = vault_with(SOURCE, &original);
+    let notes = FolderNotes(paths.clone());
+    let clean = rt
+        .block_on(shrinker(&paths, &notes, &NoFaults).prepare(SOURCE, DAY))
+        .unwrap();
+
+    let (_d2, paths2) = vault_with(SOURCE, &original);
+    let notes2 = FolderNotes(paths2.clone());
+    let crash = CrashAt::at(0);
+    let err = rt
+        .block_on(shrinker(&paths2, &notes2, &crash).prepare(SOURCE, DAY))
+        .unwrap_err();
+    assert!(matches!(err, ShrinkError::Crashed("pictures_stored")));
+    assert!(
+        Cas::new(paths2.clone()).total_bytes() > 0,
+        "the pictures are already stored"
+    );
+    let retry = rt
+        .block_on(shrinker(&paths2, &notes2, &NoFaults).prepare(SOURCE, DAY))
+        .unwrap();
+    assert_eq!(retry.saved_bytes, clean.saved_bytes);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Adopting a note an import already made
 

@@ -67,8 +67,12 @@ pub(crate) async fn shrink_handler(
     State(state): State<Arc<WsState>>,
     Json(b): Json<PathBody>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let status = hq_suite_adapter::api::prepare(&state.vault_path, &b.path)
+    // Detached: a phone that gives up waiting must not cancel a shrink halfway, which would leave
+    // pictures stored without a job and make the retry's saving look larger than it is.
+    let vault = state.vault_path.clone();
+    let status = tokio::spawn(async move { hq_suite_adapter::api::prepare(&vault, &b.path).await })
         .await
+        .map_err(ApiError::internal)?
         .map_err(refused)?;
     Ok(Json(status))
 }
