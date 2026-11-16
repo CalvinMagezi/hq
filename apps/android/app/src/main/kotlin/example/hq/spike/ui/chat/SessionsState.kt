@@ -11,6 +11,9 @@ data class SessionsUi(
 ) {
     val count: Int get() = sessions.size
     val waiting: Int get() = sessions.count { it.needsAnswer }
+
+    /** Agents HQ answers for right now: running with Drive on. */
+    val driving: List<WatchedSession> get() = sessions.filter { it.running && it.drive }
 }
 
 /** The rules for [SessionsUi], pure so the optimistic switch and its rollback are tested without a phone. */

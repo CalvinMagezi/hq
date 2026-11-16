@@ -64,6 +64,8 @@ const APPROVAL_TTL_HOURS: i64 = 24;
 const MAX_WAITING_APPROVALS: i64 = 5;
 /// Arguments longer than this cannot be reviewed in an inbox message, so they are refused.
 const MAX_APPROVAL_ARGS_CHARS: usize = 3000;
+/// Approval scopes of web chats read `web:<thread>`; a session's `owner_thread` is the bare thread.
+const WEB_SCOPE_PREFIX: &str = "web:";
 const SOURCE: &str = "owner-approval";
 const KEY_PREFIX: &str = "owner-approval";
 
@@ -127,11 +129,15 @@ impl OwnerApproval {
         let Some(id) = args.get("session_id").and_then(Value::as_str) else {
             return false;
         };
+        let thread = self
+            .scope
+            .strip_prefix(WEB_SCOPE_PREFIX)
+            .unwrap_or(&self.scope);
         self.db
             .with_conn(|c| hq_db::harness_sessions_registry::get(c, id))
             .ok()
             .flatten()
-            .is_some_and(|r| r.drive && r.owner_thread.as_deref() == Some(self.scope.as_str()))
+            .is_some_and(|r| r.drive && r.owner_thread.as_deref() == Some(thread))
     }
 
     pub fn new(db: Arc<Database>, scope: impl Into<String>) -> Arc<Self> {
