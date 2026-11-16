@@ -484,14 +484,14 @@ function TasksPage() {
       for (const deletedId of res.deleted_ids ?? [id]) removeTask(deletedId)
       setSelectedTaskId(null)
       if (purge) {
-        await archived.refresh()
+        await deleted.refresh()
         return
       }
       toastUndo(
         t('undo_task_archived'),
         async () => {
           upsertTask(await restoreTaskClient(id))
-          await archived.refresh()
+          await deleted.refresh()
         },
         t('restored_task'),
         'undo.task_archived',
@@ -771,7 +771,7 @@ function TasksPage() {
         ))}
       </select>
       {statusTab !== 'archived' && statusTab !== 'deleted' && (
-        <ArchiveSweep scope={sweepScope} scopeLabel={sweepLabel} onArchived={handleSweep} onError={setNotice} />
+        <ArchiveSweep scope={sweepScope} label={sweepLabel} onArchived={handleSweep} onError={setNotice} />
       )}
     </div>
   )

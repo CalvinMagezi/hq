@@ -1,21 +1,20 @@
 import { useEffect, useState } from 'react'
 import { Archive, Loader2 } from 'lucide-react'
 import { shelveCompletedClient, type SweepScope } from '~/lib/tasksApi'
+import { t, tn } from '~/strings'
 import { DEFAULT_SWEEP_DAYS, SWEEP_AGE_OPTIONS } from './shelf'
-
-// A floating panel needs a solid fill: the frosted one lets the cards behind it show through.
-const SOLID = { background: 'var(--bg-solid-elevated)' }
+import './tasks.css'
 
 interface Props {
   scope: SweepScope
   /** Where the sweep reaches, in words: a list, a space, or all lists. */
   label: string
   /** Called with the ids archived, so the page can offer to undo. */
-  onArchived: (ids: string[]) => Promise<void>
+  onArchived: (ids: string[]) => unknown
   onError: (message: string) => void
 }
 
-const errorText = (e: unknown) => (e instanceof Error ? e.message : 'Could not archive')
+const errorText = (e: unknown) => (e instanceof Error ? e.message : t('tasks_sweep_error'))
 
 /**
  * Archives completed tasks older than a chosen age in one step. It counts first and archives
@@ -59,65 +58,55 @@ export function ArchiveSweep({ scope, label, onArchived, onError }: Props) {
   }
 
   return (
-    <div className="relative shrink-0">
+    <div className="tk-menu-at">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Hide old completed tasks from the lists"
-        className="px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 hq-field text-neutral-300 hover:text-white transition-all"
+        title={t('tasks_sweep_hint')}
+        className="a-btn compact quiet"
       >
-        <Archive className="w-3.5 h-3.5 shrink-0" />
-        Tidy up
+        <Archive className="a-ic xs" aria-hidden="true" />
+        {t('tasks_sweep_button')}
       </button>
       {open && (
-        <>
-          <button type="button" aria-label="Close" className="fixed inset-0 z-30 cursor-default" onClick={() => setOpen(false)} />
-          <div
-            role="dialog"
-            aria-label="Archive old completed tasks"
-            style={SOLID}
-            className="absolute left-0 top-full mt-2 z-40 w-72 max-w-[calc(100vw-2rem)] p-3 rounded-xl hq-modal flex flex-col gap-3"
+        <div role="dialog" aria-label={t('tasks_sweep_dialog')} className="a-menu tk-pop a-pad tk-stack">
+          <p className="a-body-sm">{t('tasks_sweep_prompt', { label })}</p>
+          <select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            aria-label={t('tasks_sweep_days_label')}
+            className="a-input"
           >
-            <p className="text-xs text-neutral-300">
-              Archive completed tasks in <span className="font-semibold text-white">{label}</span> that finished more than
-            </p>
-            <select
-              value={days}
-              onChange={(e) => setDays(Number(e.target.value))}
-              aria-label="Age in days"
-              className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
+            {SWEEP_AGE_OPTIONS.map((d) => (
+              <option key={d} value={d}>
+                {t('tasks_sweep_days_option', { n: d })}
+              </option>
+            ))}
+          </select>
+          <p className="a-body-sm a-muted" aria-live="polite">
+            {matched === null
+              ? t('tasks_sweep_counting')
+              : matched === 0
+                ? t('tasks_sweep_empty')
+                : tn('tasks_sweep_count', matched)}
+          </p>
+          <div className="tk-add">
+            <button type="button" onClick={() => setOpen(false)} className="a-btn compact quiet">
+              {t('dl_btn_cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={run}
+              disabled={running || matched === null || matched === 0}
+              className="a-btn compact secondary"
             >
-              {SWEEP_AGE_OPTIONS.map((d) => (
-                <option key={d} value={d}>
-                  {d} days ago
-                </option>
-              ))}
-            </select>
-            <p className="text-[11px] text-neutral-500" aria-live="polite">
-              {matched === null
-                ? 'Counting...'
-                : matched === 0
-                  ? 'Nothing to archive.'
-                  : `${matched} task${matched === 1 ? '' : 's'} will leave the lists. Agents still see them, and you can undo this.`}
-            </p>
-            <div className="flex items-center justify-end gap-2">
-              <button type="button" onClick={() => setOpen(false)} className="px-3 py-1.5 rounded-lg text-xs text-neutral-400 hover:text-neutral-200">
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={run}
-                disabled={running || matched === null || matched === 0}
-                className="hq-btn-ghost disabled:opacity-40 disabled:pointer-events-none"
-              >
-                {running && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                Archive
-              </button>
-            </div>
+              {running && <Loader2 className="a-ic xs" aria-hidden="true" />}
+              {t('tasks_archive_action')}
+            </button>
           </div>
-        </>
+        </div>
       )}
     </div>
   )

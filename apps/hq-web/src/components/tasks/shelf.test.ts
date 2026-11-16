@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test'
+import { dependentsOf, doneQuestion } from '~/lib/doneAsk'
+import { matchTasks } from '~/lib/search'
 import type { Initiative, TaskItem } from '~/lib/tasksApi'
 import { isShelved, shelveNotice, withoutShelved } from './shelf'
 
@@ -47,4 +49,21 @@ test('the notice says what changed and names what was left alone', () => {
   ).toBe('Nothing archived. Left alone: X alice is working on it.')
   const many = Array.from({ length: 5 }, (_, i) => ({ task: `t${i}`, reason: 'already archived' }))
   expect(shelveNotice({ changed: ['a'], skipped: many }, 'Archived', name)).toContain('and 2 more')
+})
+
+test('shelved tasks stay visible to done-question dependents and global search', () => {
+  const lists = byId([list('l1')])
+  const a = task('a', { title: 'Blocker task', status: 'in_progress', depends_on: [], tags: [] })
+  const b = task('b', {
+    title: 'Archived dependent',
+    status: 'to_do',
+    depends_on: ['a'],
+    tags: [],
+    shelved_at: '2026-10-01 00:00:00',
+  })
+  const all = [a, b]
+  expect(withoutShelved(all, lists).map((t) => t.id)).toEqual(['a'])
+  expect(dependentsOf(a, all).map((t) => t.id)).toEqual(['b'])
+  expect(doneQuestion(a, { status: 'complete' }, all, false)).toBe('dependents')
+  expect(matchTasks(all, 'Archived dependent').map((t) => t.id)).toEqual(['b'])
 })

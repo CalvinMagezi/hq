@@ -37,8 +37,8 @@ interface Props {
   /** Brings a deleted task back. */
   onRestore?: (id: string) => Promise<void>
   /** Hides the task from the lists, or shows it again. Agents are not affected either way. */
-  onArchive?: (task: TaskItem) => Promise<void>
-  onUnarchive?: (task: TaskItem) => Promise<void>
+  onArchive?: (task: TaskItem) => unknown
+  onUnarchive?: (task: TaskItem) => unknown
   /** Set when the task has no stamp of its own but its list or parent is archived, which hides it all the same. */
   hiddenBy?: HiddenBy
   /** Deletes the task; `purge` deletes a deleted one for good. */
@@ -99,7 +99,7 @@ export function TaskDetailMain({
   const stale = useIsStale(task?.id ?? '')
 
   if (!task) return null
-  const removed = task.archived_at !== null
+  const archived = task.archived_at !== null
   const shelved = task.shelved_at !== null
 
   const handleSaveEdit = async () => {
@@ -155,7 +155,7 @@ export function TaskDetailMain({
             </button>
           </>
         ) : (
-          !removed && (
+          !archived && (
             <button type="button" onClick={() => setEditing(true)} className="a-ib" aria-label={t('note_editor_edit')}>
               <Pencil className="a-ic" aria-hidden="true" />
             </button>
@@ -167,17 +167,17 @@ export function TaskDetailMain({
           </button>
           {menuOpen && (
             <div role="menu" className="a-menu tk-pop">
-              {!removed && !shelved && onArchive && (
+              {!archived && !shelved && onArchive && (
                 <button type="button" role="menuitem" className="a-menu-item" disabled={busy} onClick={() => { setMenuOpen(false); void onArchive(task) }}>
                   {t('tasks_archive_action')}
                 </button>
               )}
-              {!removed && (
+              {!archived && (
                 <button type="button" role="menuitem" className="a-menu-item" disabled={busy} onClick={handleDeleteClick}>
                   {t('tasks_delete_action')}
                 </button>
               )}
-              {removed && (
+              {archived && (
                 <button type="button" role="menuitem" className="a-menu-item danger" disabled={busy} onClick={() => { setMenuOpen(false); setConfirmingDelete(true) }}>
                   {t('delete_task_act')}
                 </button>
@@ -211,7 +211,7 @@ export function TaskDetailMain({
 
       <div className="tk-body">
         <div className="tk-stack a-pad">
-          {shelved && !removed && (
+          {shelved && !archived && (
             <div className="a-stale" role="status">
               <span>{t('tasks_shelved_notice', { when: formatLocalTime(task.shelved_at ?? '') })}</span>
               {onUnarchive && (
@@ -222,7 +222,7 @@ export function TaskDetailMain({
             </div>
           )}
 
-          {hiddenBy && !shelved && !removed && (
+          {hiddenBy && !shelved && !archived && (
             <div className="a-stale" role="status">
               <span>{t('tasks_hidden_by_notice', { kind: hiddenBy.kind, name: hiddenBy.name })}</span>
               <button type="button" onClick={hiddenBy.onUnarchive} disabled={busy} className="a-btn compact secondary">
@@ -231,7 +231,7 @@ export function TaskDetailMain({
             </div>
           )}
 
-          {removed && (
+          {archived && (
             <div className="a-stale" role="status">
               <span>{t('tasks_archived_notice', { when: formatLocalTime(task.archived_at ?? '') })}</span>
               {onRestore && (
@@ -272,7 +272,7 @@ export function TaskDetailMain({
                 key={status}
                 type="button"
                 aria-pressed={status === task.status}
-                disabled={busy || removed || status === task.status}
+                disabled={busy || archived || status === task.status}
                 onClick={() => onUpdate(task.id, { status, expected_status: task.status })}
                 className="a-chip"
               >
@@ -365,7 +365,7 @@ export function TaskDetailMain({
           <TaskDecisions key={`decisions-${task.id}`} taskId={task.id} />
           <TaskCheckpoint key={`checkpoint-${task.id}`} task={task} />
           <TaskTime key={`time-${task.id}`} task={task} />
-          <TaskSessions key={`sessions-${task.id}`} taskId={task.id} taskTitle={task.title} done={removed || task.status === 'complete'} />
+          <TaskSessions key={`sessions-${task.id}`} taskId={task.id} taskTitle={task.title} done={archived || task.status === 'complete'} />
           <TaskComments key={`comments-${task.id}`} taskId={task.id} />
         </div>
       </div>

@@ -1039,7 +1039,7 @@ pub(crate) async fn shelve_completed_handler(
     State(state): State<Arc<WsState>>,
     Json(body): Json<ShelveCompletedBody>,
 ) -> Response {
-    let scope = t::SweepScope {
+    let scope = t::ShelfSweepScope {
         space_id: body.space_id.filter(|s| !s.is_empty()),
         initiative_id: body.initiative_id.filter(|s| !s.is_empty()),
     };

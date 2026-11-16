@@ -41,7 +41,8 @@ export function useTasksData() {
     }
   }, [setSpaces, setFolders, setInitiatives])
 
-  // Archived lists stay in the store (their name still labels their tasks); archived tasks never load.
+  // Archived lists and tasks stay in the store so search, the Active badge, dependents and
+  // dependency arrows still see them; the visible lists filter them out with withoutShelved.
   const loadInitiatives = useCallback(async () => {
     try {
       setInitiatives((await fetchInitiativesClient()).initiatives)
@@ -53,7 +54,7 @@ export function useTasksData() {
   const loadTasks = useCallback(async () => {
     setIsRefreshing(true)
     try {
-      const res = await fetchTasksClient({ shelf: 'exclude' })
+      const res = await fetchTasksClient()
       setTasks(res.tasks)
     } catch (e) {
       console.error('Failed to load tasks:', e)

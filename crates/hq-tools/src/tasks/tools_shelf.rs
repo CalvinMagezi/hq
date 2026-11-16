@@ -166,7 +166,7 @@ impl HqTool for TaskShelveCompletedTool {
             .and_then(|n| u32::try_from(n).ok())
             .ok_or_else(|| anyhow::anyhow!("older_than_days is required"))?;
         let dry_run = args.get("dry_run").and_then(Value::as_bool).unwrap_or(true);
-        let scope = t::SweepScope {
+        let scope = t::ShelfSweepScope {
             space_id: Some(arg_str(&args, "space_id")).filter(|s| !s.is_empty()),
             initiative_id: Some(arg_str(&args, "initiative_id")).filter(|s| !s.is_empty()),
         };

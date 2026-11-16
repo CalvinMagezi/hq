@@ -49,7 +49,7 @@ pub struct ShelveOutcome {
 
 /// Which tasks a sweep may touch.
 #[derive(Debug, Clone, Default)]
-pub struct SweepScope {
+pub struct ShelfSweepScope {
     pub space_id: Option<String>,
     pub initiative_id: Option<String>,
 }
@@ -260,7 +260,7 @@ const SWEEP_WHERE: &str = "t.status = 'complete' AND t.archived_at IS NULL AND t
 pub fn shelve_completed(
     conn: &Connection,
     older_than_days: u32,
-    scope: &SweepScope,
+    scope: &ShelfSweepScope,
     dry_run: bool,
 ) -> Result<SweepOutcome> {
     if !(1..=MAX_SHELVE_AGE_DAYS).contains(&older_than_days) {

@@ -2,10 +2,11 @@ use anyhow::Result;
 use hq_core::config::HqConfig;
 use hq_core::types::{ValueItem, ValueKind};
 use hq_db::Database;
-use hq_db::tasks::{SweepScope, get_task, shelve_completed};
+use hq_db::tasks::{ShelfSweepScope, get_task, shelve_completed};
 use tracing::info;
 
-/// Source name of the notice. Listed in `WEB_ONLY_SOURCES`: task housekeeping stays in the web app.
+/// Source name of the notice. Posted as a `ValueKind::Fyi` item in the owner's inbox
+/// (web push skips `Fyi` unless `push_all` is on). Deliberately not in `DEVICE_ONLY_SOURCES`.
 pub const AUTO_ARCHIVE_SOURCE: &str = "task_auto_archive";
 /// Tasks named in one notice; the count still covers all of them.
 const MAX_LISTED: usize = 10;
@@ -40,7 +41,8 @@ pub async fn run_task_auto_archive(db: &Database, config: &HqConfig) -> Result<(
     let Some(days) = config.tasks.auto_archive_days() else {
         return Ok(());
     };
-    let outcome = db.with_conn(|c| shelve_completed(c, days, &SweepScope::default(), false))?;
+    let outcome =
+        db.with_conn(|c| shelve_completed(c, days, &ShelfSweepScope::default(), false))?;
     if outcome.changed.is_empty() {
         return Ok(());
     }
@@ -245,7 +247,10 @@ mod tests {
         assert!(hq_core::config::MAX_AUTO_ARCHIVE_DAYS <= hq_db::tasks::MAX_SHELVE_AGE_DAYS);
 
     #[test]
-    fn the_notice_stays_in_the_web_app() {
-        assert!(hq_daemon::value_bus::WEB_ONLY_SOURCES.contains(&AUTO_ARCHIVE_SOURCE));
+    fn the_notice_is_fyi_and_not_device_only() {
+        let item = notice_item(&[("TK-1".into(), "Done".into())], 1, 30, "2026-10-19");
+        assert_eq!(item.kind, ValueKind::Fyi);
+        assert!(!hq_core::types::DEVICE_ONLY_SOURCES.contains(&AUTO_ARCHIVE_SOURCE));
+        assert!(!item.is_device_only());
     }
 }

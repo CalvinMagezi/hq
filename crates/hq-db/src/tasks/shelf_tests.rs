@@ -128,6 +128,7 @@ fn a_shelved_task_stays_valid_for_the_queue_the_dependencies_and_the_links() {
         initiative_id: None,
         tag: None,
         no_code_work: false,
+        resume_after_secs: None,
     };
     let next = db.with_conn(|c| next_task(c, &query)).unwrap();
     assert_eq!(next.map(|t| t.id), Some("waiting".to_string()));
@@ -297,7 +298,7 @@ fn the_sweep_shelves_only_old_finished_work_and_can_be_undone() {
     complete(&db, "kid", 90);
     complete(&db, "open_child", 90);
 
-    let scope = SweepScope::default();
+    let scope = ShelfSweepScope::default();
     let dry = db
         .with_conn(|c| shelve_completed(c, 30, &scope, true))
         .unwrap();
@@ -336,7 +337,7 @@ fn the_sweep_respects_its_scope_and_age_limits() {
     complete(&db, "a", 90);
     complete(&db, "b", 90);
 
-    let scope = SweepScope {
+    let scope = ShelfSweepScope {
         initiative_id: Some("in-2".to_string()),
         ..Default::default()
     };
@@ -345,7 +346,7 @@ fn the_sweep_respects_its_scope_and_age_limits() {
         .unwrap();
     assert_eq!(out.changed, vec!["b"]);
     assert!(
-        db.with_conn(|c| shelve_completed(c, 0, &SweepScope::default(), true))
+        db.with_conn(|c| shelve_completed(c, 0, &ShelfSweepScope::default(), true))
             .is_err()
     );
 }
@@ -494,7 +495,7 @@ fn the_sweep_leaves_a_task_an_agent_holds_and_honours_a_space_scope() {
         .unwrap();
     // open_for_session surfaces; the sweep is what is under test, so nothing is shelved yet.
 
-    let scope = SweepScope {
+    let scope = ShelfSweepScope {
         space_id: Some("personal".to_string()),
         ..Default::default()
     };

@@ -467,15 +467,16 @@ a removed task; the web labels the first Archived and the second Deleted.
 - **Scheduled sweep (opt in).** `tasks.auto_archive_after_days` (default absent, 0 is off) makes
   the daemon task `task-auto-archive` run `shelve_completed` once a day over every list. Values
   are clamped to 7 to 3650 days, so a typo of 1 cannot hide last week's work. It touches only what
-  the manual sweep touches, and posts one web-only inbox item (`task_auto_archive`, deduplicated per
-  day, silent when nothing was archived) with the count, the first ten tasks and how to undo.
+  the manual sweep touches, and posts one `Fyi` inbox item (`task_auto_archive`, deduplicated per
+  day, silent when nothing was archived; web push skips `Fyi` unless `push_all` is on, so it
+  appears in the owner's inbox) with the count, the first ten tasks and how to undo.
 - **Surfaces.** MCP: `task_shelve`, `task_unshelve`, `task_shelve_completed`, `initiative_shelve`;
   a launched agent may shelve its own tasks only. REST: `POST /api/tasks/shelve`, `.../unshelve`,
   `.../shelve-completed`, `POST /api/initiatives/{id}/shelf`, plus `GET /api/tasks/{id}` and
   `GET /api/tasks/{id}/related` so a link or a relation to an archived task still opens. The task
   watcher fingerprints the stamps, so other open pages refresh.
 
-Rollback of 095, then delete the `095_task_shelf` row from `schema_version` (SQLite 3.35+):
+Rollback of 136, then delete the `136_task_shelf` row from `schema_version` (SQLite 3.35+):
 
 ```sql
 DROP INDEX IF EXISTS idx_tasks_shelved;
