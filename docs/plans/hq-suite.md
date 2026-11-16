@@ -134,21 +134,21 @@ M0, then made a hard CI limit.
   routes (`crates/hq-web/src/suite_api.rs`, logic in `hq-suite-adapter::api`). The Android reader
   gets one bar for a note made from an office file (`ui/notes/SuiteBar.kt`): make it smaller,
   agree or not, undo. No new screen, tab or Activity (section 12 of the scope note).
+- 2026-11-17: pictures a note links from the media store are drawn in the Android reader
+  (`/api/suite/media`, `ui/chat/blocks/VaultImage.kt`; chat still blocks them), the `office_file`
+  chat tool exists (`confirm` asks the owner, `docs/security/OWNER_APPROVAL.md`), and CI checks
+  the size budget on pull requests that touch the suite (`.github/workflows/suite-size.yml`).
 
 ## Next
 
-1. **Reference phone, real shrink.** Run the bar on the Galaxy A32 against a real shrink and
-   record the savings. The side-by-side test build (`-Phq.appId=...`) is how.
-2. **CI.** Wire `scripts/check-suite-size.sh` into CI, path-filtered to `crates/suite/**`.
-3. **`office_*` tools and owner approval.** Chat can not yet shrink a file. Register the tools in
-   `hq-tools`, classify shrink and trash purge in `docs/security/OWNER_APPROVAL.md`, and add them
-   to the capability catalog.
-4. **Cold sinks (M3).** The original can only go to the vault's trash today.
-5. **Web screens** for the same bar (milestone M2), and the Android fixtures for the bar's states.
-6. **Adoption beyond the neighbour.** A note an import placed under another name, or in
+1. **Cold sinks (M3).** The original can only go to the vault's trash today.
+2. **Web screens** for the same bar (milestone M2), and Android fixtures for the bar's states.
+3. **Adoption beyond the neighbour.** A note an import placed under another name, or in
    `Notebooks/Imports/<month>/` for a file outside `Notebooks/`, is not adopted: the lookup is
    the note beside the file. An index lookup by `source_sha256` would close that.
-7. PNG sources that are photographs stay lossless and often do not shrink; measure and decide.
+4. **Capability catalog.** `office_file` is not yet in `crates/hq-tools/assets/capabilities.yaml`,
+   so the empty chat does not offer "make a document smaller".
+5. PNG sources that are photographs stay lossless and often do not shrink; measure and decide.
 
 Then M2 (Docs, the importer mapping that puts pictures where they sat, docx and pdf render, the
 regenerate check, the editor spike on WebView 111).
