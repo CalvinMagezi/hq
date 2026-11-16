@@ -4032,6 +4032,14 @@ sessions_drive_failed: "Couldn't change that, try again."
 sessions_unwatch_failed: "Couldn't stop watching. Try again."
 sessions_load_failed: "Couldn't load the agents, try again."
 
+# The HQ Suite bar in the note reader: make the original file smaller, agree, say no, undo
+suite_bar_make_smaller: "Make it smaller"
+suite_bar_move: "Move the original to the trash"
+suite_bar_not_now: "Not now"
+suite_bar_undo: "Undo"
+suite_bar_working: "Working on it…"
+suite_bar_failed: "Couldn't do that, try again."
+
 # Chat problem bar, send states, follow-up chips and title menu (W3b)
 chat_problem_offline: "You're offline. Unsent messages show Not sent with Try again."
 chat_problem_signed_out: "Signed out of your server HQ."

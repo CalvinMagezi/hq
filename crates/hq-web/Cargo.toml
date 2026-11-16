@@ -3,7 +3,13 @@ name = "hq-web"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+# The HQ Suite's REST routes (`/api/suite/*`), over `hq-suite-adapter`.
+suite = ["dep:hq-suite-adapter"]
+
 [dependencies]
+hq-suite-adapter = { workspace = true, optional = true }
 axum = { workspace = true }
 tower-http = { workspace = true }
 tokio = { workspace = true }

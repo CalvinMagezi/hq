@@ -44,6 +44,8 @@ mod sessions_api;
 mod settings_api;
 mod setup_api;
 mod subagent_followup;
+#[cfg(feature = "suite")]
+mod suite_api;
 mod tasks_api;
 mod tasks_watch;
 mod threads_api;
@@ -310,6 +312,14 @@ pub(crate) const CHANGE_SETTINGS: &str = "settings";
 pub(crate) const SETTINGS_CHANGE_SOURCE: &str = "settings-change";
 
 /// Create the web router — vault-focused endpoints only.
+/// The HQ Suite's routes, or none in a build without the `suite` feature.
+fn suite_routes() -> Router<Arc<WsState>> {
+    #[cfg(feature = "suite")]
+    return suite_api::routes();
+    #[cfg(not(feature = "suite"))]
+    return Router::new();
+}
+
 pub fn create_router(state: Arc<WsState>) -> Router {
     state.load_configured_state();
     let static_dir = state
@@ -415,6 +425,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/capabilities",
             get(capabilities_api::capabilities_handler),
         )
+        .merge(suite_routes())
         .route("/api/adoption", get(adoption_api::adoption_handler))
         .route("/api/offers/replay", get(adoption_api::replay_handler))
         .route("/api/offers/answer", post(offers_api::answer_handler))

@@ -19,7 +19,7 @@ tunnel = ["dep:hq-tunnel", "dep:libc", "dep:zeroize"]
 # only: the dependencies are not pulled on Windows, where the commands are compiled out.
 bridge = ["dep:hq-bridge", "hq-edge/invite"]
 # `hq suite`: the HQ Suite (docs/suite/README.md). Needs a C compiler for libwebp.
-suite = ["dep:hq-suite-adapter"]
+suite = ["dep:hq-suite-adapter", "hq-web/suite"]
 
 [dependencies]
 hq-core = { workspace = true }

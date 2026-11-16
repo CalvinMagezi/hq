@@ -103,7 +103,7 @@ pub fn vault_relative(vault: &Path, file: &Path) -> Result<String> {
     Ok(text.trim_start_matches("./").to_string())
 }
 
-fn today() -> String {
+pub(crate) fn today() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
@@ -129,7 +129,7 @@ fn explain(r: &Refusal) -> String {
     }
 }
 
-fn friendly(e: ShrinkError) -> anyhow::Error {
+pub(crate) fn friendly(e: ShrinkError) -> anyhow::Error {
     match e {
         ShrinkError::Refused(r) => anyhow::anyhow!("Not shrunk. {}", explain(&r)),
         ShrinkError::SourceChanged => anyhow::anyhow!(
@@ -139,7 +139,7 @@ fn friendly(e: ShrinkError) -> anyhow::Error {
     }
 }
 
-fn shrinker<'a>(paths: &SuitePaths, notes: &'a VaultNotes) -> Shrinker<'a> {
+pub(crate) fn shrinker<'a>(paths: &SuitePaths, notes: &'a VaultNotes) -> Shrinker<'a> {
     Shrinker::new(paths.clone(), notes, &NoFaults, Options::default())
 }
 

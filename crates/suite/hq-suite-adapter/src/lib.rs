@@ -6,6 +6,7 @@
 //! `hq suite measure` command. Every other suite crate stays free of HQ so the suite can be
 //! lifted out; `tests/boundary.rs` keeps it that way.
 
+pub mod api;
 pub mod governor;
 pub mod measure;
 pub mod shrink;

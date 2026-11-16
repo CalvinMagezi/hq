@@ -202,6 +202,7 @@ private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions, onAsk: 
             IconAction(HqIcons.MoreVertical, stringResource(R.string.tasks_more), iconSize = 24.dp) { actions.onMenu(true) }
         }
         if (VaultRules.markOf(note.review) == ReviewMark.Changed) ChangedBar(actions.onKeep)
+        suiteSourceOf(note.body)?.let { SuiteBar(it, actions.onNotice) }
         ReaderHeader(note, onAsk)
         // Lazy, so a long note opens by drawing the screenful in view, not every block of it.
         SelectionContainer(Modifier.weight(1f)) { NoteBody(note.path, blocks, handlers, note.truncated, actions) }

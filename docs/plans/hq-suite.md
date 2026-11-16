@@ -116,40 +116,39 @@ M0, then made a hard CI limit.
 - M0 started: workspace folder, `hq-suite-md` (parser, printer, validator, patch API, golden
   corpus), the hqmd spec, the extraction rules and the test that enforces them.
 - `hq suite measure` built: numbers-only report, candidate encoders behind `suite-candidates`
-  (pure-Rust lossy WebP, libwebp, AVIF compile and round-trip). Not yet run on real files.
+  (pure-Rust lossy WebP, libwebp, AVIF compile and round-trip).
 - M1 storage layer built: `hq-suite-store` (atomic files, media by hash, trash in the vault's
   layout, the shrink journal) and the shrink pipeline in `hq-suite-shrink` with a crash matrix
   that injects a failure at every recorded step. `hq suite shrink | confirm | abandon | undo |
   jobs | recover` work against a real vault. See `docs/suite/SHRINK.md`.
+- 2026-11-16, M0 measured and closed. Four real folders (1,098 files) on a laptop and a 162 MB
+  sample on the Galaxy A32. **Encoder: lossy WebP through libwebp at quality 80.** At matched
+  quality it is 17% smaller than JPEG 75, 2.5x faster than pure-Rust WebP, and AVIF costs seconds
+  per picture on the phone and cannot be read back to verify. The losing crates are gone. The
+  measuring tool had scored transparent pictures against the wrong background; fixed and tested.
+  Numbers: `docs/suite/MEASURE.md`. Size budget: the suite adds 0.6 MB on the laptop build and
+  0.65 MB on `aarch64-linux-android`, against 6 MiB.
+- 2026-11-16, M1 finished in Rust: the storage governor (`hq-suite-governor`, `suite:` config,
+  daemon task `suite-governor`, `hq suite storage [--tidy]`), shrink adopts the note an import
+  already made (with its crash matrix), `vault_import` skips `_media/cas`, and the `/api/suite/*`
+  routes (`crates/hq-web/src/suite_api.rs`, logic in `hq-suite-adapter::api`). The Android reader
+  gets one bar for a note made from an office file (`ui/notes/SuiteBar.kt`): make it smaller,
+  agree or not, undo. No new screen, tab or Activity (section 12 of the scope note).
 
 ## Next
 
-Needs a machine with real files, a phone, or the owner's tools (the cloud session that built the
-above had none of them):
-
-1. **Measure real files.** Run `hq suite measure` on the owner's own folders, then 20 to 30 pilot
-   sets with consent, built with `--features suite-candidates`. Fill the table in
-   `docs/suite/MEASURE.md`. Decide the encoder (replace `ImagePolicy::default()` in
-   `hq-suite-shrink/src/pipeline.rs`), then drop the encoder crates that lost from
-   `hq-suite-shrink/Cargo.toml`.
-2. **Reference phone.** Run measure and a real shrink on the Galaxy A32 through the app's `hq`.
-   Record encode time and peak memory as an evidence note beside the earlier spikes.
-3. **Size budget.** Run `scripts/check-suite-size.sh` (and with `aarch64-linux-android`), record the
-   number here, then wire it into CI path-filtered to `crates/suite/**`.
-4. **File the tasks** under an "HQ Suite" initiative from the items below.
-5. **Governor (rest of M1).** `suite:` config section in `hq-core` (budget, `governor: false`
-   switch) read by the adapter; the storage report in plain words; eviction order (`Exports/`
-   and previews, thumbnails and stats, cold originals past their window, then ask); the
-   `suite-governor` daemon task with the mobile profile's cadence; reconciling notes whose original
-   left the trash to `suite_original_state: gone`; collecting media nobody links to
-   (`Cas::unreferenced` after a full scan of every note).
-6. **Adopt existing notes.** A file already imported by `hq vault import` has a note carrying
-   `source_sha256`. Shrink should add the pictures and suite keys to that note instead of writing a
-   second one (also fixes the second note after an undo).
-7. **Vault and search.** Make `vault_inventory` skip `_media/cas/`; check how the watcher and index
-   treat non-markdown files there (open question 9). Add the `office_*` tools and the owner-approval
-   classification for shrink and trash purge (`docs/security/OWNER_APPROVAL.md`).
-8. **Web screens and device actions** for Drive (milestone M2 and M3).
+1. **Reference phone, real shrink.** Run the bar on the Galaxy A32 against a real shrink and
+   record the savings. The side-by-side test build (`-Phq.appId=...`) is how.
+2. **CI.** Wire `scripts/check-suite-size.sh` into CI, path-filtered to `crates/suite/**`.
+3. **`office_*` tools and owner approval.** Chat can not yet shrink a file. Register the tools in
+   `hq-tools`, classify shrink and trash purge in `docs/security/OWNER_APPROVAL.md`, and add them
+   to the capability catalog.
+4. **Cold sinks (M3).** The original can only go to the vault's trash today.
+5. **Web screens** for the same bar (milestone M2), and the Android fixtures for the bar's states.
+6. **Adoption beyond the neighbour.** A note an import placed under another name, or in
+   `Notebooks/Imports/<month>/` for a file outside `Notebooks/`, is not adopted: the lookup is
+   the note beside the file. An index lookup by `source_sha256` would close that.
+7. PNG sources that are photographs stay lossless and often do not shrink; measure and decide.
 
 Then M2 (Docs, the importer mapping that puts pictures where they sat, docx and pdf render, the
 regenerate check, the editor spike on WebView 111).
