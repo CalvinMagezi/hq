@@ -37,6 +37,9 @@ use crate::registry::HqTool;
 /// Where chat uploads and downloaded attachments land. Their files are referenced by
 /// conversations and kept as the owner's originals, so this tool never moves them.
 const MEDIA_DIR: &str = "_media";
+/// The HQ Suite's pictures, stored by hash for the notes that link them. They are the suite's own
+/// output, not sources: importing them would turn each into a second note.
+const SUITE_MEDIA_DIR: &str = "_media/cas";
 /// Where originals go when `archive_originals` is set.
 const ARCHIVE_DIR: &str = "_archive/originals";
 const KEEP_EXPORT_DIR: &str = "Keep";
@@ -151,7 +154,10 @@ fn walk_files(
                 format!("{rel_dir}/{name}")
             };
             if meta.is_dir() {
-                if depth < MAX_DEPTH && !skip_dir(&name, rel_dir.is_empty()) {
+                if depth < MAX_DEPTH
+                    && !skip_dir(&name, rel_dir.is_empty())
+                    && rel != SUITE_MEDIA_DIR
+                {
                     stack.push((entry.path(), rel, depth + 1));
                 }
             } else if meta.is_file() {
@@ -1293,6 +1299,16 @@ mod tests {
         let p = dir.path().join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, bytes).unwrap();
+    }
+
+    #[test]
+    fn the_suites_stored_pictures_are_not_import_candidates() {
+        let dir = tempfile::tempdir().unwrap();
+        put(&dir, "_media/cas/ab/abcdef.png", b"not really a png");
+        put(&dir, "_media/web/upload.png", b"not really a png");
+        let (files, _, _) = find_candidates(dir.path(), "");
+        let names: Vec<_> = files.iter().map(|f| f.rel.as_str()).collect();
+        assert_eq!(names, vec!["_media/web/upload.png"]);
     }
 
     async fn run(importer: &Arc<Importer>, args: Value) -> Value {
