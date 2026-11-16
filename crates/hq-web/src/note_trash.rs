@@ -588,6 +588,7 @@ mod tests {
         assert_eq!(by("Notebooks/Inbox/b.md"), "hq");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn empty_reports_what_it_could_not_remove() {
         use std::os::unix::fs::PermissionsExt;
@@ -648,6 +649,7 @@ mod tests {
         assert_eq!(seen, 1);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_link_planted_in_the_trash_is_not_followed_by_a_purge() {
         let (vault, app) = vault_with_note();

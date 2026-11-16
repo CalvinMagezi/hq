@@ -1095,6 +1095,7 @@ mod tests {
         fx.db.with_conn(|c| hq_db::note_keep::get(c, rel)).unwrap()
     }
 
+    #[cfg(unix)]
     #[test]
     fn before_write_keeps_only_a_real_note_inside_the_vault() {
         let fx = Fixture::new();
@@ -1135,6 +1136,7 @@ mod tests {
         assert!(kept(&fx, "Notebooks/own.md").is_none());
     }
 
+    #[cfg(unix)]
     #[test]
     fn before_write_never_opens_a_fifo_or_reads_past_the_cap() {
         let fx = Fixture::new();
