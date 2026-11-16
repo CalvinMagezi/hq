@@ -360,3 +360,22 @@ fn remote_reads_run_and_remote_writes_ask() {
     assert!(asks("bare"));
     assert!(asks("unlisted"));
 }
+
+#[test]
+fn moving_an_office_original_asks_and_the_other_office_actions_do_not() {
+    for action in ["status", "shrink", "abandon", "undo"] {
+        assert!(
+            !needs_owner("office_file", "office", &json!({ "action": action })),
+            "{action}"
+        );
+    }
+    assert!(needs_owner(
+        "office_file",
+        "office",
+        &json!({ "action": "confirm" })
+    ));
+    assert!(
+        needs_owner("office_file", "office", &json!({})),
+        "a call with no action asks"
+    );
+}

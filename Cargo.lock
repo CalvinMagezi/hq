@@ -3936,6 +3936,7 @@ dependencies = [
  "hq-host",
  "hq-llm",
  "hq-memory",
+ "hq-suite-adapter",
  "hq-vault",
  "html2text",
  "libc",

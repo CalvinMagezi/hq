@@ -46,6 +46,7 @@ object ToolWords {
         all(R.string.step_note_moved, "vault_move")
         all(R.string.step_note_deleted, "vault_delete")
         all(R.string.step_notes_imported, "vault_import")
+        all(R.string.step_office_file, "office_file")
         all(R.string.step_document_made, "vault_export", "vault_export_pdf", "convert_from_markdown")
         all(R.string.step_document_read, "convert_to_markdown")
         all(R.string.step_picture_read, "ocr_extract_text")

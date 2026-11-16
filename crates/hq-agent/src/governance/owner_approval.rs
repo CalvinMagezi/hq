@@ -81,6 +81,13 @@ pub fn needs_owner(tool: &str, category: &str, args: &Value) -> bool {
             .unwrap_or_default();
         return !hq_tools::github::coder::READ_ACTIONS.contains(&action);
     }
+    if tool == hq_tools::office::OFFICE_TOOL {
+        let action = args
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        return hq_tools::office::moves_original(action);
+    }
     if EXPORT_TOOLS.contains(&tool) {
         return args
             .get(EXPORT_PATH_ARG)

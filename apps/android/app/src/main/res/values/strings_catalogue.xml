@@ -1804,6 +1804,7 @@
     <string name="step_notes_looked">Looked through your Vault</string>
     <string name="step_notes_worked">Worked with your Vault</string>
     <string name="step_notes_imported">Added files to your Vault</string>
+    <string name="step_office_file">Making a document smaller</string>
     <string name="step_document_made">Made a document</string>
     <string name="step_document_read">Read a document</string>
     <string name="step_picture_read">Read the text in a picture</string>

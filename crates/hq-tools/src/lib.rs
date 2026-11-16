@@ -41,6 +41,7 @@ pub mod imagegen;
 pub mod link_capture;
 pub mod model_control;
 pub mod notify;
+pub mod office;
 pub mod prose_lint;
 pub mod provenance;
 pub mod registry;
