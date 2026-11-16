@@ -73,6 +73,8 @@ class NotesActions(
     /** The note page being left reports how far it was scrolled (first visible item, offset), so Back can return to the same place. */
     val onScrolled: (String, Int, Int) -> Unit = { _, _, _ -> },
     val scrollOf: (String) -> Pair<Int, Int>? = { null },
+    /** Reads the open note again, for when something outside the editor changed it (the suite's bar). */
+    val onReload: () -> Unit = {},
 )
 
 class NotesViewModel(app: Application) : AndroidViewModel(app) {
@@ -106,6 +108,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         onDelete = ::deleteNote, onOpenTrash = ::openTrash, onToggleTrashed = ::toggleTrashed, onRestore = ::restoreTrashed, onUndoDelete = ::undo, onUndoExpire = { _state.update(VaultReducer::expired) }, onPoll = ::pollSignals,
         onKeep = ::keepChange, onMoreFolders = { open -> _state.update { it.copy(foldersOpen = open) } }, onNewSheet = { open -> _state.update { it.copy(newOpen = open) } }, onPasteNew = ::pasteNew, onShown = ::shown,
         onScrolled = scrolls::save, scrollOf = scrolls::restore,
+        onReload = { (_state.value.top as? NotesRoute.Reader)?.let { loadReader(it.path) } },
     )
 
 

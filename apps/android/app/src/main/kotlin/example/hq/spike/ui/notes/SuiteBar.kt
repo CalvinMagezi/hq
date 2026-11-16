@@ -55,7 +55,7 @@ fun suiteSourceOf(noteText: String): SuiteSource? {
  * hq prepared, or undo. No page of its own: the question opens in place. hq writes every sentence about the file.
  */
 @Composable
-fun SuiteBar(source: SuiteSource, onNotice: (String) -> Unit) {
+fun SuiteBar(source: SuiteSource, onNotice: (String) -> Unit, onChanged: () -> Unit) {
     val client = HqServices.get(LocalContext.current).client
     val scope = rememberCoroutineScope()
     var file by remember(source.path) { mutableStateOf<SuiteFile?>(null) }
@@ -72,6 +72,7 @@ fun SuiteBar(source: SuiteSource, onNotice: (String) -> Unit) {
         scope.launch {
             try {
                 file = call()
+                onChanged()
             } catch (e: SuiteRefused) {
                 refusal = e.message
             } catch (e: java.io.IOException) {
