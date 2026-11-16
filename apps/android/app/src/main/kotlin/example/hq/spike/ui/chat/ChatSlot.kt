@@ -2,8 +2,8 @@ package example.hq.spike.ui.chat
 
 import example.hq.spike.data.Offer
 
-/** What the one slot above the composer holds. Follow-up chips will rank after the offer; they are not built yet. */
-enum class SlotItem { None, Approval, Offer }
+/** What the one slot above the composer holds, in priority order: approval, offer, follow-up chips. */
+enum class SlotItem { None, Approval, Offer, Chips }
 
 /** The three answers to an offer; [wire] is what `POST /api/offers/answer` takes. */
 enum class OfferAnswer(val wire: String) { Yes("yes"), NotNow("not_now"), Later("later") }
@@ -15,10 +15,11 @@ enum class OfferResult { Later, NotNow }
 enum class SendKey { Voice, Send, Stop }
 
 object ChatSlot {
-    /** An approval wins over an offer, and an offer (or the line it left) shows only when no approval waits. Never two. */
-    fun pick(hasApproval: Boolean, offered: Offer?, result: OfferResult?): SlotItem = when {
+    /** Approval wins over offer, offer wins over follow-up chips. Never two. */
+    fun pick(hasApproval: Boolean, offered: Offer?, result: OfferResult?, hasChips: Boolean = false): SlotItem = when {
         hasApproval -> SlotItem.Approval
         offered != null || result != null -> SlotItem.Offer
+        hasChips -> SlotItem.Chips
         else -> SlotItem.None
     }
 

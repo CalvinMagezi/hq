@@ -45,6 +45,8 @@ import kotlinx.coroutines.launch
 class ChatActions(
     val onDraft: (String) -> Unit = {},
     val onSend: () -> Unit = {},
+    val onRetrySend: (String) -> Unit = {},
+    val onFollowUp: (String) -> Unit = {},
     val onStop: () -> Unit = {},
     val onRetry: () -> Unit = {},
     val onOpenChats: () -> Unit = {},
@@ -127,7 +129,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private var frozen = false
 
     val actions = ChatActions(
-        onDraft = ::setDraft, onSend = ::send, onStop = ::stop, onRetry = ::retry,
+        onDraft = ::setDraft, onSend = ::send, onRetrySend = ::retrySend, onFollowUp = ::followUp, onStop = ::stop, onRetry = ::retry,
         onOpenChats = ::openChats, onCloseChats = { _state.update { it.copy(chatsOpen = false) } }, onNewChat = { newChat() },
         onOpenChat = ::openThread, onSearchChats = { q -> _state.update { it.copy(chatSearch = q) } },
         onArchive = ::archive, onUndo = ::undoArchive, onDismissNotice = { commitArchive(); _state.update { it.copy(notice = null) } },
@@ -155,7 +157,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             services.connection.connected.collect { c ->
                 if (frozen) return@collect
-                _state.update { it.copy(connected = c, offlineSince = if (c) null else it.offlineSince ?: System.currentTimeMillis()) }
+                _state.update {
+                    val msgs = if (c) it.messages else MessageSendState.failInFlight(it.messages)
+                    it.copy(connected = c, offlineSince = if (c) null else it.offlineSince ?: System.currentTimeMillis(), messages = msgs)
+                }
                 if (c) reconcile()
             }
         }
@@ -172,11 +177,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private fun handle(event: ChatEvent) {
         _state.update { ChatReducer.apply(it, event, pending) }
         when (event) {
-            is ChatEvent.Rejected -> if (event.clientId in pending) restore(event.clientId!!, event.reason)
+            is ChatEvent.Rejected -> if (event.clientId in pending) rejectSend(event.clientId!!, event.reason)
             is ChatEvent.TurnStart -> {
-                event.clientId?.let { sentContexts.remove(it); sentFiles.remove(it); sentReplace.remove(it) }
+                event.clientId?.let { cid ->
+                    pending -= cid
+                    sentContexts.remove(cid); sentFiles.remove(cid); sentReplace.remove(cid)
+                }
                 // A first message was sent before its chat had an id; Retry finds it by that id.
-                lastQuestion = lastQuestion?.let { q -> if (q.threadId == null && event.threadId != null && event.clientId != null && event.clientId in pending) LastQuestion(event.threadId, q.text, q.files, q.contexts) else q }
+                lastQuestion = lastQuestion?.let { q -> if (q.threadId == null && event.threadId != null && event.clientId != null) LastQuestion(event.threadId, q.text, q.files, q.contexts) else q }
             }
             is ChatEvent.TurnEnd -> {
                 if (event.threadId == _state.value.threadId) viewModelScope.launch {
@@ -203,7 +211,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun setDraft(text: String) {
-        _state.update { it.copy(draft = text) }
+        _state.update { FollowUpChips.onDraftChanged(it, text) }
         drafts.edit().putString(draftKey(_state.value.threadId), text).apply()
     }
 
@@ -246,7 +254,44 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             if (fromComposer) sent.copy(draft = "", contexts = emptyList(), files = emptyList()) else sent
         }
         if (fromComposer) drafts.edit().remove(draftKey(s.threadId)).apply()
-        if (!services.connection.sendChat(withContext(text, sendContexts), s.threadId, clientId, replaceFrom, sendFiles)) restore(clientId, "Not connected to HQ. Your message is back in the box.")
+        if (!services.connection.sendChat(withContext(text, sendContexts), s.threadId, clientId, replaceFrom, sendFiles)) markNotSent(clientId)
+    }
+
+    private fun followUp(text: String) {
+        submit(text, replaceFrom = null, files = emptyList(), contexts = emptyList())
+    }
+
+    /** Marks a sent message as Not sent so the user can tap Try again with the same client id. */
+    private fun markNotSent(clientId: String, reason: String? = null) {
+        _state.update { s ->
+            s.copy(
+                messages = s.messages.map { if (it.id == clientId) it.copy(sending = false, notSent = true) else it },
+                notice = reason?.takeIf { it.isNotBlank() }?.let { Notice(it) } ?: s.notice,
+            )
+        }
+    }
+
+    /** Marks a rejected send as Not sent and reloads the thread when it had truncated a tail for edit/regenerate. */
+    private fun rejectSend(clientId: String, reason: String) {
+        markNotSent(clientId, reason)
+        val replaced = sentReplace.remove(clientId)
+        val tid = _state.value.threadId
+        if (MessageSendState.shouldReloadOnReject(replaced, tid)) {
+            viewModelScope.launch { loadMessages(tid!!) }
+        }
+    }
+
+    private fun retrySend(messageId: String) {
+        val s = _state.value
+        val (updated, msg) = MessageSendState.beginRetry(s.messages, messageId)
+        if (msg == null) return
+        pending += messageId
+        val contexts = sentContexts[messageId].orEmpty()
+        val files = sentFiles[messageId]?.mapNotNull { it.uploaded } ?: msg.files
+        val replaceFrom = sentReplace[messageId]
+        _state.update { it.copy(messages = updated) }
+        val sent = services.connection.sendChat(withContext(msg.text, contexts), s.threadId, messageId, replaceFrom, files)
+        if (!sent) markNotSent(messageId)
     }
 
     /** `/clear` and `/topic <name>` archive this chat and open a fresh one, as on the web. */
@@ -308,22 +353,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 loadingOlder = false
             }
         }
-    }
-
-    /** A send that did not go through: the text returns to the field, with the reason. */
-    private fun restore(clientId: String, reason: String) {
-        pending -= clientId
-        val replaced = sentReplace.remove(clientId)
-        _state.update { s ->
-            val text = s.messages.firstOrNull { it.id == clientId }?.text ?: s.draft
-            s.copy(
-                messages = s.messages.filter { it.id != clientId }, draft = if (replaced == null) text else s.draft.ifBlank { text }, notice = Notice(reason),
-                contexts = sentContexts.remove(clientId) ?: s.contexts, files = sentFiles.remove(clientId) ?: s.files,
-                editing = if (replaced != null && s.editing == null) replaced else s.editing,
-            )
-        }
-        // The questions the failed replace cut off locally are still on the server.
-        if (replaced != null) _state.value.threadId?.let { id -> viewModelScope.launch { loadMessages(id) } }
     }
 
     private fun stop() {
@@ -391,17 +420,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         val shown = OfferFlow.strip(page.sortedBy { it.createdAt }.map(::toUi), _state.value.answeredOffers)
         if (page.any { it.spoken }) SpokenThreads.mark(getApplication(), id)
+        shown.mapNotNull { it.clientId }.forEach { cid ->
+            pending -= cid
+            sentContexts.remove(cid); sentFiles.remove(cid); sentReplace.remove(cid)
+        }
         _state.update {
             if (it.threadId != id) return@update it
             // Sends the server has not acknowledged yet stay at the end.
-            val unsaved = it.messages.filter { m -> m.id.startsWith("local-") && shown.none { s -> s.id == m.id } }
+            val unsaved = MessageSendState.unsavedLocals(it.messages, shown)
             val full = page.size >= HqClient.MESSAGE_PAGE
             val merged = ChatReducer.mergeLatest(it.messages, shown, full)
             it.copy(messages = merged + unsaved, hasOlder = if (merged.size > shown.size) it.hasOlder else full)
         }
     }
 
-    private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt, spoken = m.spoken, offer = m.offer)
+    private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt, spoken = m.spoken, offer = m.offer, clientId = m.clientId)
 
     /**
      * Collapses the offer to its result line at once and tells HQ. Yes acts after HQ has taken the answer (or has no route for it),
@@ -671,7 +704,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         archiving?.second?.cancel()
         commitArchive()
         val app = getApplication<Application>()
-        _state.update { it.copy(chats = it.chats.filter { row -> row.id != id }, notice = Notice(app.getString(R.string.undo_chat_archived), app.getString(R.string.undo))) }
+        _state.update { it.copy(chats = it.chats.filter { row -> row.id != id }, notice = Notice(app.getString(R.string.undo_chat_archived), app.getString(R.string.undo), timeoutMs = ARCHIVE_UNDO_MS)) }
         archiving = id to viewModelScope.launch {
             try { client.archive(id) } catch (e: HqUnavailable) {
                 _state.update { it.copy(notice = null) }
@@ -736,6 +769,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         const val PIN_PREFS = "chat_pins"
         const val PIN_KEY = "ids"
         const val RESULT_MS = 6_000L
+        const val ARCHIVE_UNDO_MS = 8_000L
         const val HTTP_NOT_FOUND = 404
         const val HTTP_CONFLICT = 409
         const val SESSIONS_POLL_MS = 5_000L

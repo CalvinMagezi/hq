@@ -19,6 +19,8 @@ class UsageViewModel(app: Application) : AndroidViewModel(app) {
     private val client = HqServices.get(app).client
     private val _chip = MutableStateFlow<BalanceChip?>(null)
     val chip: StateFlow<BalanceChip?> = _chip
+    private val _model = MutableStateFlow<String?>(null)
+    val model: StateFlow<String?> = _model
     private var frozen = false
     private var lastSettings: JSONObject? = null
 
@@ -44,6 +46,7 @@ class UsageViewModel(app: Application) : AndroidViewModel(app) {
         val settings = got[0] ?: lastSettings
         lastSettings = settings
         _chip.value = UsageWords.chip(example.hq.spike.ui.shell.Words.of(getApplication()), UsageSnapshot(settings, got[1], got[2], got[3]))
+        _model.value = UsageWords.chain(settings, got[1]).firstOrNull()?.let { it.model.ifBlank { it.provider } }
     }
 
     private suspend fun get(path: String): JSONObject? = try { client.json(path) } catch (e: HqUnavailable) { null }

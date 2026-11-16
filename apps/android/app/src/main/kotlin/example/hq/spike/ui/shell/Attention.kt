@@ -198,9 +198,9 @@ fun AttentionGate(kind: AttentionKind, key: String, content: @Composable () -> U
 @Composable
 fun AttentionOrInline(
     kind: AttentionKind, key: String, modifier: Modifier = Modifier, onExpire: (() -> Unit)? = null, announce: Boolean = true,
-    restartOn: Any? = null, content: @Composable (Modifier) -> Unit,
+    restartOn: Any? = null, timeoutMs: Long? = null, content: @Composable (Modifier) -> Unit,
 ) {
-    if (LocalAttention.current == null) content(modifier) else AttentionPost(kind, key, null, onExpire, announce, restartOn) { content(Modifier) }
+    if (LocalAttention.current == null) content(modifier) else AttentionPost(kind, key, timeoutMs, onExpire, announce, restartOn) { content(Modifier) }
 }
 
 /** A key that stays the same for as long as one call site stays on screen, for posters that can overlap. */

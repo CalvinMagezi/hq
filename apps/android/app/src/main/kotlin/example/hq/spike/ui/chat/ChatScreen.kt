@@ -72,6 +72,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun ChatScreen(
     state: ChatUiState, actions: ChatActions, status: example.hq.spike.data.Connection = example.hq.spike.data.Connection.Connected, onStartHq: () -> Unit = {}, onAiKeys: () -> Unit = {},
+    onSignIn: () -> Unit = {},
     /** What this chat waits on the owner for, drawn between the conversation and the composer. */
     needs: @Composable () -> Unit = {},
     /** True when [needs] draws an approval card; it then takes the slot, and an offer waits. */
@@ -79,11 +80,13 @@ fun ChatScreen(
     /** The composer's mic: opens the voice sheet, or the page that sets it up. */
     onVoice: () -> Unit = {},
 ) {
+    val problemBar = ProblemBar.forState(status)
+    val chips = FollowUpChips.forState(state, hasNeeds, problemBar != null)
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            example.hq.spike.ui.connection.ChatBanner(status, onStartHq, onAiKeys)
+            if (problemBar == null) example.hq.spike.ui.connection.ChatBanner(status, onStartHq, onAiKeys)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                NameRow(state.title, state.messages.any { it.spoken }, actions.onOpenChats, Modifier.weight(1f))
+                NameRow(state, actions, Modifier.weight(1f))
                 if (state.sessions.count > 0) SessionsButton(state.sessions, actions.onOpenSessions)
             }
             DrivingStrip(state.sessions, actions.onOpenSessions)
@@ -91,11 +94,13 @@ fun ChatScreen(
                 if (state.messages.isEmpty() && state.live == null) EmptyChat(Suggestions.visible(state.suggestions, state.pillsCleared), actions.onDraft, state.pillChoices, actions.onFewer, actions.onNever) else Conversation(state, actions)
                 SlashPalette(state.draft, actions.onSlash, Modifier.align(Alignment.BottomCenter))
             }
-            when (ChatSlot.pick(hasNeeds, state.offered?.offer, state.offerResult)) {
+            when (ChatSlot.pick(hasNeeds, state.offered?.offer, state.offerResult, chips.isNotEmpty())) {
                 SlotItem.Approval -> needs()
                 SlotItem.Offer -> OfferSlot(state, actions)
+                SlotItem.Chips -> FollowUpChipsSlot(chips, state.messages.lastOrNull()?.id.orEmpty(), actions.onFollowUp)
                 SlotItem.None -> {}
             }
+            problemBar?.let { ProblemBarView(it, onSignIn) }
             Composer(state, actions, onVoice)
         }
     }
@@ -160,16 +165,46 @@ fun ChatOverlays(state: ChatUiState, actions: ChatActions, onOpenInNotes: (Strin
 }
 
 @Composable
-private fun NameRow(title: String, spoken: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun NameRow(state: ChatUiState, actions: ChatActions, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(24.dp)
-    Row(
-        modifier.padding(start = 16.dp, end = 16.dp).heightIn(min = 48.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape)
-            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.chat_show_chats), onClick = onClick).padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(if (spoken) HqIcons.Mic else HqIcons.Chat, null, Modifier.size(20.dp), tint = Mts.InkMuted)
-        Text(title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        Icon(HqIcons.ChevronDown, null, Modifier.size(18.dp), tint = Mts.InkMuted)
+    var menuOpen by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val balance = example.hq.spike.ui.usage.LocalBalance.current
+    val onBalance = example.hq.spike.ui.usage.LocalOnBalance.current
+    val model = example.hq.spike.ui.usage.LocalModel.current
+    val currentRow = state.threadId?.let { id -> state.chats.firstOrNull { it.id == id } }
+    Box(modifier) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp).heightIn(min = 48.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape)
+                .clickable(role = Role.Button, onClickLabel = stringResource(R.string.chat_title_menu_label)) { menuOpen = true }.padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(if (state.messages.any { it.spoken }) HqIcons.Mic else HqIcons.Chat, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+            Text(state.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Icon(HqIcons.ChevronDown, null, Modifier.size(18.dp), tint = Mts.InkMuted)
+        }
+        DropdownMenu(menuOpen, { menuOpen = false }) {
+            balance?.let { chip ->
+                DropdownMenuItem(
+                    text = { Text(chip.label, style = HqType.Body, color = Mts.Ink) },
+                    onClick = { menuOpen = false; onBalance(chip.target) },
+                )
+            }
+            val modelText = if (!model.isNullOrBlank()) stringResource(R.string.chat_title_model, model) else stringResource(R.string.chat_title_model_unset)
+            DropdownMenuItem(
+                text = { Text(modelText, style = HqType.BodySm, color = Mts.InkMuted) },
+                onClick = { menuOpen = false },
+            )
+            currentRow?.let { row ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(if (row.pinned) R.string.chat_unpin else R.string.chat_pin), style = HqType.Body, color = Mts.Ink) },
+                    onClick = { menuOpen = false; actions.onPinChat(row.id) },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.chat_title_all_chats), style = HqType.BodyBold, color = Mts.Ink) },
+                onClick = { menuOpen = false; actions.onOpenChats() },
+            )
+        }
     }
 }
 
@@ -202,7 +237,16 @@ private fun Conversation(state: ChatUiState, actions: ChatActions) {
                         onLongClickLabel = "Message actions", onClick = {}, onLongClick = { if (!m.sending) actions.onLongPress(m.id) },
                     ),
                 ) {
-                    if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile, spoken = m.spoken) else ReplyBubble(m, blocks)
+                    if (m.speaker == Speaker.User) {
+                        UserBubble(
+                            m.text, m.sending, m.files, actions.onOpenFile,
+                            spoken = m.spoken,
+                            sendStatus = MessageSendState.statusFor(state.messages, m.id),
+                            onRetrySend = { actions.onRetrySend(m.id) },
+                        )
+                    } else {
+                        ReplyBubble(m, blocks)
+                    }
                 }
             }
         }
@@ -284,6 +328,6 @@ private fun SuggestionChip(icon: ImageVector, label: String, capability: String?
 /** One line at the bottom: what just happened, and sometimes a word to undo it. The shell closes it. */
 @Composable
 private fun Snack(notice: Notice, actions: ChatActions, modifier: Modifier) {
-    AttentionOrInline(if (notice.action != null) AttentionKind.UndoSnackbar else AttentionKind.Snackbar, rememberAttentionKey(), modifier.navigationBarsPadding(), actions.onDismissNotice, restartOn = notice) { m -> SnackbarRow(notice.text, notice.action, actions.onUndo, m) }
+    AttentionOrInline(if (notice.action != null) AttentionKind.UndoSnackbar else AttentionKind.Snackbar, rememberAttentionKey(), modifier.navigationBarsPadding(), actions.onDismissNotice, restartOn = notice, timeoutMs = notice.timeoutMs) { m -> SnackbarRow(notice.text, notice.action, actions.onUndo, m) }
 }
 

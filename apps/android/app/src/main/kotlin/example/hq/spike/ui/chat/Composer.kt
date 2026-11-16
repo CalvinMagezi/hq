@@ -161,10 +161,11 @@ private fun MessageRow(state: ChatUiState, actions: ChatActions, onVoice: () -> 
                 }
             },
         )
+        val tick = rememberTick()
         // Three controls at rest: Plus, the field, and one button that is voice, send or stop.
         when (ChatSlot.sendKey(state.running, state.draft, state.files.isNotEmpty() || state.editing != null)) {
-            SendKey.Stop -> StopButton(actions.onStop)
-            SendKey.Send -> SendButton(state.canSend, actions.onSend)
+            SendKey.Stop -> StopButton { tick(); actions.onStop() }
+            SendKey.Send -> SendButton(state.canSend) { tick(); actions.onSend() }
             SendKey.Voice -> VoiceButton(onVoice)
         }
     }
