@@ -165,8 +165,28 @@ class ShellActivity : ComponentActivity() {
 
     private var notifFacts by mutableStateOf<NotifFactsNow?>(null)
     private var upgraderOpen by mutableStateOf(false)
+    private var postReplyNotifOpen by mutableStateOf(false)
     private var connectionOpen by mutableStateOf(false)
     private var turnOnOrigin = NotifOrigin.Later
+
+    private val askCalendarPermissions = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val readGranted = results[android.Manifest.permission.READ_CALENDAR] == true ||
+            androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CALENDAR) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val writeGranted = results[android.Manifest.permission.WRITE_CALENDAR] == true ||
+            androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.WRITE_CALENDAR) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val outcome = example.hq.spike.ui.chat.CalendarAsk.permissionOutcome(
+            readGranted = readGranted,
+            writeGranted = writeGranted,
+            rationaleRead = shouldShowRequestPermissionRationale(android.Manifest.permission.READ_CALENDAR),
+            rationaleWrite = shouldShowRequestPermissionRationale(android.Manifest.permission.WRITE_CALENDAR),
+        )
+        if (outcome == example.hq.spike.ui.chat.CalendarPermOutcome.PermanentlyDenied) {
+            chat.actions.onNotice(getString(R.string.chat_ask_calendar_blocked))
+            PhoneIntents.startFirst(this, listOf(example.hq.spike.voice.AssistantRole.appInfo(this)))
+        }
+    }
 
     /** Set while the owner is in Android's settings for a Turn on, so coming back counts a grant. */
     private var inAndroidSettings: NotifOrigin? = null
@@ -175,7 +195,6 @@ class ShellActivity : ComponentActivity() {
         // Only an activity can say whether Android would show its dialog again.
         val rationale = !granted && shouldShowRequestPermissionRationale(android.Manifest.permission.POST_NOTIFICATIONS)
         NotifAccess.answered(this, turnOnOrigin, granted, rationale)
-        if (!granted && turnOnOrigin == NotifOrigin.FirstRun) firstRun.actions.onNotifNotNow()
         rereadNotifications()
     }
 
@@ -185,6 +204,15 @@ class ShellActivity : ComponentActivity() {
         inbox.actions.onServerOpen = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Notifications) }
         settings.actions.onCodeFromPhone = { helpers.actions.onGithubOpen() }
         settings.actions.onWork = { key -> requested = if (key == example.hq.spike.ui.settings.WORK_TASKS_ROW) Place.Tasks else Place.Helpers }
+        chat.onLocalOfferAccepted = { kind ->
+            when (kind) {
+                example.hq.spike.ui.chat.LocalOfferKind.Calendar -> askCalendarPermissions.launch(arrayOf(android.Manifest.permission.READ_CALENDAR, android.Manifest.permission.WRITE_CALENDAR))
+                example.hq.spike.ui.chat.LocalOfferKind.Messaging -> { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Messaging) }
+                example.hq.spike.ui.chat.LocalOfferKind.Assistant -> { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Assistant) }
+                example.hq.spike.ui.chat.LocalOfferKind.Repo -> helpers.actions.onGithubOpen()
+            }
+        }
+        chat.isGithubConnected = { example.hq.spike.ui.helpers.HelperWords.coderReady(helpers.state.value.github) }
         inbox.refreshBanner()
     }
 
@@ -215,6 +243,7 @@ class ShellActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         rereadNotifications()
+        chat.checkAssistantOffer()
         Thread { example.hq.spike.update.Updater.onForeground(applicationContext) }.start()
         val origin = inAndroidSettings ?: return
         inAndroidSettings = null
@@ -470,6 +499,30 @@ class ShellActivity : ComponentActivity() {
                 }
             }
             val notifUi = notifFacts?.let { NotifUi(it, ::turnOnNotifications) }
+            var currentPlace by remember { mutableStateOf(start) }
+            val hasChatNeeds = needsOfChat(inboxState.shownNeeds, chatState.threadId).isNotEmpty()
+            val blockedByOtherSlot = example.hq.spike.ui.chat.LaterAskDecider.blockedByOtherSlot(
+                connected = shown is Connection.Connected,
+                hasChatNeeds = hasChatNeeds,
+                offered = chatState.offered?.offer,
+                offerResult = chatState.offerResult,
+                localOffer = chatState.localOffer,
+            )
+            val oldFirstRunDone = remember(firstDone) {
+                val s = FirstRunStore(this@ShellActivity)
+                NotifyAsk.oldFirstRunDone(s.done(), s.threeScreenFlow(), firstDone)
+            }
+            LaunchedEffect(chatState.replyCompletedInSession, currentPlace, notifFacts, upgraderOpen, blockedByOtherSlot, chatState.running) {
+                if (NotifyAsk.shouldClose(postReplyNotifOpen, chatState.running)) {
+                    postReplyNotifOpen = false
+                    return@LaunchedEffect
+                }
+                val f = notifFacts ?: return@LaunchedEffect
+                val askedBefore = f.asked || NotifAccess.postReplyAsked(this@ShellActivity)
+                if (fixture == null && NotifyAsk.shouldShow(chatState.replyCompletedInSession, currentPlace == Place.Chat, askedBefore, oldFirstRunDone, f.needsOn, upgraderOpen, blockedByOtherSlot, chatState.running)) {
+                    postReplyNotifOpen = true
+                }
+            }
             HqTheme { CompositionLocalProvider(example.hq.spike.ui.usage.LocalBalance provides (if (shown !is Connection.Connected) null else balance), example.hq.spike.ui.usage.LocalModel provides (if (shown !is Connection.Connected) null else activeModel), example.hq.spike.ui.usage.LocalOnBalance provides { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) }, LocalOpenWeb provides { page -> web = page }, LocalNotif provides notifUi, example.hq.spike.ui.shell.LocalReselectAtTop provides atTop) {
                 if (firstRunUi.step != null) FirstRunHost(firstRunUi, firstRun.actions)
                 else if (startup == Startup.Starting) StartingScreen(((status as? Connection.Starting)?.step ?: 0) + 1, (status as? Connection.Starting)?.seconds ?: 12) { openCapture() }
@@ -493,8 +546,9 @@ class ShellActivity : ComponentActivity() {
                     },
                     request = requested, onRequestHandled = { requested = null },
                     aboveBar = { place -> if (place != Place.Tasks) tasksState.line?.let { Snack(it, tasks.actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) } },
-                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); CompositionLocalProvider(example.hq.spike.ui.shell.LocalCoversBar provides true) { SettingsHost(settingsState, settings.actions); SearchHost(searchState, shown); if (tasksState.away.open) AwayHost(tasksState); web?.let { page -> WebHostScreen(page, onClose = { web = null }, onStartHq = ::tryStartAgain, onNotes = { web = null; requested = Place.Notes }) } } },
+                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen || postReplyNotifOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; postReplyNotifOpen = false; NotifAccess.markPostReplyAsked(this); turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false; postReplyNotifOpen = false; NotifAccess.markPostReplyAsked(this) }); CompositionLocalProvider(example.hq.spike.ui.shell.LocalCoversBar provides true) { SettingsHost(settingsState, settings.actions); SearchHost(searchState, shown); if (tasksState.away.open) AwayHost(tasksState); web?.let { page -> WebHostScreen(page, onClose = { web = null }, onStartHq = ::tryStartAgain, onNotes = { web = null; requested = Place.Notes }) } } },
                 ) { place ->
+                    currentPlace = place
                     LaunchedEffect(place) { example.hq.spike.update.AppVisibility.inChat = place == Place.Chat }
                     when (place) {
                         Place.Chat -> ChatScreen(chatState, chat.actions, status = shown, onStartHq = ::tryStartAgain, onAiKeys = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Keys) }, onSignIn = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Notifications) }, needs = { ChatNeeds(needsOfChat(inboxState.shownNeeds, chatState.threadId), inboxState, inbox.actions) }, hasNeeds = needsOfChat(inboxState.shownNeeds, chatState.threadId).isNotEmpty(), onVoice = ::speakToHq)

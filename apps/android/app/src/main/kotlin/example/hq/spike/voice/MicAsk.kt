@@ -9,6 +9,16 @@ object MicAsk {
     /** A dialog still on screen takes longer than this to answer; Android answering by itself does not. A guess to check on a phone. */
     const val DIALOG_MS = 300L
 
+    private val REASON_PHASES = setOf(VoicePhase.ModelReady, VoicePhase.Idle, VoicePhase.Stopped)
+
+    /** True when the first mic tap should show the one-sentence reason before Android's system dialog. */
+    fun shouldShowReason(granted: Boolean, askedBefore: Boolean, phase: VoicePhase): Boolean =
+        !granted && !askedBefore && phase in REASON_PHASES
+
+    /** True when a mic tap may launch Android's permission dialog without clobbering a download or prepare state. */
+    fun canLaunchDialog(granted: Boolean, askedBefore: Boolean, phase: VoicePhase): Boolean =
+        !granted && (phase == VoicePhase.MicNeeded || (askedBefore && phase in REASON_PHASES))
+
     /** Only Don't allow counts: a dismissed dialog leaves the rationale unchanged, and Android's own instant answer means it stopped asking. */
     fun outcome(granted: Boolean, rationaleBefore: Boolean, rationaleAfter: Boolean, tookMs: Long): MicOutcome = when {
         granted -> MicOutcome.Granted

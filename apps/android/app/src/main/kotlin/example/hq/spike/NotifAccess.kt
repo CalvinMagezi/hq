@@ -41,6 +41,7 @@ object NotifAccess {
     private const val RATIONALE = "rationale"
     private const val LAST_VERSION = "last_version"
     private const val UPGRADER_SHOWN = "upgrader_shown"
+    private const val POST_REPLY_ASKED = "post_reply_asked"
     private const val SNOOZE_UNTIL = "banner_snooze_until"
     const val WAITING = "waiting"
     const val SERVER_WAITING = "server_waiting"
@@ -106,8 +107,39 @@ object NotifAccess {
     fun saveVersion(c: Context, version: Int) { prefs(c).edit().putInt(LAST_VERSION, version).apply() }
     fun upgraderShown(c: Context): Boolean = prefs(c).getBoolean(UPGRADER_SHOWN, false)
     fun markUpgraderShown(c: Context) { prefs(c).edit().putBoolean(UPGRADER_SHOWN, true).apply() }
+    fun postReplyAsked(c: Context): Boolean = prefs(c).getBoolean(POST_REPLY_ASKED, false)
+    fun markPostReplyAsked(c: Context) { prefs(c).edit().putBoolean(POST_REPLY_ASKED, true).apply() }
 
     fun snoozeUntil(c: Context): Long = prefs(c).getLong(SNOOZE_UNTIL, 0L)
     fun snooze(c: Context, now: Long = System.currentTimeMillis()) { prefs(c).edit().putLong(SNOOZE_UNTIL, now + SNOOZE_MS).apply() }
     fun clearSnooze(c: Context) { prefs(c).edit().remove(SNOOZE_UNTIL).apply() }
+}
+
+/** Pure rule for showing the in-app notifications sheet after the first completed reply. */
+object NotifyAsk {
+    fun shouldShow(
+        replyCompletedInSession: Boolean,
+        inChatPlace: Boolean,
+        askedBefore: Boolean,
+        oldFirstRunDone: Boolean,
+        granted: Boolean,
+        upgraderOpen: Boolean,
+        blockedByOtherSlot: Boolean,
+        turnRunning: Boolean,
+    ): Boolean =
+        replyCompletedInSession &&
+            inChatPlace &&
+            !askedBefore &&
+            !oldFirstRunDone &&
+            !granted &&
+            !upgraderOpen &&
+            !blockedByOtherSlot &&
+            !turnRunning
+
+    /** True when an open post-reply notifications sheet must close because a new turn started. */
+    fun shouldClose(sheetOpen: Boolean, turnRunning: Boolean): Boolean = sheetOpen && turnRunning
+
+    /** An install that completed the old first run (before the 3-screen cut) counts as already asked. */
+    fun oldFirstRunDone(done: Boolean, threeScreenFlow: Boolean, heardHqBefore: Boolean): Boolean =
+        (done || heardHqBefore) && !threeScreenFlow
 }

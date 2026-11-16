@@ -23,21 +23,27 @@ class FirstRunLogicTest {
 
     @Test fun aKillResumesTheSavedStepEvenThoughKeyAndFirstAnswerNowExist() {
         // The key is sealed at step 1 and hq answers /health during the flow: neither may end it early.
-        for (step in listOf(Step.Welcome, Step.Moved, Step.Model, Step.Chat, Step.Notify, Step.Start, Step.Restore)) {
+        for (step in listOf(Step.Welcome, Step.Moved, Step.Model, Step.Start, Step.Restore)) {
             assertEquals(step, FirstRunLogic.decide(done = false, saved = step, hasModelKey = true, heardHqBefore = true))
         }
+        // Saved Chat or Notify from before the 3-screen cut must land on Start, not crash.
+        assertEquals(Step.Start, FirstRunLogic.decide(done = false, saved = Step.Chat, hasModelKey = true, heardHqBefore = true))
+        assertEquals(Step.Start, FirstRunLogic.decide(done = false, saved = Step.Notify, hasModelKey = true, heardHqBefore = true))
     }
 
     @Test fun eachButtonLeadsToTheNextScreen() {
         assertEquals(Step.Model, FirstRunLogic.next(Step.Welcome))
-        assertEquals(Step.Chat, FirstRunLogic.next(Step.Model))
-        assertEquals(Step.Notify, FirstRunLogic.next(Step.Chat))
+        assertEquals(Step.Model, FirstRunLogic.next(Step.Moved))
+        assertEquals(Step.Start, FirstRunLogic.next(Step.Model))
+        assertEquals(Step.Start, FirstRunLogic.next(Step.Chat))
         assertEquals(Step.Start, FirstRunLogic.next(Step.Notify))
-        assertEquals(Step.Notify, FirstRunLogic.next(Step.Restore))
+        assertEquals(Step.Start, FirstRunLogic.next(Step.Restore))
+        assertEquals(Step.Start, FirstRunLogic.next(Step.Start))
         assertEquals(Step.Welcome, FirstRunLogic.back(Step.Model))
+        assertEquals(Step.Moved, FirstRunLogic.back(Step.Model, moved = true))
         assertEquals(Step.Model, FirstRunLogic.back(Step.Chat))
-        assertEquals(Step.Chat, FirstRunLogic.back(Step.Notify))
-        assertEquals(Step.Notify, FirstRunLogic.back(Step.Start))
+        assertEquals(Step.Model, FirstRunLogic.back(Step.Notify))
+        assertEquals(Step.Model, FirstRunLogic.back(Step.Start))
         assertEquals(Step.Welcome, FirstRunLogic.back(Step.Restore))
     }
 }

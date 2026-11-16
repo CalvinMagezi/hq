@@ -149,7 +149,13 @@ class VoiceActivity : ComponentActivity() {
     private fun micPressed() {
         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         if (granted) return session.micPressed()
-        if (session.state.value.phase == VoicePhase.MicBlocked) return session.micBlocked()
+        val phase = session.state.value.phase
+        if (phase == VoicePhase.MicBlocked) return session.micBlocked()
+        val askedBefore = AssistantRole.micAsked(this)
+        if (MicAsk.shouldShowReason(granted = false, askedBefore = askedBefore, phase = phase)) {
+            return session.micNeeded()
+        }
+        if (!MicAsk.canLaunchDialog(granted = false, askedBefore = askedBefore, phase = phase)) return
         rationaleBefore = shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
         askedAt = SystemClock.elapsedRealtime()
         AssistantRole.markMicAsked(this)

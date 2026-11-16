@@ -115,6 +115,10 @@ data class ChatUiState(
     val pillsCleared: Boolean = false,
     /** False once HQ has no fewer or never route, so a pill's long-press menu is not offered. */
     val pillChoices: Boolean = true,
+    /** Client-side contextual ask or offer shown when no server offer or approval is active. */
+    val localOffer: LocalOffer? = null,
+    /** True after a reply completes in this session for the open thread; cleared on thread switch or new turn. */
+    val replyCompletedInSession: Boolean = false,
     /** The agent sessions this chat watches, and whether their sheet is open. */
     val sessions: SessionsUi = SessionsUi(),
     /** Reply id of a turn that ended in this session; follow-up chips show only for this id. */
@@ -241,7 +245,7 @@ object ChatReducer {
             saved != null && base.none { it.id == saved.id } -> base + saved
             else -> base
         }
-        return state.copy(threadId = e.threadId, messages = messages, live = LiveReply(), failed = false, finishedReplyId = null)
+        return state.copy(threadId = e.threadId, messages = messages, live = LiveReply(), failed = false, finishedReplyId = null, replyCompletedInSession = false)
     }
 
     private fun reply(state: ChatUiState, event: ChatEvent): ChatUiState {
@@ -272,6 +276,7 @@ object ChatReducer {
             messages = if (added) state.messages + message else state.messages,
             failed = state.failed || (empty && !e.stopped),
             finishedReplyId = if (added) message.id else state.finishedReplyId,
+            replyCompletedInSession = state.replyCompletedInSession || (!empty && !e.stopped),
         )
     }
 

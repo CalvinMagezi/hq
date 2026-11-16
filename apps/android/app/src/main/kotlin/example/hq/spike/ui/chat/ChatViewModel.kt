@@ -102,6 +102,7 @@ class ChatActions(
     /** Turns Drive on or off for a watched session, by its id. */
     val onSessionDrive: (String, Boolean) -> Unit = { _, _ -> },
     val onStopWatching: (String) -> Unit = {},
+    val onLocalOfferAnswer: (LocalOfferKind, Boolean) -> Unit = { _, _ -> },
 )
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -127,6 +128,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val sentReplace = mutableMapOf<String, String>()
     private var archiving: Pair<String, Job>? = null
     private var frozen = false
+    var onLocalOfferAccepted: (LocalOfferKind) -> Unit = {}
+    var isGithubConnected: () -> Boolean = { false }
 
     val actions = ChatActions(
         onDraft = ::setDraft, onSend = ::send, onRetrySend = ::retrySend, onFollowUp = ::followUp, onStop = ::stop, onRetry = ::retry,
@@ -149,6 +152,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         onPinChat = ::pinChat,
         onOpenSessions = ::openSessions, onCloseSessions = ::closeSessions, onSessionDrive = ::setSessionDrive, onStopWatching = ::stopWatching,
         onSlash = { name -> setDraft(if (name == "/topic") "/topic " else name) },
+        onLocalOfferAnswer = ::answerLocalOffer,
     )
 
     init {
@@ -176,6 +180,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun handle(event: ChatEvent) {
         _state.update { ChatReducer.apply(it, event, pending) }
+        if (CalendarAsk.isCalendarEvent(event)) maybeOfferCalendar()
         when (event) {
             is ChatEvent.Rejected -> if (event.clientId in pending) rejectSend(event.clientId!!, event.reason)
             is ChatEvent.TurnStart -> {
@@ -191,6 +196,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     // The live copy has tool arguments cut at 4000 characters and no ids; the saved one is whole.
                     event.threadId?.let { loadMessages(it) }
                     refreshChats()
+                    maybeOfferMessaging(threadMatches = true, stopped = event.stopped)
                 }
                 maybeNotifyReply(event)
             }
@@ -255,6 +261,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (fromComposer) drafts.edit().remove(draftKey(s.threadId)).apply()
         if (!services.connection.sendChat(withContext(text, sendContexts), s.threadId, clientId, replaceFrom, sendFiles)) markNotSent(clientId)
+        else if (fromComposer) maybeOfferRepo(text)
     }
 
     private fun followUp(text: String) {
@@ -377,7 +384,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val row = _state.value.chats.firstOrNull { it.id == id }
         _state.update {
             it.copy(threadId = id, title = row?.title ?: it.title, messages = emptyList(), live = null, failed = false, chatsOpen = false,
-                draft = drafts.getString(draftKey(id), "").orEmpty(), contexts = emptyList(), files = emptyList(), editing = null, pressed = null, hasOlder = false, offerResult = null, sessions = SessionsUi())
+                draft = drafts.getString(draftKey(id), "").orEmpty(), contexts = emptyList(), files = emptyList(), editing = null, pressed = null, hasOlder = false, offerResult = null, replyCompletedInSession = false, sessions = SessionsUi())
         }
         sessionsPoll?.cancel()
         viewModelScope.launch { loadMessages(id) }
@@ -762,9 +769,73 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             c.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
+    fun checkAssistantOffer() {
+        val app = getApplication<Application>()
+        val show = LaterAskDecider.shouldOfferAssistantOnResume(
+            hasLocalOffer = _state.value.localOffer != null,
+            voiceTurnDone = LaterAsksPrefs.voiceTurnDone(app),
+            available = example.hq.spike.voice.AssistantRole.available(app),
+            held = example.hq.spike.voice.AssistantRole.held(app),
+            askedBefore = LaterAsksPrefs.wasAsked(app, LocalOfferKind.Assistant),
+        )
+        if (show) _state.update { it.copy(localOffer = LaterAsksPrefs.buildOffer(app, LocalOfferKind.Assistant)) }
+    }
+
+    private fun maybeOfferCalendar() {
+        val app = getApplication<Application>()
+        val show = CalendarAsk.shouldShow(
+            isCalendarRequest = true,
+            hasPermission = example.hq.spike.calendar.AndroidCalendarStore.hasPermission(app),
+            askedBefore = LaterAsksPrefs.wasAsked(app, LocalOfferKind.Calendar),
+        )
+        if (show) _state.update { it.copy(localOffer = LaterAsksPrefs.buildOffer(app, LocalOfferKind.Calendar)) }
+    }
+
+    private fun maybeOfferMessaging(threadMatches: Boolean, stopped: Boolean) {
+        val app = getApplication<Application>()
+        val storedKeys = example.hq.spike.KeyVault.names(app)
+        val hasRelay = TELEGRAM in storedKeys || DISCORD in storedKeys
+        val show = LaterAskDecider.shouldOfferMessagingOnTurnEnd(
+            state = _state.value,
+            hasRelayToken = hasRelay,
+            askedBefore = LaterAsksPrefs.wasAsked(app, LocalOfferKind.Messaging),
+            threadMatches = threadMatches,
+            stopped = stopped,
+        )
+        if (show) _state.update { it.copy(localOffer = LaterAsksPrefs.buildOffer(app, LocalOfferKind.Messaging)) }
+    }
+
+    private fun maybeOfferRepo(text: String) {
+        val app = getApplication<Application>()
+        val show = LaterAskDecider.shouldOfferRepoOnSubmit(
+            fromComposer = true,
+            sendSucceeded = true,
+            text = text,
+            githubConnected = isGithubConnected(),
+            askedBefore = LaterAsksPrefs.wasAsked(app, LocalOfferKind.Repo),
+            hasLocalOffer = _state.value.localOffer != null,
+        )
+        if (show) _state.update { it.copy(localOffer = LaterAsksPrefs.buildOffer(app, LocalOfferKind.Repo)) }
+    }
+
+    private fun answerLocalOffer(kind: LocalOfferKind, accepted: Boolean) {
+        LaterAsksPrefs.markAsked(getApplication(), kind)
+        val showNotNow = !accepted && kind != LocalOfferKind.Calendar
+        _state.update {
+            it.copy(
+                localOffer = null,
+                offerResult = if (showNotNow) OfferResult.NotNow else it.offerResult,
+            )
+        }
+        if (showNotNow) startResultTimer()
+        if (accepted) onLocalOfferAccepted(kind)
+    }
+
     private fun draftKey(threadId: String?) = threadId ?: NEW_CHAT_KEY
 
     private companion object {
+        const val TELEGRAM = "HQ_RELAY__TELEGRAM_TOKEN"
+        const val DISCORD = "HQ_RELAY__DISCORD_TOKEN"
         const val DRAFT_PREFS = "chat_drafts"
         const val PIN_PREFS = "chat_pins"
         const val PIN_KEY = "ids"

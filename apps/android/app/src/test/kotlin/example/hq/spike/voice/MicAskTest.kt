@@ -27,4 +27,20 @@ class MicAskTest {
         assertEquals(SilenceLine.SwitchHint, MicAsk.silenceLine(2, 31))
         assertEquals(SilenceLine.SpeakCloser, MicAsk.silenceLine(2, 30))
     }
+
+    @Test fun firstMicTapShowsReasonOnlyInReadyIdleOrStoppedPhases() {
+        for (phase in listOf(VoicePhase.ModelReady, VoicePhase.Idle, VoicePhase.Stopped)) {
+            assertTrue(MicAsk.shouldShowReason(granted = false, askedBefore = false, phase = phase))
+            assertFalse(MicAsk.shouldShowReason(granted = true, askedBefore = false, phase = phase))
+            assertFalse(MicAsk.shouldShowReason(granted = false, askedBefore = true, phase = phase))
+            assertTrue(MicAsk.canLaunchDialog(granted = false, askedBefore = true, phase = phase))
+        }
+        for (busyPhase in listOf(VoicePhase.NeedsModel, VoicePhase.Downloading, VoicePhase.Preparing, VoicePhase.MicBlocked)) {
+            assertFalse(MicAsk.shouldShowReason(granted = false, askedBefore = false, phase = busyPhase))
+            assertFalse(MicAsk.canLaunchDialog(granted = false, askedBefore = false, phase = busyPhase))
+            assertFalse(MicAsk.canLaunchDialog(granted = false, askedBefore = true, phase = busyPhase))
+        }
+        assertFalse(MicAsk.shouldShowReason(granted = false, askedBefore = false, phase = VoicePhase.MicNeeded))
+        assertTrue(MicAsk.canLaunchDialog(granted = false, askedBefore = false, phase = VoicePhase.MicNeeded))
+    }
 }

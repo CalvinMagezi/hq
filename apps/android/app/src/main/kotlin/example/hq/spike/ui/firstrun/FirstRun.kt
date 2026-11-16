@@ -7,7 +7,11 @@ import android.database.sqlite.SQLiteDatabase
 import java.io.File
 import java.io.IOException
 
-/** The screens of the first-run flow. [Restore] hangs off [Welcome] and ends at [Notify], which is skipped when notifications already reach the owner. [Moved] opens the flow on a phone the vault was copied to. */
+/**
+ * The screens of the first-run flow. The required path is [Welcome], [Model], [Start].
+ * [Restore] hangs off [Welcome] and ends at [Start]. [Moved] opens the flow on a phone the vault was copied to.
+ * [Chat] and [Notify] are kept so a saved step from before the cut still decodes and lands on [Start].
+ */
 enum class Step { Welcome, Moved, Model, Chat, Notify, Start, Restore }
 
 /** The pure rules: which screen shows on launch, and where each button leads. */
@@ -15,12 +19,14 @@ object FirstRunLogic {
     /**
      * The screen to show now, or null when the flow is over.
      * A finished flow stays finished. A saved step is resumed even after a kill, and wins over a stored key (the key
-     * is sealed at step 1, so a later step has one already). With nothing saved, a stored model key or an app that
-     * had already heard HQ answer before this flow existed (an upgrade, or a development build set up with adb)
-     * means there is nothing to ask. Only a clean install starts at [Step.Welcome].
+     * is sealed at step 1, so a later step has one already); a saved [Step.Chat] or [Step.Notify] from an older build
+     * lands on [Step.Start]. With nothing saved, a stored model key or an app that had already heard HQ answer before
+     * this flow existed (an upgrade, or a development build set up with adb) means there is nothing to ask.
+     * Only a clean install starts at [Step.Welcome].
      */
     fun decide(done: Boolean, saved: Step?, hasModelKey: Boolean, heardHqBefore: Boolean): Step? = when {
         done -> null
+        saved == Step.Chat || saved == Step.Notify -> Step.Start
         saved != null -> saved
         hasModelKey || heardHqBefore -> null
         else -> Step.Welcome
@@ -29,11 +35,11 @@ object FirstRunLogic {
     fun next(step: Step): Step = when (step) {
         Step.Welcome -> Step.Model
         Step.Moved -> Step.Model
-        Step.Model -> Step.Chat
-        Step.Chat -> Step.Notify
+        Step.Model -> Step.Start
+        Step.Chat -> Step.Start
         Step.Notify -> Step.Start
         Step.Start -> Step.Start
-        Step.Restore -> Step.Notify
+        Step.Restore -> Step.Start
     }
 
     fun back(step: Step, moved: Boolean = false): Step = when (step) {
@@ -41,8 +47,8 @@ object FirstRunLogic {
         Step.Moved -> Step.Moved
         Step.Model -> if (moved) Step.Moved else Step.Welcome
         Step.Chat -> Step.Model
-        Step.Notify -> Step.Chat
-        Step.Start -> Step.Notify
+        Step.Notify -> Step.Model
+        Step.Start -> Step.Model
         Step.Restore -> Step.Welcome
     }
 }
@@ -52,6 +58,7 @@ class FirstRunStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     fun done(): Boolean = prefs.getBoolean(DONE, false)
+    fun threeScreenFlow(): Boolean = prefs.getBoolean(THREE_SCREEN_FLOW, false)
     private val appContext = context.applicationContext
 
     /**
@@ -75,7 +82,7 @@ class FirstRunStore(context: Context) {
     fun movedSeen(): Boolean = prefs.getBoolean(MOVED_SEEN, false)
     fun save(step: Step) { prefs.edit().putString(STEP, step.name).apply() }
     fun finish() {
-        prefs.edit().putBoolean(DONE, true).putBoolean(MOVED, false).remove(STEP).apply()
+        prefs.edit().putBoolean(DONE, true).putBoolean(THREE_SCREEN_FLOW, true).putBoolean(MOVED, false).remove(STEP).apply()
         InstallMarker.write(appContext)
     }
 
@@ -91,6 +98,7 @@ class FirstRunStore(context: Context) {
         const val DONE = "done"
         const val MOVED = "moved"
         const val MOVED_SEEN = "moved_seen"
+        const val THREE_SCREEN_FLOW = "three_screen_flow"
     }
 }
 

@@ -73,9 +73,7 @@ fun FirstRunHost(ui: FirstRunUi, actions: FirstRunActions) {
             Step.Welcome -> WelcomeStep(actions)
             Step.Moved -> MovedStep(ui, actions)
             Step.Model -> ModelStep(ui, actions)
-            Step.Chat -> ChatStep(ui, actions)
-            Step.Notify -> NotifyStep(ui, actions)
-            Step.Start -> StartStep(ui, actions)
+            Step.Chat, Step.Notify, Step.Start -> StartStep(ui, actions)
             Step.Restore -> RestoreStep(ui, actions)
         }
     }
@@ -151,19 +149,6 @@ private fun ModelStep(ui: FirstRunUi, actions: FirstRunActions) {
 }
 
 @Composable
-private fun ChatStep(ui: FirstRunUi, actions: FirstRunActions) {
-    Heading(FirstRunWords.CHAT_TITLE, FirstRunWords.CHAT_BODY)
-    SecretField(FirstRunWords.TELEGRAM_LABEL, ui.telegram, FirstRunWords.CHAT_HINT, ui.showKey, !ui.busy, onShow = actions.onShowKey, onChange = actions.onTelegram)
-    SecretField(FirstRunWords.DISCORD_LABEL, ui.discord, FirstRunWords.CHAT_HINT, ui.showKey, !ui.busy, onShow = actions.onShowKey, onChange = actions.onDiscord)
-    ui.error?.let { Message(it) }
-    GreenPill(FirstRunWords.NEXT, busy = ui.busy, onClick = actions.onChatNext)
-    Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-        TextAction(FirstRunWords.BACK, enabled = !ui.busy, onClick = actions.onBack)
-        TextAction(FirstRunWords.SKIP, enabled = !ui.busy, onClick = actions.onChatSkip)
-    }
-}
-
-@Composable
 private fun StartStep(ui: FirstRunUi, actions: FirstRunActions) {
     if (ui.moved) {
         Text(FirstRunWords.START_TITLE, style = Title, color = Mts.Ink)
@@ -172,8 +157,6 @@ private fun StartStep(ui: FirstRunUi, actions: FirstRunActions) {
         Text(FirstRunWords.START_TITLE, style = Title, color = Mts.Ink)
     }
     ui.error?.let { Message(it) }
-    StartNotifCard()
-    AssistantCard(example.hq.spike.ui.settings.rememberAssistantFacts())
     if (!ui.moved) Text(stringResource(R.string.assist_one_machine), style = HqType.BodySm, color = Mts.InkMuted)
     GreenPill(if (ui.busy) FirstRunWords.STARTING else FirstRunWords.START, busy = ui.busy, onClick = actions.onStart)
     TextAction(FirstRunWords.BACK, enabled = !ui.busy, onClick = actions.onBack)
@@ -295,37 +278,3 @@ private fun openLink(context: Context, url: String) {
 private fun displayName(context: Context, uri: Uri): String? = runCatching {
     context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
 }.getOrNull()
-
-/** The optional "make HQ your phone's assistant" card. Shown only where the phone has the setting; it never blocks Start HQ. */
-@Composable
-internal fun AssistantCard(facts: example.hq.spike.ui.settings.AssistantFacts) {
-    val context = LocalContext.current
-    var steps by remember { mutableStateOf(false) }
-    var skipped by remember { mutableStateOf(false) }
-    if (!facts.available) return
-    if (facts.held) androidx.compose.runtime.LaunchedEffect(Unit) { example.hq.spike.measure.Counters.get(context).bump(example.hq.spike.measure.Counter.AssistantChosen) }
-    val shape = RoundedCornerShape(16.dp)
-    Column(
-        Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (facts.held) Mts.Ink else Mts.Line, shape).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        val big = LocalDensity.current.fontScale >= 1.5f
-        val head: @Composable () -> Unit = {
-            androidx.compose.material3.Icon(if (facts.held) example.hq.spike.ui.shell.HqIcons.Check else example.hq.spike.ui.shell.HqIcons.Mic, null, Modifier.size(24.dp), tint = Mts.Ink)
-            Text(stringResource(if (facts.held) R.string.assist_card_chosen_title else R.string.assist_card_title), style = HqType.BodyBold, color = Mts.Ink)
-        }
-        if (big) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { head() } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { head() }
-        if (facts.held) {
-            val size = example.hq.spike.download.DownloadRules.sizeMb(example.hq.spike.voice.VoiceModels.SIZE_BYTES)
-            Text(stringResource(R.string.assist_card_chosen_body, stringResource(R.string.dl_mb, size)), style = HqType.BodySm, color = Mts.InkMuted)
-        } else {
-            Text(stringResource(R.string.assist_optional), style = HqType.Caption, color = Mts.InkMuted)
-            Text(stringResource(R.string.assist_card_body), style = HqType.BodySm, color = Mts.InkMuted)
-            if (skipped) Text(stringResource(R.string.assist_card_not_set), style = HqType.BodySm, color = Mts.InkMuted)
-            OutlinePill(stringResource(if (skipped) R.string.assist_try_again else R.string.assist_card_set_up)) { steps = true }
-        }
-    }
-    if (steps) androidx.compose.ui.window.Dialog(onDismissRequest = { steps = false; skipped = true }) {
-        Column(Modifier.clip(shape).background(Mts.Surface100)) { example.hq.spike.ui.settings.AssistantTapSteps { steps = false; skipped = true } }
-    }
-}
