@@ -28,6 +28,7 @@ const makeTask = (id: string, display_id: string, initiative_id: string, updated
   blocked_since: null,
   long_horizon: false,
   archived_at: null,
+  shelved_at: null,
   created_by: 'test',
   created_at,
   updated_at,

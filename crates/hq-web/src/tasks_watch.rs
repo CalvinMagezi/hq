@@ -22,6 +22,8 @@ struct TasksSnapshot {
     comments: i64,
     // Who wrote which note, and what was decided about it, feed a task's activity view.
     provenance: String,
+    // Shelving changes what a list shows without touching `updated_at`.
+    shelf: String,
 }
 
 fn take_tasks_snapshot(db: &hq_db::Database) -> TasksSnapshot {
@@ -33,7 +35,9 @@ fn take_tasks_snapshot(db: &hq_db::Database) -> TasksSnapshot {
                     (SELECT COALESCE(MAX(id), 0) FROM task_comments), \
                     (SELECT COALESCE(MAX(id), 0) || '/' || COUNT(*) || '/' || COALESCE(SUM(recorded_late), 0) \
                        FROM note_provenance) || '/' || \
-                    (SELECT COALESCE(MAX(id), 0) FROM note_review_events) \
+                    (SELECT COALESCE(MAX(id), 0) FROM note_review_events), \
+                    (SELECT COUNT(shelved_at) || '/' || COALESCE(MAX(shelved_at), '') FROM tasks) || '/' || \
+                    (SELECT COUNT(shelved_at) || '/' || COALESCE(MAX(shelved_at), '') FROM initiatives) \
              FROM tasks",
             [],
             |row| {
@@ -43,6 +47,7 @@ fn take_tasks_snapshot(db: &hq_db::Database) -> TasksSnapshot {
                     leases: row.get(2)?,
                     comments: row.get(3)?,
                     provenance: row.get(4)?,
+                    shelf: row.get(5)?,
                 })
             },
         )
@@ -109,6 +114,44 @@ mod tests {
         let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .expect("task:sync should arrive well before the 30s fallback poll")
+            .unwrap();
+        assert!(event.contains("task:sync"), "{event}");
+    }
+
+    #[tokio::test]
+    async fn shelving_wakes_web_clients_though_it_leaves_updated_at_alone() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let state = Arc::new(WsState::new(vault.path().to_path_buf(), None));
+        state
+            .db
+            .with_conn(|c| {
+                hq_db::tasks::create_initiative(
+                    c, "in-s", "personal", None, "Shelf", "shelf", "SHELF",
+                )?;
+                hq_db::tasks::create_task(
+                    c,
+                    "tk-s",
+                    "in-s",
+                    &hq_db::tasks::NewTask {
+                        title: "Task",
+                        created_by: "test",
+                        ..Default::default()
+                    },
+                )
+            })
+            .unwrap();
+        let mut rx = state.tx.subscribe();
+        spawn_tasks_watcher(state.clone());
+        tokio::task::yield_now().await;
+
+        state
+            .db
+            .with_conn(|c| hq_db::tasks::shelve_tasks(c, &["tk-s".to_string()]))
+            .unwrap();
+
+        let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("shelving should reach open web clients before the fallback poll")
             .unwrap();
         assert!(event.contains("task:sync"), "{event}");
     }

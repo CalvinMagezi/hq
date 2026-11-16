@@ -9,6 +9,13 @@ pub const DEFAULT_STALE_AFTER_HOURS: u64 = 72;
 /// The shortest ttl honoured, so a typo of 0 or 1 does not expire every lease at once.
 pub const MIN_LEASE_TTL_SECS: u64 = 60;
 
+/// The youngest finished work the daily sweep will archive, so a typo of 1 does not hide
+/// yesterday's tasks from the owner.
+pub const MIN_AUTO_ARCHIVE_DAYS: u32 = 7;
+
+/// The oldest age the sweep accepts, ten years, which is also the most the database allows.
+pub const MAX_AUTO_ARCHIVE_DAYS: u32 = 3650;
+
 /// Whether an agent must hold a work lease to start a task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -251,6 +258,12 @@ pub struct TasksConfig {
     /// Verifying completion without a person reading each task.
     #[serde(default)]
     pub verification: VerificationConfig,
+
+    /// Archive completed tasks that finished more than this many days ago, once a day.
+    /// Absent or 0 turns it off, which is the default. Archiving only hides a task from the
+    /// web lists: agents, the queue and the graph still see it, and it can be undone.
+    #[serde(default)]
+    pub auto_archive_after_days: Option<u32>,
 }
 
 impl TasksConfig {
@@ -262,6 +275,14 @@ impl TasksConfig {
     /// The staleness window in force, at least one hour.
     pub fn stale_hours(&self) -> u64 {
         self.stale_after_hours.max(1)
+    }
+
+    /// Days after which the daily sweep archives completed tasks, or `None` while it is off.
+    /// A value below `MIN_AUTO_ARCHIVE_DAYS` is raised to it and one above the maximum lowered.
+    pub fn auto_archive_days(&self) -> Option<u32> {
+        self.auto_archive_after_days
+            .filter(|days| *days > 0)
+            .map(|days| days.clamp(MIN_AUTO_ARCHIVE_DAYS, MAX_AUTO_ARCHIVE_DAYS))
     }
 }
 
@@ -285,6 +306,7 @@ impl Default for TasksConfig {
             stale_after_hours: default_stale_after_hours(),
             route_tags: default_route_tags(),
             verification: VerificationConfig::default(),
+            auto_archive_after_days: None,
         }
     }
 }
@@ -382,6 +404,38 @@ mod tests {
             !cfg.verification.reviewer_enabled(),
             "a zero ceiling is no ceiling"
         );
+    }
+
+    #[test]
+    fn auto_archive_is_off_unless_asked_for() {
+        let cfg: TasksConfig = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(cfg.auto_archive_days(), None);
+        assert_eq!(TasksConfig::default().auto_archive_days(), None);
+        let cfg: TasksConfig = serde_yaml::from_str("auto_archive_after_days: 0").unwrap();
+        assert_eq!(
+            cfg.auto_archive_days(),
+            None,
+            "0 reads as off, not as everything"
+        );
+    }
+
+    #[test]
+    fn auto_archive_days_stay_between_the_floor_and_the_ceiling() {
+        let days = |text: &str| {
+            serde_yaml::from_str::<TasksConfig>(text)
+                .unwrap()
+                .auto_archive_days()
+        };
+        assert_eq!(days("auto_archive_after_days: 90"), Some(90));
+        assert_eq!(
+            days("auto_archive_after_days: 1"),
+            Some(MIN_AUTO_ARCHIVE_DAYS)
+        );
+        assert_eq!(
+            days("auto_archive_after_days: 999999"),
+            Some(MAX_AUTO_ARCHIVE_DAYS)
+        );
+        assert!(serde_yaml::from_str::<TasksConfig>("auto_archive_after_days: -5").is_err());
     }
 
     #[test]

@@ -265,6 +265,22 @@ fn deleted_tasks_are_pruned_and_budget_leaves_stale_remaining() {
 }
 
 #[test]
+fn shelved_tasks_stay_in_the_graph() {
+    let db = db();
+    seed_fixture(&db);
+    sync_all(&db);
+    let before = top_ids(&db, "a1", 10);
+    assert!(before.contains(&"a2".to_string()));
+
+    db.with_conn(|c| tasks::shelve_tasks(c, &["a2".to_string()]))
+        .unwrap();
+    let report = sync_all(&db);
+
+    assert_eq!(report.removed, 0);
+    assert_eq!(top_ids(&db, "a1", 10), before);
+}
+
+#[test]
 fn rebuild_recovers_from_a_wiped_index_and_results_are_bounded() {
     let db = db();
     seed_fixture(&db);

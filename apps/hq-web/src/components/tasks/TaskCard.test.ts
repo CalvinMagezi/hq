@@ -31,6 +31,7 @@ const makeTask = (overrides: Partial<TaskItem> = {}): TaskItem => ({
   blocked_since: null,
   long_horizon: false,
   archived_at: null,
+  shelved_at: null,
   created_by: 'alice',
   created_at: '2026-09-28 10:00:00',
   updated_at: '2026-09-28 20:30:00',

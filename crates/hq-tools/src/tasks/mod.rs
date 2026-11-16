@@ -23,6 +23,7 @@ mod tools_lease;
 mod tools_links;
 mod tools_ops;
 mod tools_org;
+mod tools_shelf;
 mod tools_task;
 mod tools_time;
 pub mod verify;
@@ -49,6 +50,7 @@ pub use tools_lease::{lease_ttl_secs, task_settings};
 use tools_links::*;
 use tools_ops::{InitiativeProgressTool, TaskRoutingAuditTool, TaskStaleTool};
 use tools_org::*;
+use tools_shelf::*;
 use tools_task::*;
 use tools_time::TaskTimeReportTool;
 
@@ -168,6 +170,10 @@ pub(crate) fn build_task_tools(
             settings: settings.clone(),
             db: db.clone(),
         }),
+        Box::new(TaskShelveTool { db: db.clone() }),
+        Box::new(TaskUnshelveTool { db: db.clone() }),
+        Box::new(TaskShelveCompletedTool { db: db.clone() }),
+        Box::new(InitiativeShelveTool { db: db.clone() }),
         Box::new(TaskCommentAddTool {
             settings: settings.clone(),
             db: db.clone(),

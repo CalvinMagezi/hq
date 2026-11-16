@@ -186,6 +186,9 @@ pub struct Initiative {
     pub next_sequence: i64,
     #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
+    /// UTC timestamp the owner shelved the list. `None` = shown. Display only: its tasks
+    /// stay valid for agents, the queue and the graph. See `shelf.rs`.
+    pub shelved_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -239,9 +242,14 @@ pub struct Task {
     pub blocked_since: Option<String>,
     /// A finished turn or an exit of a session on this task does not move it.
     pub long_horizon: bool,
-    /// UTC timestamp it was archived. `None` = active. Archived tasks are hidden from lists.
+    /// UTC timestamp it was removed (`task_delete`). `None` = not removed. A removed task
+    /// leaves lists, the queue and the graph, and can only be restored or purged.
     #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub archived_at: Option<String>,
+    /// UTC timestamp the owner shelved it. `None` = shown. Display only: a shelved task
+    /// stays in the queue and the graph and can be claimed, changed and linked as usual.
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
+    pub shelved_at: Option<String>,
     /// Caller-supplied idempotency key, unique within the task's space.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_id: Option<String>,
@@ -310,8 +318,10 @@ pub struct TaskFilter {
     /// Page size, at most `MAX_LIST_LIMIT`. `None` = the maximum.
     pub limit: Option<usize>,
     pub offset: usize,
-    /// `false` = active tasks only (the default); `true` = only archived ones.
+    /// `false` = tasks that are not removed (the default); `true` = only removed ones.
     pub archived: bool,
+    /// Whether shelved tasks are listed. The default lists them, so agent reads are unchanged.
+    pub shelf: Shelf,
     /// Tasks assigned to this name.
     pub assignee: Option<String>,
     /// Every word must appear in the title, description or display id (case-insensitive).
@@ -319,6 +329,29 @@ pub struct TaskFilter {
     /// Only tasks changed after this UTC `YYYY-MM-DD HH:MM:SS` (see `normalize_since`).
     pub updated_since: Option<String>,
     pub sort: TaskSort,
+}
+
+/// Which side of the shelf a list reads.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Shelf {
+    /// Shelved and shown tasks alike.
+    #[default]
+    Include,
+    /// Only tasks the owner has not shelved: the web's everyday view.
+    Exclude,
+    /// Only shelved tasks.
+    Only,
+}
+
+impl Shelf {
+    pub fn parse(name: &str) -> Result<Self> {
+        match name {
+            "include" | "" => Ok(Self::Include),
+            "exclude" => Ok(Self::Exclude),
+            "only" => Ok(Self::Only),
+            other => anyhow::bail!("unknown shelf '{other}', expected include, exclude or only"),
+        }
+    }
 }
 
 /// How a task list is ordered.
@@ -423,6 +456,9 @@ mod rollout;
 mod rollout_tests;
 mod rows;
 mod shadow;
+mod shelf;
+#[cfg(test)]
+mod shelf_tests;
 mod stale;
 mod sweeps;
 #[cfg(test)]
@@ -452,6 +488,7 @@ pub use rollout::*;
 use rows::*;
 pub use rows::{list_task_events, validate_date};
 pub use shadow::*;
+pub use shelf::*;
 pub use stale::*;
 pub use sweeps::*;
 pub use time::*;
