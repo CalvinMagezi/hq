@@ -31,7 +31,7 @@ use sha2::{Digest, Sha256};
 use super::{
     names_private_folder, sync_note_index_and_cache, validate_path_in_vault, validate_write_path,
 };
-use crate::provenance::{Recorder, Writer, record_tool_write};
+use crate::provenance::{Recorder, Writer};
 use crate::registry::HqTool;
 
 /// Where chat uploads and downloaded attachments land. Their files are referenced by
@@ -620,18 +620,38 @@ impl Importer {
             &converted.saved,
         );
         let vault = self.vault.clone();
+        let db = self.db.clone();
         let (note_path, to_write) = (path.clone(), note.clone());
-        tokio::task::spawn_blocking(move || vault.write_note(&note_path, &to_write)).await??;
-        sync_note_index_and_cache(
-            self.db.as_ref(),
-            &path,
-            &note.content,
-            &note.title,
-            &note.tags,
-        );
-        self.record(&path, caller).await;
-        // Read it back: the note is only counted once it can be read.
-        let back = self.vault.read_note(&path)?;
+        let writer = match caller {
+            Caller::Tool(args) => Some((*args).clone()),
+            Caller::Known(_) => None,
+        };
+        let known_writer = match caller {
+            Caller::Known(w) => Some(w.clone()),
+            Caller::Tool(_) => None,
+        };
+        let back = tokio::task::spawn_blocking(move || -> Result<hq_core::types::Note> {
+            // Hold the per-note lock across write, index, record, and read-back; never across .await.
+            let _held = hq_vault::note_lock::lock_note(&note_path);
+            vault.write_note(&note_path, &to_write)?;
+            sync_note_index_and_cache(
+                db.as_ref(),
+                &note_path,
+                &to_write.content,
+                &to_write.title,
+                &to_write.tags,
+            );
+            if let Some(ref db) = db {
+                let recorder = Recorder::new(db.clone(), vault.vault_path().to_path_buf());
+                if let Some(ref args) = writer {
+                    recorder.after_write(&note_path, args);
+                } else if let Some(ref w) = known_writer {
+                    recorder.record(&note_path, w);
+                }
+            }
+            vault.read_note(&note_path)
+        })
+        .await??;
         if back.content.trim().is_empty() {
             bail!("the note was written but reads back empty");
         }
@@ -654,22 +674,6 @@ impl Importer {
         Ok(out)
     }
 
-    async fn record(&self, note_path: &str, caller: &Caller<'_>) {
-        match caller {
-            Caller::Tool(args) => {
-                record_tool_write(self.db.as_ref(), self.root(), note_path, args).await
-            }
-            Caller::Known(writer) => {
-                if let Some(db) = &self.db {
-                    let recorder = Recorder::new(db.clone(), self.root().to_path_buf());
-                    let (path, writer) = (note_path.to_string(), writer.clone());
-                    let _ =
-                        tokio::task::spawn_blocking(move || recorder.record(&path, &writer)).await;
-                }
-            }
-        }
-    }
-
     /// Moves the original to `_archive/originals/` and points the note's `source` at it.
     async fn archive(&self, rel: &str, note_path: &str, caller: &Caller<'_>) -> Result<String> {
         if rel.starts_with(&format!("{MEDIA_DIR}/")) {
@@ -681,19 +685,42 @@ impl Importer {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::rename(&from, &to)?;
-        // Re-point the note at the new location.
-        let mut note = self.vault.read_note(note_path)?;
-        note.frontmatter
-            .insert("source".into(), serde_yaml::Value::String(target.clone()));
-        note.frontmatter.insert(
-            "original_location".into(),
-            serde_yaml::Value::String(rel.to_string()),
-        );
-        note.modified_at = chrono::Utc::now();
+        // Re-point the note at the new location under its per-note lock.
         let vault = self.vault.clone();
+        let db = self.db.clone();
         let path = note_path.to_string();
-        tokio::task::spawn_blocking(move || vault.write_note(&path, &note)).await??;
-        self.record(note_path, caller).await;
+        let target_for_note = target.clone();
+        let rel_owned = rel.to_string();
+        let writer = match caller {
+            Caller::Tool(args) => Some((*args).clone()),
+            Caller::Known(_) => None,
+        };
+        let known_writer = match caller {
+            Caller::Known(w) => Some(w.clone()),
+            Caller::Tool(_) => None,
+        };
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let _held = hq_vault::note_lock::lock_note(&path);
+            let mut note = vault.read_note(&path)?;
+            note.frontmatter
+                .insert("source".into(), serde_yaml::Value::String(target_for_note));
+            note.frontmatter.insert(
+                "original_location".into(),
+                serde_yaml::Value::String(rel_owned),
+            );
+            note.modified_at = chrono::Utc::now();
+            vault.write_note(&path, &note)?;
+            if let Some(ref db) = db {
+                let recorder = Recorder::new(db.clone(), vault.vault_path().to_path_buf());
+                if let Some(ref args) = writer {
+                    recorder.after_write(&path, args);
+                } else if let Some(ref w) = known_writer {
+                    recorder.record(&path, w);
+                }
+            }
+            Ok(())
+        })
+        .await??;
         Ok(target)
     }
 

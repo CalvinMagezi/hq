@@ -265,6 +265,42 @@ pub async fn keep_before_tool_write(
     let _ = tokio::task::spawn_blocking(move || recorder.before_write(&rel, &args)).await;
 }
 
+/// Run `write` under the per-note lock, keeping any earlier text beforehand, discarding the
+/// kept row if `write` fails, and recording provenance on success.
+///
+/// Must be called from synchronous code (for example inside `spawn_blocking`) so the
+/// [`hq_vault::note_lock::NoteGuard`] is never held across an `.await`.
+pub fn locked_tool_write<T, F>(
+    db: Option<&Arc<Database>>,
+    vault_path: &Path,
+    rel: &str,
+    args: &Value,
+    write: F,
+) -> anyhow::Result<T>
+where
+    F: FnOnce() -> anyhow::Result<T>,
+{
+    let _held = hq_vault::note_lock::lock_note(rel);
+    let recorder = db.map(|db| Recorder::new(db.clone(), vault_path.to_path_buf()));
+    if let Some(ref rec) = recorder {
+        rec.before_write(rel, args);
+    }
+    match write() {
+        Ok(value) => {
+            if let Some(ref rec) = recorder {
+                rec.after_write(rel, args);
+            }
+            Ok(value)
+        }
+        Err(e) => {
+            if let Some(ref rec) = recorder {
+                rec.discard_kept(rel, args);
+            }
+            Err(e)
+        }
+    }
+}
+
 /// Records writes. Best effort: a failure here is logged and never fails the write it describes.
 #[derive(Clone)]
 pub struct Recorder {
@@ -421,6 +457,25 @@ impl Recorder {
         });
         if let Err(e) = kept {
             tracing::warn!(path = rel, error = %e, "provenance: could not keep the earlier text");
+        }
+    }
+
+    /// The write whose earlier text `before_write` may have kept failed: drop the unarmed kept
+    /// row so a later non-keeping write cannot tie it to an older text.
+    pub fn discard_kept(&self, rel: &str, args: &Value) {
+        if resolve(args, &self.db).source_kind != SourceKind::Agent {
+            return;
+        }
+        let rel_owned = rel.to_string();
+        if let Err(e) = self
+            .db
+            .with_conn(move |conn| hq_db::note_keep::remove(conn, &rel_owned))
+        {
+            tracing::warn!(
+                path = rel,
+                error = %e,
+                "provenance: could not discard kept text after failed write"
+            );
         }
     }
 
@@ -1186,6 +1241,28 @@ mod tests {
         fx.recorder().after_write(rel, &agent_args());
         assert_eq!(kept(&fx, rel).unwrap().text, "owner v2");
         std::fs::write(&path, "hq v3, no keeping step").unwrap();
+        fx.recorder().after_write(rel, &agent_args());
+        assert!(kept(&fx, rel).is_none());
+    }
+
+    #[test]
+    fn failed_write_discards_kept_row_and_does_not_tie_later_non_keeping_write() {
+        let fx = Fixture::new();
+        std::fs::create_dir_all(fx.dir.path().join("Notebooks")).unwrap();
+        let path = fx.dir.path().join("Notebooks/a.md");
+        let rel = "Notebooks/a.md";
+        std::fs::write(&path, "owner v1").unwrap();
+        fx.recorder().record(rel, &Writer::owner());
+
+        fx.recorder().before_write(rel, &agent_args());
+        assert!(kept(&fx, rel).is_some());
+        // The write failed before landing: discard the kept row.
+        fx.recorder().discard_kept(rel, &agent_args());
+        assert!(kept(&fx, rel).is_none());
+
+        // An outside edit happens, then a non-keeping HQ write runs: it must not tie "owner v1".
+        std::fs::write(&path, "outside edit").unwrap();
+        std::fs::write(&path, "hq non-keeping").unwrap();
         fx.recorder().after_write(rel, &agent_args());
         assert!(kept(&fx, rel).is_none());
     }

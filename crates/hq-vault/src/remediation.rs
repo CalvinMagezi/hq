@@ -101,6 +101,13 @@ pub(crate) fn repoint_wikilinks(
     let old_lower = old_stem.to_lowercase();
     let mut modified = 0u32;
     for path in &paths {
+        let rel = path
+            .strip_prefix(vault_path)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        // Lock one referrer at a time around read-modify-write; never hold two note locks.
+        let _held = crate::note_lock::lock_note(&rel);
         let Ok(content) = std::fs::read_to_string(path) else {
             continue;
         };
@@ -154,26 +161,34 @@ pub fn repair_nested_frontmatter(
     let mut report = NestedFrontmatterReport::default();
     for path in files {
         report.scanned += 1;
-        let Ok(raw) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let Some(repaired) = unnest(&raw) else {
-            continue;
-        };
         let rel = path
             .strip_prefix(vault)
             .unwrap_or(&path)
             .to_string_lossy()
-            .into_owned();
+            .replace('\\', "/");
         if apply {
+            let _held = crate::note_lock::lock_note(&rel);
+            let Ok(raw) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Some(repaired) = unnest(&raw) else {
+                continue;
+            };
             let backup = backup_dir.join(&rel);
             if let Some(parent) = backup.parent() {
                 std::fs::create_dir_all(parent)?;
             }
             std::fs::write(&backup, &raw)?;
             write_atomic(&path, repaired.as_bytes())?;
+            report.nested.push(rel);
+        } else {
+            let Ok(raw) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            if unnest(&raw).is_some() {
+                report.nested.push(rel);
+            }
         }
-        report.nested.push(rel);
     }
     Ok(report)
 }

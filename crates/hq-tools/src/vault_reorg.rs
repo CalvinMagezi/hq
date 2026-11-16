@@ -246,23 +246,16 @@ impl HqTool for VaultFrontmatterUpdateTool {
             .map(|v| serde_json::from_value(v).unwrap_or_default())
             .unwrap_or_default();
         crate::vault::validate_write_path(self.vault.vault_path(), &path)?;
-        crate::provenance::keep_before_tool_write(
-            self.db.as_ref(),
-            self.vault.vault_path(),
-            &path,
-            &args,
-        )
-        .await;
         let vault = self.vault.clone();
+        let db = self.db.clone();
         let p = path.clone();
-        tokio::task::spawn_blocking(move || vault.update_frontmatter(&p, set, remove)).await??;
-        crate::provenance::record_tool_write(
-            self.db.as_ref(),
-            self.vault.vault_path(),
-            &path,
-            &args,
-        )
-        .await;
+        // Run keep + write + record inside spawn_blocking so the NoteGuard is never held across .await.
+        tokio::task::spawn_blocking(move || {
+            crate::provenance::locked_tool_write(db.as_ref(), vault.vault_path(), &p, &args, || {
+                vault.update_frontmatter(&p, set, remove)
+            })
+        })
+        .await??;
         Ok(json!({ "updated": path }))
     }
 }
@@ -296,9 +289,6 @@ impl HqTool for VaultPinTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         let path = arg_str(&args, "path");
         let pin = args.get("pin").and_then(Value::as_bool).unwrap_or(true);
-        if !pin {
-            self.refuse_owner_pin(&path)?;
-        }
         let (set, remove) = if pin {
             let set = std::collections::HashMap::from([(
                 "pinned".to_string(),
@@ -309,17 +299,31 @@ impl HqTool for VaultPinTool {
             (std::collections::HashMap::new(), vec!["pinned".to_string()])
         };
         crate::vault::validate_write_path(self.vault.vault_path(), &path)?;
-        crate::provenance::keep_before_tool_write(
-            self.db.as_ref(),
-            self.vault.vault_path(),
-            &path,
-            &args,
-        )
-        .await;
         let vault = self.vault.clone();
+        let db = self.db.clone();
         let p = path.clone();
-        tokio::task::spawn_blocking(move || vault.update_frontmatter(&p, set, remove)).await??;
-        self.record_as_agent(&path, &args);
+        // Run check + keep + write + record inside spawn_blocking so NoteGuard is never held across .await.
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let _held = hq_vault::note_lock::lock_note(&p);
+            if !pin {
+                Self::refuse_owner_pin_with(db.as_ref(), vault.vault_path(), &p)?;
+            }
+            let recorder = db.as_ref().map(|db| {
+                crate::provenance::Recorder::new(db.clone(), vault.vault_path().to_path_buf())
+            });
+            if let Some(ref rec) = recorder {
+                rec.before_write(&p, &args);
+            }
+            if let Err(e) = vault.update_frontmatter(&p, set, remove) {
+                if let Some(ref rec) = recorder {
+                    rec.discard_kept(&p, &args);
+                }
+                return Err(e);
+            }
+            Self::record_as_agent_with(db.as_ref(), vault.vault_path(), &p, &args);
+            Ok(())
+        })
+        .await??;
         Ok(json!({
             "path": path,
             "pinned": pin,
@@ -338,8 +342,13 @@ const UNATTRIBUTED_PINNER: &str = "an unattributed agent";
 impl VaultPinTool {
     /// Every call of this tool is an agent's, so a caller HQ could not attribute is
     /// recorded as one rather than left unknown, which would make its pin trusted.
-    fn record_as_agent(&self, path: &str, args: &Value) {
-        let Some(db) = &self.db else { return };
+    fn record_as_agent_with(
+        db: Option<&Arc<Database>>,
+        vault_path: &std::path::Path,
+        path: &str,
+        args: &Value,
+    ) {
+        let Some(db) = db else { return };
         let mut writer = crate::provenance::resolve(args, db);
         if writer.source_kind == hq_db::provenance::SourceKind::Unknown {
             writer.source_kind = hq_db::provenance::SourceKind::Agent;
@@ -347,14 +356,18 @@ impl VaultPinTool {
                 .actor_id
                 .get_or_insert_with(|| UNATTRIBUTED_PINNER.to_string());
         }
-        crate::provenance::Recorder::new(db.clone(), self.vault.vault_path().to_path_buf())
+        crate::provenance::Recorder::new(db.clone(), vault_path.to_path_buf())
             .record(path, &writer);
     }
 
     /// A pin the owner made (any pin not suggested by an agent) is theirs to remove.
-    fn refuse_owner_pin(&self, path: &str) -> Result<()> {
-        let Some(db) = &self.db else { return Ok(()) };
-        let Ok(raw) = std::fs::read_to_string(self.vault.vault_path().join(path)) else {
+    fn refuse_owner_pin_with(
+        db: Option<&Arc<Database>>,
+        vault_path: &std::path::Path,
+        path: &str,
+    ) -> Result<()> {
+        let Some(db) = db else { return Ok(()) };
+        let Ok(raw) = std::fs::read_to_string(vault_path.join(path)) else {
             return Ok(());
         };
         let pinned = hq_core::frontmatter_utils::split_frontmatter(&raw)

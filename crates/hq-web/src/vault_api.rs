@@ -386,8 +386,15 @@ fn safe_title(title: &str) -> String {
     }
 }
 
-/// Write `content` to a new file named after `title` in `dir`, adding " N" on collision.
-fn create_unique(dir: &Path, title: &str, content: &str) -> std::io::Result<PathBuf> {
+/// Write `content` to a new file named after `title` in `dir`, adding " N" on collision,
+/// holding the per-note lock for the chosen path so a concurrent writer cannot slip in before
+/// provenance is recorded.
+fn create_unique_locked(
+    vault_root: &Path,
+    dir: &Path,
+    title: &str,
+    content: &str,
+) -> std::io::Result<(PathBuf, hq_vault::note_lock::NoteGuard)> {
     use std::io::Write;
     std::fs::create_dir_all(dir)?;
     let base = safe_title(title);
@@ -398,6 +405,8 @@ fn create_unique(dir: &Path, title: &str, content: &str) -> std::io::Result<Path
             format!("{base} {n}.md")
         };
         let path = dir.join(name);
+        let rel = rel_to_vault(vault_root, &path);
+        let held = hq_vault::note_lock::lock_note(&rel);
         match std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -405,13 +414,18 @@ fn create_unique(dir: &Path, title: &str, content: &str) -> std::io::Result<Path
         {
             Ok(mut f) => {
                 f.write_all(content.as_bytes())?;
-                return Ok(path);
+                return Ok((path, held));
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e),
         }
     }
     unreachable!("the dedupe loop only exits by returning")
+}
+
+#[cfg(test)]
+fn create_unique(dir: &Path, title: &str, content: &str) -> std::io::Result<PathBuf> {
+    create_unique_locked(dir, dir, title, content).map(|(p, _)| p)
 }
 
 /// Web writes go straight into FTS so search sees them before the periodic
@@ -637,11 +651,11 @@ pub(crate) async fn note_create_handler(
             Err(e) => tracing::warn!("notes: could not check the client id: {e:#}"),
         }
     }
-    let created = create_unique(&dir, title, content);
+    let created = create_unique_locked(&state.vault_path, &dir, title, content);
     if let Some(id) = client_id {
         use hq_db::client_ids::{KIND_NOTE, record, release};
         let noted = state.db.with_conn(|c| match &created {
-            Ok(path) => record(c, KIND_NOTE, id, &rel_to_vault(&state.vault_path, path)),
+            Ok((path, _)) => record(c, KIND_NOTE, id, &rel_to_vault(&state.vault_path, path)),
             Err(_) => release(c, KIND_NOTE, id),
         });
         if let Err(e) = noted {
@@ -649,7 +663,7 @@ pub(crate) async fn note_create_handler(
         }
     }
     match created {
-        Ok(path) => {
+        Ok((path, _held)) => {
             index_web_note(&state, &path, content);
             record_owner_write(&state, &path);
             let rel = rel_to_vault(&state.vault_path, &path);
@@ -812,7 +826,7 @@ pub(crate) async fn note_update_handler(
         return ApiError::not_found().into_response();
     }
     // Read, compare and write happen with no await in between, under the note's lock.
-    let _held = crate::note_undo::lock_note(rel);
+    let _held = hq_vault::note_lock::lock_note(rel);
     let existing = match std::fs::read_to_string(&abs) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {

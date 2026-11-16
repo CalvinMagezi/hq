@@ -367,11 +367,21 @@ fn write_lines(vault: &VaultClient, path: &str, lines: &[String]) -> Result<()> 
 }
 
 /// Writes the fact, then re-reads the note to confirm it landed.
+#[cfg(test)]
 fn record_fact(
     vault: &VaultClient,
     req: &FactRequest<'_>,
     date: &str,
 ) -> Result<(String, Outcome)> {
+    let (path, outcome, _held) = record_fact_locked(vault, req, date)?;
+    Ok((path, outcome))
+}
+
+fn record_fact_locked(
+    vault: &VaultClient,
+    req: &FactRequest<'_>,
+    date: &str,
+) -> Result<(String, Outcome, hq_vault::note_lock::NoteGuard)> {
     validate(req)?;
     let person = PersonId::from_name(req.person);
     if !req.create_person && !req.registered && !person_has_notes(vault, &person) {
@@ -384,19 +394,20 @@ fn record_fact(
         );
     }
     let path = choose_note(vault, &person)?;
+    let held = hq_vault::note_lock::lock_note(&path);
     if !vault.note_exists(&path) {
         new_person_note(vault, &path, req.person)?;
     }
     let before = fact_lines(vault, &path)?;
     let (after, outcome) = apply(&before, req, date);
     if outcome == Outcome::Duplicate {
-        return Ok((path, outcome));
+        return Ok((path, outcome, held));
     }
     write_lines(vault, &path, &after)?;
     if fact_lines(vault, &path)? != after {
         bail!("verification failed: {path} does not contain the recorded fact");
     }
-    Ok((path, outcome))
+    Ok((path, outcome, held))
 }
 
 fn str_arg<'a>(args: &'a Value, key: &str) -> &'a str {
@@ -462,7 +473,7 @@ impl HqTool for PersonRecordFactTool {
                 create_person,
                 registered,
             };
-            let (path, outcome) = record_fact(&vault, &req, &date)?;
+            let (path, outcome, _held) = record_fact_locked(&vault, &req, &date)?;
             if let Ok(note) = vault.read_note(&path) {
                 sync_note_index_and_cache(
                     db.as_ref(),

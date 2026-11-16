@@ -335,9 +335,16 @@ where
     let Some(enriched) = parse_reply(&reply) else {
         return try_later(db, capture, "the reply was not the JSON asked for");
     };
-    match write_if_unchanged(vault, capture, &enriched)? {
+    let outcome = {
+        // Hold the per-note lock only across the synchronous read-compare-write; drop it before
+        // `name_after_page` (which may move the note and lock referrers) and before any `.await`.
+        let _held = hq_vault::note_lock::lock_note(&capture.path);
+        write_if_unchanged(vault, capture, &enriched)?
+    };
+    match outcome {
         Outcome::Written => {
             let path = name_after_page(db, vault, &capture.path, enriched.title.as_deref());
+            let _held = hq_vault::note_lock::lock_note(&path);
             after_write(db, vault, &path);
             finish(db, &capture.path, Finish::Done, None)
         }

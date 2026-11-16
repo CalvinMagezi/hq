@@ -420,26 +420,31 @@ pub(crate) async fn pin_toggle_handler(
         return ApiError::not_found().into_response();
     }
 
-    let content = match std::fs::read_to_string(&abs) {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return ApiError::not_found().into_response();
+    // Read, modify and write happen with no await in between, under the note's lock.
+    // Release the guard before `accept_suggested_pin` because it calls `review_note`, which takes
+    // `lock_note` on the same note.
+    let new_content = {
+        let _held = hq_vault::note_lock::lock_note(&path_param);
+        let content = match std::fs::read_to_string(&abs) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return ApiError::not_found().into_response();
+            }
+            Err(e) => return ApiError::internal(e).into_response(),
+        };
+
+        let new_content = crate::vault_api::set_pinned(&content, pin);
+        if let Err(e) = hq_vault::notes::write_atomic(&abs, new_content.as_bytes()) {
+            return ApiError::internal(e).into_response();
         }
-        Err(e) => return ApiError::internal(e).into_response(),
+        crate::vault_api::record_owner_write(&state, &abs);
+        new_content
     };
 
-    let new_content = crate::vault_api::set_pinned(&content, pin);
-
-    match hq_vault::notes::write_atomic(&abs, new_content.as_bytes()) {
-        Ok(_) => {
-            crate::vault_api::record_owner_write(&state, &abs);
-            if pin {
-                crate::vault_api::accept_suggested_pin(&state, &path_param, &new_content);
-            }
-            axum::Json(serde_json::json!({"success": true})).into_response()
-        }
-        Err(e) => ApiError::internal(e).into_response(),
+    if pin {
+        crate::vault_api::accept_suggested_pin(&state, &path_param, &new_content);
     }
+    axum::Json(serde_json::json!({"success": true})).into_response()
 }
 
 /// Fan-out into the WS channel, used by `hq notify-restart` (from
@@ -507,5 +512,99 @@ mod search_tests {
         );
         assert_eq!(search_folder(Some("  ")), Ok(None));
         assert_eq!(search_folder(None), Ok(None));
+    }
+}
+
+#[cfg(test)]
+mod pin_tests {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use serde_json::json;
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn pinning_an_agent_suggested_note_does_not_deadlock() {
+        let v = tempfile::tempdir().unwrap();
+        let rel = "Notebooks/Inbox/suggested.md";
+        std::fs::create_dir_all(v.path().join("Notebooks/Inbox")).unwrap();
+        std::fs::write(
+            v.path().join(rel),
+            "---\ntitle: Suggested\npinned: true\n---\nbody",
+        )
+        .unwrap();
+
+        let state = Arc::new(crate::WsState::new(v.path().to_path_buf(), None));
+        let recorder =
+            hq_tools::provenance::Recorder::new(Arc::new(state.db.clone()), v.path().to_path_buf());
+        recorder.after_write(
+            rel,
+            &json!({ "_hq_native_session": "s1", "_hq_native_agent": "helper" }),
+        );
+
+        let app = crate::create_router(state.clone());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/pin")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "path": rel, "pin": true }).to_string()))
+            .unwrap();
+
+        let res = tokio::time::timeout(std::time::Duration::from_secs(5), app.oneshot(req))
+            .await
+            .expect("POST /api/pin must not deadlock on accept_suggested_pin")
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let raw = std::fs::read_to_string(v.path().join(rel)).unwrap();
+        let hash = hq_db::search::content_hash(&raw);
+        let prov = state
+            .db
+            .with_conn(|c| hq_db::provenance::current(c, rel, &hash))
+            .unwrap()
+            .unwrap();
+        assert_eq!(prov.review_state, hq_db::provenance::ReviewState::Accepted);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn pin_toggle_waits_for_shared_note_lock() {
+        let v = tempfile::tempdir().unwrap();
+        let rel = "Notebooks/Inbox/pin-wait.md";
+        std::fs::create_dir_all(v.path().join("Notebooks/Inbox")).unwrap();
+        std::fs::write(v.path().join(rel), "---\ntitle: Wait\n---\nbody").unwrap();
+
+        let state = Arc::new(crate::WsState::new(v.path().to_path_buf(), None));
+        let app = crate::create_router(state);
+
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let locker = std::thread::spawn(move || {
+            let _held = hq_vault::note_lock::lock_note(rel);
+            locked_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        locked_rx.recv().unwrap();
+
+        let mut handle = tokio::spawn(async move {
+            let req = Request::builder()
+                .method("POST")
+                .uri("/api/pin")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "path": rel, "pin": true }).to_string()))
+                .unwrap();
+            app.oneshot(req).await.unwrap()
+        });
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), &mut handle)
+                .await
+                .is_err(),
+            "POST /api/pin must wait while note lock is held"
+        );
+
+        release_tx.send(()).unwrap();
+        locker.join().unwrap();
+        let res = handle.await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
     }
 }

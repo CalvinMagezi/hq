@@ -65,9 +65,17 @@ These routes are the owner's. No tool, helper or MCP call reaches them (a test s
 - `POST /api/note/restore-version {path, id}` writes that text back as the owner, so the
   `changed` mark clears and the note reads as `you`, and answers the new `hash`. It restores only
   while the note on disk is still exactly HQ's change `id`; otherwise it answers 409 ("The note
-  changed since HQ's edit, so it was not rolled back.") and writes nothing. Reading, comparing and
-  writing happen under one per-note lock, which the owner's own save takes too. Once restored the
-  kept text is gone, so a second call is 404.
+  changed since HQ's edit, so it was not rolled back.") and writes nothing. Reading, comparing,
+  keeping, writing and recording happen under one shared per-note lock (`hq_vault::note_lock`),
+  which the owner's own save, create, link and pin handlers, `note_review`, and HQ's note write,
+  append, patch, frontmatter, pin, person-fact, import, link-capture, wikilink-repoint and
+  nested-frontmatter-repair paths all take. Paths that only rename, move to or from `_trash/`,
+  append without provenance, or run offline do not take it: `vault_move` on the moved note's
+  source and destination (it only renames the file; referrers whose wikilinks are rewritten are
+  locked one at a time), `vault_delete` (moves to `_trash/` without rewriting text), trash
+  restore and purge in `note_trash.rs` (restore picks a free path without overwriting; purge
+  removes trashed files), CLI `hq vault` commands, and `VaultLogShortcut` (append-only daily log
+  with no `note_keep` or provenance). Once restored the kept text is gone, so a second call is 404.
 - `POST /api/note/trash/empty` also answers `failed` (items it could not remove) and `success` is
   false when any failed. A purge re-checks the final file with `lstat` right before removing it
   and refuses a symlink; a window of a few instructions remains between that check and the

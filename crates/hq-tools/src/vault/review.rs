@@ -129,6 +129,7 @@ pub fn review_note(
         );
     }
 
+    let _held = hq_vault::note_lock::lock_note(path);
     let version = match id {
         Some(id) => db
             .with_conn(|c| provenance::get(c, id))?
@@ -853,5 +854,46 @@ mod tests {
             .unwrap();
         rt.block_on(view.execute(json!({ "path": NOTE }))).unwrap();
         assert_eq!(fx.record_of(NOTE, &hash), before);
+    }
+
+    #[tokio::test]
+    async fn review_note_waits_for_shared_note_lock() {
+        let fx = Fx::new();
+        fx.write_as(NOTE, "v1", &json!({}));
+
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let locker = std::thread::spawn(move || {
+            let _held = hq_vault::note_lock::lock_note(NOTE);
+            locked_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        locked_rx.recv().unwrap();
+
+        let db = fx.db.clone();
+        let vault = fx.vault.clone();
+        let mut handle = tokio::task::spawn_blocking(move || {
+            review_note(
+                &db,
+                &vault,
+                NOTE,
+                None,
+                ReviewState::Accepted,
+                None,
+                &Reviewer::owner(),
+            )
+        });
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), &mut handle)
+                .await
+                .is_err(),
+            "review_note must wait while note lock is held"
+        );
+
+        release_tx.send(()).unwrap();
+        locker.join().unwrap();
+        let reviewed = handle.await.unwrap().unwrap();
+        assert_eq!(reviewed.record.review_state, ReviewState::Accepted);
     }
 }
