@@ -21,6 +21,7 @@ pub mod pairing;
 pub mod paths;
 pub mod privacy;
 pub mod prose_quality;
+pub mod publish_check;
 pub mod quota;
 pub mod redact;
 pub mod server_proof;

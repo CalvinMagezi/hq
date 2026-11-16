@@ -3,12 +3,10 @@
 //! published is scanned for credentials (see `docs/plans/edge-coding-worker.md`).
 
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use base64::Engine;
-use regex::Regex;
 use reqwest::Method;
 use serde_json::{Value, json};
 
@@ -21,11 +19,10 @@ use crate::registry::HqTool;
 /// The token's own variable, never the read-only `GH_TOKEN` or `GITHUB_TOKEN`.
 pub(crate) const TOKEN_ENV: &str = "HQ_GITHUB_WRITE_TOKEN";
 const BRANCH_PREFIX: &str = "hq/";
-const MAX_BRANCH_CHARS: usize = 100;
 const MAX_MESSAGE_CHARS: usize = 10_000;
-/// GitHub's own limits, checked before anything is pushed so a refusal never comes halfway.
-const MAX_TITLE_CHARS: usize = 256;
-const MAX_BODY_CHARS: usize = 65_536;
+use hq_core::publish_check::{
+    MAX_BODY_CHARS, MAX_TITLE_CHARS, check_branch as check_plain_branch, env_secrets, holds_secret,
+};
 /// How many of its own commits per branch the tool remembers.
 const PUSHED_KEPT: usize = 50;
 const PUSHED_RECORD_FILE: &str = "pushed.json";
@@ -33,10 +30,6 @@ const ACCEPT_JSON: &str = "application/vnd.github+json";
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// How many changed paths a reply lists; the counts it gives are always exact.
 const PATHS_SHOWN: usize = 50;
-
-static BRANCH: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$").unwrap()
-});
 
 pub struct GithubWriteTool {
     repos: Vec<String>,
@@ -221,10 +214,7 @@ impl Request {
             ("body", &self.body),
         ];
         for (name, value) in fields {
-            let leaked = secrets
-                .iter()
-                .any(|s| !s.is_empty() && value.contains(s.as_str()));
-            if leaked || hq_core::redact::looks_like_credential(value) {
+            if holds_secret(value, secrets) {
                 bail!("`{name}` holds something shaped like a credential; nothing was pushed");
             }
         }
@@ -232,31 +222,8 @@ impl Request {
     }
 }
 
-/// Values of this process's secret-named variables, refused verbatim wherever they appear,
-/// whatever their shape. Short values are left out: they would match ordinary text.
-fn env_secrets() -> Vec<String> {
-    const SECRET_NAME_ENDINGS: [&str; 5] = ["_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_PAT"];
-    const MIN_SECRET_CHARS: usize = 12;
-    std::env::vars()
-        .filter(|(name, value)| {
-            let name = name.to_ascii_uppercase();
-            SECRET_NAME_ENDINGS.iter().any(|e| name.ends_with(e)) && value.len() >= MIN_SECRET_CHARS
-        })
-        .map(|(_, value)| value)
-        .collect()
-}
-
-/// Plain names joined by `/`, each one a name git accepts for a branch component.
 fn check_branch(name: &str) -> Result<()> {
-    let parts_ok = name
-        .split('/')
-        .all(|part| !part.ends_with(".lock") && !part.ends_with('.'));
-    let ok =
-        BRANCH.is_match(name) && name.len() <= MAX_BRANCH_CHARS && !name.contains("..") && parts_ok;
-    if !ok {
-        bail!("`branch` must be plain names joined by /, such as fix-plant-log");
-    }
-    Ok(())
+    check_plain_branch(name).map_err(|e| anyhow::anyhow!(e))
 }
 
 /// GitHub's REST API with the write token, for one repository. The token goes only to the API

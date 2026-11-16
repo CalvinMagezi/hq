@@ -48,6 +48,8 @@ mod pane;
 mod programs;
 mod proto;
 #[cfg(unix)]
+mod publish;
+#[cfg(unix)]
 mod quota;
 #[cfg(unix)]
 mod relay;
@@ -111,6 +113,10 @@ pub use lockdown::{
 };
 #[cfg(unix)]
 pub use proto::{MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};
+#[cfg(unix)]
+pub use publish::{
+    Report as PublishReport, Request as PublishRequest, publish as publish_worktree,
+};
 #[cfg(unix)]
 pub use relay::{run_relay, sandbox_init};
 #[cfg(unix)]

@@ -918,6 +918,49 @@ the goal and criteria in force at the time (`registry::list_events`).
   is the only tool that ends it, and it is never called as a side effect of a mode change.
   After a resume the row keeps its goal, so Drive can be turned on again.
 
+## Publishing a helper's work (`harness_session_publish`)
+
+A sandboxed helper that committed work in its own worktree used to stop at "policy denies
+pushing" and ping the owner. It now asks HQ: `harness_session_publish` takes a `title` and a
+`body`, nothing else. The session is the one the MCP gateway attested for the call (its own
+token), never a name in the arguments, so a helper can publish only its own branch. HQ's host
+checks the change, pushes the branch to `origin` and opens the pull request with its own
+GitHub login (`gh`). The helper never gets a credential and its sandbox does not change.
+
+What the host refuses, each with the exact reason in the reply so the helper can fix it and
+call again:
+
+- a worktree HQ did not make, a branch other than the one checked out, a detached head;
+- the default branch (what `origin/HEAD` names, or `main`/`master`), `develop` and `release/*`;
+- uncommitted changes, or no commits ahead of the base;
+- any changed path under `.github/` or another CI or hook directory, any `.git*` file, a
+  submodule pointer, a file over `max_bytes`, more than `max_files` files;
+- anything shaped like a credential in a file, the title or the body (the same scanner
+  `github_write` uses, `hq_core::publish_check`);
+- a repository whose own configuration redirects a push (`pushurl`, `insteadOf`) or names a
+  program a push would run;
+- a `gh` that is missing (`gh_missing`) or not logged in (`gh_not_logged_in`): there is no
+  fallback to anything else.
+
+Policy, in `agent_host.publish`:
+
+```yaml
+agent_host:
+  publish:
+    enabled: true                  # off refuses every request
+    repos: ["<owner>/<repo>"]      # opened for without asking; empty by default
+    max_files: 100
+    max_bytes: 1048576             # per file
+    max_per_session_per_day: 10
+```
+
+A repository not in `repos` files one inbox request, "Allow HQ to open PRs for `<repo>` for
+helpers?", and returns `pending_owner_approval` to the helper, which tells the user and calls
+again. A request already waiting is never filed twice, a decline is a hard no, and an approval
+lasts 30 days and covers every helper for that repository. On success HQ adds a comment with the
+pull request address to the session's task and records a `publish` event; the day limit counts
+those events. Security notes: `docs/security/PUBLISH.md`.
+
 ## General-purpose agents
 
 Setting one up, everyday use and removal are in [PERSONAL_AGENTS.md](PERSONAL_AGENTS.md).

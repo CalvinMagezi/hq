@@ -1,7 +1,7 @@
 use super::{
     AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, GitHead, LaunchRequest, Launched,
-    LogsSince, PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo, WorktreeRemoved,
-    WorktreeStatus,
+    LogsSince, PendingRead, PromptOutcome, PublishAsk, PublishOutcome, WorktreeBase, WorktreeInfo,
+    WorktreeRemoved, WorktreeStatus,
 };
 use hq_core::quota::LaneQuota;
 use serde::Serialize;
@@ -161,6 +161,15 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
         Err(AgentHostError::Api {
             code: "unsupported".into(),
             message: format!("host '{}' cannot read worktrees", self.name()),
+        })
+    }
+
+    /// Pushes a helper's committed branch and opens its pull request with the host's own login,
+    /// after the host's mechanical checks. Only the built-in host can.
+    fn worktree_publish(&self, _ask: &PublishAsk) -> Result<PublishOutcome, AgentHostError> {
+        Err(AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' cannot publish branches", self.name()),
         })
     }
 
@@ -425,6 +434,9 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
         against: Option<&str>,
     ) -> Result<WorktreeStatus, AgentHostError> {
         (**self).worktree_status(path, against)
+    }
+    fn worktree_publish(&self, ask: &PublishAsk) -> Result<PublishOutcome, AgentHostError> {
+        (**self).worktree_publish(ask)
     }
     fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
         (**self).head(target)

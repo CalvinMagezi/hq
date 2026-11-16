@@ -188,6 +188,16 @@ fn repository_keys(dir: &Path, pattern: &str) -> Option<Vec<String>> {
     )
 }
 
+/// Keys in the repository's own configuration that send a push somewhere other than the
+/// remote's `url`: a `pushurl`, or a URL rewrite. A publish is refused while one is set, since
+/// the host's login would be offered to whatever it names.
+const PUSH_REDIRECT_KEYS: &str = r"^(remote\..*\.pushurl|url\..*\.(insteadof|pushinsteadof))$";
+
+/// The push-redirecting keys the repository sets itself. `None` when git cannot say.
+pub fn push_redirects(dir: &Path) -> Option<Vec<String>> {
+    repository_keys(dir, PUSH_REDIRECT_KEYS)
+}
+
 /// The signing-program keys the repository's own configuration sets. `None` when git cannot say.
 fn local_signing_programs(dir: &Path) -> Option<Vec<&'static (&'static str, &'static str)>> {
     let keys = repository_keys(

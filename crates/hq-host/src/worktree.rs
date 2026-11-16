@@ -63,6 +63,11 @@ pub enum WorktreeError {
     NotARepo(String),
     BranchInUse(String),
     Git(String),
+    /// HQ's checks said no; the message is the reason, written for the helper to act on.
+    Refused(String),
+    /// A step of a publish failed, under a code the caller can branch on (`gh_missing`,
+    /// `gh_not_logged_in`, `gh_failed`, `push_failed`).
+    Step(&'static str, String),
 }
 
 impl WorktreeError {
@@ -72,6 +77,8 @@ impl WorktreeError {
             WorktreeError::NotARepo(_) => "not_a_repo",
             WorktreeError::BranchInUse(_) => "branch_in_use",
             WorktreeError::Git(_) => "git_failed",
+            WorktreeError::Refused(_) => "refused",
+            WorktreeError::Step(code, _) => code,
         }
     }
 
@@ -80,7 +87,9 @@ impl WorktreeError {
             WorktreeError::Invalid(m)
             | WorktreeError::NotARepo(m)
             | WorktreeError::BranchInUse(m)
-            | WorktreeError::Git(m) => m,
+            | WorktreeError::Git(m)
+            | WorktreeError::Refused(m)
+            | WorktreeError::Step(_, m) => m,
         }
     }
 }
@@ -93,7 +102,7 @@ impl From<std::io::Error> for WorktreeError {
 
 /// Runs git in `dir` with no prompt, no inherited repository from the environment, and none
 /// of the commands the repository's own configuration names (`crate::host_git`).
-fn git(dir: &Path, args: &[&str]) -> Result<String, WorktreeError> {
+pub(crate) fn git(dir: &Path, args: &[&str]) -> Result<String, WorktreeError> {
     let mut cmd = crate::host_git::command(dir).ok_or_else(|| {
         WorktreeError::Git("git could not read the repository's configuration".into())
     })?;
@@ -182,7 +191,7 @@ fn main_folder(dir: &Path) -> Result<PathBuf, WorktreeError> {
     Ok(main.canonicalize()?)
 }
 
-fn current_branch(dir: &Path) -> Option<String> {
+pub(crate) fn current_branch(dir: &Path) -> Option<String> {
     git(dir, &["symbolic-ref", "--short", "-q", "HEAD"])
         .ok()
         .filter(|b| !b.is_empty())
@@ -340,7 +349,7 @@ fn reuse(main: &Path, target: &Path, base: &Base) -> Result<Worktree, WorktreeEr
 
 /// Only `worktrees/<repository>/<session>` under the holder, never the holder itself or a
 /// repository's folder. Both paths are canonical.
-fn check_ours(holder: &Path, path: &Path) -> Result<(), WorktreeError> {
+pub(crate) fn check_ours(holder: &Path, path: &Path) -> Result<(), WorktreeError> {
     let inside = path
         .strip_prefix(holder)
         .is_ok_and(|rest| rest.components().count() == 2);

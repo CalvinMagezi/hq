@@ -559,6 +559,23 @@ impl Conn {
                 .map_err(|e| body(e.code(), e.message()))?;
                 Ok(json!(status))
             }
+            "worktree.publish" => {
+                let p: WorktreePublishParams = parse(&params)?;
+                let root = self.workspace_root()?;
+                let req = crate::publish::Request {
+                    path: std::path::Path::new(&p.path),
+                    branch: &p.branch,
+                    title: &p.title,
+                    body: &p.body,
+                    repo_slug: p.repo_slug.as_deref(),
+                    check_only: p.check_only,
+                    max_files: p.max_files,
+                    max_bytes: p.max_bytes,
+                };
+                let report = crate::publish::publish(&root, &req)
+                    .map_err(|e| body(e.code(), e.message()))?;
+                Ok(json!(report))
+            }
             "worktree.remove" => {
                 let p: WorktreeRemoveParams = parse(&params)?;
                 let root = self.workspace_root()?;
@@ -896,6 +913,22 @@ struct WorktreeStatusParams {
     path: String,
     /// A commit or ref to count commits ahead of and behind.
     against: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorktreePublishParams {
+    path: String,
+    branch: String,
+    title: String,
+    #[serde(default)]
+    body: String,
+    repo_slug: Option<String>,
+    /// Run every check and report, push nothing.
+    #[serde(default)]
+    check_only: bool,
+    max_files: usize,
+    max_bytes: u64,
 }
 
 #[derive(Deserialize)]

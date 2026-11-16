@@ -296,6 +296,36 @@ pub struct WorktreeStatus {
     pub behind: Option<u32>,
 }
 
+/// A publish asked of the host: the helper's committed branch pushed and its pull request opened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PublishAsk {
+    pub path: String,
+    pub branch: String,
+    pub title: String,
+    pub body: String,
+    /// The repository the worktree's `origin` must be. `None` only with `check_only`.
+    pub repo_slug: Option<String>,
+    /// Run every check and report the repository, pushing nothing.
+    pub check_only: bool,
+    pub max_files: u32,
+    pub max_bytes: u64,
+}
+
+/// What the host's checks found, and the pull request once it is open.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct PublishOutcome {
+    pub repo: String,
+    pub branch: String,
+    pub base: String,
+    pub files: usize,
+    pub bytes: u64,
+    pub commits: u32,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub existing: bool,
+}
+
 /// The commit an agent's folder is at.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct GitHead {
