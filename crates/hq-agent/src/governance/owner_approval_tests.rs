@@ -333,3 +333,30 @@ fn only_a_session_this_chat_drives_counts_as_its_own_send_target() {
     assert!(!approval.drives_target(&json!({"session_id": "hs-missing"})));
     assert!(!approval.drives_target(&json!({})));
 }
+
+// A remote tool its server marked read-only runs; everything else keeps asking.
+#[test]
+fn remote_reads_run_and_remote_writes_ask() {
+    use hq_tools::remote_mcp::{REMOTE_MCP_CATEGORY, record_tool_list};
+    record_tool_list(
+        "agentpolicy",
+        json!([
+            {"name": "get", "annotations": {"readOnlyHint": true}},
+            {"name": "put", "annotations": {"readOnlyHint": false}},
+            {"name": "bare"}
+        ])
+        .as_array()
+        .unwrap(),
+    );
+    let asks = |tool: &str| {
+        needs_owner(
+            "agentpolicy_call",
+            REMOTE_MCP_CATEGORY,
+            &json!({"tool": tool}),
+        )
+    };
+    assert!(!asks("get"));
+    assert!(asks("put"));
+    assert!(asks("bare"));
+    assert!(asks("unlisted"));
+}

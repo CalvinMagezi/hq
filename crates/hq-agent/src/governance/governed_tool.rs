@@ -11,7 +11,7 @@ use super::injection::{injection_denial, without_default_drive};
 use super::paths::{PATH_TOOLS, path_args_for_tool, path_values};
 use super::taint::{TaintTracker, is_untrusted_source};
 use super::tainted_calls::drive_after_untrusted_reads;
-use super::tainted_calls::{always_ask_reason, tainted_reason, unasked_denial};
+use super::tainted_calls::{always_ask_reason, tainted_reason_for, unasked_denial_for};
 use super::{DenialNotifier, DenialTracker, RepeatCallTracker};
 use crate::coding::text_result;
 use crate::tools::AgentTool;
@@ -351,7 +351,13 @@ impl GovernedTool {
             return None;
         }
         let tool_name = self.inner.name();
-        let denial = unasked_denial(tool_name, args, &self.taint, self.needs_owner(args))?;
+        let denial = unasked_denial_for(
+            tool_name,
+            self.inner.category(),
+            args,
+            &self.taint,
+            self.needs_owner(args),
+        )?;
         self.record_denial("denial threshold exceeded under the injection policy");
         warn!(tool = tool_name, denial = %denial, "tainted session with nobody to ask");
         self.notify_denial(&denial);
@@ -377,7 +383,7 @@ impl GovernedTool {
         let asks = (matches!(self.permission_mode, PermissionMode::Default)
             && self.needs_owner(args))
             || always_ask_reason(tool_name, args).is_some()
-            || (tainted_reason(tool_name, args, &self.taint).is_some()
+            || (tainted_reason_for(tool_name, self.inner.category(), args, &self.taint).is_some()
                 && !self.sends_to_own_driven_session(approval, args));
         let site_allowed = super::tainted_calls::fetch_site(tool_name, args)
             .is_some_and(|s| approval.site_allowed(&s));
