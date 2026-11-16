@@ -56,6 +56,24 @@ fun OfferSlot(state: ChatUiState, actions: ChatActions) {
     }
 }
 
+/** Client-side contextual ask or offer rendered in the same attention slot as server offers. */
+@Composable
+fun LocalOfferSlot(offer: LocalOffer, onAnswer: (Boolean) -> Unit) {
+    AttentionGate(AttentionKind.Offer, "local-${offer.kind.name}") {
+        val stacked = SlotLayout.stacked(LocalConfiguration.current.fontScale)
+        Column(
+            Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().clip(SlotShape).background(Mts.Surface100).border(1.dp, Mts.Hairline, SlotShape).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(offer.line, style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+            Buttons(stacked) { m ->
+                OfferButton(offer.yesLabel, Mts.BrandGreen, Mts.OnGreen, m) { onAnswer(true) }
+                OfferButton(offer.notNowLabel, Mts.Surface200, Mts.Ink, m) { onAnswer(false) }
+            }
+        }
+    }
+}
+
 @Composable
 private fun OfferCard(offer: Offer, laterSupported: Boolean, onAnswer: (OfferAnswer) -> Unit, onSchedule: (Long) -> Unit) {
     var picking by rememberSaveable { mutableStateOf(false) }

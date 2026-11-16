@@ -240,7 +240,7 @@ class VoiceSession(
             TurnOutput.NeedsOk -> _state.update { it.copy(needsOk = true) }
             is TurnOutput.Reset -> _state.update { it.copy(reply = out.text) }
             TurnOutput.Working -> { worked = true; _state.update { it.copy(phase = VoicePhase.LookingUp) } }
-            TurnOutput.Done -> Unit
+            TurnOutput.Done -> example.hq.spike.ui.chat.LaterAsksPrefs.markVoiceTurnDone(app)
         }
     }
 

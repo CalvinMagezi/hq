@@ -94,9 +94,10 @@ fun ChatScreen(
                 if (state.messages.isEmpty() && state.live == null) EmptyChat(Suggestions.visible(state.suggestions, state.pillsCleared), actions.onDraft, state.pillChoices, actions.onFewer, actions.onNever) else Conversation(state, actions)
                 SlashPalette(state.draft, actions.onSlash, Modifier.align(Alignment.BottomCenter))
             }
-            when (ChatSlot.pick(hasNeeds, state.offered?.offer, state.offerResult, chips.isNotEmpty())) {
+            when (ChatSlot.pick(hasNeeds, state.offered?.offer, state.offerResult, chips.isNotEmpty(), state.localOffer)) {
                 SlotItem.Approval -> needs()
                 SlotItem.Offer -> OfferSlot(state, actions)
+                SlotItem.LocalOffer -> state.localOffer?.let { LocalOfferSlot(it) { accepted -> actions.onLocalOfferAnswer(it.kind, accepted) } }
                 SlotItem.Chips -> FollowUpChipsSlot(chips, state.messages.lastOrNull()?.id.orEmpty(), actions.onFollowUp)
                 SlotItem.None -> {}
             }

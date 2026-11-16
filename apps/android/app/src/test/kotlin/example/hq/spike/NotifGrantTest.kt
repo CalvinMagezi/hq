@@ -42,4 +42,50 @@ class NotifGrantTest {
     @Test fun updatesFoldAfterThreeAnHour() {
         assertEquals(3, AlertPoster.updatesLeft(c, now = 10L))
     }
+
+    @Test fun notifyAskRequiresSessionReplyInChatAndNotOldFirstRunOrUpgrader() {
+        fun show(
+            replyCompletedInSession: Boolean = true,
+            inChatPlace: Boolean = true,
+            askedBefore: Boolean = false,
+            oldFirstRunDone: Boolean = false,
+            granted: Boolean = false,
+            upgraderOpen: Boolean = false,
+            blockedByOtherSlot: Boolean = false,
+            turnRunning: Boolean = false,
+        ) = NotifyAsk.shouldShow(
+            replyCompletedInSession, inChatPlace, askedBefore, oldFirstRunDone,
+            granted, upgraderOpen, blockedByOtherSlot, turnRunning,
+        )
+
+        assertTrue(show())
+        assertFalse(show(replyCompletedInSession = false))
+        assertFalse(show(inChatPlace = false))
+        assertFalse(show(askedBefore = true))
+        assertFalse(show(oldFirstRunDone = true))
+        assertFalse(show(granted = true))
+        assertFalse(show(upgraderOpen = true))
+        assertFalse(show(blockedByOtherSlot = true))
+        assertFalse(show(turnRunning = true))
+
+        assertTrue(NotifyAsk.shouldClose(sheetOpen = true, turnRunning = true))
+        assertFalse(NotifyAsk.shouldClose(sheetOpen = true, turnRunning = false))
+        assertFalse(NotifyAsk.shouldClose(sheetOpen = false, turnRunning = true))
+
+        assertTrue(NotifyAsk.oldFirstRunDone(done = true, threeScreenFlow = false, heardHqBefore = false))
+        assertTrue(NotifyAsk.oldFirstRunDone(done = false, threeScreenFlow = false, heardHqBefore = true))
+        assertFalse(NotifyAsk.oldFirstRunDone(done = true, threeScreenFlow = true, heardHqBefore = true))
+        assertFalse(NotifyAsk.oldFirstRunDone(done = false, threeScreenFlow = false, heardHqBefore = false))
+
+        val store = example.hq.spike.ui.firstrun.FirstRunStore(c)
+        assertFalse(store.threeScreenFlow())
+        store.finish()
+        assertTrue(store.threeScreenFlow())
+    }
+
+    @Test fun postReplyNotNowIsRemembered() {
+        assertFalse(NotifAccess.postReplyAsked(c))
+        NotifAccess.markPostReplyAsked(c)
+        assertTrue(NotifAccess.postReplyAsked(c))
+    }
 }

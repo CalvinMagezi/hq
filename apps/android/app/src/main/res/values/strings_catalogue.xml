@@ -3990,4 +3990,10 @@
     <string name="chat_title_model">Model: %1$s</string>
     <string name="chat_title_model_unset">Model: not set</string>
     <string name="chat_title_all_chats">All chats</string>
+    <string name="chat_ask_calendar">HQ needs calendar access to check or add events on your phone.</string>
+    <string name="chat_ask_calendar_allow">Allow</string>
+    <string name="chat_ask_calendar_blocked">Calendar access is off. Turn on Calendar in app settings.</string>
+    <string name="chat_offer_messaging">Talk to HQ from Telegram or Discord too\?</string>
+    <string name="chat_offer_assistant">Make HQ your phone\'s assistant so you can hold the power button to ask\?</string>
+    <string name="chat_offer_repo">Connect GitHub so HQ Coder can work on that repository\?</string>
 </resources>

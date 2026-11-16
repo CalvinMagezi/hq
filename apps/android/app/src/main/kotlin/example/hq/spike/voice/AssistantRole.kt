@@ -50,6 +50,8 @@ object AssistantRole {
     fun micAllowed(c: Context): Boolean = ContextCompat.checkSelfPermission(c, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     /** Only that the dialog was shown once, so "not asked yet" can be told from "off in Android". Not a count of refusals. */
+    fun micAsked(c: Context): Boolean = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MIC_ASKED, false)
+
     fun markMicAsked(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_MIC_ASKED, true).apply()
 
     fun micState(c: Context): MicFact = when {
