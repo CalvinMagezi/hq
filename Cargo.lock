@@ -3871,6 +3871,7 @@ dependencies = [
  "hq-convert",
  "hq-suite-ingest",
  "hq-suite-md",
+ "hq-suite-store",
  "image",
  "imgref",
  "oxideav-webp",

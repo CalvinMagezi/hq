@@ -25,10 +25,9 @@ pub const JOURNAL_VERSION: u32 = 1;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Step {
-    /// The plan is written; nothing has changed yet.
+    /// Every picture is in the media store and verified, and the note is drafted: its text sits
+    /// in the journal folder. Nothing in the vault has changed except pictures no note links to.
     Planned,
-    /// Every picture is in the media store and verified.
-    MediaStored,
     /// The note is written.
     NoteWritten,
     /// The note was read back and checked, and every picture it links to is present and intact.
@@ -78,8 +77,20 @@ pub struct Job {
     /// The note that becomes the record, vault-relative.
     pub note: String,
     pub media: Vec<MediaPlan>,
-    /// Hash of the note text as written; the check reads it back and compares.
+    /// Hash of the drafted note text; the check reads the written note back and compares.
     pub note_sha256: String,
+    /// The day the job was prepared, as `YYYY-MM-DD`. Fixed at the start so resuming on another
+    /// day writes the same note.
+    pub day: String,
+    /// What the importer made the note from, kept for the preview.
+    pub source_format: String,
+    /// Which kinds of loss the importer reported, each once, as the importer names them.
+    pub loss_kinds: Vec<String>,
+    /// `native`, `safe`, `lossy` or `view`, as projected when the job was prepared.
+    pub fidelity: String,
+    /// Pictures that were recompressed, and pictures kept as they were.
+    pub pictures_recompressed: u32,
+    pub pictures_kept: u32,
     pub disposition: Option<Disposition>,
     pub step: Step,
     /// Original size minus the record's size (note plus new pictures), once known.
@@ -110,8 +121,7 @@ impl Job {
         let ok = to == from
             || matches!(
                 (from, to),
-                (Planned, MediaStored)
-                    | (MediaStored, NoteWritten)
+                (Planned, NoteWritten)
                     | (NoteWritten, Verified)
                     | (Verified, Consented)
                     | (Consented, OriginalMoved)
@@ -227,6 +237,33 @@ impl Journal {
             .collect()
     }
 
+    fn draft_file(&self, id: &str) -> Result<PathBuf> {
+        self.file(id).map(|f| f.with_extension("md"))
+    }
+
+    /// Keeps the drafted note's text beside the job, so a resumed job writes exactly it.
+    pub fn write_draft(&self, id: &str, text: &str) -> Result<()> {
+        fsx::atomic_write(&self.draft_file(id)?, text.as_bytes())
+    }
+
+    pub fn read_draft(&self, id: &str) -> Result<String> {
+        let path = self.draft_file(id)?;
+        fs::read_to_string(&path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                StoreError::Missing(format!("draft of job {id}"))
+            } else {
+                StoreError::io(&path, e)
+            }
+        })
+    }
+
+    /// Removes a draft once its job is finished. Missing is fine.
+    pub fn remove_draft(&self, id: &str) {
+        if let Ok(path) = self.draft_file(id) {
+            let _ = fs::remove_file(path);
+        }
+    }
+
     /// Clears unfinished temporary files a crash left in the journal folder.
     pub fn sweep(&self) -> usize {
         fsx::sweep_partials(&self.dir)
@@ -250,6 +287,12 @@ mod tests {
                 bytes: 100,
             }],
             note_sha256: "ef".repeat(32),
+            day: "2026-11-16".into(),
+            source_format: "docx".into(),
+            loss_kinds: vec![],
+            fidelity: "safe".into(),
+            pictures_recompressed: 1,
+            pictures_kept: 0,
             disposition: None,
             step: Step::Planned,
             saved_bytes: None,
@@ -269,7 +312,7 @@ mod tests {
         let mut a = job("sj-0001");
         j.create(&a).unwrap();
         assert!(matches!(j.create(&a), Err(StoreError::Exists(_))));
-        a.advance(Step::MediaStored).unwrap();
+        a.advance(Step::NoteWritten).unwrap();
         a.disposition = Some(Disposition::Trash {
             target: "_trash/2026-11-16/x".into(),
         });
@@ -282,8 +325,7 @@ mod tests {
     fn steps_only_go_forward_and_repeat_safely() {
         let mut a = job("sj-1");
         for s in [
-            Step::MediaStored,
-            Step::MediaStored,
+            Step::NoteWritten,
             Step::NoteWritten,
             Step::Verified,
             Step::Consented,
@@ -301,18 +343,13 @@ mod tests {
         assert!(a.advance(Step::Done).is_err());
 
         let mut b = job("sj-2");
-        assert!(b.advance(Step::NoteWritten).is_err(), "no skipping");
+        assert!(b.advance(Step::Verified).is_err(), "no skipping");
         assert!(b.advance(Step::Done).is_err());
         b.advance(Step::Abandoned).unwrap();
         assert!(b.step.is_terminal());
 
         let mut c = job("sj-3");
-        for s in [
-            Step::MediaStored,
-            Step::NoteWritten,
-            Step::Verified,
-            Step::Consented,
-        ] {
+        for s in [Step::NoteWritten, Step::Verified, Step::Consented] {
             c.advance(s).unwrap();
         }
         c.advance(Step::Abandoned).unwrap();
@@ -361,6 +398,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(j.sweep(), 1);
+    }
+
+    #[test]
+    fn a_draft_is_kept_beside_its_job_and_is_not_a_job() {
+        let (_d, j) = journal();
+        j.create(&job("sj-d")).unwrap();
+        j.write_draft("sj-d", "# note\n").unwrap();
+        assert_eq!(j.read_draft("sj-d").unwrap(), "# note\n");
+        assert_eq!(j.list().0.len(), 1, "the draft is not listed as a job");
+        j.remove_draft("sj-d");
+        j.remove_draft("sj-d");
+        assert!(matches!(j.read_draft("sj-d"), Err(StoreError::Missing(_))));
     }
 
     #[test]

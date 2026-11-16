@@ -689,7 +689,7 @@ pub async fn measure(
     })
 }
 
-fn loss_label(k: LossKind) -> String {
+pub(crate) fn loss_label(k: LossKind) -> String {
     // The serde name of the kind, such as `charts_omitted`.
     serde_json::to_value(k)
         .ok()

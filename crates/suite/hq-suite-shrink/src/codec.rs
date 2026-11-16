@@ -116,6 +116,16 @@ impl Encoder {
         }
     }
 
+    /// The file extension a picture made by this encoder is filed under.
+    pub fn extension(&self) -> &'static str {
+        match self {
+            Encoder::Jpeg { .. } => "jpg",
+            Encoder::Png => "png",
+            Encoder::WebpLossless | Encoder::WebpPure { .. } | Encoder::WebpLib { .. } => "webp",
+            Encoder::Avif { .. } => "avif",
+        }
+    }
+
     /// Whether the output can differ from the input pixels.
     pub fn is_lossy(&self) -> bool {
         !matches!(self, Encoder::Png | Encoder::WebpLossless)

@@ -65,7 +65,7 @@ pub enum Scalar {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FrontmatterError {
-    /// The key is not `[a-z][a-z0-9_]*`.
+    /// The key is not letters, digits and `_` starting with a letter.
     BadKey(String),
     /// The value holds a line break; the suite's keys are single-line scalars.
     MultiLine,
@@ -89,10 +89,12 @@ impl fmt::Display for FrontmatterError {
 
 impl std::error::Error for FrontmatterError {}
 
+/// Letters, digits and `_`, starting with a letter. The vault's own keys are camel case
+/// (`noteType`, `sourceFormat`), so capitals are allowed; the suite's own keys are snake case.
 fn valid_key(k: &str) -> bool {
     let mut chars = k.chars();
-    matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// The text between the fences of a raw block.

@@ -10,4 +10,6 @@ pub mod media;
 pub mod project;
 
 pub use media::{ImageFormat, MediaItem, MediaScan, for_each_media, sniff_image};
-pub use project::{Failure, FailureKind, Projection, class_of, project};
+pub use project::{
+    DocumentText, Failure, FailureKind, Projection, class_of, project, read_document,
+};

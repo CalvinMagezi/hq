@@ -10,6 +10,7 @@ description = "Shrinking documents and media into the small record, and measurin
 hq-convert = { workspace = true }
 hq-suite-ingest = { workspace = true }
 hq-suite-md = { workspace = true }
+hq-suite-store = { workspace = true }
 # Same feature set as hq-export, so the phone binary links one copy of each codec.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 serde = { workspace = true }

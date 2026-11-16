@@ -546,7 +546,7 @@ mod tests {
             run(
                 &d,
                 vec![Op::SetMeta {
-                    key: "Bad".into(),
+                    key: "bad key".into(),
                     value: Scalar::Int(1)
                 }]
             ),

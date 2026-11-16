@@ -1,12 +1,16 @@
 //! Shrinking documents and media into the small record, and measuring how much that saves.
 //!
-//! Today this crate holds the picture codecs with the pixel and memory caps around them, and
-//! the measurement behind `hq suite measure`. The shrink pipeline itself (plan, journal, apply,
-//! verify, undo) arrives with milestone M1.
+//! The picture codecs with the pixel and memory caps around them, the measurement behind
+//! `hq suite measure`, and the pipeline that shrinks one file: prepare, confirm, undo, recover.
 
 pub mod codec;
 pub mod measure;
+pub mod pipeline;
 pub mod probe;
 
 pub use codec::{CodecError, Encoder};
 pub use measure::{MeasureError, MeasureReport, Settings, measure};
+pub use pipeline::{
+    Faults, ImagePolicy, NoFaults, Notes, Options, OriginalAt, Outcome, Preview, Recovered,
+    Refusal, ShrinkError, Shrinker,
+};

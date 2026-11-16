@@ -95,6 +95,15 @@ pub fn classify(err: &ConvertError) -> FailureKind {
     }
 }
 
+/// A document read by the importer: its markdown and what the suite makes of it.
+#[derive(Debug, Clone)]
+pub struct DocumentText {
+    pub markdown: String,
+    /// A title the file itself names.
+    pub title: Option<String>,
+    pub projection: Projection,
+}
+
 /// Converts `bytes` as the importer would and reports what the suite would keep. `ext` is the
 /// file's extension, used only to break ties, as everywhere else in the importer.
 pub async fn project(
@@ -102,6 +111,15 @@ pub async fn project(
     ext: &str,
     opts: &ConvertOptions,
 ) -> Result<Projection, Failure> {
+    read_document(bytes, ext, opts).await.map(|d| d.projection)
+}
+
+/// Like [`project`], and also returns the markdown.
+pub async fn read_document(
+    bytes: Vec<u8>,
+    ext: &str,
+    opts: &ConvertOptions,
+) -> Result<DocumentText, Failure> {
     let sniffed = sniff(&bytes, ext);
     let fail = |kind: FailureKind| Failure {
         kind,
@@ -118,7 +136,7 @@ pub async fn project(
                 done.report.warnings.iter().map(|w| w.kind).collect();
             loss_kinds.sort();
             loss_kinds.dedup();
-            Ok(Projection {
+            let projection = Projection {
                 kind: sniffed.kind,
                 class: class_of(sniffed.kind, None),
                 fidelity: if done.report.has_loss() {
@@ -129,6 +147,11 @@ pub async fn project(
                 md_bytes: done.markdown.len() as u64,
                 engine: done.report.engine,
                 loss_kinds,
+            };
+            Ok(DocumentText {
+                markdown: done.markdown,
+                title: done.title,
+                projection,
             })
         }
     }
