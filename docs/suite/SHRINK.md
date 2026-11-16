@@ -40,10 +40,10 @@ removes it.
   cannot carry (charts, embedded objects, text boxes become inline text). The preview lists them.
 - Pictures are appended in a "Pictures" section at the end of the note for now. Placing each one
   where it sat in the document arrives with the importer mapping in milestone M2.
-- JPEG photographs are scaled to at most 1600 pixels on the long side and recompressed. PNG and
-  WebP graphics are recompressed losslessly. A picture is replaced only if the new file is smaller;
-  otherwise the original bytes are kept. These settings are provisional until the measurement
-  (`hq suite measure`) decides the encoder.
+- JPEG photographs are scaled to at most 1600 pixels on the long side and recompressed as lossy
+  WebP at quality 80 (chosen by measurement, `docs/suite/MEASURE.md`). PNG and WebP graphics are
+  recompressed losslessly. A picture is replaced only if the new file is smaller; otherwise the
+  original bytes are kept.
 - Not shrunk: password protected files, files HQ cannot read, scans and photographs of documents
   (they keep their page images; shrinking them comes later), anything under a folder HQ keeps for
   itself (`_media`, `_trash`, `_data`, `_system`), and files whose record would not be smaller.

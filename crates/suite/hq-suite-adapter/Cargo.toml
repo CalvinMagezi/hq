@@ -16,11 +16,6 @@ hq-suite-shrink = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 
-[features]
-default = []
-# Passes through to the picture codecs worth measuring but not shipping.
-candidates = ["hq-suite-shrink/candidates"]
-
 [dev-dependencies]
 tempfile = { workspace = true }
 toml = { workspace = true }

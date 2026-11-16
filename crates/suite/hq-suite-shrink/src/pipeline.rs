@@ -139,7 +139,7 @@ pub enum ShrinkError {
     Crashed(&'static str),
 }
 
-/// How pictures are recompressed. Provisional until the measurement picks the encoder.
+/// How pictures are recompressed. The encoder was picked by measurement (docs/suite/MEASURE.md).
 #[derive(Debug, Clone, Copy)]
 pub struct ImagePolicy {
     /// For photographs (JPEG sources).
@@ -153,7 +153,9 @@ pub struct ImagePolicy {
 impl Default for ImagePolicy {
     fn default() -> Self {
         ImagePolicy {
-            photo: Encoder::Jpeg { quality: 75 },
+            photo: Encoder::WebpLossy {
+                quality: crate::codec::DEFAULT_WEBP_QUALITY,
+            },
             graphic: Encoder::WebpLossless,
             max_long_edge: 1600,
             max_pixels: 50_000_000,

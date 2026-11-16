@@ -36,7 +36,7 @@ to delete the guard first and say why in review.
 | `hq-suite-md` | hqmd: parse, print, validate, patch. Pure, no I/O. | `pulldown-cmark`, `serde*`, `sha2`, `hex`, `chrono` |
 | `hq-suite-ingest` | Reads office files for the suite: pictures inside packages, fidelity tier projection from the importer's report | `hq-convert`, `hq-suite-md` |
 | `hq-suite-store` | Durable files: atomic writes, media stored by hash, trash in the vault's layout, the shrink journal | `hq-suite-md`, `sha2`, `serde*` |
-| `hq-suite-shrink` | Picture decoding with caps, candidate encoders, the measurement report, the shrink pipeline (prepare, confirm, undo, recover) | `hq-convert`, `hq-suite-ingest`, `hq-suite-md`, `hq-suite-store`, `image`, the `cand-*` encoder crates |
+| `hq-suite-shrink` | Picture decoding with caps, the encoders (lossy WebP through libwebp for photographs), the measurement report, the shrink pipeline (prepare, confirm, undo, recover) | `hq-convert`, `hq-suite-ingest`, `hq-suite-md`, `hq-suite-store`, `image`, `webp` |
 | `hq-suite-adapter` | The only crate that knows HQ: config, tools, CLI glue, daemon task, device actions, REST | everything |
 
 The plan names more crates (governor, sinks, render, calc, one per tool).

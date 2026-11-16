@@ -18,10 +18,8 @@ tunnel = ["dep:hq-tunnel", "dep:libc", "dep:zeroize"]
 # installed laptop or server can pair with a phone; nothing listens until a command is run. Unix
 # only: the dependencies are not pulled on Windows, where the commands are compiled out.
 bridge = ["dep:hq-bridge", "hq-edge/invite"]
-# `hq suite`: the HQ Suite (docs/suite/README.md). Pure Rust, so it builds everywhere HQ does.
-# `suite-candidates` adds the picture encoders that are measured and not shipped.
+# `hq suite`: the HQ Suite (docs/suite/README.md). Needs a C compiler for libwebp.
 suite = ["dep:hq-suite-adapter"]
-suite-candidates = ["suite", "hq-suite-adapter/candidates"]
 
 [dependencies]
 hq-core = { workspace = true }

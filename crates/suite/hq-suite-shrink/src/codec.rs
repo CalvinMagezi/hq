@@ -1,4 +1,4 @@
-//! Picture decoding, resizing and the candidate encoders.
+//! Picture decoding, resizing and the encoders.
 //!
 //! Decoding is bounded: the header is read first and a picture over the pixel cap is refused
 //! before any pixel memory is allocated, so a hostile file cannot use a small download to exhaust
@@ -19,6 +19,10 @@ use image::codecs::webp::WebPEncoder;
 use image::imageops::FilterType;
 use image::{DynamicImage, ExtendedColorType, ImageEncoder, ImageReader, RgbImage, RgbaImage};
 
+/// Chosen by measurement (docs/suite/MEASURE.md): about 39 dB against the original at 40% less
+/// than JPEG 75 on a folder of real pictures.
+pub const DEFAULT_WEBP_QUALITY: u8 = 80;
+
 /// One way to turn pixels into a file, with its quality setting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Encoder {
@@ -29,22 +33,14 @@ pub enum Encoder {
     Png,
     /// Lossless WebP from the `image` crate.
     WebpLossless,
-    /// Lossy WebP in pure Rust (`oxideav-webp`), behind `cand-webp-pure`.
-    WebpPure { quality: u8 },
-    /// Lossy WebP through libwebp, behind `cand-webp-lib`.
-    WebpLib { quality: u8 },
-    /// AVIF through rav1e, behind `cand-avif`.
-    Avif { quality: u8 },
+    /// Lossy WebP through libwebp.
+    WebpLossy { quality: u8 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CodecError {
-    #[error(
-        "`{0}` is not an encoder; try jpeg:75, png, webp-lossless, webp-pure:75, webp-lib:75, avif:55"
-    )]
+    #[error("`{0}` is not an encoder; try jpeg:75, png, webp-lossless, webp:80")]
     UnknownEncoder(String),
-    #[error("{0} is not built into this binary (build with the `{1}` feature)")]
-    NotBuilt(String, &'static str),
     #[error("the picture is too large to decode here ({0} pixels)")]
     TooManyPixels(u64),
     #[error("the picture could not be read: {0}")]
@@ -60,14 +56,11 @@ impl Encoder {
             Encoder::Jpeg { quality } => format!("jpeg-q{quality}"),
             Encoder::Png => "png".into(),
             Encoder::WebpLossless => "webp-lossless".into(),
-            Encoder::WebpPure { quality } => format!("webp-pure-q{quality}"),
-            Encoder::WebpLib { quality } => format!("webp-lib-q{quality}"),
-            Encoder::Avif { quality } => format!("avif-q{quality}"),
+            Encoder::WebpLossy { quality } => format!("webp-q{quality}"),
         }
     }
 
-    /// Reads `jpeg:75`, `png`, `webp-lossless`, `webp-pure:75`, `webp-lib:75`, `avif:55`.
-    /// Refuses an encoder this binary was not built with, saying which feature adds it.
+    /// Reads `jpeg:75`, `png`, `webp-lossless`, `webp:80`.
     pub fn parse(s: &str) -> Result<Encoder, CodecError> {
         let (name, q) = match s.split_once(':') {
             Some((n, q)) => (n, Some(q)),
@@ -89,31 +82,12 @@ impl Encoder {
             },
             "png" if q.is_none() => Encoder::Png,
             "webp-lossless" if q.is_none() => Encoder::WebpLossless,
-            "webp-pure" => Encoder::WebpPure {
-                quality: quality(75)?,
-            },
-            "webp-lib" => Encoder::WebpLib {
-                quality: quality(75)?,
-            },
-            "avif" => Encoder::Avif {
-                quality: quality(55)?,
+            "webp" => Encoder::WebpLossy {
+                quality: quality(DEFAULT_WEBP_QUALITY)?,
             },
             _ => return Err(CodecError::UnknownEncoder(s.to_string())),
         };
-        match enc.built_with() {
-            Some(feature) => Err(CodecError::NotBuilt(enc.label(), feature)),
-            None => Ok(enc),
-        }
-    }
-
-    /// The feature that must be on for this encoder, or `None` if it is built in.
-    fn built_with(&self) -> Option<&'static str> {
-        match self {
-            Encoder::WebpPure { .. } if !cfg!(feature = "cand-webp-pure") => Some("cand-webp-pure"),
-            Encoder::WebpLib { .. } if !cfg!(feature = "cand-webp-lib") => Some("cand-webp-lib"),
-            Encoder::Avif { .. } if !cfg!(feature = "cand-avif") => Some("cand-avif"),
-            _ => None,
-        }
+        Ok(enc)
     }
 
     /// The file extension a picture made by this encoder is filed under.
@@ -121,8 +95,7 @@ impl Encoder {
         match self {
             Encoder::Jpeg { .. } => "jpg",
             Encoder::Png => "png",
-            Encoder::WebpLossless | Encoder::WebpPure { .. } | Encoder::WebpLib { .. } => "webp",
-            Encoder::Avif { .. } => "avif",
+            Encoder::WebpLossless | Encoder::WebpLossy { .. } => "webp",
         }
     }
 
@@ -133,21 +106,14 @@ impl Encoder {
 
     /// The encoders this binary has, with default settings. Used when none is asked for.
     pub fn defaults() -> Vec<Encoder> {
-        let mut v = vec![
+        vec![
             Encoder::Jpeg { quality: 75 },
             Encoder::Png,
             Encoder::WebpLossless,
-        ];
-        if cfg!(feature = "cand-webp-pure") {
-            v.push(Encoder::WebpPure { quality: 75 });
-        }
-        if cfg!(feature = "cand-webp-lib") {
-            v.push(Encoder::WebpLib { quality: 75 });
-        }
-        if cfg!(feature = "cand-avif") {
-            v.push(Encoder::Avif { quality: 55 });
-        }
-        v
+            Encoder::WebpLossy {
+                quality: DEFAULT_WEBP_QUALITY,
+            },
+        ]
     }
 
     /// The image format a file made by this encoder is read back with, for quality checks.
@@ -155,11 +121,7 @@ impl Encoder {
         match self {
             Encoder::Jpeg { .. } => Some(image::ImageFormat::Jpeg),
             Encoder::Png => Some(image::ImageFormat::Png),
-            Encoder::WebpLossless | Encoder::WebpPure { .. } | Encoder::WebpLib { .. } => {
-                Some(image::ImageFormat::WebP)
-            }
-            // The `image` crate here has no AVIF decoder, so quality is not measured.
-            Encoder::Avif { .. } => None,
+            Encoder::WebpLossless | Encoder::WebpLossy { .. } => Some(image::ImageFormat::WebP),
         }
     }
 }
@@ -270,9 +232,6 @@ pub fn psnr_db(a: &[u8], b: &[u8]) -> Option<f64> {
 /// Encodes `img` with `enc`, timing it and, for a lossy encoder this build can read back,
 /// measuring how far the result is from the input.
 pub fn encode(img: &DynamicImage, enc: Encoder) -> Result<Encoded, CodecError> {
-    if let Some(feature) = enc.built_with() {
-        return Err(CodecError::NotBuilt(enc.label(), feature));
-    }
     let transparent = has_transparency(img);
     let start = Instant::now();
     let (bytes, flattened) = encode_inner(img, enc, transparent)?;
@@ -284,7 +243,8 @@ pub fn encode(img: &DynamicImage, enc: Encoder) -> Result<Encoded, CodecError> {
             image::load_from_memory_with_format(&bytes, format)
                 .ok()
                 .and_then(|back| {
-                    let back = back.to_rgb8();
+                    // Encoders that keep alpha decode with it; compare on the same white as the reference.
+                    let back = flatten(&back);
                     if back.dimensions() == reference.dimensions() {
                         psnr_db(reference.as_raw(), back.as_raw())
                     } else {
@@ -335,40 +295,13 @@ fn encode_inner(
                 .map_err(|e| err(&e))?;
             Ok((out, false))
         }
-        Encoder::WebpPure { quality } => {
-            encode_webp_pure(img, quality, transparent).map(|b| (b, false))
-        }
-        Encoder::WebpLib { quality } => {
-            encode_webp_lib(img, quality, transparent).map(|b| (b, false))
-        }
-        Encoder::Avif { quality } => {
-            encode_avif(img, quality, transparent).map(|b| (b, transparent))
+        Encoder::WebpLossy { quality } => {
+            encode_webp_lossy(img, quality, transparent).map(|b| (b, false))
         }
     }
 }
 
-#[cfg(feature = "cand-webp-pure")]
-fn encode_webp_pure(
-    img: &DynamicImage,
-    quality: u8,
-    transparent: bool,
-) -> Result<Vec<u8>, CodecError> {
-    let opts = oxideav_webp::EncodeOptions::default().with_quality(f32::from(quality));
-    let (w, h) = (img.width(), img.height());
-    if transparent {
-        oxideav_webp::encode_rgba8(w, h, img.to_rgba8().as_raw(), &opts)
-    } else {
-        oxideav_webp::encode_rgb8(w, h, img.to_rgb8().as_raw(), &opts)
-    }
-    .map_err(|e| CodecError::Encode(e.to_string()))
-}
-#[cfg(not(feature = "cand-webp-pure"))]
-fn encode_webp_pure(_: &DynamicImage, _: u8, _: bool) -> Result<Vec<u8>, CodecError> {
-    Err(CodecError::NotBuilt("webp-pure".into(), "cand-webp-pure"))
-}
-
-#[cfg(feature = "cand-webp-lib")]
-fn encode_webp_lib(
+fn encode_webp_lossy(
     img: &DynamicImage,
     quality: u8,
     transparent: bool,
@@ -382,31 +315,6 @@ fn encode_webp_lib(
         webp::Encoder::from_rgb(rgb.as_raw(), w, h).encode(f32::from(quality))
     };
     Ok(mem.to_vec())
-}
-#[cfg(not(feature = "cand-webp-lib"))]
-fn encode_webp_lib(_: &DynamicImage, _: u8, _: bool) -> Result<Vec<u8>, CodecError> {
-    Err(CodecError::NotBuilt("webp-lib".into(), "cand-webp-lib"))
-}
-
-#[cfg(feature = "cand-avif")]
-fn encode_avif(img: &DynamicImage, quality: u8, _transparent: bool) -> Result<Vec<u8>, CodecError> {
-    let rgb = flatten(img);
-    let pixels: Vec<rgb::RGB8> = rgb
-        .as_raw()
-        .chunks_exact(3)
-        .map(|c| rgb::RGB8::new(c[0], c[1], c[2]))
-        .collect();
-    let frame = imgref::Img::new(pixels, rgb.width() as usize, rgb.height() as usize);
-    ravif::Encoder::new()
-        .with_quality(f32::from(quality))
-        .with_speed(8)
-        .encode_rgb(frame.as_ref())
-        .map(|r| r.avif_file)
-        .map_err(|e| CodecError::Encode(e.to_string()))
-}
-#[cfg(not(feature = "cand-avif"))]
-fn encode_avif(_: &DynamicImage, _: u8, _: bool) -> Result<Vec<u8>, CodecError> {
-    Err(CodecError::NotBuilt("avif".into(), "cand-avif"))
 }
 
 #[cfg(test)]
@@ -464,19 +372,19 @@ mod tests {
     }
 
     #[test]
-    fn a_candidate_that_is_not_built_says_which_feature_adds_it() {
-        if !cfg!(feature = "cand-avif") {
-            assert_eq!(
-                Encoder::parse("avif:55"),
-                Err(CodecError::NotBuilt("avif-q55".into(), "cand-avif"))
-            );
+    fn a_picture_with_transparency_is_scored_on_the_same_white_as_its_reference() {
+        let mut rgba = image::RgbaImage::from_pixel(64, 64, image::Rgba([200, 30, 30, 255]));
+        for x in 0..32 {
+            for y in 0..64 {
+                rgba.put_pixel(x, y, image::Rgba([0, 0, 0, 0]));
+            }
         }
-        if !cfg!(feature = "cand-webp-lib") {
-            assert!(matches!(
-                Encoder::parse("webp-lib"),
-                Err(CodecError::NotBuilt(_, "cand-webp-lib"))
-            ));
-        }
+        let out = encode(
+            &DynamicImage::ImageRgba8(rgba),
+            Encoder::WebpLossy { quality: 80 },
+        )
+        .unwrap();
+        assert!(out.psnr_db.is_none_or(|p| p > 25.0), "{:?}", out.psnr_db);
     }
 
     #[test]

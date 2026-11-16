@@ -3876,10 +3876,6 @@ dependencies = [
  "hq-suite-md",
  "hq-suite-store",
  "image",
- "imgref",
- "oxideav-webp",
- "ravif",
- "rgb",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6542,21 +6538,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36820e9051aca1014ddc75770aab4d68bc1e9e632f0f5627c4086bc216fb583b"
 dependencies = [
  "ttf-parser",
-]
-
-[[package]]
-name = "oxideav-vp8"
-version = "0.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c449a84e4f468bb88e40868383e297605c6ab4b591ca600b5f78345e40f281e"
-
-[[package]]
-name = "oxideav-webp"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfca0cb5908192778a23da0b3ede28db58e663069ea70aab72b65b1cfaeb45b8"
-dependencies = [
- "oxideav-vp8",
 ]
 
 [[package]]

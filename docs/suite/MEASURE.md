@@ -25,18 +25,8 @@ Useful options:
 | `--max-files N` | Look at no more than this many files. Default 5000. |
 | `--json` | Print the JSON report instead of the table. |
 
-Encoders in every build: `jpeg:Q`, `png`, `webp-lossless`. Three more are candidates and are
-built only to be measured. Build with `--features suite-candidates`:
-
-| Encoder | What it is |
-|---------|------------|
-| `webp-pure:Q` | Lossy WebP in pure Rust (`oxideav-webp`). A young crate. |
-| `webp-lib:Q` | Lossy WebP through libwebp (C). The reference for size and quality. |
-| `avif:Q` | AVIF through rav1e. Slow on a phone CPU. |
-
-```bash
-cargo build --release -p hq-cli --features suite-candidates
-```
+Encoders: `jpeg:Q`, `png`, `webp-lossless` and `webp:Q` (lossy WebP through libwebp, the encoder the
+shrink uses for photographs, at quality 80 by default).
 
 ## Reading the report
 
@@ -69,13 +59,54 @@ index. A measurement is a decision input, not a promise to a user.
 
 The numbers that decide the design are the phone's: encode time and peak memory on a
 Samsung Galaxy A32 (Helio G80, about 2 GB free). Run the same command there, through the
-`hq` binary the app ships, on a folder of copied files, with a candidate build if you want the
-extra encoders. Record each run as an evidence note beside the earlier device spikes: device,
+`hq` binary the app ships, on a folder of copied files, Record each run as an evidence note beside the earlier device spikes: device,
 build, the table, and what was not covered.
+
+## The encoder decision
+
+Three lossy candidates were built and measured on 255 real pictures (282 MB, all kinds of
+photographs and screenshots), scaled to 1600 pixels on the long edge, on an Apple Silicon laptop:
+
+| Encoder | Bytes out | Share of JPEG 75 | PSNR mean / worst | Median encode |
+|---------|-----------|------------------|-------------------|---------------|
+| jpeg q75 (the old default) | 43.9 MB | 100% | 40.0 / 31.2 dB | 8 ms |
+| webp (libwebp) q75 | 24.7 MB | 56% | 37.7 / 32.0 dB | 51 ms |
+| webp (libwebp) q80 | 29.8 MB | 68% | 39.0 / 33.6 dB | 53 ms |
+| webp (libwebp) q85 | 36.5 MB | 83% | 40.5 / 35.1 dB | 55 ms |
+| webp pure Rust q75 | 24.7 MB | 56% | 37.0 / 31.4 dB | 118 ms |
+| webp pure Rust q85 | 36.0 MB | 82% | 39.4 / 34.0 dB | 139 ms |
+| avif q55 | 15.2 MB | 35% | not measurable | 92 ms |
+
+Chosen: lossy WebP through libwebp at quality 80. At a quality score that matches JPEG 75 it is
+17% smaller with a better worst case; at the same size as pure-Rust WebP it scores higher and
+encodes about two and a half times faster. AVIF is smaller still, but this build cannot decode it
+to verify a record, Word and Google's apps do not take it in a document, and it costs more time
+and memory per picture on a phone. Pure-Rust WebP is a young crate. Graphics (PNG and WebP
+sources) stay lossless.
+
+An earlier run printed a worst-case PSNR near zero for both WebP encoders. That was the measuring
+tool: the decoded picture was compared without the white it was flattened onto, so transparent
+pixels counted as errors. It is fixed, and a test keeps it fixed.
+
+Reading the per-encoder columns: they encode every picture lossily, while the policy is lossy for
+photographs only, so they are upper bounds on what the policy saves.
 
 ## The measurement table
 
-| File set | Files | Original bytes | Record bytes | Saved | Tier mix | Notes |
-|----------|-------|----------------|--------------|-------|----------|-------|
+Four sets of the owner's own files, read with `hq suite measure`. The projection is the record
+under lossy WebP q75 against the original, over every class the tool can project; scans are
+excluded as they are not projected. Text-only PDFs project very small because the record keeps
+text and tables, not layout, and they are in the lossy tier.
 
-Rows are added as real file sets are measured. Until then the design uses no ratio as fact.
+| File set | Files | Original MiB | Record MiB | Saved | Tier mix | Notes |
+|----------|-------|--------------|------------|-------|----------|-------|
+| A: a downloads folder | 484 | 475 | 59 | 88% | 145 safe, 17 lossy | Half of it is pictures; 17 files were not projected (archives, unknown) |
+| B: a work folder of reports | 62 | 46 | 2.8 | 94% | 49 safe, 7 lossy | Mostly docx and decks |
+| C: a folder of mixed documents | 157 | 89 | 9.8 | 89% | 109 safe | Many PDFs; docx files barely shrink (0.9 and up) |
+| D: a project archive | 395 | 335 | 24 | 93% | 342 safe, 12 lossy | Decks with embedded pictures dominate the saving |
+
+Before recompression (`as-is`, markdown and deduplication alone) the same sets save 32%, 86%, 83%
+and 58%. The picture encoder is where the big decks and downloads folders come from.
+
+Not yet measured: sets from other people, with consent; the reference phone's own table (see the
+evidence note beside the earlier device spikes).

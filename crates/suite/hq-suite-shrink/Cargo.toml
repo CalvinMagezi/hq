@@ -20,24 +20,9 @@ hex = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 
-# Candidate encoders. They exist to be measured (`hq suite measure --encoders ...`) and are off
-# by default, so a normal build links only what the phone ships. The one chosen in M0 becomes a
-# default dependency and the others are dropped.
-oxideav-webp = { version = "0.3", default-features = false, optional = true }
-webp = { version = "0.3", default-features = false, optional = true }
-ravif = { version = "0.13", default-features = false, optional = true }
-imgref = { version = "1", optional = true }
-rgb = { version = "0.8", optional = true }
-
-[features]
-default = []
-# Lossy WebP in pure Rust (young crate; a candidate, not yet reviewed for hostile input).
-cand-webp-pure = ["dep:oxideav-webp"]
-# Lossy WebP through libwebp (C). The reference for size and quality.
-cand-webp-lib = ["dep:webp"]
-# AVIF through rav1e (pure Rust, slow on a phone CPU).
-cand-avif = ["dep:ravif", "dep:imgref", "dep:rgb"]
-candidates = ["cand-webp-pure", "cand-webp-lib", "cand-avif"]
+# Lossy WebP through libwebp (C), chosen by measurement over pure-Rust WebP and AVIF
+# (docs/suite/MEASURE.md). AVIF was dropped for want of a decoder and for encode time on a phone.
+webp = { version = "0.3", default-features = false }
 
 [dev-dependencies]
 tempfile = { workspace = true }
