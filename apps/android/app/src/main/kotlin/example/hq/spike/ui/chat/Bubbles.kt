@@ -54,7 +54,16 @@ private val ReplyShape = RoundedCornerShape(topStart = 6.dp, topEnd = 20.dp, bot
 private const val USER_BUBBLE_SHARE = 0.84f
 
 @Composable
-fun UserBubble(text: String, sending: Boolean, files: List<Attachment> = emptyList(), onOpenFile: (Attachment) -> Unit = {}, modifier: Modifier = Modifier, spoken: Boolean = false) {
+fun UserBubble(
+    text: String,
+    sending: Boolean,
+    files: List<Attachment> = emptyList(),
+    onOpenFile: (Attachment) -> Unit = {},
+    modifier: Modifier = Modifier,
+    spoken: Boolean = false,
+    sendStatus: SendStatus? = null,
+    onRetrySend: () -> Unit = {},
+) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
         Column(Modifier.align(Alignment.CenterEnd).widthIn(max = maxWidth * USER_BUBBLE_SHARE).alpha(if (sending) 0.7f else 1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (text.isNotBlank()) {
@@ -65,6 +74,19 @@ fun UserBubble(text: String, sending: Boolean, files: List<Attachment> = emptyLi
                 Text(stringResource(R.string.chat_spoken), style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.align(Alignment.End).semantics { contentDescription = byVoice })
             }
             files.forEach { FileCardView(it, { onOpenFile(it) }) }
+            when (sendStatus) {
+                SendStatus.Sending -> Text(stringResource(R.string.chat_sending), style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.align(Alignment.End))
+                SendStatus.NotSent -> Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.chat_not_sent), style = HqType.Caption, color = Mts.DangerText)
+                    Text(
+                        stringResource(R.string.chat_try_again),
+                        style = HqType.BodySmBold,
+                        color = Mts.BrandGreen,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button, onClick = onRetrySend).padding(horizontal = 8.dp, vertical = 12.dp),
+                    )
+                }
+                null -> {}
+            }
         }
     }
 }

@@ -23,6 +23,9 @@ import example.hq.spike.ui.theme.Mts
 /** What is left on the AI service in use, or null. The shell provides it; it no longer sits in the top bar. */
 val LocalBalance = staticCompositionLocalOf<BalanceChip?> { null }
 
+/** The active primary model or provider name, or null when unknown. */
+val LocalModel = staticCompositionLocalOf<String?> { null }
+
 /** Opens the page that explains the balance (Spending or the AI service keys). */
 val LocalOnBalance = staticCompositionLocalOf<(ChipTarget) -> Unit> { {} }
 

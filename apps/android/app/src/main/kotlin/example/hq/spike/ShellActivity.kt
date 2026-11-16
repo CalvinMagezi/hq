@@ -415,6 +415,7 @@ class ShellActivity : ComponentActivity() {
             val settingsState by settings.state.collectAsStateWithLifecycle()
             val searchState by search.state.collectAsStateWithLifecycle()
             val balance by usage.chip.collectAsStateWithLifecycle()
+            val activeModel by usage.model.collectAsStateWithLifecycle()
             val shown: Connection = if (fixture == null) status else Connection.Connected
             searchSources = { example.hq.spike.ui.search.SearchSources(tasksState.tasks, chatState.chats, helpersState.cards, shown is Connection.ServerUnreachable || shown is Connection.ServerSignedOut, (notesState.recent + notesState.pinned).flatMap { it.tags }.distinct()) }
             val startupFixture = when (fixtureName) { "x-starting" -> Startup.Starting; else -> null }
@@ -469,7 +470,7 @@ class ShellActivity : ComponentActivity() {
                 }
             }
             val notifUi = notifFacts?.let { NotifUi(it, ::turnOnNotifications) }
-            HqTheme { CompositionLocalProvider(example.hq.spike.ui.usage.LocalBalance provides (if (shown !is Connection.Connected) null else balance), example.hq.spike.ui.usage.LocalOnBalance provides { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) }, LocalOpenWeb provides { page -> web = page }, LocalNotif provides notifUi, example.hq.spike.ui.shell.LocalReselectAtTop provides atTop) {
+            HqTheme { CompositionLocalProvider(example.hq.spike.ui.usage.LocalBalance provides (if (shown !is Connection.Connected) null else balance), example.hq.spike.ui.usage.LocalModel provides (if (shown !is Connection.Connected) null else activeModel), example.hq.spike.ui.usage.LocalOnBalance provides { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) }, LocalOpenWeb provides { page -> web = page }, LocalNotif provides notifUi, example.hq.spike.ui.shell.LocalReselectAtTop provides atTop) {
                 if (firstRunUi.step != null) FirstRunHost(firstRunUi, firstRun.actions)
                 else if (startup == Startup.Starting) StartingScreen(((status as? Connection.Starting)?.step ?: 0) + 1, (status as? Connection.Starting)?.seconds ?: 12) { openCapture() }
                 else HqShell(
@@ -496,7 +497,7 @@ class ShellActivity : ComponentActivity() {
                 ) { place ->
                     LaunchedEffect(place) { example.hq.spike.update.AppVisibility.inChat = place == Place.Chat }
                     when (place) {
-                        Place.Chat -> ChatScreen(chatState, chat.actions, status = shown, onStartHq = ::tryStartAgain, onAiKeys = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Keys) }, needs = { ChatNeeds(needsOfChat(inboxState.shownNeeds, chatState.threadId), inboxState, inbox.actions) }, hasNeeds = needsOfChat(inboxState.shownNeeds, chatState.threadId).isNotEmpty(), onVoice = ::speakToHq)
+                        Place.Chat -> ChatScreen(chatState, chat.actions, status = shown, onStartHq = ::tryStartAgain, onAiKeys = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Keys) }, onSignIn = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Notifications) }, needs = { ChatNeeds(needsOfChat(inboxState.shownNeeds, chatState.threadId), inboxState, inbox.actions) }, hasNeeds = needsOfChat(inboxState.shownNeeds, chatState.threadId).isNotEmpty(), onVoice = ::speakToHq)
                         Place.Notes -> NotesPlace(notesState)
                         Place.Inbox -> InboxPlace(inboxState)
                         Place.Tasks -> TasksPlace(tasksState)

@@ -21,6 +21,10 @@ data class UiMessage(
     val tools: List<ToolStep> = emptyList(),
     /** True for a question shown at once, before the server has saved it. */
     val sending: Boolean = false,
+    /** True when the send did not reach HQ and can be tried again with the same client id. */
+    val notSent: Boolean = false,
+    /** Server-saved copy of the client id sent by this phone, used to deduplicate on reconnect. */
+    val clientId: String? = null,
     /** When the server saved it; blank for a reply that just finished in this session. */
     val createdAt: String = "",
     val files: List<Attachment> = emptyList(),
@@ -30,11 +34,11 @@ data class UiMessage(
 ) {
     companion object {
         /** A saved message: the attachment marker the server appends is split off into [files]. */
-        fun saved(id: String, speaker: Speaker, content: String, tools: List<ToolStep> = emptyList(), createdAt: String = "", spoken: Boolean = false, offer: Offer? = null): UiMessage {
+        fun saved(id: String, speaker: Speaker, content: String, tools: List<ToolStep> = emptyList(), createdAt: String = "", spoken: Boolean = false, offer: Offer? = null, clientId: String? = null): UiMessage {
             // Only the user's own messages carry the marker; a model reply that contains one is just text.
-            if (speaker != Speaker.User) return UiMessage(id, speaker, content, tools, createdAt = createdAt, offer = offer)
+            if (speaker != Speaker.User) return UiMessage(id, speaker, content, tools, createdAt = createdAt, offer = offer, clientId = clientId)
             val (text, files) = Attachments.split(content)
-            return UiMessage(id, speaker, text, tools, createdAt = createdAt, files = files, spoken = spoken)
+            return UiMessage(id, speaker, text, tools, createdAt = createdAt, files = files, spoken = spoken, clientId = clientId)
         }
     }
 }
@@ -113,6 +117,10 @@ data class ChatUiState(
     val pillChoices: Boolean = true,
     /** The agent sessions this chat watches, and whether their sheet is open. */
     val sessions: SessionsUi = SessionsUi(),
+    /** Reply id of a turn that ended in this session; follow-up chips show only for this id. */
+    val finishedReplyId: String? = null,
+    /** Reply id whose follow-up chips were dismissed by typing; keeps them hidden even if the draft is cleared. */
+    val dismissedFollowUpId: String? = null,
 ) {
     /** The newest message when it is a finished reply carrying an offer that is still open. */
     val offered: UiMessage? get() = messages.lastOrNull()?.takeIf { it.speaker == Speaker.Reply && it.offer != null && live == null && !failed }
@@ -204,8 +212,8 @@ sealed interface ExportState {
     data class Failed(override val note: ExportNote, val format: ExportFormat, val reason: String) : ExportState
 }
 
-/** A line at the bottom of the screen, with an optional action word (Undo). */
-data class Notice(val text: String, val action: String? = null)
+/** A line at the bottom of the screen, with an optional action word (Undo) and custom timeout. */
+data class Notice(val text: String, val action: String? = null, val timeoutMs: Long? = null)
 
 /** Applies one server event to the open chat. Pure, so the rules can be tested without a phone. */
 object ChatReducer {
@@ -233,7 +241,7 @@ object ChatReducer {
             saved != null && base.none { it.id == saved.id } -> base + saved
             else -> base
         }
-        return state.copy(threadId = e.threadId, messages = messages, live = LiveReply(), failed = false)
+        return state.copy(threadId = e.threadId, messages = messages, live = LiveReply(), failed = false, finishedReplyId = null)
     }
 
     private fun reply(state: ChatUiState, event: ChatEvent): ChatUiState {
@@ -258,10 +266,12 @@ object ChatReducer {
         val steps = live.steps.map { it.step }
         val empty = live.text.isBlank() && steps.isEmpty()
         val message = UiMessage(e.messageId ?: "reply-${state.messages.size}", Speaker.Reply, live.text, steps)
+        val added = !empty && state.messages.none { it.id == message.id }
         return state.copy(
             live = null,
-            messages = if (empty || state.messages.any { it.id == message.id }) state.messages else state.messages + message,
+            messages = if (added) state.messages + message else state.messages,
             failed = state.failed || (empty && !e.stopped),
+            finishedReplyId = if (added) message.id else state.finishedReplyId,
         )
     }
 

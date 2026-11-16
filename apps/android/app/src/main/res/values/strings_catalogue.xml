@@ -3969,4 +3969,25 @@
     <string name="sessions_drive_failed">Couldn\'t change that. Try again.</string>
     <string name="sessions_unwatch_failed">Couldn\'t stop watching. Try again.</string>
     <string name="sessions_load_failed">Couldn\'t load the agents. Try again.</string>
+    <string name="chat_problem_offline">You\'re offline. Unsent messages show Not sent with Try again.</string>
+    <string name="chat_problem_signed_out">Signed out of your server HQ.</string>
+    <string name="chat_sending">Sending…</string>
+    <string name="chat_not_sent">Not sent</string>
+    <string name="chat_try_again">Try again</string>
+    <string name="chat_chip_note_1">Summarise what you saved</string>
+    <string name="chat_chip_note_2">Link this to related notes</string>
+    <string name="chat_chip_note_3">Make a task from this note</string>
+    <string name="chat_chip_task_1">Show my tasks for today</string>
+    <string name="chat_chip_task_2">Break this into smaller steps</string>
+    <string name="chat_chip_task_3">What else needs my attention\?</string>
+    <string name="chat_chip_search_1">Summarise the key points</string>
+    <string name="chat_chip_search_2">Save this as a note</string>
+    <string name="chat_chip_search_3">What should I do next\?</string>
+    <string name="chat_chip_neutral_1">Tell me more about that</string>
+    <string name="chat_chip_neutral_2">Give me a shorter version</string>
+    <string name="chat_chip_neutral_3">Turn this into next steps</string>
+    <string name="chat_title_menu_label">Chat options</string>
+    <string name="chat_title_model">Model: %1$s</string>
+    <string name="chat_title_model_unset">Model: not set</string>
+    <string name="chat_title_all_chats">All chats</string>
 </resources>

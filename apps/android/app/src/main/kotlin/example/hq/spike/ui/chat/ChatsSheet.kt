@@ -56,6 +56,13 @@ private val SheetTop = 152.dp
 private val ScrimColor = Color.Black.copy(alpha = 0.62f)
 private val ArchivePanel = Mts.BrandIndigo
 
+object ChatsFilter {
+    fun byTitle(rows: List<ChatRow>, query: String): List<ChatRow> {
+        val q = query.trim()
+        return if (q.isEmpty()) rows else rows.filter { it.title.contains(q, ignoreCase = true) }
+    }
+}
+
 /**
  * The chats sheet: the design's own overlay, with its top edge 152 dp down so the chat name row stays visible above it.
  * Tapping the dimmed part or pressing Back closes it.
@@ -72,8 +79,7 @@ fun ChatsSheet(state: ChatUiState, actions: ChatActions) {
                 NewChatButton(actions.onNewChat)
             }
             SearchField(state.chatSearch, actions.onSearchChats)
-            example.hq.spike.ui.usage.BalanceRow()
-            val shown = state.chats.filter { it.title.contains(state.chatSearch, true) || it.subtitle.contains(state.chatSearch, true) }
+            val shown = ChatsFilter.byTitle(state.chats, state.chatSearch)
             LazyColumn(Modifier.fillMaxWidth()) {
                 val pinned = shown.filter { it.pinned }
                 if (pinned.isNotEmpty()) {
@@ -127,6 +133,7 @@ private fun GroupHeader(label: String) {
 @Composable
 private fun ChatRowItem(row: ChatRow, selected: Boolean, actions: ChatActions) {
     val pinLabel = stringResource(if (row.pinned) R.string.chat_unpin else R.string.chat_pin)
+    val archiveLabel = stringResource(R.string.chat_row_archive_named, row.title)
     val swipe = rememberSwipeToDismissBoxState(confirmValueChange = {
         (it == SwipeToDismissBoxValue.EndToStart).also { archive -> if (archive) actions.onArchive(row.id) }
     })
@@ -148,7 +155,12 @@ private fun ChatRowItem(row: ChatRow, selected: Boolean, actions: ChatActions) {
             Modifier.padding(horizontal = 8.dp).fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp))
                 .background(if (selected) Mts.Surface200 else Mts.Surface100)
                 .combinedClickable(role = Role.Button, onLongClickLabel = pinLabel, onLongClick = { actions.onPinChat(row.id) }, onClick = { actions.onOpenChat(row.id) })
-                .semantics { customActions = listOf(CustomAccessibilityAction(pinLabel) { actions.onPinChat(row.id); true }) }
+                .semantics {
+                    customActions = listOf(
+                        CustomAccessibilityAction(pinLabel) { actions.onPinChat(row.id); true },
+                        CustomAccessibilityAction(archiveLabel) { actions.onArchive(row.id); true },
+                    )
+                }
                 .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically,
         ) {

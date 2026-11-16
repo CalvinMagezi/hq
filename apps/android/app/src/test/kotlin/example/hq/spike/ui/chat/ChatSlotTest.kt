@@ -12,11 +12,12 @@ class ChatSlotTest {
     private fun reply(offer: Offer?) = UiMessage("r1", Speaker.Reply, "Done.", offer = offer)
 
     @Test fun anApprovalWinsOverAnOfferAndNeverBothShow() {
-        assertEquals(SlotItem.Approval, ChatSlot.pick(hasApproval = true, offered = offer, result = null))
-        assertEquals(SlotItem.Approval, ChatSlot.pick(hasApproval = true, offered = null, result = OfferResult.Later))
-        assertEquals(SlotItem.Offer, ChatSlot.pick(hasApproval = false, offered = offer, result = null))
-        assertEquals(SlotItem.Offer, ChatSlot.pick(hasApproval = false, offered = null, result = OfferResult.NotNow))
-        assertEquals(SlotItem.None, ChatSlot.pick(hasApproval = false, offered = null, result = null))
+        assertEquals(SlotItem.Approval, ChatSlot.pick(hasApproval = true, offered = offer, result = null, hasChips = true))
+        assertEquals(SlotItem.Approval, ChatSlot.pick(hasApproval = true, offered = null, result = OfferResult.Later, hasChips = true))
+        assertEquals(SlotItem.Offer, ChatSlot.pick(hasApproval = false, offered = offer, result = null, hasChips = true))
+        assertEquals(SlotItem.Offer, ChatSlot.pick(hasApproval = false, offered = null, result = OfferResult.NotNow, hasChips = true))
+        assertEquals(SlotItem.Chips, ChatSlot.pick(hasApproval = false, offered = null, result = null, hasChips = true))
+        assertEquals(SlotItem.None, ChatSlot.pick(hasApproval = false, offered = null, result = null, hasChips = false))
     }
 
     @Test fun yesNotNowLaterAreOfferedAndLaterHidesOnceUsedOrUnsupported() {
