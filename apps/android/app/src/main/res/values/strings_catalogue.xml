@@ -3771,6 +3771,10 @@
     <string name="sites_trusted_title">Sites HQ reads without asking</string>
     <string name="sites_trusted_body">You allowed these in three or more chats. Removing one makes HQ ask again.</string>
     <string name="sites_trusted_remove">Remove</string>
+    <string name="sites_domains_title">Domains you trust</string>
+    <string name="sites_domains_body">HQ reads these and their subdomains without asking. Pages from them still count as untrusted text.</string>
+    <string name="sites_domains_placeholder">example.com</string>
+    <string name="sites_domains_add">Trust</string>
     <plurals name="chat_approval_summary">
         <item quantity="one">%1$s request answered</item>
         <item quantity="other">%1$s requests answered</item>

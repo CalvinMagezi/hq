@@ -681,6 +681,10 @@ enum Commands {
     #[command(subcommand)]
     Inbox(commands::inbox::InboxAction),
 
+    /// Domains HQ may fetch without asking you (never skips the untrusted-text marking)
+    #[command(subcommand)]
+    Trust(commands::trust::TrustAction),
+
     /// How HQ is used on this machine: capabilities, corrections, return visits (counts only)
     Adoption {
         /// Print JSON
@@ -1366,6 +1370,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         #[cfg(all(unix, feature = "bridge"))]
         Commands::Claude(action) => commands::claude::run(config, action),
         Commands::Inbox(action) => commands::inbox::run(config, action),
+        Commands::Trust(action) => commands::trust::run(config, action),
         Commands::Adoption { json } => commands::adoption::run_adoption(config, json),
         Commands::Offers(action) => commands::adoption::run_offers(config, action),
         Commands::Decisions { days, site } => {
