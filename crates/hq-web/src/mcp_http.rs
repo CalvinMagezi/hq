@@ -122,6 +122,14 @@ impl McpKeys {
     }
 
     #[cfg(test)]
+    pub(crate) fn with_spark(key: &str) -> Self {
+        Self {
+            spark: Some(key.to_string()),
+            ..Self::default()
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn with_full(key: &str) -> Self {
         Self {
             full: Some(key.to_string()),

@@ -87,6 +87,19 @@ pub async fn run_vault_cleanup(vault_path: &Path, db: &Database) -> Result<()> {
             Err(e) => tracing::warn!(%e, "vault-cleanup: provenance purge failed"),
         }
 
+        // Earlier note texts HQ kept for Undo, past their retention or over the size bound.
+        match db.with_conn(|conn| {
+            hq_db::note_keep::prune_prev(
+                conn,
+                hq_db::note_keep::PREV_RETENTION_DAYS,
+                hq_db::note_keep::PREV_TOTAL_BYTES,
+            )
+        }) {
+            Ok(0) => {}
+            Ok(n) => actions.push(format!("Dropped {n} kept earlier note text(s)")),
+            Err(e) => tracing::warn!(%e, "vault-cleanup: earlier-text prune failed"),
+        }
+
         // Raw skill invocations past the retention window become monthly counts; the skills and
         // their audit trail are not touched.
         match db.with_conn(|conn| {

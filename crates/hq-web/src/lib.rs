@@ -26,6 +26,7 @@ mod lane_quotas_api;
 mod mcp_http;
 mod note_ids;
 mod note_trash;
+mod note_undo;
 mod notifications_api;
 mod notifications_watch;
 mod oauth;
@@ -378,6 +379,19 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/note/trash/restore",
             post(note_trash::trash_restore_handler),
+        )
+        .route(
+            "/api/note/trash/purge",
+            post(note_trash::trash_purge_handler),
+        )
+        .route(
+            "/api/note/trash/empty",
+            post(note_trash::trash_empty_handler),
+        )
+        .route("/api/note/version", get(note_undo::note_version_handler))
+        .route(
+            "/api/note/restore-version",
+            post(note_undo::restore_version_handler),
         )
         .route("/api/note/create", post(vault_api::note_create_handler))
         .route("/api/note/versions", get(vault_api::note_versions_handler))

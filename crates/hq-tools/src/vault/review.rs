@@ -162,6 +162,10 @@ pub fn review_note(
         let record = provenance::get(c, version.id)?
             .ok_or_else(|| anyhow::anyhow!("record {} vanished", version.id))?;
         let history = provenance::review_history(c, version.id)?;
+        // Keeping the change settles it, so the text it replaced is not offered any more.
+        if state == ReviewState::Accepted && version.path == path {
+            hq_db::note_keep::remove(c, path)?;
+        }
         Ok((record, history))
     })?;
     Ok(Reviewed {

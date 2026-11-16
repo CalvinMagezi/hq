@@ -483,6 +483,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "132_context_gateway_audit",
         include_str!("../sql/132_context_gateway_audit.sql"),
     ),
+    ("133_note_keep", include_str!("../sql/133_note_keep.sql")),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

@@ -53,11 +53,14 @@ fn remove_from_index(db: Option<&Arc<Database>>, path: &str) {
 }
 
 /// Moves a note to the trash and drops it from search and provenance. The tool and the apps
-/// both delete through here, so a delete means the same thing from either.
+/// both delete through here, so a delete means the same thing from either. `by_owner` is true only
+/// for the owner's own web handler; every tool or MCP call passes false, whatever identity it
+/// carries or lacks, and the Trash then says HQ deleted it.
 pub async fn trash_and_forget(
     vault: Arc<VaultClient>,
     db: Option<Arc<Database>>,
     path: &str,
+    by_owner: bool,
 ) -> Result<String> {
     let client = vault.clone();
     let p = path.to_string();
@@ -68,6 +71,12 @@ pub async fn trash_and_forget(
         .unwrap_or_else(|_| path.to_string());
     remove_from_index(db.as_ref(), &path);
     if let Some(db) = db {
+        let kept = trashed_to.clone();
+        let noted =
+            db.with_conn(move |conn| hq_db::note_keep::record_deleted_by(conn, &kept, !by_owner));
+        if let Err(e) = noted {
+            tracing::warn!(error = %e, "trash: could not note who deleted the note");
+        }
         crate::provenance::Recorder::new(db, vault.vault_path().to_path_buf()).after_delete(&path);
     }
     Ok(trashed_to)
@@ -186,7 +195,8 @@ impl HqTool for VaultDeleteTool {
         let path = arg_str(&args, "path");
         let dry_run = arg_dry_run(&args);
         if !dry_run {
-            let trashed_to = trash_and_forget(self.vault.clone(), self.db.clone(), &path).await?;
+            let trashed_to =
+                trash_and_forget(self.vault.clone(), self.db.clone(), &path, false).await?;
             return Ok(json!({ "trashed_to": trashed_to, "dry_run": false }));
         }
         let vault = self.vault.clone();
@@ -235,6 +245,14 @@ impl HqTool for VaultFrontmatterUpdateTool {
             .cloned()
             .map(|v| serde_json::from_value(v).unwrap_or_default())
             .unwrap_or_default();
+        crate::vault::validate_write_path(self.vault.vault_path(), &path)?;
+        crate::provenance::keep_before_tool_write(
+            self.db.as_ref(),
+            self.vault.vault_path(),
+            &path,
+            &args,
+        )
+        .await;
         let vault = self.vault.clone();
         let p = path.clone();
         tokio::task::spawn_blocking(move || vault.update_frontmatter(&p, set, remove)).await??;
@@ -290,6 +308,14 @@ impl HqTool for VaultPinTool {
         } else {
             (std::collections::HashMap::new(), vec!["pinned".to_string()])
         };
+        crate::vault::validate_write_path(self.vault.vault_path(), &path)?;
+        crate::provenance::keep_before_tool_write(
+            self.db.as_ref(),
+            self.vault.vault_path(),
+            &path,
+            &args,
+        )
+        .await;
         let vault = self.vault.clone();
         let p = path.clone();
         tokio::task::spawn_blocking(move || vault.update_frontmatter(&p, set, remove)).await??;
@@ -463,5 +489,28 @@ mod tests {
         assert_eq!(hits[0].note_path, "Notebooks/new.md");
         assert_eq!(related_new, vec!["Notebooks/x.md"]);
         assert!(related_old.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_tool_delete_says_hq_even_with_no_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Notebooks")).unwrap();
+        std::fs::write(dir.path().join("Notebooks/a.md"), "x").unwrap();
+        let vault = Arc::new(VaultClient::new(dir.path().to_path_buf()).unwrap());
+        let db = Arc::new(Database::open_memory().unwrap());
+        let tool = VaultDeleteTool {
+            vault,
+            db: Some(db.clone()),
+        };
+        // What an MCP caller sends: no `_hq_*` identity at all.
+        let out = tool
+            .execute(json!({"path": "Notebooks/a.md"}))
+            .await
+            .unwrap();
+        let trash = out["trashed_to"].as_str().unwrap().to_string();
+        let by = db
+            .with_conn(|c| hq_db::note_keep::deleted_by(c, &trash))
+            .unwrap();
+        assert_eq!(by, "hq");
     }
 }

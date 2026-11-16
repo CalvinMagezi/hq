@@ -80,7 +80,7 @@ fn names_private_folder(path: &str) -> bool {
 /// Refuse a note write into HQ's private folders or into a folder whose files become
 /// instructions. Skills, slash commands, agent definitions and mailboxes each have a managed
 /// tool with its own approval, staging and scanning; a plain note write would skip all of it.
-fn validate_write_path(vault_path: &Path, path: &str) -> Result<()> {
+pub(crate) fn validate_write_path(vault_path: &Path, path: &str) -> Result<()> {
     validate_path_in_vault(vault_path, path)?;
     if names_private_folder(path) {
         bail!(

@@ -117,6 +117,11 @@ impl VaultClient {
         crate::reorg::read_trashed(&self.vault_path, trash_rel)
     }
 
+    /// Remove one trashed note for good. Returns the path it had before it was deleted.
+    pub fn purge_trashed(&self, trash_rel: &str) -> Result<String> {
+        crate::reorg::purge_trashed(&self.vault_path, trash_rel)
+    }
+
     /// Put a trashed note back, never over another note.
     pub fn restore_note(&self, trash_rel: &str) -> Result<crate::reorg::RestoredNote> {
         crate::reorg::restore_note(&self.vault_path, trash_rel)
