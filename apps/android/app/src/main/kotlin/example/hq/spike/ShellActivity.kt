@@ -301,9 +301,12 @@ class ShellActivity : ComponentActivity() {
         }
         t.web?.let { WebPage.fromSlug(it) }?.let { web = it }
         t.screen?.let { name ->
-            val pages = example.hq.spike.ui.settings.SettingsRoutes.stack(name) ?: return@let
+            val route = example.hq.spike.ui.settings.SettingsRoutes.resolve(name) ?: return@let
             settings.actions.onOpen()
-            pages.forEach(settings.actions.onPage)
+            route.stack.forEachIndexed { i, p ->
+                if (i == route.stack.lastIndex && route.section != null) settings.actions.onPageSection(p, route.section)
+                else settings.actions.onPage(p)
+            }
         }
     }
 

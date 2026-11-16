@@ -924,6 +924,12 @@ leave_note_fallback: "this note"
 
 # Settings: the four groups, This browser, the card slot (web wave 1 spec 06)
 settings_title: "Settings"
+settings_search_hint: "Search settings"
+settings_search_empty: "Nothing in Settings matches that."
+settings_search_result_section: "{page}, {section}"
+settings_search_count:
+  one: "{n} result"
+  other: "{n} results"
 settings_back: "Back to Settings"
 settings_loading: "Asking HQ for your settings"
 group_browser: "This browser"

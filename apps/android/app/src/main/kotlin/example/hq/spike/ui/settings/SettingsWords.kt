@@ -47,6 +47,9 @@ const val WORK_HELPERS_ROW = "work_helpers"
 
 data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
 
+/** One row on Settings Home: its target page (null for action rows), icon key, and title resource. Shared by Home, search, and placement tests. */
+data class HomeRowSpec(val page: SettingsPage?, val key: String, val titleRes: Int)
+
 data class HomeGroup(val title: String, val rows: List<HomeRow>, val note: String? = null, val lead: String? = null)
 
 /** A line on a read-only page: a title with its value, and a sentence that says what it means. */
@@ -162,7 +165,52 @@ object SettingsWords {
     fun inPhoneOrder(rows: List<HomeRow>): List<HomeRow> = PHONE_PAGES.mapNotNull { p -> rows.firstOrNull { it.page == p } }
 
     /** The pages the view model puts in "This phone" (read from Android, so they are not built here); the placement test counts them as on Home. */
-    val PHONE_PAGES = listOf(SettingsPage.Background, SettingsPage.Notifications, SettingsPage.Assistant, SettingsPage.Calendar, SettingsPage.Contacts, SettingsPage.CaptureWidgets)
+    val PHONE_SPECS: List<HomeRowSpec> = listOf(
+        HomeRowSpec(SettingsPage.Background, "background", R.string.about_background),
+        HomeRowSpec(SettingsPage.Notifications, "notifications", R.string.row_notifications),
+        HomeRowSpec(SettingsPage.Assistant, "assistant", R.string.assist_row_title),
+        HomeRowSpec(SettingsPage.Calendar, "calendar", R.string.cal_row_title),
+        HomeRowSpec(SettingsPage.Contacts, "contacts", R.string.contacts_row_title),
+        HomeRowSpec(SettingsPage.CaptureWidgets, "capture", R.string.settings_page_capture),
+    )
+
+    val PHONE_PAGES: List<SettingsPage> = PHONE_SPECS.mapNotNull { it.page }
+
+    val WORK_SPECS: List<HomeRowSpec> = listOf(
+        HomeRowSpec(null, WORK_TASKS_ROW, R.string.row_work_tasks),
+        HomeRowSpec(null, WORK_HELPERS_ROW, R.string.row_work_helpers),
+    )
+
+    val AI_SPECS: List<HomeRowSpec> = listOf(
+        HomeRowSpec(SettingsPage.Keys, "key", R.string.row_ai_keys),
+        HomeRowSpec(SettingsPage.Spending, "gauge", R.string.row_spending),
+    )
+
+    val CHATS_SPECS: List<HomeRowSpec> = listOf(
+        HomeRowSpec(SettingsPage.Messaging, "chat", R.string.row_messaging),
+        HomeRowSpec(SettingsPage.Devices, "phone", R.string.devices_title),
+        HomeRowSpec(SettingsPage.Computers, "computer", R.string.settings_page_computers),
+        HomeRowSpec(null, HQ_CODER_ROW, R.string.row_github),
+    )
+
+    val SAFETY_SPECS: List<HomeRowSpec> = listOf(
+        HomeRowSpec(SettingsPage.Safety, "shield", R.string.row_safety),
+        HomeRowSpec(SettingsPage.Suggests, SUGGESTS_ROW, R.string.row_suggests),
+    )
+
+    val DATA_SPECS: List<HomeRowSpec> = listOf(
+        HomeRowSpec(SettingsPage.About, "arch", R.string.settings_backup_title),
+        HomeRowSpec(SettingsPage.Update, "update", R.string.upd_page_title),
+        HomeRowSpec(SettingsPage.Technical, "technical", R.string.settings_technical_title),
+    )
+
+    /** Every Home row in group order; shared by Home, SettingsIndex, and placement tests. */
+    val HOME_SPECS: List<HomeRowSpec> = WORK_SPECS + AI_SPECS + CHATS_SPECS + PHONE_SPECS + SAFETY_SPECS + DATA_SPECS
+
+    fun phoneSpec(page: SettingsPage): HomeRowSpec = PHONE_SPECS.first { it.page == page }
+
+    private fun row(w: Words, spec: HomeRowSpec, status: String, warn: Boolean = false): HomeRow =
+        HomeRow(spec.page, spec.key, w.s(spec.titleRes), status, warn)
 
     /** The paired server's row: the state first, so the 40 character cut can only shorten the host; amber while signed out. */
     fun serverRow(w: Words, host: String, signedOut: Boolean): HomeRow =
@@ -211,22 +259,22 @@ object SettingsWords {
     ): List<HomeGroup> = withChecking(w, loaded, listOf(
         HomeGroup(
             w.s(R.string.settings_group_work), listOf(
-                HomeRow(null, WORK_TASKS_ROW, w.s(R.string.row_work_tasks), w.s(R.string.trail_work_tasks)),
-                HomeRow(null, WORK_HELPERS_ROW, w.s(R.string.row_work_helpers), w.s(R.string.trail_work_helpers)),
+                row(w, WORK_SPECS[0], w.s(R.string.trail_work_tasks)),
+                row(w, WORK_SPECS[1], w.s(R.string.trail_work_helpers)),
             ),
         ),
         HomeGroup(
             w.s(R.string.settings_group_ai), listOf(
-                HomeRow(SettingsPage.Keys, "key", w.s(R.string.row_ai_keys), keysStatus(w, snap.settings, snap.providers)),
-                HomeRow(SettingsPage.Spending, "gauge", w.s(R.string.row_spending), spendingStatus(w, snap.budgets)),
+                row(w, AI_SPECS[0], keysStatus(w, snap.settings, snap.providers)),
+                row(w, AI_SPECS[1], spendingStatus(w, snap.budgets)),
             ),
         ),
         HomeGroup(
             w.s(R.string.settings_group_chats), listOf(
-                HomeRow(SettingsPage.Messaging, "chat", w.s(R.string.row_messaging), messagingStatus(w, snap.chatApps)),
-                HomeRow(SettingsPage.Devices, "phone", w.s(R.string.devices_title), devicesStatus(w, snap.devices)),
-                HomeRow(SettingsPage.Computers, "computer", w.s(R.string.settings_page_computers), computersHome(w, snap.settings)),
-                HomeRow(null, HQ_CODER_ROW, w.s(R.string.row_github), githubStatus(w, snap.github), warn = githubWarns(snap.github)),
+                row(w, CHATS_SPECS[0], messagingStatus(w, snap.chatApps)),
+                row(w, CHATS_SPECS[1], devicesStatus(w, snap.devices)),
+                row(w, CHATS_SPECS[2], computersHome(w, snap.settings)),
+                row(w, CHATS_SPECS[3], githubStatus(w, snap.github), warn = githubWarns(snap.github)),
             ) + listOfNotNull(server),
             note = claudeViaLaptop(w),
             lead = strip,
@@ -234,15 +282,15 @@ object SettingsWords {
         HomeGroup(w.s(R.string.settings_group_phone), phone),
         HomeGroup(
             w.s(R.string.settings_group_safety), listOf(
-                HomeRow(SettingsPage.Safety, "shield", w.s(R.string.row_safety), if (snap.settings == null) notAnswered(w) else w.s(R.string.connect_scope_read_only_title)),
-                HomeRow(SettingsPage.Suggests, SUGGESTS_ROW, w.s(R.string.row_suggests), w.s(R.string.trail_suggests)),
+                row(w, SAFETY_SPECS[0], if (snap.settings == null) notAnswered(w) else w.s(R.string.connect_scope_read_only_title)),
+                row(w, SAFETY_SPECS[1], w.s(R.string.trail_suggests)),
             ),
         ),
         HomeGroup(
             w.s(R.string.settings_group_data), listOf(
-                HomeRow(SettingsPage.About, "arch", w.s(R.string.settings_backup_title), BackupWords.homeLine(w, backup, now), warn = BackupWords.warns(backup, now)),
-                HomeRow(SettingsPage.Update, "update", w.s(R.string.upd_page_title), updates.first, warn = updates.second),
-                HomeRow(SettingsPage.Technical, "technical", w.s(R.string.settings_technical_title), w.s(R.string.settings_technical_home)),
+                row(w, DATA_SPECS[0], BackupWords.homeLine(w, backup, now), warn = BackupWords.warns(backup, now)),
+                row(w, DATA_SPECS[1], updates.first, warn = updates.second),
+                row(w, DATA_SPECS[2], w.s(R.string.settings_technical_home)),
             ),
         ),
     )).map { g -> g.copy(rows = g.rows.map { it.copy(status = fit(it.status)) }) }

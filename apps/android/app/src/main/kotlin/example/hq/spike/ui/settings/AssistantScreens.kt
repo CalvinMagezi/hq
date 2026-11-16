@@ -113,16 +113,17 @@ internal fun AssistantPage(ui: SettingsUi, actions: SettingsActions) {
     val askMic = remember(activity) { MicAskState(activity) }
     val micDialog = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { askMic.answered(it) }
     val server = ServerHq.address(c)?.let { runCatching { java.net.URI(it).host }.getOrNull() }
-    Page {
+    val scroller = rememberSectionScroller(ui, actions.onSectionConsumed)
+    Page(scroller) {
         if (!f.available) {
             Notice(w.s(R.string.assist_na_body), HqIcons.Lock)
             // Deleting or downloading the speech model does not depend on the assistant role, so it stays reachable here.
-            Label(w.s(R.string.speech_title))
+            Label(w.s(R.string.speech_title), Modifier.sectionTarget(scroller, ScrollTarget.AssistantSpeech))
             SpeechSection(ui, actions)
             return@Page
         }
         Text(w.s(R.string.assist_intro), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
-        Label(w.s(R.string.assist_group_right_now))
+        Label(w.s(R.string.assist_group_right_now), Modifier.sectionTarget(scroller, ScrollTarget.AssistantRightNow))
         val modelBytes = VoiceModels.SIZE_BYTES
         val model = when {
             models.ready() -> w.s(R.string.assist_model_on, w.s(R.string.dl_mb, DownloadRules.sizeMb(models.onPhoneBytes())))
@@ -157,7 +158,7 @@ internal fun AssistantPage(ui: SettingsUi, actions: SettingsActions) {
         Text(w.s(R.string.assist_samsung_note), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
         Text(if (server != null) w.s(R.string.assist_privacy_server, server) else w.s(R.string.assist_privacy), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 16.dp))
         LockCard(f, w)
-        Label(w.s(R.string.speech_title))
+        Label(w.s(R.string.speech_title), Modifier.sectionTarget(scroller, ScrollTarget.AssistantSpeech))
         SpeechSection(ui, actions)
     }
 }

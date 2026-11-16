@@ -877,6 +877,13 @@
     <string name="fail_remove_device_pairing_off">Couldn\'t remove “%1$s”. Pairing is off. Switch it on and try again.</string>
     <string name="leave_note_fallback">this note</string>
     <string name="settings_title">Settings</string>
+    <string name="settings_search_hint">Search settings</string>
+    <string name="settings_search_empty">Nothing in Settings matches that.</string>
+    <string name="settings_search_result_section">%1$s, %2$s</string>
+    <plurals name="settings_search_count">
+        <item quantity="one">%1$s result</item>
+        <item quantity="other">%1$s results</item>
+    </plurals>
     <string name="settings_back">Back to Settings</string>
     <string name="settings_loading">Asking HQ for your settings</string>
     <string name="group_browser">This browser</string>
