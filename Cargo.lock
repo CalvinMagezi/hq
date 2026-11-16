@@ -3825,6 +3825,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hq-suite-md"
+version = "0.9.1"
+dependencies = [
+ "chrono",
+ "hex",
+ "pulldown-cmark 0.12.2",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "hq-tools"
 version = "0.9.1"
 dependencies = [

@@ -1,0 +1,17 @@
+[package]
+name = "hq-suite-md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "hqmd: HQ-compatible markdown with typed fenced blocks, for the HQ Suite"
+
+# Pure model and parser: no I/O, no HQ crates. Only hq-suite-adapter may know HQ
+# (see crates/suite/CLAUDE.md, enforced by crates/suite/hq-suite-adapter/tests/boundary.rs).
+[dependencies]
+chrono = { workspace = true }
+hex = { workspace = true }
+pulldown-cmark = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+sha2 = { workspace = true }

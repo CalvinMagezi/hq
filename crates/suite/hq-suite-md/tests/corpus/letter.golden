@@ -1,0 +1,9 @@
+frontmatter: 75 bytes
+meta: SuiteMeta { kind: Some(Doc), fidelity: Some(Native), original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None }
+ 0 Heading { level: 1 } | # Order for the March delivery
+ 1 Paragraph | Dear Mr Example,
+ 2 Paragraph | Please send the following by **Friday**. Payment is by mobil
+ 3 List { ordered: true } | 1. 50 kg sugar
+ 4 Paragraph | ![Shop front](../../_media/cas/ab/abcdef0123456789.jpg)
+ 5 Paragraph | Thank you,
+ 6 Verbatim | [price list]: https://example.com/prices "Current prices"

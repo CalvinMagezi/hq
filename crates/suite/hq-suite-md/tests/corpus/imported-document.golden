@@ -1,0 +1,6 @@
+frontmatter: 418 bytes
+meta: SuiteMeta { kind: Some(Doc), fidelity: Some(Lossy), original_state: Some(Offloaded), original_sink: Some("sink-usb-1"), original_bytes: Some(184320), shrunk_at: Some("2026-11-16"), saved_bytes: Some(151000) }
+ 0 Heading { level: 1 } | # Annual report
+ 1 Paragraph | Revenue grew in every quarter.
+ 2 Table | | Quarter | Revenue |
+ 3 Paragraph | ![Chart of revenue](../../_media/cas/9f/9f86d081884c7d65.web

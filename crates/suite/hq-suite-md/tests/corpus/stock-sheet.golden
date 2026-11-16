@@ -1,0 +1,11 @@
+frontmatter: 62 bytes
+meta: SuiteMeta { kind: Some(Sheet), fidelity: Some(Native), original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None }
+ 0 Heading { level: 1 } | # Stock
+ 1 Paragraph | Counted on the first of the month.
+ 2 Typed(Sheet) | ```sheet name=Stock types="text,int,ugx,ugx" id=stock
+     header: sheet name=Stock types="text,int,ugx,ugx" id=stock
+     closed: true
+ 3 Paragraph | Large history lives in a sidecar:
+ 4 Typed(Sheet) | ```sheet name=History data="_data/suite/sheets/stock-history
+     header: sheet name=History data="_data/suite/sheets/stock-history.csv.zst" rows=48210 types="date,text,int"
+     closed: true

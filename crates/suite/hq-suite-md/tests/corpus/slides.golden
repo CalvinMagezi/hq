@@ -1,0 +1,10 @@
+frontmatter: 77 bytes
+meta: SuiteMeta { kind: Some(Slides), fidelity: Some(Native), original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None }
+ 0 Heading { level: 1 } | # Savings group intro
+ 1 Heading { level: 2 } | ## Why we meet
+ 2 Html | <!-- layout: title -->
+ 3 List { ordered: false } | - Save a little every week
+ 4 Heading { level: 2 } | ## What it costs
+ 5 Html | <!-- layout: two-column -->
+ 6 Table | | Weekly | Yearly |
+ 7 Quote | > Small steps, steady growth.

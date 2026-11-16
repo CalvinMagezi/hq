@@ -1,0 +1,16 @@
+frontmatter: 75 bytes
+meta: SuiteMeta { kind: Some(Dashboard), fidelity: Some(Native), original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None }
+ 0 Heading { level: 1 } | # Shop dashboard
+ 1 Typed(Tile) | ```tile from="[[Stock]]!D2:D40" fn=sum label="Stock value" f
+     header: tile from="[[Stock]]!D2:D40" fn=sum label="Stock value" format=ugx
+     closed: true
+ 2 Typed(Tile) | ```tile from="[[Stock]]!B2:B40" fn=count label=Items
+     header: tile from="[[Stock]]!B2:B40" fn=count label=Items
+     closed: true
+ 3 Typed(Plot) | ```plot type=bar from="[[Stock]]!A2:D40" x=item y=total titl
+     header: plot type=bar from="[[Stock]]!A2:D40" x=item y=total title="Value by item"
+     closed: true
+ 4 Paragraph | A small chart with its data inline, as chat draws it:
+ 5 Typed(Chart) | ```chart
+     header: chart
+     closed: true
