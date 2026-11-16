@@ -323,6 +323,12 @@ enum Commands {
     /// Restore an encrypted backup into a new or empty folder (the same as `hq backup restore`)
     Restore(RestoreArgs),
 
+    /// The HQ Suite (documents, sheets, storage): measure (`hq suite --help`)
+    Suite {
+        #[command(subcommand)]
+        command: commands::suite::SuiteCommand,
+    },
+
     /// Set up API keys interactively, or set one with `hq env set <provider>`
     Env {
         #[command(subcommand)]
@@ -1230,6 +1236,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Lite { sub, folder } => commands::lite::lite(config, &sub, folder.as_deref()),
         Commands::Backup { command } => commands::backup::run(config, command),
         Commands::Restore(args) => commands::backup::restore(config, &args),
+        Commands::Suite { command } => commands::suite::run(command).await,
         Commands::Pair { platform } => commands::pair::run(config, &platform),
         Commands::Env { action: None } => commands::env::run(config).await,
         Commands::Env {

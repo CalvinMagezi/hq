@@ -31,7 +31,9 @@ members = [
     # crates/suite/CLAUDE.md for the rules a test enforces.
     "crates/suite/hq-suite-md",
     "crates/suite/hq-suite-ingest",
+    "crates/suite/hq-suite-store",
     "crates/suite/hq-suite-shrink",
+    "crates/suite/hq-suite-adapter",
 ]
 
 # The Tauri shell pulls in a web view and its system libraries, which the Linux CI job does not
@@ -175,7 +177,9 @@ hq-desktop = { path = "crates/hq-desktop" }
 hq-edge = { path = "crates/hq-edge" }
 hq-suite-md = { path = "crates/suite/hq-suite-md" }
 hq-suite-ingest = { path = "crates/suite/hq-suite-ingest" }
+hq-suite-store = { path = "crates/suite/hq-suite-store" }
 hq-suite-shrink = { path = "crates/suite/hq-suite-shrink" }
+hq-suite-adapter = { path = "crates/suite/hq-suite-adapter" }
 
 
 [profile.release]

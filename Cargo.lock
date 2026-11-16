@@ -3474,6 +3474,7 @@ dependencies = [
  "hq-net",
  "hq-relay",
  "hq-sandbox",
+ "hq-suite-adapter",
  "hq-tools",
  "hq-tunnel",
  "hq-update",
@@ -3825,6 +3826,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hq-suite-adapter"
+version = "0.9.1"
+dependencies = [
+ "anyhow",
+ "hq-suite-shrink",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml 0.8.2",
+]
+
+[[package]]
 name = "hq-suite-ingest"
 version = "0.9.1"
 dependencies = [
@@ -3871,6 +3884,19 @@ dependencies = [
  "tokio",
  "webp",
  "zip 9.0.5",
+]
+
+[[package]]
+name = "hq-suite-store"
+version = "0.9.1"
+dependencies = [
+ "hex",
+ "hq-suite-md",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

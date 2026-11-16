@@ -726,8 +726,22 @@ impl MeasureReport {
                 ));
                 continue;
             }
+            // Without pictures every encoder gives the same record; one line says so.
+            let same = c
+                .projected
+                .values()
+                .map(|p| p.record_bytes)
+                .collect::<HashSet<_>>()
+                .len()
+                == 1;
+            let rows: Vec<(&String, &Projected)> = if same {
+                c.projected.iter().take(1).collect()
+            } else {
+                c.projected.iter().collect()
+            };
             let mut first = true;
-            for (label, p) in &c.projected {
+            for (label, p) in rows {
+                let label = if same { "any encoder" } else { label.as_str() };
                 let ratio = p
                     .ratio
                     .as_ref()

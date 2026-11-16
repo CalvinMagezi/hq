@@ -23,8 +23,10 @@ can be lifted out later. The rules below are what keep that possible, and a test
    existing pairing, reached through the adapter by the peer sink.
 5. Frontmatter keys the suite adds are flat and start with `suite_` (see `HQMD.md`).
 
-`crates/suite/hq-suite-adapter/tests/boundary.rs` reads every suite manifest and source file and
-fails on a breach of rules 1, 2 (imports), 3 and 4. A later change that needs to cross a line has
+`crates/suite/hq-suite-adapter/tests/boundary.rs` reads every suite manifest and the shipped
+source (`src/`) of every crate but the adapter, and fails on a breach of rules 1, 2 (starting
+programs), 3 and 4. It also checks that every suite crate is listed below and is a workspace
+member, and that its own scanner still sees planted breaches. A later change that needs to cross a line has
 to delete the guard first and say why in review.
 
 ## Crates
@@ -32,9 +34,11 @@ to delete the guard first and say why in review.
 | Crate | Job | May depend on |
 |-------|-----|---------------|
 | `hq-suite-md` | hqmd: parse, print, validate, patch. Pure, no I/O. | `pulldown-cmark`, `serde*`, `sha2`, `hex`, `chrono` |
+| `hq-suite-ingest` | Reads office files for the suite: pictures inside packages, fidelity tier projection from the importer's report | `hq-convert`, `hq-suite-md` |
+| `hq-suite-shrink` | Picture decoding with caps, candidate encoders, the measurement report (shrink pipeline in M1) | `hq-convert`, `hq-suite-ingest`, `hq-suite-md`, `image`, the `cand-*` encoder crates |
 | `hq-suite-adapter` | The only crate that knows HQ: config, tools, CLI glue, daemon task, device actions, REST | everything |
 
-The plan names more crates (store, shrink, governor, sinks, ingest, render, calc, one per tool).
+The plan names more crates (store, governor, sinks, render, calc, one per tool).
 They are added in the milestone that needs them, not before: an empty crate is debt.
 A crate that is added gets a row here and an Entry Points row in the root `CLAUDE.md` if it
 has an entry point.

@@ -8,7 +8,7 @@ name = "hq"
 path = "src/main.rs"
 
 [features]
-default = ["discord", "telegram", "bridge"]
+default = ["discord", "telegram", "bridge", "suite"]
 discord = ["hq-relay/discord"]
 telegram = ["hq-relay/telegram"]
 # `hq net tunnel`: this device as a userspace WireGuard peer (the phone app builds with it; a
@@ -18,6 +18,10 @@ tunnel = ["dep:hq-tunnel", "dep:libc", "dep:zeroize"]
 # installed laptop or server can pair with a phone; nothing listens until a command is run. Unix
 # only: the dependencies are not pulled on Windows, where the commands are compiled out.
 bridge = ["dep:hq-bridge", "hq-edge/invite"]
+# `hq suite`: the HQ Suite (docs/suite/README.md). Pure Rust, so it builds everywhere HQ does.
+# `suite-candidates` adds the picture encoders that are measured and not shipped.
+suite = ["dep:hq-suite-adapter"]
+suite-candidates = ["suite", "hq-suite-adapter/candidates"]
 
 [dependencies]
 hq-core = { workspace = true }
@@ -29,6 +33,7 @@ hq-convert = { workspace = true }
 hq-export = { workspace = true }
 hq-update = { workspace = true }
 hq-backup = { workspace = true }
+hq-suite-adapter = { workspace = true, optional = true }
 hq-host = { workspace = true }
 hq-acp = { path = "../hq-acp" }
 tokio = { workspace = true }
