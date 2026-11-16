@@ -2,8 +2,8 @@ use super::transport::Transport;
 use super::{
     AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, AwaitingAgent, GitHead, Host,
     HostBackend, HostEvent, HostEvents, INVALID_KEYS_CODE, LaunchRequest, Launched, LogsSince,
-    PendingRead, PromptOutcome, QuotaAsk, WorktreeBase, WorktreeInfo, WorktreeRemoved,
-    WorktreeStatus, bad_reply, parse_quotas, shell_line, validate_keys,
+    PendingRead, PromptOutcome, PublishAsk, PublishOutcome, QuotaAsk, WorktreeBase, WorktreeInfo,
+    WorktreeRemoved, WorktreeStatus, bad_reply, parse_quotas, shell_line, validate_keys,
 };
 use hq_core::quota::LaneQuota;
 use hq_host::{Client, ClientError};
@@ -927,6 +927,13 @@ impl HostBackend for NativeBackend {
         }
         let v = self.call("worktree.status", params)?;
         serde_json::from_value(v).map_err(|e| bad_reply("worktree.status", e))
+    }
+
+    fn worktree_publish(&self, ask: &PublishAsk) -> Result<PublishOutcome, AgentHostError> {
+        let params = serde_json::to_value(ask).map_err(|e| bad_reply("worktree.publish", e))?;
+        // A push and a pull request go over the network, so they get the launch bound.
+        let v = self.call_within("worktree.publish", params, self.launch_bound)?;
+        serde_json::from_value(v).map_err(|e| bad_reply("worktree.publish", e))
     }
 
     fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {

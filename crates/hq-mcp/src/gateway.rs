@@ -144,6 +144,7 @@ pub const SESSION_ALLOWLIST: &[&str] = &[
     "agent_message_send",
     "agent_delegate",
     "team_roster",
+    "harness_session_publish",
     // Scoped reads: each resolves the proven session to its task's folders and nothing wider.
     "context_orient",
     "context_search",

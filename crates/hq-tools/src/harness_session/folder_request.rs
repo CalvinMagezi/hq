@@ -61,7 +61,7 @@ pub(super) fn granted_folders(
     folder_grants::folders_for_host(db, host)
 }
 
-fn approval_unspent(db: &Database, key: &str) -> Result<bool> {
+pub(super) fn approval_unspent(db: &Database, key: &str) -> Result<bool> {
     let latest = value_items::latest_engagement_by_dedup(db, key)?;
     let now = chrono::Utc::now();
     Ok(latest.is_some_and(|l| {

@@ -205,6 +205,80 @@ pub struct AgentHostConfig {
     /// caller names another, or `none`. See `crate::command_policy`.
     #[serde(default)]
     pub command_policies: BTreeMap<String, crate::command_policy::PolicyConfig>,
+
+    /// HQ pushing a helper's branch and opening its pull request. See [`PublishConfig`].
+    #[serde(default)]
+    pub publish: PublishConfig,
+}
+
+/// `agent_host.publish`: what a sandboxed helper may ask HQ to publish for it with
+/// `harness_session_publish`. HQ does the push and the pull request with the host's own login;
+/// the helper never holds a credential.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublishConfig {
+    /// Off refuses every request.
+    #[serde(default = "default_publish_enabled")]
+    pub enabled: bool,
+    /// `<owner>/<repo>` names HQ opens pull requests for without asking. A repository not listed
+    /// asks the owner once (the answer lasts 30 days). Empty by default.
+    #[serde(default)]
+    pub repos: Vec<String>,
+    /// Most changed files in one publish. Clamped to 1..=CEILING_PUBLISH_FILES.
+    #[serde(default = "default_publish_max_files")]
+    pub max_files: u32,
+    /// Largest changed file, in bytes, and the most one publish may add up to is this times
+    /// `max_files`. Clamped to 1..=CEILING_PUBLISH_BYTES.
+    #[serde(default = "default_publish_max_bytes")]
+    pub max_bytes: u64,
+    /// Publishes one session may make per day. Clamped to 1..=CEILING_PUBLISH_PER_DAY.
+    #[serde(default = "default_publish_per_day")]
+    pub max_per_session_per_day: u32,
+}
+
+pub const CEILING_PUBLISH_FILES: u32 = 500;
+pub const CEILING_PUBLISH_BYTES: u64 = 10 * 1024 * 1024;
+pub const CEILING_PUBLISH_PER_DAY: u32 = 50;
+
+fn default_publish_enabled() -> bool {
+    true
+}
+fn default_publish_max_files() -> u32 {
+    100
+}
+fn default_publish_max_bytes() -> u64 {
+    1024 * 1024
+}
+fn default_publish_per_day() -> u32 {
+    10
+}
+
+impl Default for PublishConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_publish_enabled(),
+            repos: Vec::new(),
+            max_files: default_publish_max_files(),
+            max_bytes: default_publish_max_bytes(),
+            max_per_session_per_day: default_publish_per_day(),
+        }
+    }
+}
+
+impl PublishConfig {
+    pub fn files(&self) -> u32 {
+        self.max_files.clamp(1, CEILING_PUBLISH_FILES)
+    }
+    pub fn bytes(&self) -> u64 {
+        self.max_bytes.clamp(1, CEILING_PUBLISH_BYTES)
+    }
+    pub fn per_day(&self) -> u32 {
+        self.max_per_session_per_day
+            .clamp(1, CEILING_PUBLISH_PER_DAY)
+    }
+    /// Whether `repo` (`owner/name`, any case) is on the allowlist.
+    pub fn lists(&self, repo: &str) -> bool {
+        self.repos.iter().any(|r| r.eq_ignore_ascii_case(repo))
+    }
 }
 
 /// `agent_host.keep_awake`.
@@ -768,6 +842,7 @@ impl Default for AgentHostConfig {
             unreachable_alert_minutes: default_unreachable_alert_minutes(),
             keep_awake: KeepAwake::Off,
             command_policies: BTreeMap::new(),
+            publish: PublishConfig::default(),
         }
     }
 }

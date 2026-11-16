@@ -1430,6 +1430,7 @@ pub fn create_harness_session_tools(
             chat: chat.clone(),
         }),
         Box::new(HarnessSessionStopTool { db: db.clone() }),
+        Box::new(super::publish::HarnessSessionPublishTool { db: db.clone() }),
         Box::new(HarnessSessionLinkTool {
             db: db.clone(),
             chat: chat.clone(),
