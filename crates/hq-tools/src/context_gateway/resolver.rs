@@ -87,7 +87,8 @@ fn resolve_with(
             max_results: DEFAULT_MAX_RESULTS,
             max_chars: DEFAULT_MAX_CHARS,
         },
-        caps: Caps::READ,
+        // Asking HQ only searches the same folders, so it rides with read.
+        caps: Caps::READ.union(Caps::ASK_HQ),
         expires_at,
     })
 }

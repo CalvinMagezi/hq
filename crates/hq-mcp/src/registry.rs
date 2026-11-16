@@ -301,6 +301,7 @@ mod tests {
             "context_read",
             "context_expand",
             "context_related",
+            "context_ask_hq",
             "list_agents",
             "load_agent",
         ] {

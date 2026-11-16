@@ -45,3 +45,56 @@ pub fn counts_for_task(conn: &Connection, task_id: &str) -> Result<Vec<(String, 
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
+
+pub struct TrailRow<'a> {
+    pub task_id: &'a str,
+    pub session_id: &'a str,
+    pub op: &'a str,
+    pub source_id: &'a str,
+    pub content_hash: &'a str,
+}
+
+/// One row per source a call returned. Ids and hashes only: the trail never holds note text.
+pub fn record_trail(conn: &Connection, row: &TrailRow<'_>, now: DateTime<Utc>) -> Result<()> {
+    conn.execute(
+        "INSERT INTO context_gateway_trail
+         (task_id, session_id, op, source_id, content_hash, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            row.task_id,
+            row.session_id,
+            row.op,
+            row.source_id,
+            row.content_hash,
+            now.to_rfc3339_opts(SecondsFormat::Secs, true),
+        ],
+    )?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TrailEntry {
+    pub session_id: String,
+    pub op: String,
+    pub source_id: String,
+    pub content_hash: String,
+    pub created_at: String,
+}
+
+/// What every session of a task was shown, oldest first.
+pub fn trail_for_task(conn: &Connection, task_id: &str) -> Result<Vec<TrailEntry>> {
+    let mut stmt = conn.prepare(
+        "SELECT session_id, op, source_id, content_hash, created_at
+         FROM context_gateway_trail WHERE task_id = ?1 ORDER BY id",
+    )?;
+    let rows = stmt.query_map([task_id], |r| {
+        Ok(TrailEntry {
+            session_id: r.get(0)?,
+            op: r.get(1)?,
+            source_id: r.get(2)?,
+            content_hash: r.get(3)?,
+            created_at: r.get(4)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}

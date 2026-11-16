@@ -151,6 +151,7 @@ pub const SESSION_ALLOWLIST: &[&str] = &[
     "context_read",
     "context_expand",
     "context_related",
+    "context_ask_hq",
 ];
 
 /// Build the two MCP `Tool` definitions for the gateway.
