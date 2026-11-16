@@ -490,6 +490,10 @@ fetch, `core.sshCommand` or remote helper), `log.showSignature=false` (no `gpg.p
 every filter driver the configuration names emptied for that command. The host never asks
 for a diff, so `textconv` and external diff drivers never run.
 
+The one operation that does use the network is `worktree.publish`, which pushes a branch the
+host has checked and opens its pull request. Its own checks and limits are in
+`docs/security/PUBLISH.md`.
+
 The `git` it runs, like the `bwrap` it wraps agents in, is taken from a directory only root
 can write (`/usr/bin`, `/bin`, `/usr/local/bin`, then any such `PATH` entry), never from the
 first match on `PATH`: a service's `PATH` can include `~/.local/bin`, which an open agent can
