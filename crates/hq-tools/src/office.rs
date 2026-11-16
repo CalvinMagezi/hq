@@ -129,7 +129,6 @@ mod tests {
 #[cfg(all(test, feature = "suite"))]
 mod suite_tests {
     use super::*;
-    use crate::registry::HqTool;
     use serde_json::json;
 
     #[tokio::test]
