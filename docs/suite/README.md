@@ -4,8 +4,9 @@ A small office suite inside HQ for people whose phone is their only computer. It
 documents in the smallest form that is still faithful, helps them put the originals somewhere
 they own, and shares work back out as Word, Excel, PDF and PowerPoint files.
 
-Status: milestone M0 (spec, corpus, measurement) and the start of M1. Nothing here is shown in
-the web app yet.
+Status: milestone M0 (spec, corpus, measurement) is built apart from the numbers from real files and
+the reference phone; milestone M1 has its storage layer and the shrink pipeline, and is missing the
+storage governor. Everything is on the command line; nothing is in the web app yet.
 
 ## The problem
 
@@ -36,6 +37,7 @@ formulas, animation, and a desktop or native UI.
 | The plan and milestones | [../plans/hq-suite.md](../plans/hq-suite.md) |
 | Rules for the code | `crates/suite/CLAUDE.md` |
 | Measuring real files | [MEASURE.md](MEASURE.md) |
+| Making a document smaller | [SHRINK.md](SHRINK.md) |
 
 ## Why inside this repository
 

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Subcommand;
+use hq_core::config::HqConfig;
 
 #[derive(Subcommand)]
 pub enum SuiteCommand {
@@ -36,12 +37,42 @@ pub enum SuiteCommand {
         #[arg(long)]
         json: bool,
     },
+
+    /// Make a document smaller: keep its text and pictures as a note, set the original aside
+    ///
+    /// Shows what would be saved and what is left out, and moves nothing until you agree. The
+    /// original goes to the vault's trash, where it stays for 30 days.
+    Shrink {
+        /// The file, in the vault (a vault-relative path, or one inside the vault folder)
+        file: PathBuf,
+        /// Agree to move the original to the trash without asking
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Agree to a prepared shrink: move its original to the trash
+    Confirm { job: String },
+    /// Leave a prepared shrink undone: removes the new note, the original is not touched
+    Abandon { job: String },
+    /// Bring an original back from the trash and mark the note as having it again
+    Undo { job: String },
+    /// List shrink jobs and where each stands
+    Jobs,
+    /// Finish or resume jobs a crash or a restart interrupted
+    Recover,
 }
 
 #[cfg(feature = "suite")]
-pub async fn run(command: SuiteCommand) -> Result<()> {
+pub async fn run(config: &HqConfig, command: SuiteCommand) -> Result<()> {
     use hq_suite_adapter::measure::{Request, run as measure};
+    use hq_suite_adapter::shrink;
+    let vault = &config.vault_path;
     match command {
+        SuiteCommand::Shrink { file, yes } => shrink::shrink(vault, &file, yes).await,
+        SuiteCommand::Confirm { job } => shrink::confirm(vault, &job),
+        SuiteCommand::Abandon { job } => shrink::abandon(vault, &job),
+        SuiteCommand::Undo { job } => shrink::undo(vault, &job),
+        SuiteCommand::Jobs => shrink::jobs(vault),
+        SuiteCommand::Recover => shrink::recover(vault),
         SuiteCommand::Measure {
             folder,
             encoders,
@@ -66,6 +97,6 @@ pub async fn run(command: SuiteCommand) -> Result<()> {
 }
 
 #[cfg(not(feature = "suite"))]
-pub async fn run(_command: SuiteCommand) -> Result<()> {
+pub async fn run(_config: &HqConfig, _command: SuiteCommand) -> Result<()> {
     anyhow::bail!("this build of hq has no HQ Suite; build with the `suite` feature")
 }

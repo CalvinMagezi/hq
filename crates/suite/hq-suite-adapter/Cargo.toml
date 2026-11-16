@@ -9,6 +9,9 @@ description = "The one place the HQ Suite meets HQ: commands, configuration and,
 # lifted out (crates/suite/CLAUDE.md, enforced by tests/boundary.rs).
 [dependencies]
 anyhow = { workspace = true }
+chrono = { workspace = true }
+hq-vault = { workspace = true }
+hq-suite-store = { workspace = true }
 hq-suite-shrink = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

@@ -7,3 +7,5 @@
 //! lifted out; `tests/boundary.rs` keeps it that way.
 
 pub mod measure;
+pub mod shrink;
+pub mod text;

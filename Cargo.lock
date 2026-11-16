@@ -3830,7 +3830,10 @@ name = "hq-suite-adapter"
 version = "0.9.1"
 dependencies = [
  "anyhow",
+ "chrono",
  "hq-suite-shrink",
+ "hq-suite-store",
+ "hq-vault",
  "serde_json",
  "tempfile",
  "tokio",

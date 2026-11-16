@@ -501,14 +501,14 @@ fn a_crash_at_any_point_of_undo_loses_nothing() {
         .enable_all()
         .build()
         .unwrap();
-    for k in after_confirm..names.len() {
+    for (k, name) in names.iter().enumerate().skip(after_confirm) {
         let (d, paths) = vault_with(SOURCE, &original);
         let notes = FolderNotes(paths.clone());
         let clean = shrinker(&paths, &notes, &NoFaults);
         let preview = rt.block_on(clean.prepare(SOURCE, DAY)).unwrap();
         clean.confirm(&preview.job, DAY).unwrap();
 
-        let faults = CrashAt::at(k - after_confirm + 0);
+        let faults = CrashAt::at(k - after_confirm);
         let s = shrinker(&paths, &notes, &faults);
         // The fault counter starts at zero for the undo alone.
         let err = s.undo(&preview.job).unwrap_err();
@@ -518,7 +518,7 @@ fn a_crash_at_any_point_of_undo_loses_nothing() {
         assert!(
             clean.nothing_lost(&job),
             "undo point {k} ({}): lost the original",
-            names[k]
+            name
         );
         clean.undo(&preview.job).unwrap();
         assert_eq!(

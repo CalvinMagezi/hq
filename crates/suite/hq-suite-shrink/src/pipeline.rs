@@ -42,6 +42,36 @@ pub trait Notes: Send + Sync {
     /// Writes the whole note, atomically.
     fn write(&self, rel: &str, text: &str) -> Result<(), ShrinkError>;
     fn remove(&self, rel: &str) -> Result<(), ShrinkError>;
+
+    /// Reads the note, lets `change` produce its new text, and writes that if there is one, all
+    /// under one lock where the store has locks. The default is read then write, which is only
+    /// as safe as the store; the vault's own implementation holds the note's lock throughout, so
+    /// an edit made elsewhere in between cannot be overwritten.
+    fn modify(
+        &self,
+        rel: &str,
+        change: &dyn Fn(&str) -> Result<Option<String>, ShrinkError>,
+    ) -> Result<(), ShrinkError> {
+        let text = self
+            .read(rel)?
+            .ok_or_else(|| ShrinkError::NotVerified("the note is missing".into()))?;
+        match change(&text)? {
+            Some(next) => self.write(rel, &next),
+            None => Ok(()),
+        }
+    }
+
+    /// Removes the note only if its text still hashes to `sha256`, under one lock where there is
+    /// one. Returns whether it was removed.
+    fn remove_if_unchanged(&self, rel: &str, sha256: &str) -> Result<bool, ShrinkError> {
+        match self.read(rel)? {
+            Some(text) if sha256_bytes(text.as_bytes()) == sha256 => {
+                self.remove(rel)?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
 }
 
 /// Where a crash can be simulated. [`NoFaults`] in production.
@@ -706,31 +736,26 @@ impl<'a> Shrinker<'a> {
 
     /// Sets the note's `suite_original_state` and `suite_saved_bytes`, leaving every other byte.
     fn mark_note(&self, job: &Job, state: &str, saved: i64) -> Result<(), ShrinkError> {
-        let text = self
-            .notes
-            .read(&job.note)?
-            .ok_or_else(|| ShrinkError::NotVerified("the note is missing".into()))?;
-        let doc = Document::parse(&text);
-        let patch = Patch {
-            base_revision: None,
-            ops: vec![
-                Op::SetMeta {
-                    key: KEY_ORIGINAL_STATE.into(),
-                    value: Scalar::Str(state.into()),
-                },
-                Op::SetMeta {
-                    key: KEY_SAVED_BYTES.into(),
-                    value: Scalar::Int(saved),
-                },
-            ],
-        };
-        let next = apply(&doc, &patch)
-            .map_err(|e| ShrinkError::Notes(e.to_string()))?
-            .render();
-        if next != text {
-            self.notes.write(&job.note, &next)?;
-        }
-        Ok(())
+        self.notes.modify(&job.note, &|text| {
+            let doc = Document::parse(text);
+            let patch = Patch {
+                base_revision: None,
+                ops: vec![
+                    Op::SetMeta {
+                        key: KEY_ORIGINAL_STATE.into(),
+                        value: Scalar::Str(state.into()),
+                    },
+                    Op::SetMeta {
+                        key: KEY_SAVED_BYTES.into(),
+                        value: Scalar::Int(saved),
+                    },
+                ],
+            };
+            let next = apply(&doc, &patch)
+                .map_err(|e| ShrinkError::Notes(e.to_string()))?
+                .render();
+            Ok((next != text).then_some(next))
+        })
     }
 
     // -----------------------------------------------------------------------------------------
@@ -776,11 +801,8 @@ impl<'a> Shrinker<'a> {
                 "the original has already moved; use undo",
             ));
         }
-        if let Some(text) = self.notes.read(&job.note)?
-            && sha256_bytes(text.as_bytes()) == job.note_sha256
-        {
-            self.notes.remove(&job.note)?;
-        }
+        self.notes
+            .remove_if_unchanged(&job.note, &job.note_sha256)?;
         job.advance(Step::Abandoned)?;
         journal.save(&job)?;
         journal.remove_draft(&job.id);
