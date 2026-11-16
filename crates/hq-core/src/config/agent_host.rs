@@ -319,6 +319,11 @@ pub struct SpawnLimitsConfig {
     /// is always checked.
     #[serde(default)]
     pub count_harness_in_global: bool,
+    /// Running sessions per harness (lane), keyed by harness name such as `copilot-lean`. A
+    /// harness not listed has no cap of its own and only counts toward `max_live_sessions`.
+    /// Empty by default. Each value is clamped to 1..=500.
+    #[serde(default)]
+    pub max_live_per_harness: std::collections::BTreeMap<String, u32>,
 }
 
 fn default_spawn_max_live() -> u32 {
@@ -334,11 +339,18 @@ impl Default for SpawnLimitsConfig {
             max_live_sessions: default_spawn_max_live(),
             max_spawns_per_hour: default_spawn_per_hour(),
             count_harness_in_global: false,
+            max_live_per_harness: Default::default(),
         }
     }
 }
 
 impl SpawnLimitsConfig {
+    /// The live-session cap of one harness, when the owner set one.
+    pub fn live_for_harness(&self, harness: &str) -> Option<usize> {
+        self.max_live_per_harness
+            .get(harness)
+            .map(|n| (*n).clamp(1, CEILING_SPAWN_LIVE_SESSIONS) as usize)
+    }
     pub fn live_sessions(&self) -> usize {
         self.max_live_sessions.clamp(1, CEILING_SPAWN_LIVE_SESSIONS) as usize
     }

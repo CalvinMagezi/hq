@@ -17,16 +17,19 @@ use crate::a2a::RATE_WINDOW_MINUTES;
 /// Starts that passed the check and have not yet written their session row. The lock is held only
 /// to check and add one, never across a folder approval or a launch, so a slow start cannot
 /// stall another one.
-static PENDING: std::sync::Mutex<usize> = std::sync::Mutex::new(0);
+static PENDING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 /// A slot claimed by a start that passed the limits. Dropped once the start's row is written
 /// (or the start failed), after which the row itself is what counts.
-pub struct Reservation(());
+#[derive(Debug)]
+pub struct Reservation(String);
 
 impl Drop for Reservation {
     fn drop(&mut self) {
         let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
-        *pending = pending.saturating_sub(1);
+        if let Some(at) = pending.iter().position(|h| *h == self.0) {
+            pending.swap_remove(at);
+        }
     }
 }
 
@@ -35,14 +38,29 @@ pub fn reserve(
     db: &Arc<Database>,
     limits: &SpawnLimitsConfig,
     budgets: &BudgetsConfig,
+    harness: &str,
     now: i64,
 ) -> Result<Reservation> {
     let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
-    check_with_pending(db, limits, budgets, now, *pending)?;
-    *pending += 1;
-    Ok(Reservation(()))
+    let in_lane = pending.iter().filter(|h| *h == harness).count();
+    let inflight = InFlight {
+        all: pending.len(),
+        in_lane,
+    };
+    check_with_pending(db, limits, budgets, harness, now, inflight)?;
+    pending.push(harness.to_string());
+    Ok(Reservation(harness.to_string()))
 }
 
+/// Starts that passed the check and have not written their row yet.
+#[derive(Clone, Copy)]
+struct InFlight {
+    all: usize,
+    in_lane: usize,
+}
+
+#[cfg(test)]
+const TEST_HARNESS: &str = "claude-code";
 const SECS_PER_HOUR: i64 = 3600;
 const HARNESS_ORIGIN: &str = "harness";
 const ALERT_SOURCE: &str = "spawn-limits";
@@ -55,17 +73,25 @@ fn check(
     budgets: &BudgetsConfig,
     now: i64,
 ) -> Result<()> {
-    check_with_pending(db, limits, budgets, now, 0)
+    check_with_pending(
+        db,
+        limits,
+        budgets,
+        TEST_HARNESS,
+        now,
+        InFlight { all: 0, in_lane: 0 },
+    )
 }
 
 fn check_with_pending(
     db: &Arc<Database>,
     limits: &SpawnLimitsConfig,
     budgets: &BudgetsConfig,
+    harness: &str,
     now: i64,
-    pending: usize,
+    pending: InFlight,
 ) -> Result<()> {
-    let refusal = match refusal(db, limits, budgets, now, pending) {
+    let refusal = match refusal(db, limits, budgets, harness, now, pending) {
         Ok(None) => return Ok(()),
         Ok(Some(r)) => r,
         Err(e) => return Err(e),
@@ -84,17 +110,21 @@ fn refusal(
     db: &Arc<Database>,
     limits: &SpawnLimitsConfig,
     budgets: &BudgetsConfig,
+    harness: &str,
     now: i64,
-    pending: usize,
+    pending: InFlight,
 ) -> Result<Option<Refusal>> {
-    let pending = pending as i64;
+    let all = pending.all as i64;
     let hour = now / SECS_PER_HOUR;
     let (live, recent) = db.with_conn(|c| {
         Ok((
-            registry::count_active_unparented(c)? + pending,
-            registry::count_unparented_started_since(c, RATE_WINDOW_MINUTES)? + pending,
+            registry::count_active_unparented(c)? + all,
+            registry::count_unparented_started_since(c, RATE_WINDOW_MINUTES)? + all,
         ))
     })?;
+    if let Some(refusal) = lane_refusal(db, limits, harness, hour, pending.in_lane)? {
+        return Ok(Some(refusal));
+    }
     let max_live = limits.live_sessions();
     if live >= max_live as i64 {
         return Ok(Some(Refusal {
@@ -116,6 +146,31 @@ fn refusal(
         }));
     }
     exhausted_budget(db, limits, budgets, now)
+}
+
+/// A harness whose own live cap is reached, so the caller can route the work to another lane.
+fn lane_refusal(
+    db: &Arc<Database>,
+    limits: &SpawnLimitsConfig,
+    harness: &str,
+    hour: i64,
+    in_flight: usize,
+) -> Result<Option<Refusal>> {
+    let Some(cap) = limits.live_for_harness(harness) else {
+        return Ok(None);
+    };
+    let live = db.with_conn(|c| registry::count_active_unparented_for_harness(c, harness))?
+        + in_flight as i64;
+    if live < cap as i64 {
+        return Ok(None);
+    }
+    Ok(Some(Refusal {
+        message: format!(
+            "lane {harness} is full: {live} sessions active (at most {cap}, agent_host.spawn_limits.max_live_per_harness); route this to another lane or wait for one to finish"
+        ),
+        title: format!("Session start refused: {harness} lane full"),
+        dedup_key: format!("spawn-limit:lane:{harness}:{hour}"),
+    }))
 }
 
 /// A hard budget that covers harness spend and is used up. Soft budgets never stop a start.
@@ -218,6 +273,7 @@ mod tests {
             max_live_sessions: live,
             max_spawns_per_hour: per_hour,
             count_harness_in_global: false,
+            max_live_per_harness: Default::default(),
         }
     }
 
@@ -381,6 +437,7 @@ mod tests {
                         &db,
                         &limits(1, 100),
                         &BudgetsConfig::default(),
+                        TEST_HARNESS,
                         NOW_HOUR_SECS,
                     )
                 })
@@ -390,14 +447,45 @@ mod tests {
         assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
     }
 
+    fn lane_limits(lane: &str, cap: u32) -> SpawnLimitsConfig {
+        let mut l = limits(100, 1000);
+        l.max_live_per_harness.insert(lane.to_string(), cap);
+        l
+    }
+
+    #[test]
+    fn a_full_lane_refuses_while_other_lanes_still_start() {
+        let db = Arc::new(Database::open_memory().unwrap());
+        let (l, b) = (lane_limits("lane-a-test", 1), BudgetsConfig::default());
+        let held = reserve(&db, &l, &b, "lane-a-test", NOW_HOUR_SECS).unwrap();
+        let err = reserve(&db, &l, &b, "lane-a-test", NOW_HOUR_SECS).unwrap_err();
+        assert!(
+            err.to_string().contains("lane lane-a-test is full"),
+            "{err}"
+        );
+        let other = reserve(&db, &l, &b, "lane-b-test", NOW_HOUR_SECS).unwrap();
+        drop((held, other));
+        reserve(&db, &l, &b, "lane-a-test", NOW_HOUR_SECS).unwrap();
+    }
+
+    #[test]
+    fn a_lane_with_no_cap_only_counts_toward_the_global_limit() {
+        let db = Arc::new(Database::open_memory().unwrap());
+        let (l, b) = (limits(100, 1000), BudgetsConfig::default());
+        let held: Vec<_> = (0..3)
+            .map(|_| reserve(&db, &l, &b, "lane-c-test", NOW_HOUR_SECS).unwrap())
+            .collect();
+        assert_eq!(held.len(), 3);
+    }
+
     #[test]
     fn a_dropped_reservation_frees_its_slot() {
         let db = Arc::new(Database::open_memory().unwrap());
         let (l, b) = (limits(1, 100), BudgetsConfig::default());
-        let held = reserve(&db, &l, &b, NOW_HOUR_SECS).unwrap();
-        assert!(reserve(&db, &l, &b, NOW_HOUR_SECS).is_err());
+        let held = reserve(&db, &l, &b, TEST_HARNESS, NOW_HOUR_SECS).unwrap();
+        assert!(reserve(&db, &l, &b, TEST_HARNESS, NOW_HOUR_SECS).is_err());
         drop(held);
-        reserve(&db, &l, &b, NOW_HOUR_SECS).unwrap();
+        reserve(&db, &l, &b, TEST_HARNESS, NOW_HOUR_SECS).unwrap();
     }
 
     const HARNESS_HARD: &str = "budgets:\n  - {name: coders, scope: 'origin:harness', period: day, limit_usd: 5, action: block}\n";

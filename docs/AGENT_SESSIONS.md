@@ -531,6 +531,11 @@ two simultaneous starts cannot both pass the cap. Sessions inside a team keep th
   done do not count, so a host that keeps many idle sessions open is not locked out.
 - `max_spawns_per_hour` (default 60, clamped to 1..=6000): sessions with no parent started in the
   last 60 minutes, running or ended.
+- `max_live_per_harness` (default empty, each value clamped to 1..=500): a live cap per harness
+  (lane), counted like `max_live_sessions`, for example `{copilot-lean: 3, agy: 20}`. A start on a
+  full lane is refused with an error that says the lane is full, so a driving agent can route the
+  work to another lane. A harness that is not listed has no cap of its own. The cap applies to the
+  harness the caller named, before any quota fallback to another lane.
 - `count_harness_in_global` (default false): global budgets leave harness spend out of their sum.
   Set this to true to make a used-up hard global budget stop starts too. An `origin:harness`
   budget is always checked.
