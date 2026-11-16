@@ -87,10 +87,8 @@ import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.shell.consumeTouches
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
-import kotlinx.coroutines.delay
 
 private val SmallText = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp)
-private const val NOTICE_MS = 4_000L
 
 /** The pages pushed over Notes, one at a time, with the note menu, the export steps and the line at the bottom. */
 @Composable

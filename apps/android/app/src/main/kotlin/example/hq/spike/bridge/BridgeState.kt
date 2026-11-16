@@ -27,6 +27,7 @@ data class BridgeState(
     val join: JoinState = JoinState.Idle,
     val peers: List<BridgePeer>? = null,
     val line: String? = null,
+    val lineIsError: Boolean = false,
 )
 
 enum class TicketEnd { Paired, Declined, TooLate, Expired, Failed }
@@ -34,8 +35,8 @@ enum class TicketEnd { Paired, Declined, TooLate, Expired, Failed }
 /** Folds what `hq bridge run` says into what the screens show. Pure, so each step is tested. */
 object BridgeReducer {
     fun reduce(s: BridgeState, e: BridgeEvent, now: Long): BridgeState = when (e) {
-        is BridgeEvent.Ready -> s.copy(running = true, deviceId = e.id, relay = e.relay)
-        is BridgeEvent.Ticket -> s.copy(ticket = OpenTicket(e.link, now + e.expiresInSecs * MS_PER_SEC), request = null, ticketEnd = null)
+        is BridgeEvent.Ready -> s.copy(running = true, deviceId = e.id, relay = e.relay, line = null, lineIsError = false)
+        is BridgeEvent.Ticket -> s.copy(ticket = OpenTicket(e.link, now + e.expiresInSecs * MS_PER_SEC), request = null, ticketEnd = null, line = null, lineIsError = false)
         is BridgeEvent.Request -> s.copy(request = WaitingRequest(e.joiner, e.name, now + e.windowSecs * MS_PER_SEC))
         is BridgeEvent.Decision -> s.copy(
             request = null,
@@ -51,15 +52,15 @@ object BridgeReducer {
             ticketEnd = if (e.paired) TicketEnd.Paired else s.ticketEnd ?: TicketEnd.Expired,
         )
         is BridgeEvent.Digits -> s.copy(join = JoinState.ShowDigits(e.value))
-        is BridgeEvent.Joined -> s.copy(join = JoinState.Done(e.id, e.name))
+        is BridgeEvent.Joined -> s.copy(join = JoinState.Done(e.id, e.name), line = null, lineIsError = false)
         is BridgeEvent.JoinFailed -> s.copy(join = JoinState.Failed(e.why))
         is BridgeEvent.Peers -> s.copy(peers = e.peers)
-        is BridgeEvent.Revoked -> s.copy(peers = s.peers?.filterNot { it.id == e.id }, line = if (e.changed) "${s.peers?.firstOrNull { it.id == e.id }?.name?.ifBlank { null } ?: "Device"} removed." else "That device was already removed.")
+        is BridgeEvent.Revoked -> s.copy(peers = s.peers?.filterNot { it.id == e.id }, line = if (e.changed) "${s.peers?.firstOrNull { it.id == e.id }?.name?.ifBlank { null } ?: "Device"} removed." else "That device was already removed.", lineIsError = false)
         is BridgeEvent.Failed -> when (e.cmd) {
             // These two have a screen waiting for an answer that will not come, so they end it.
             "join" -> s.copy(join = JoinState.Failed(e.message))
-            "open" -> s.copy(ticket = null, ticketEnd = TicketEnd.Failed, line = e.message)
-            else -> s.copy(line = e.message)
+            "open" -> s.copy(ticket = null, ticketEnd = TicketEnd.Failed, line = e.message, lineIsError = true)
+            else -> s.copy(line = e.message, lineIsError = true)
         }
         is BridgeEvent.Ping, is BridgeEvent.Keep -> s
         BridgeEvent.Bye -> s.copy(running = false, ticket = null, request = null)

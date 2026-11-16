@@ -71,8 +71,21 @@ class BridgeReducerTest {
         val open = fold(BridgeEvent.Failed("open", "could not bind"))
         assertEquals(TicketEnd.Failed, open.ticketEnd)
         assertNull(open.ticket)
+        assertEquals(true, open.lineIsError)
         assertEquals(JoinState.Failed("no route"), fold(BridgeEvent.Failed("join", "no route")).join)
-        assertEquals("busy", fold(BridgeEvent.Failed("digits", "busy")).line)
+        val digitsFailed = fold(BridgeEvent.Failed("digits", "busy"))
+        assertEquals("busy", digitsFailed.line)
+        assertEquals(true, digitsFailed.lineIsError)
+        assertEquals(false, fold(BridgeEvent.Revoked("aa", true)).lineIsError)
+        val afterReady = BridgeReducer.reduce(digitsFailed, BridgeEvent.Ready("aa", "n", "r"), now)
+        assertNull(afterReady.line)
+        assertEquals(false, afterReady.lineIsError)
+        val afterTicket = BridgeReducer.reduce(digitsFailed, BridgeEvent.Ticket("l", 60), now)
+        assertNull(afterTicket.line)
+        assertEquals(false, afterTicket.lineIsError)
+        val afterJoined = BridgeReducer.reduce(digitsFailed, BridgeEvent.Joined("aa", "A"), now)
+        assertNull(afterJoined.line)
+        assertEquals(false, afterJoined.lineIsError)
     }
 
     @Test fun aChildThatEndsTakesItsListAndAJoinInFlightWithIt() {

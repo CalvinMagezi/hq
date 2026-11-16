@@ -141,7 +141,7 @@ object BridgeSupervisor {
     fun networkChanged(): Boolean = send(BridgeWire.networkChange())
     fun forgetJoin() = flow.update(BridgeReducer::resetJoin)
     fun forgetTicketEnd() = flow.update { it.copy(ticketEnd = null) }
-    fun dismissLine() = flow.update { it.copy(line = null) }
+    fun dismissLine() = flow.update { it.copy(line = null, lineIsError = false) }
 
     private fun supervise(context: Context, gen: Int) {
         var backoff = BACKOFF_MIN_MS

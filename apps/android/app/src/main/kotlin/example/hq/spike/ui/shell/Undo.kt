@@ -97,7 +97,7 @@ fun SnackbarRow(text: String, action: String?, onAction: () -> Unit, modifier: M
         modifier.padding(8.dp).fillMaxWidth().heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(start = 16.dp, end = if (action == null) 16.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text, style = HqType.BodySm, color = Mts.Surface100, modifier = Modifier.weight(1f))
+        Text(text, style = HqType.BodySm, color = Mts.Surface100, modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite })
         if (action != null) Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onAction).padding(horizontal = 16.dp).testTag("undo"), contentAlignment = Alignment.Center) {
             Text(action, style = HqType.BodySmBold, color = Mts.UndoBlue)
         }
