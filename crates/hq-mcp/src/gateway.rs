@@ -619,10 +619,18 @@ pub fn needs_owner_confirmation(registry: &ToolRegistry, tool: &str, args: &Valu
             })
             .any(in_system_folder);
     }
-    CONNECTOR_CONFIRM_TOOLS.contains(&tool)
-        || registry
-            .get(tool)
-            .is_some_and(|t| t.category() == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY)
+    if CONNECTOR_CONFIRM_TOOLS.contains(&tool) {
+        return true;
+    }
+    let is_remote = registry
+        .get(tool)
+        .is_some_and(|t| t.category() == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY);
+    is_remote
+        && hq_tools::remote_mcp::asks_owner(
+            hq_tools::remote_mcp::RemoteMcpCaller::Connector,
+            tool,
+            args,
+        )
 }
 
 /// Whether `path` is, or is inside, one of [`SYSTEM_VAULT_FOLDERS`], however it is spelled
@@ -1052,6 +1060,61 @@ mod tests {
             args["path"], "Notes/a.md",
             "ordinary arguments are untouched"
         );
+    }
+
+    /// The connector is a remote caller so it still asks for every remote MCP tool (including
+    /// read-only-marked tools and `<server>_discover`), while the agent path spares a marked
+    /// read-only tool in a clean session.
+    #[test]
+    fn connector_always_asks_for_remote_tools_even_when_marked_read_only() {
+        use hq_core::config::RemoteMcpAsk;
+        use hq_tools::remote_mcp::{RemoteMcpCaller, create_remote_mcp_tools, record_tool_list};
+        let server = hq_core::config::RemoteMcpServer {
+            name: "gatewaypolicy".into(),
+            url: "https://example.invalid/mcp".into(),
+            api_key: None,
+            live_user_turn_only: false,
+        };
+        let mut registry = ToolRegistry::new();
+        for tool in create_remote_mcp_tools(&[server], None, RemoteMcpAsk::Writes) {
+            registry.register(tool);
+        }
+        record_tool_list(
+            "gatewaypolicy",
+            json!([
+                {"name": "get", "annotations": {"readOnlyHint": true}},
+                {"name": "put", "annotations": {"readOnlyHint": false}},
+                {"name": "bare"}
+            ])
+            .as_array()
+            .unwrap(),
+        );
+        for (tool, agent_asks) in [("get", false), ("put", true), ("bare", true), ("new", true)] {
+            let args = json!({ "tool": tool });
+            assert!(
+                needs_owner_confirmation(&registry, "gatewaypolicy_call", &args),
+                "connector must always ask for {tool}"
+            );
+            assert_eq!(
+                hq_tools::remote_mcp::asks_owner(
+                    RemoteMcpCaller::Agent,
+                    "gatewaypolicy_call",
+                    &args
+                ),
+                agent_asks,
+                "agent, {tool}"
+            );
+        }
+        assert!(needs_owner_confirmation(
+            &registry,
+            "gatewaypolicy_discover",
+            &json!({})
+        ));
+        assert!(!hq_tools::remote_mcp::asks_owner(
+            RemoteMcpCaller::Agent,
+            "gatewaypolicy_discover",
+            &json!({})
+        ));
     }
 
     #[test]

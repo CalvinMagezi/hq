@@ -44,7 +44,7 @@ off everywhere.
   and nobody to ask, so the model (or text it read) setting one up is asked about once, here
 - other machines and agents: `host_add`, `host_send`, `agent_send_message`, and starting a coding agent (`harness_session_spawn`, `harness_session_handoff`, `agent_delegate`), which is as strong as `bash`. Steering an agent already started (`harness_session_send`, `harness_session_answer`) does not ask in a clean session; see below for a tainted one
 - exports to a path: `convert_from_markdown`, `vault_export` and `vault_export_pdf` when given `output`
-- the owner's other accounts: `google_workspace` and every remote MCP server (`remote_mcp:`)
+- the owner's other accounts: `google_workspace` and the tools of remote MCP servers (`remote_mcp:`), except the ones a server marks read-only (see below)
 - the owner's phone calendar: `calendar_update_event` and `calendar_delete_event`. Unlike the rest of
   this list they ask in every permission mode but bypass, and a clean chat is no exception
   (`always_ask_reason` in `tainted_calls.rs`, wording from `hq_tools::calendar::describe_modification`).
@@ -53,6 +53,20 @@ off everywhere.
   calendar: start to 2026-02-11T16:00." The digest covers every argument, so an approval is for this
   event and this change only. With no approval store they do not run. Creating an event
   (`calendar_create_event`) still asks only once the turn is tainted.
+
+A remote MCP server can say which of its tools only read, by setting `annotations.readOnlyHint`
+to `true` in its `tools/list` reply. HQ keeps that mark for each server (replaced every time the
+list is fetched, which happens when `<name>_discover` runs) and, with
+`governance.remote_mcp_ask: writes` (the default), lets those tools run without asking in the
+owner's own clean sessions only. Every other remote tool still asks: a tool with no mark, a mark
+of `false`, a mark that is not a plain `true`, a tool HQ has not seen listed yet, and a call that
+does not name its tool. The mark never applies to the claude.ai connector
+(`needs_owner_confirmation` in `crates/hq-mcp/src/gateway.rs`, which still asks for every remote
+tool and `<name>_discover` because its caller is remote), and never applies to a tainted session
+(`tainted_reason_for` in `crates/hq-agent/src/governance/tainted_calls.rs`, which asks in a chat
+and denies unattended). Set `remote_mcp_ask: all` (or `HQ_GOVERNANCE__REMOTE_MCP_ASK=all`) to ask
+for every remote tool. The mark comes from the server you configured, so only list servers you
+trust to label their tools honestly.
 
 Reads never ask, and neither do notes and tasks, which the owner can undo from the vault and the
 task history.

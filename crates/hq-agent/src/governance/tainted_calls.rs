@@ -42,9 +42,26 @@ pub(super) fn always_ask_reason(tool: &str, args: &Value) -> Option<String> {
 
 /// Why this call from a tainted session needs the owner although the same call from a clean
 /// session would not, or `None`. Says nothing about a clean session.
+#[cfg(test)]
 pub(super) fn tainted_reason(tool: &str, args: &Value, taint: &TaintTracker) -> Option<String> {
+    tainted_reason_for(tool, "", args, taint)
+}
+
+/// Like [`tainted_reason`], with the tool's `category` so every `remote_mcp` call still asks in
+/// a tainted session even when its server marked it `readOnlyHint: true`.
+pub(super) fn tainted_reason_for(
+    tool: &str,
+    category: &str,
+    args: &Value,
+    taint: &TaintTracker,
+) -> Option<String> {
     if !taint.is_tainted() {
         return None;
+    }
+    if category == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY
+        && !tool.ends_with(hq_tools::remote_mcp::DISCOVER_TOOL_SUFFIX)
+    {
+        return Some("would call a remote MCP server".into());
     }
     match tool {
         "harness_session_send" => Some("would type into a running coding agent".into()),
@@ -112,8 +129,21 @@ fn fetch_reason(raw: &str, taint: &TaintTracker) -> Option<String> {
 
 /// Why this call must not run in a session with no approval store, or `None`. `needs_owner`
 /// is whether the call would wait for the owner in a chat (see `needs_owner`).
+#[cfg(test)]
 pub(super) fn unasked_denial(
     tool: &str,
+    args: &Value,
+    taint: &TaintTracker,
+    needs_owner: bool,
+) -> Option<String> {
+    unasked_denial_for(tool, "", args, taint, needs_owner)
+}
+
+/// Like [`unasked_denial`], with the tool's `category` so a tainted unattended session refuses
+/// every `remote_mcp` call even when marked read-only.
+pub(super) fn unasked_denial_for(
+    tool: &str,
+    category: &str,
     args: &Value,
     taint: &TaintTracker,
     needs_owner: bool,
@@ -131,7 +161,7 @@ pub(super) fn unasked_denial(
     let why = if hands_work_over {
         Some("would hand work to another agent".to_string())
     } else if taint.is_unattended() {
-        tainted_reason(tool, args, taint)
+        tainted_reason_for(tool, category, args, taint)
             .or_else(|| needs_owner.then(|| "needs the owner's approval".to_string()))
     } else {
         None
@@ -318,5 +348,56 @@ mod tests {
         let clean = TaintTracker::new();
         clean.set_unattended();
         assert_eq!(unasked_denial("bash", &bash, &clean, true), None);
+    }
+
+    #[test]
+    fn tainted_session_asks_and_denies_marked_read_only_remote_mcp() {
+        use hq_tools::remote_mcp::{REMOTE_MCP_CATEGORY, record_tool_list};
+        record_tool_list(
+            "taint_srv",
+            json!([{"name": "get", "annotations": {"readOnlyHint": true}}])
+                .as_array()
+                .unwrap(),
+        );
+        let args = json!({"tool": "get", "args": {"secret": "vault-text"}});
+        let needs = super::super::needs_owner("taint_srv_call", REMOTE_MCP_CATEGORY, &args);
+        assert!(
+            !needs,
+            "clean session spares a marked read-only remote tool"
+        );
+
+        let clean = TaintTracker::new();
+        assert_eq!(
+            tainted_reason_for("taint_srv_call", REMOTE_MCP_CATEGORY, &args, &clean),
+            None
+        );
+        clean.set_unattended();
+        assert_eq!(
+            unasked_denial_for("taint_srv_call", REMOTE_MCP_CATEGORY, &args, &clean, needs),
+            None
+        );
+
+        let taint = tainted();
+        assert!(
+            tainted_reason_for("taint_srv_call", REMOTE_MCP_CATEGORY, &args, &taint).is_some(),
+            "tainted chat must still ask for a marked read-only remote tool"
+        );
+        assert_eq!(
+            tainted_reason_for(
+                "taint_srv_discover",
+                REMOTE_MCP_CATEGORY,
+                &json!({}),
+                &taint
+            ),
+            None,
+            "discover sends no args and stays unasked"
+        );
+
+        taint.set_unattended();
+        assert!(
+            unasked_denial_for("taint_srv_call", REMOTE_MCP_CATEGORY, &args, &taint, needs)
+                .is_some(),
+            "tainted unattended session must deny a marked read-only remote tool"
+        );
     }
 }
