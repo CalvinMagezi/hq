@@ -82,6 +82,10 @@ impl Client {
 }
 
 fn start_server() -> Client {
+    // The server marks calls from a pane HQ launched, which would add a key to the echoed
+    // arguments; no test here depends on that, so none may inherit it from the caller.
+    // SAFETY: every test in this binary only removes the variable and none sets it.
+    unsafe { std::env::remove_var(hq_tools::harness_session::SESSION_ENV) };
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(EchoTool));
     registry.register(Box::new(FailTool));

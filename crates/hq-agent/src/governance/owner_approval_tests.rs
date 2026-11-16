@@ -1,7 +1,18 @@
 use super::*;
 use serde_json::json;
 
+/// Signed approvals read a key next to the config file. Pointing it at a private directory keeps
+/// the test off the caller's `~/.hq`, which a sandboxed session cannot read and a fresh machine
+/// does not have.
+fn private_approval_key_dir() {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap());
+    // SAFETY: set once to the same value before any approval is signed; no test here reads it back.
+    unsafe { std::env::set_var("HQ_CONFIG_PATH", dir.path().join("config.yaml")) };
+}
+
 fn approval() -> (Arc<Database>, Arc<OwnerApproval>) {
+    private_approval_key_dir();
     let db = Arc::new(Database::open_memory().unwrap());
     let approval = OwnerApproval::new(db.clone(), "web:t1");
     (db, approval)
