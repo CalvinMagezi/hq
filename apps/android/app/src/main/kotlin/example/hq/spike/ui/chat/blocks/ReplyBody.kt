@@ -38,7 +38,7 @@ fun BlockView(block: Block, actions: BlockActions) {
         is Block.Code -> CodeBlockView(block.lang, block.text, actions.onCopied)
         is Block.ChartBlock -> ChartBlockView(block, actions)
         is Block.Table -> TableBlockView(block) { actions.onOpenTable(block) }
-        is Block.Image -> BlockedImageView()
+        is Block.Image -> VaultImageView(block.src)
     }
 }
 

@@ -207,3 +207,58 @@ pub fn abandon(vault: &Path, job: &str) -> Result<FileStatus> {
 pub fn undo(vault: &Path, job: &str) -> Result<FileStatus> {
     after(vault, job, |s| s.undo(job).map_err(friendly))
 }
+
+/// Largest picture the media route hands out. Recompressed pictures are far below it; the cap only
+/// stops a hostile or odd file from filling the phone's memory.
+const MAX_MEDIA_BYTES: u64 = 16 * 1024 * 1024;
+
+/// A picture from the media store by its vault path (`_media/cas/ab/<hash>.<ext>`), with the type
+/// to send it as. Anything that is not exactly a store path is refused.
+pub fn media(vault: &Path, path: &str) -> Result<(Vec<u8>, &'static str)> {
+    let r = hq_suite_store::CasRef::parse_rel(path)
+        .ok_or_else(|| anyhow::anyhow!("That is not a stored picture."))?;
+    let kind = match path.rsplit('.').next().unwrap_or("") {
+        "webp" => "image/webp",
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        _ => anyhow::bail!("That kind of picture is not shown."),
+    };
+    let paths = SuitePaths::new(vault);
+    let file = paths.resolve(&r.rel())?;
+    if std::fs::metadata(&file)
+        .map_err(|_| anyhow::anyhow!("That picture is not there."))?
+        .len()
+        > MAX_MEDIA_BYTES
+    {
+        anyhow::bail!("That picture is too large to show.");
+    }
+    let bytes = hq_suite_store::Cas::new(paths)
+        .read(&r)
+        .map_err(|_| anyhow::anyhow!("That picture is not there."))?;
+    Ok((bytes, kind))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stored_picture_is_served_and_nothing_else_is() {
+        let d = tempfile::tempdir().unwrap();
+        let paths = SuitePaths::new(d.path());
+        let (r, _) = hq_suite_store::Cas::new(paths)
+            .put(b"picture", "webp")
+            .unwrap();
+        let (bytes, kind) = media(d.path(), &r.rel()).unwrap();
+        assert_eq!((bytes.as_slice(), kind), (&b"picture"[..], "image/webp"));
+        for bad in [
+            "Notebooks/a.docx",
+            "_media/cas/ab/not-a-hash.webp",
+            "_media/cas/../../secret.webp",
+            "_media/web/upload.png",
+        ] {
+            assert!(media(d.path(), bad).is_err(), "{bad}");
+        }
+    }
+}

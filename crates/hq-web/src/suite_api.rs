@@ -29,6 +29,7 @@ pub(crate) fn routes() -> Router<Arc<WsState>> {
         .route("/api/suite/abandon", post(abandon_handler))
         .route("/api/suite/undo", post(undo_handler))
         .route("/api/suite/storage", get(storage_handler))
+        .route("/api/suite/media", get(media_handler))
 }
 
 #[derive(Deserialize)]
@@ -116,6 +117,25 @@ pub(crate) async fn undo_handler(
     ))
 }
 
+pub(crate) async fn media_handler(
+    State(state): State<Arc<WsState>>,
+    Query(q): Query<PathQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let (bytes, kind) = blocking(move || hq_suite_adapter::api::media(&vault, &q.path)).await?;
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, kind),
+            // Stored by hash: the bytes behind a path never change.
+            (
+                axum::http::header::CACHE_CONTROL,
+                "private, max-age=31536000, immutable",
+            ),
+        ],
+        bytes,
+    ))
+}
+
 pub(crate) async fn storage_handler(
     State(state): State<Arc<WsState>>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -163,5 +183,22 @@ mod tests {
         )
         .await;
         assert!(outside.is_err(), "a file outside the vault is refused");
+
+        let hostile = media_handler(
+            State(Arc::new(WsState::new(vault.path().to_path_buf(), None))),
+            Query(PathQuery {
+                path: "Notebooks/a.docx".into(),
+            }),
+        )
+        .await;
+        assert!(hostile.is_err(), "only stored pictures are served");
+        let traversal = media_handler(
+            State(Arc::new(WsState::new(vault.path().to_path_buf(), None))),
+            Query(PathQuery {
+                path: "_media/cas/../../Notebooks/a.docx".into(),
+            }),
+        )
+        .await;
+        assert!(traversal.is_err());
     }
 }

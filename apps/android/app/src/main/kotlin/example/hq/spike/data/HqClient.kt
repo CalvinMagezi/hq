@@ -766,6 +766,20 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 
     suspend fun suiteUndo(job: String): SuiteFile = suiteAction("/api/suite/undo", JSONObject().put("job", job))
 
+    /** A picture from the suite's media store, by its vault path (`_media/cas/...`); hq serves nothing else here. */
+    suspend fun suiteMedia(path: String): ByteArray = withContext(Dispatchers.IO) {
+        val request = authed("/api/suite/media?path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()
+        try {
+            http.newCall(request).execute().use { r ->
+                if (r.code == HTTP_UNAUTHORIZED) refused()
+                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/suite/media", status = r.code)
+                r.body.bytes()
+            }
+        } catch (e: IOException) {
+            throw if (e is HqUnavailable) e else HqUnavailable("hq is not reachable", e)
+        }
+    }
+
     /** A suite action: a 422 carries a sentence for the person, which [SuiteRefused] hands on. */
     private suspend fun suiteAction(route: String, body: JSONObject): SuiteFile = withContext(Dispatchers.IO) {
         val request = authed(route).post(body.toString().toRequestBody("application/json".toMediaType())).build()

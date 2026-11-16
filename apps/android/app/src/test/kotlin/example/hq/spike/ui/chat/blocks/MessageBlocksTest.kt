@@ -50,7 +50,7 @@ class MessageBlocksTest {
         assertEquals(Block.Quote("Samsung may undo this."), b[2])
         assertEquals(Block.Checklist(listOf(true to "Allow background activity", false to "Turn off automatic removal")), b[3])
         assertEquals(Block.Bullets(true, listOf("Open Settings", "Find HQ")), b[4])
-        assertEquals(Block.Image("a diagram"), b[5])
+        assertEquals(Block.Image("a diagram", "https://example.com/x.png"), b[5])
     }
 
     @Test fun headingsAndPlainTextKeepTheirOrder() {
