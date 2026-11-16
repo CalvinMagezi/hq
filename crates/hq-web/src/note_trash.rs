@@ -690,6 +690,7 @@ mod tests {
                 "/api/note/restore-version",
                 r#"{"path":"Notebooks/a.md","id":1}"#,
             ),
+            ("POST", "/api/note/import?name=a.txt", "hello"),
         ];
         let connector = format!("Bearer {}", grant.access_token);
         let spark = format!("Bearer {SPARK}");
@@ -738,11 +739,12 @@ mod tests {
     /// in the tools or the MCP gateway names them, so no model or helper can ask for them.
     #[test]
     fn no_tool_or_mcp_route_reaches_the_owner_only_routes() {
-        const ROUTES: [&str; 4] = [
+        const ROUTES: [&str; 5] = [
             "note/trash/purge",
             "note/trash/empty",
             "note/restore-version",
             "api/note/version",
+            "note/import",
         ];
         let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         for krate in ["hq-tools/src", "hq-mcp/src"] {

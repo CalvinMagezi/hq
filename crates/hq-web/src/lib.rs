@@ -25,6 +25,7 @@ pub mod gmail_ingest;
 mod lane_quotas_api;
 mod mcp_http;
 mod note_ids;
+mod note_import;
 mod note_trash;
 mod note_undo;
 mod notifications_api;
@@ -388,6 +389,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/note/trash/empty",
             post(note_trash::trash_empty_handler),
         )
+        .route("/api/note/import", note_import::route())
         .route("/api/note/version", get(note_undo::note_version_handler))
         .route(
             "/api/note/restore-version",

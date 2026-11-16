@@ -111,6 +111,7 @@ async fn every_machine_path_answers_and_the_rest_of_the_server_is_a_404() {
         "/api/oauth/requests/abc",
         "/api/note/trash/purge",
         "/api/note/trash/empty",
+        "/api/note/import",
         "/api/note/version",
         "/api/note/restore-version",
         "/mcp/",
