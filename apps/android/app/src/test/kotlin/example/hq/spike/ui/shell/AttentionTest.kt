@@ -152,4 +152,9 @@ class AttentionTest {
         AttentionKind.entries.filter { it.slot == AttentionSlot.Banner || it.slot == AttentionSlot.Decision }
             .forEach { assertNull(it.name, AttentionBudget.timeoutMs(it)) }
     }
+
+    @Test fun shownForReturnsNullForEveryBannerSlotKind() {
+        AttentionKind.entries.filter { it.slot == AttentionSlot.Banner }
+            .forEach { assertNull(it.name, AttentionBudget.shownFor(item(it), 5_000L)) }
+    }
 }

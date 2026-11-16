@@ -117,7 +117,7 @@ class CaptureActivity : ComponentActivity() {
         // Claimed before it is stored, so the poller's flush cannot send it a second time while this one waits for the path.
         if (waits) OutboxSender.hold(q.id)
         try { box.add(q) } catch (e: java.io.IOException) {
-            Toast.makeText(app, "Could not save. This phone's storage did not accept it.", Toast.LENGTH_LONG).show()
+            Toast.makeText(app, app.getString(R.string.capture_storage_failed_toast), Toast.LENGTH_LONG).show()
             return
         }
         if (waits) {
@@ -131,15 +131,15 @@ class CaptureActivity : ComponentActivity() {
                             box.remove(q.id)
                             startActivity(Intent(this, ShellActivity::class.java).putExtra(Links.EXTRA, Links.noteLink(result.path)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
                         }
-                        result is Sent.Refused -> Toast.makeText(app, "Saved on this phone. HQ would not take it: ${result.why}.", Toast.LENGTH_LONG).show()
-                        else -> Toast.makeText(app, "Saved. It is sent when HQ is back.", Toast.LENGTH_LONG).show()
+                        result is Sent.Refused -> Toast.makeText(app, app.getString(R.string.capture_refused_toast, result.why), Toast.LENGTH_LONG).show()
+                        else -> Toast.makeText(app, app.getString(R.string.capture_queued_toast), Toast.LENGTH_LONG).show()
                     }
                     finish()
                 }
             }.start()
             return
         }
-        Toast.makeText(app, "Saved", Toast.LENGTH_SHORT).show()
+        Toast.makeText(app, app.getString(R.string.capture_saved_toast), Toast.LENGTH_SHORT).show()
         Thread { OutboxSender.flushNow(app) }.start()
         finish()
     }

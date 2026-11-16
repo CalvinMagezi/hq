@@ -18,6 +18,18 @@ import kotlinx.coroutines.launch
 
 enum class PairingScreen { Home, Show, Scan, Paste, Confirm, Joining }
 
+internal enum class NoticeSource { Ui, Bridge }
+
+internal data class ActiveNotice(val text: String, val isError: Boolean, val source: NoticeSource)
+
+internal fun pickPairingNotice(ui: PairingUi, bridge: BridgeState): ActiveNotice? = when {
+    bridge.line != null && bridge.lineIsError -> ActiveNotice(bridge.line, isError = true, NoticeSource.Bridge)
+    ui.line != null && ui.lineIsError -> ActiveNotice(ui.line, isError = true, NoticeSource.Ui)
+    ui.line != null -> ActiveNotice(ui.line, isError = false, NoticeSource.Ui)
+    bridge.line != null -> ActiveNotice(bridge.line, isError = false, NoticeSource.Bridge)
+    else -> null
+}
+
 data class PairingUi(
     val screen: PairingScreen = PairingScreen.Home,
     /** Digits typed for a device that waits to be paired. */
@@ -25,6 +37,7 @@ data class PairingUi(
     /** The text of the paste field, or the link a confirmation screen asks about. */
     val link: String = "",
     val line: String? = null,
+    val lineIsError: Boolean = false,
     val askRemove: BridgePeer? = null,
     val removeError: String? = null,
 )
@@ -83,7 +96,10 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun go(screen: PairingScreen) = mutableUi.update { it.copy(screen = screen, line = null, typed = "", link = "") }
+    fun go(screen: PairingScreen) {
+        mutableUi.update { it.copy(screen = screen, line = null, lineIsError = false, typed = "", link = "") }
+        if (BridgeSupervisor.state.value.lineIsError) BridgeSupervisor.dismissLine()
+    }
 
     fun showCode() {
         wantsTicket = true
@@ -103,23 +119,23 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
         mutableUi.update { it.copy(typed = "") }
     }
 
-    fun editLink(text: String) = mutableUi.update { it.copy(link = text.take(PairLink.MAX_CHARS), line = null) }
+    fun editLink(text: String) = mutableUi.update { it.copy(link = text.take(PairLink.MAX_CHARS), line = null, lineIsError = false) }
 
     /** A link from outside the app: it is shown for the person to confirm, never followed. It does not replace a pairing in progress. */
     fun confirmLink(link: String) {
         if (pairingInProgress()) {
-            mutableUi.update { it.copy(line = PairingWords.FINISH_FIRST) }
+            mutableUi.update { it.copy(line = PairingWords.FINISH_FIRST, lineIsError = true) }
             return
         }
         val ok = PairLink.accept(link)
-        mutableUi.update { if (ok != null) it.copy(screen = PairingScreen.Confirm, link = ok, line = null) else it.copy(screen = PairingScreen.Home, line = PairingWords.NOT_OURS) }
+        mutableUi.update { if (ok != null) it.copy(screen = PairingScreen.Confirm, link = ok, line = null, lineIsError = false) else it.copy(screen = PairingScreen.Home, line = PairingWords.NOT_OURS, lineIsError = true) }
     }
 
     /** The text of a scan or a paste. A code the person chose to scan or paste in this app starts at once. */
     fun joinText(text: String?) {
         val link = PairLink.accept(text)
         if (link == null) {
-            mutableUi.update { it.copy(line = PairingWords.NOT_OURS) }
+            mutableUi.update { it.copy(line = PairingWords.NOT_OURS, lineIsError = true) }
             return
         }
         startJoin(link)
@@ -132,7 +148,7 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
         runForPairing()
         BridgeSupervisor.forgetJoin()
         if (BridgeSupervisor.state.value.running) BridgeSupervisor.join(link) else pendingJoin = link
-        mutableUi.update { it.copy(screen = PairingScreen.Joining, link = "", line = null) }
+        mutableUi.update { it.copy(screen = PairingScreen.Joining, link = "", line = null, lineIsError = false) }
     }
 
     /** Leaves whatever screen is open for the home screen, dropping a ticket or a join in progress. */
@@ -165,7 +181,7 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
         val peer = mutableUi.value.askRemove ?: return
         val res = getApplication<Application>().resources
         val device = peer.name.ifBlank { "Unnamed device" }
-        if (BridgeSupervisor.revoke(peer.id)) mutableUi.update { it.copy(askRemove = null, removeError = null, line = res.getString(R.string.remove_device_done, device)) }
+        if (BridgeSupervisor.revoke(peer.id)) mutableUi.update { it.copy(askRemove = null, removeError = null, line = res.getString(R.string.remove_device_done, device), lineIsError = false) }
         else mutableUi.update { it.copy(removeError = res.getString(R.string.fail_remove_device_pairing_off, device)) }
     }
 
@@ -173,9 +189,9 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
         BridgeSupervisor.refreshPeers()
     }
 
-    fun dismissLine() {
-        mutableUi.update { it.copy(line = null) }
-        BridgeSupervisor.dismissLine()
+    internal fun dismissLine(source: NoticeSource? = null) {
+        if (source == null || source == NoticeSource.Ui) mutableUi.update { it.copy(line = null, lineIsError = false) }
+        if (source == null || source == NoticeSource.Bridge) BridgeSupervisor.dismissLine()
     }
 
     override fun onCleared() {

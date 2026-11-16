@@ -54,4 +54,17 @@ class PairingWordsTest {
         assertEquals(false, PairingWords.showBatteryNotice(BridgeState(enabled = true), true))
         assertEquals(true, PairingWords.showBatteryNotice(BridgeState(enabled = true), false))
     }
+
+    @Test fun errorLineTakesPrecedenceOverSuccessAndTracksItsSource() {
+        val uiSuccess = PairingUi(line = "Removed", lineIsError = false)
+        val bridgeError = BridgeState(line = "Bridge failed", lineIsError = true)
+        val picked = pickPairingNotice(uiSuccess, bridgeError)
+        assertEquals(ActiveNotice("Bridge failed", isError = true, NoticeSource.Bridge), picked)
+
+        val uiError = PairingUi(line = "Not our link", lineIsError = true)
+        val bridgeSuccess = BridgeState(line = "Device removed.", lineIsError = false)
+        assertEquals(ActiveNotice("Not our link", isError = true, NoticeSource.Ui), pickPairingNotice(uiError, bridgeSuccess))
+
+        assertEquals(ActiveNotice("Removed", isError = false, NoticeSource.Ui), pickPairingNotice(uiSuccess, bridgeSuccess))
+    }
 }

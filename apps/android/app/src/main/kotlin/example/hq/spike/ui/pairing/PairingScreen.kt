@@ -111,7 +111,9 @@ fun PairingHost(vm: PairingViewModel, onClose: () -> Unit) {
             }
         }
         ui.askRemove?.let { peer -> ConfirmDialog(ConfirmCopy.removeDevice(androidx.compose.ui.platform.LocalContext.current, peer.name.ifBlank { "Unnamed device" }), { vm.askRemove(null) }, vm::confirmRemove, error = ui.removeError) }
-        (ui.line ?: bridge.line)?.let { Notice(it, Modifier.align(Alignment.BottomCenter), vm::dismissLine) }
+        pickPairingNotice(ui, bridge)?.let { notice ->
+            Notice(notice.text, notice.isError, Modifier.align(Alignment.BottomCenter)) { vm.dismissLine(notice.source) }
+        }
     }
 }
 
@@ -175,14 +177,12 @@ internal fun PillButton(text: String, primary: Boolean = true, enabled: Boolean 
 }
 
 @Composable
-internal fun Notice(text: String, modifier: Modifier, onDismiss: () -> Unit) {
-    LaunchedEffect(text) { delay(NOTICE_MS); onDismiss() }
-    Row(modifier.padding(8.dp).fillMaxWidth().heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(text, style = HqType.BodySm, color = Mts.Surface100)
+internal fun Notice(text: String, isError: Boolean, modifier: Modifier, onDismiss: () -> Unit) {
+    if (!isError) {
+        LaunchedEffect(text) { delay(example.hq.spike.ui.shell.AttentionBudget.PLAIN_SNACKBAR_MS); onDismiss() }
     }
+    example.hq.spike.ui.shell.SnackbarRow(text, if (isError) stringResource(R.string.close) else null, onDismiss, modifier)
 }
-
-private const val NOTICE_MS = 5_000L
 
 // ---------------------------------------------------------------- home
 
