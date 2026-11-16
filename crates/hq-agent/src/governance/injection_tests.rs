@@ -455,3 +455,41 @@ async fn in_an_owner_chat_a_tainted_fetch_or_send_waits_for_the_owner() {
         assert!(text.contains("Waiting for the owner"), "{tool}: {text}");
     }
 }
+
+#[tokio::test]
+async fn a_trusted_domain_skips_the_ask_but_the_fetch_still_taints() {
+    let mut session = Session::new();
+    let db = with_inbox(&mut session);
+    db.with_conn(|c| hq_db::fetch_sites::add_trusted_domain(c, "example.com"))
+        .unwrap();
+    let (ran, _) = session
+        .call("web_fetch", json!({"url": "https://docs.example.com/page"}))
+        .await;
+    assert!(ran, "a subdomain of a trusted domain is fetched");
+    assert!(
+        session.guardian.taint().is_tainted(),
+        "trust skips the ask, never the marking"
+    );
+    for url in [
+        "https://example.com@attacker.example/",
+        "https://example.com.attacker.example/",
+        "https://badexample.com/",
+    ] {
+        let (ran, text) = session.call("web_fetch", json!({ "url": url })).await;
+        assert!(!ran, "{url} ran without the owner");
+        assert!(text.contains("Waiting for the owner"), "{url}: {text}");
+    }
+    let (ran, _) = session
+        .call("web_fetch", json!({"url": "https://EXAMPLE.com.:8443/x"}))
+        .await;
+    assert!(
+        ran,
+        "case, a trailing dot and a port do not change the host"
+    );
+    db.with_conn(|c| hq_db::fetch_sites::forget(c, "example.com"))
+        .unwrap();
+    let (ran, text) = session
+        .call("web_fetch", json!({"url": "https://example.com/"}))
+        .await;
+    assert!(!ran && text.contains("Waiting for the owner"), "{text}");
+}

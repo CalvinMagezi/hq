@@ -128,8 +128,12 @@ export function executeNotificationAction(
 }
 
 /** Sites that stopped asking because the owner allowed them in several chats. */
-export async function fetchTrustedSites(): Promise<string[]> {
-  return (await hqJson<{ sites: string[] }>('/api/fetch-sites')).sites
+export async function fetchTrustedSites(): Promise<{ sites: string[]; domains: string[] }> {
+  return hqJson<{ sites: string[]; domains: string[] }>('/api/fetch-sites')
+}
+
+export function addTrustedDomain(domain: string): Promise<unknown> {
+  return hqJson('/api/fetch-sites', 'POST', { domain })
 }
 
 export function forgetTrustedSite(site: string): Promise<unknown> {

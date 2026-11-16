@@ -107,6 +107,7 @@ pub mod stop;
 pub mod task;
 pub mod tasks;
 pub mod tools;
+pub mod trust;
 pub mod update;
 pub mod usage;
 pub mod vault;

@@ -488,6 +488,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "134_context_gateway_trail",
         include_str!("../sql/134_context_gateway_trail.sql"),
     ),
+    (
+        "135_trusted_domains",
+        include_str!("../sql/135_trusted_domains.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
