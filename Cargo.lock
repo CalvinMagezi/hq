@@ -3825,6 +3825,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hq-suite-ingest"
+version = "0.9.1"
+dependencies = [
+ "hex",
+ "hq-convert",
+ "hq-suite-md",
+ "serde",
+ "sha2 0.10.9",
+ "tokio",
+ "zip 9.0.5",
+]
+
+[[package]]
 name = "hq-suite-md"
 version = "0.9.1"
 dependencies = [
@@ -3835,6 +3848,29 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2 0.10.9",
+]
+
+[[package]]
+name = "hq-suite-shrink"
+version = "0.9.1"
+dependencies = [
+ "hex",
+ "hq-convert",
+ "hq-suite-ingest",
+ "hq-suite-md",
+ "image",
+ "imgref",
+ "oxideav-webp",
+ "ravif",
+ "rgb",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "webp",
+ "zip 9.0.5",
 ]
 
 [[package]]
@@ -5268,6 +5304,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "libwebp-sys"
+version = "0.9.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54cd30df7c7165ce74a456e4ca9732c603e8dc5e60784558c1c6dc047f876733"
+dependencies = [
+ "cc",
+ "glob",
+]
+
+[[package]]
 name = "linebender_resource_handle"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6466,6 +6512,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36820e9051aca1014ddc75770aab4d68bc1e9e632f0f5627c4086bc216fb583b"
 dependencies = [
  "ttf-parser",
+]
+
+[[package]]
+name = "oxideav-vp8"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c449a84e4f468bb88e40868383e297605c6ab4b591ca600b5f78345e40f281e"
+
+[[package]]
+name = "oxideav-webp"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfca0cb5908192778a23da0b3ede28db58e663069ea70aab72b65b1cfaeb45b8"
+dependencies = [
+ "oxideav-vp8",
 ]
 
 [[package]]
@@ -11229,6 +11290,15 @@ dependencies = [
  "phf_codegen 0.13.1",
  "string_cache 0.9.0",
  "string_cache_codegen 0.6.1",
+]
+
+[[package]]
+name = "webp"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c071456adef4aca59bf6a583c46b90ff5eb0b4f758fc347cea81290288f37ce1"
+dependencies = [
+ "libwebp-sys",
 ]
 
 [[package]]

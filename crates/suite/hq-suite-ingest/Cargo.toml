@@ -1,0 +1,18 @@
+[package]
+name = "hq-suite-ingest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Reads office files into hqmd records for the HQ Suite: fidelity tier, loss report, media"
+
+# May know hq-convert and the other suite crates, nothing else of HQ (crates/suite/CLAUDE.md).
+[dependencies]
+hq-convert = { workspace = true }
+hq-suite-md = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+zip = { version = "9", default-features = false, features = ["deflate"] }
