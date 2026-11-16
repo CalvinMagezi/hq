@@ -1,7 +1,18 @@
 use super::*;
 use serde_json::json;
 
+/// Signed approvals read a key next to the config file. Pointing it at a private directory keeps
+/// the test off the caller's `~/.hq`, which a sandboxed session cannot read and a fresh machine
+/// does not have.
+fn private_approval_key_dir() {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap());
+    // SAFETY: set once to the same value before any approval is signed; no test here reads it back.
+    unsafe { std::env::set_var("HQ_CONFIG_PATH", dir.path().join("config.yaml")) };
+}
+
 fn approval() -> (Arc<Database>, Arc<OwnerApproval>) {
+    private_approval_key_dir();
     let db = Arc::new(Database::open_memory().unwrap());
     let approval = OwnerApproval::new(db.clone(), "web:t1");
     (db, approval)
@@ -321,4 +332,31 @@ fn only_a_session_this_chat_drives_counts_as_its_own_send_target() {
     assert!(!approval.drives_target(&json!({"session_id": "hs-observed"})));
     assert!(!approval.drives_target(&json!({"session_id": "hs-missing"})));
     assert!(!approval.drives_target(&json!({})));
+}
+
+// A remote tool its server marked read-only runs; everything else keeps asking.
+#[test]
+fn remote_reads_run_and_remote_writes_ask() {
+    use hq_tools::remote_mcp::{REMOTE_MCP_CATEGORY, record_tool_list};
+    record_tool_list(
+        "agentpolicy",
+        json!([
+            {"name": "get", "annotations": {"readOnlyHint": true}},
+            {"name": "put", "annotations": {"readOnlyHint": false}},
+            {"name": "bare"}
+        ])
+        .as_array()
+        .unwrap(),
+    );
+    let asks = |tool: &str| {
+        needs_owner(
+            "agentpolicy_call",
+            REMOTE_MCP_CATEGORY,
+            &json!({"tool": tool}),
+        )
+    };
+    assert!(!asks("get"));
+    assert!(asks("put"));
+    assert!(asks("bare"));
+    assert!(asks("unlisted"));
 }

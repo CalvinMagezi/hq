@@ -187,6 +187,7 @@ pub(crate) fn settings_view(config: &HqConfig, env_set: &dyn Fn(&str) -> bool) -
             "sandbox_extra_domains": config.agent_host.sandbox.allow_domains.len(),
             "idle_reap_hours": config.agent_host.idle_reap_hours,
             "drive_new_watches": config.agent_host.drive_new_watches,
+            "drive_after_untrusted_reads": config.agent_host.drive_after_untrusted_reads,
             "driver_checkin_minutes": config.agent_host.driver_checkin_minutes,
             "driver_nudge_budget": config.agent_host.nudge_budget(),
             "driver_no_progress_limit": config.agent_host.no_progress_limit(),

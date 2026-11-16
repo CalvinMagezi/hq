@@ -124,6 +124,11 @@ the registry. A revoke made in another process (`hq bridge revoke`) only changes
 running bridge stops serving that peer at its next request or handshake, and closes its connections
 at once the next time its own code calls `Bridge::revoke` for the same id.
 
+The close that carries a revoke is one datagram, and QUIC does not send it twice. A peer that
+misses it sees its connection end with a reset or a timeout, and then dials once, so that the gate
+here can refuse it as revoked (`Revoker::connection_ended`). A peer that cannot reach this machine
+at that moment learns at its next dial.
+
 ## 7. Attack notes
 
 | # | Attacker | Tries | Result | Guard (test) |

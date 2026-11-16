@@ -21,6 +21,8 @@ export interface AgentHostSettings {
   sandbox_extra_domains: number
   idle_reap_hours: number
   drive_new_watches: boolean
+  /** Absent from a gateway that predates the field; read as off. */
+  drive_after_untrusted_reads?: boolean
   driver_checkin_minutes: number
   driver_nudge_budget: number
   driver_no_progress_limit: number

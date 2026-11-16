@@ -54,6 +54,10 @@ const MAX_ECHO_BYTES: usize = 64 * 1024;
 const ONLINE_WAIT: Duration = Duration::from_secs(5);
 /// How often a hub that just paired looks for the machine's setup.
 const SETUP_POLL: Duration = Duration::from_millis(200);
+/// Longest a probe spends reaching a peer that may simply have gone away.
+const PROBE_DIAL: Duration = Duration::from_secs(20);
+/// How long a probe stays open for the peer's answer: its gate refuses just after the handshake.
+const PROBE_ANSWER: Duration = Duration::from_secs(5);
 
 /// Called with a peer's endpoint id when that peer revoked us. It runs on a blocking thread.
 pub type RevokeCallback = Arc<dyn Fn(&str) + Send + Sync>;
@@ -64,6 +68,15 @@ pub fn peer_revoked_us(close_reason: Option<&ConnectionError>) -> bool {
         return false;
     };
     app.error_code == REJECT_REVOKED.into() && app.reason.as_ref() == REASON_REVOKED
+}
+
+/// Whether a connection ended without its peer saying why, as it does when the one packet that
+/// carried a revoke was lost: only asking the peer can tell.
+fn may_hide_a_revoke(close_reason: Option<&ConnectionError>) -> bool {
+    matches!(
+        close_reason,
+        Some(ConnectionError::Reset | ConnectionError::TimedOut)
+    )
 }
 
 /// Finds a [`ConnectionError`] in an error chain, if one caused it.
@@ -309,9 +322,9 @@ impl ProtocolHandler for Service {
                 recv,
             }));
         }
-        if peer_revoked_us(conn.close_reason().as_ref()) {
-            self.revoker.learned(&id).await;
-        }
+        self.revoker
+            .connection_ended(&id, conn.close_reason().as_ref(), SERVICE_ALPN)
+            .await;
         Ok(())
     }
 }
@@ -353,21 +366,36 @@ impl Registrar for PeerRegistrar {
 
 #[derive(Clone)]
 pub(crate) struct Revoker {
+    endpoint: Endpoint,
     db: Database,
     live: Arc<Live>,
     setup: Option<Arc<SetupState>>,
     on_revoked: Arc<Mutex<Option<RevokeCallback>>>,
-    revoking: Arc<Mutex<HashSet<EndpointId>>>,
+    revoking: PeerSet,
+    probing: PeerSet,
 }
 
-struct RevokingGuard {
+type PeerSet = Arc<Mutex<HashSet<EndpointId>>>;
+
+/// Holds `peer` in a set for as long as it lives.
+struct PeerClaim {
     peer: EndpointId,
-    revoking: Arc<Mutex<HashSet<EndpointId>>>,
+    set: PeerSet,
 }
 
-impl Drop for RevokingGuard {
+impl PeerClaim {
+    /// `None` when `peer` is already claimed.
+    fn take(set: &PeerSet, peer: &EndpointId) -> Option<Self> {
+        set.lock().unwrap().insert(*peer).then(|| Self {
+            peer: *peer,
+            set: set.clone(),
+        })
+    }
+}
+
+impl Drop for PeerClaim {
     fn drop(&mut self) {
-        self.revoking.lock().unwrap().remove(&self.peer);
+        self.set.lock().unwrap().remove(&self.peer);
     }
 }
 
@@ -408,12 +436,8 @@ impl Revoker {
     /// The peer told us it revoked us: the callback runs once, while the setup row it may read is
     /// still there, and then the same revoke as one made here.
     pub(crate) async fn learned(&self, peer: &EndpointId) {
-        if !self.revoking.lock().unwrap().insert(*peer) {
+        let Some(_claim) = PeerClaim::take(&self.revoking, peer) else {
             return;
-        }
-        let _guard = RevokingGuard {
-            peer: *peer,
-            revoking: self.revoking.clone(),
         };
         let paired = matches!(standing(&self.db, *peer).await, Ok(peers::Standing::Paired));
         if !paired {
@@ -430,6 +454,50 @@ impl Revoker {
         }
         if let Err(e) = self.revoke(peer).await {
             tracing::warn!(peer = %peer.fmt_short(), "the peer revoked us, but the revoke here failed: {e:#}");
+        }
+    }
+
+    /// What a connection to `peer` ending tells us. `alpn` is what to ask on if it says nothing:
+    /// a peer that does not serve it goes unasked until the next dial.
+    pub(crate) async fn connection_ended(
+        &self,
+        peer: &EndpointId,
+        close_reason: Option<&ConnectionError>,
+        alpn: &[u8],
+    ) {
+        if peer_revoked_us(close_reason) {
+            self.learned(peer).await;
+        } else if may_hide_a_revoke(close_reason) {
+            self.probe(peer, alpn).await;
+        }
+    }
+
+    /// Dials `peer` once, so that its gate can say "revoked": the close that says so is one
+    /// datagram QUIC never sends again, and nothing else dials until a local connection asks.
+    /// The dial's own watcher records the answer. Boxed because that watcher can come back here.
+    fn probe<'a>(
+        &'a self,
+        peer: &'a EndpointId,
+        alpn: &'a [u8],
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let Some(_claim) = PeerClaim::take(&self.probing, peer) else {
+                return;
+            };
+            let (dialer, id) = (self.dialer(), peer.to_string());
+            let dial = dialer.dial(&id, alpn);
+            if let Ok(Ok(conn)) = tokio::time::timeout(PROBE_DIAL, dial).await {
+                let _ = tokio::time::timeout(PROBE_ANSWER, conn.closed()).await;
+            }
+        })
+    }
+
+    fn dialer(&self) -> Dialer {
+        Dialer {
+            endpoint: self.endpoint.clone(),
+            db: self.db.clone(),
+            live: self.live.clone(),
+            revoker: self.clone(),
         }
     }
 }
@@ -486,15 +554,20 @@ impl Dialer {
         // Through the weak handle: a strong one here would keep the connection open for good.
         let closed = conn.weak_handle().closed();
         let revoker = self.revoker.clone();
+        let served = alpn.to_vec();
         tokio::spawn(async move {
-            if let Some(closed) = closed.await
-                && peer_revoked_us(Some(&closed.reason))
-            {
-                revoker.learned(&id).await;
+            if let Some(closed) = closed.await {
+                revoker
+                    .connection_ended(&id, Some(&closed.reason), &served)
+                    .await;
             }
         });
         // A revoke closes this one too, not only the connections the peer opened to us.
         self.live.register(id, conn.weak_handle());
+        // Read after registering: a revoke made during the dial is seen by one or the other.
+        if refused(&self.db, &conn, id).await {
+            bail!("{peer} is not a paired peer");
+        }
         Ok(conn)
     }
 }
@@ -511,7 +584,6 @@ pub struct ForgotEdge {
 pub struct Bridge {
     endpoint: Endpoint,
     db: Database,
-    live: Arc<Live>,
     name: String,
     relay: RelayMode,
     bind: Vec<SocketAddr>,
@@ -618,13 +690,14 @@ impl Bridge {
         let serves =
             handler.is_some() || edge_door.is_some() || services.is_some() || hub.is_some();
         let on_revoked: Arc<Mutex<Option<RevokeCallback>>> = Arc::default();
-        let revoking: Arc<Mutex<HashSet<EndpointId>>> = Arc::default();
         let revoker = Revoker {
+            endpoint: endpoint.clone(),
             db: db.clone(),
             live: live.clone(),
             setup: setup.clone(),
             on_revoked,
-            revoking,
+            revoking: PeerSet::default(),
+            probing: PeerSet::default(),
         };
         let router = serves.then(|| {
             let mut builder = Router::builder(endpoint.clone());
@@ -689,7 +762,6 @@ impl Bridge {
         Ok(Self {
             endpoint,
             db,
-            live,
             name: cfg.name,
             relay: cfg.relay,
             bind: cfg.bind,
@@ -864,12 +936,7 @@ impl Bridge {
     /// A handle that dials paired peers' services and outlives no part of this bridge it needs:
     /// a forward task holds one instead of the bridge.
     pub fn dialer(&self) -> Dialer {
-        Dialer {
-            endpoint: self.endpoint.clone(),
-            db: self.db.clone(),
-            live: self.live.clone(),
-            revoker: self.revoker.clone(),
-        }
+        self.revoker.dialer()
     }
 
     /// Takes a peer off the list and closes every connection it has open, at once.
@@ -1088,6 +1155,104 @@ mod tests {
             refusal(&Err(anyhow!("database is locked"))),
             Some((REJECT_UNAVAILABLE, REASON_UNAVAILABLE))
         );
+    }
+
+    #[test]
+    fn only_a_connection_that_ended_unexplained_is_worth_a_probe() {
+        assert!(may_hide_a_revoke(Some(&ConnectionError::Reset)));
+        assert!(may_hide_a_revoke(Some(&ConnectionError::TimedOut)));
+        assert!(!may_hide_a_revoke(Some(&ConnectionError::LocallyClosed)));
+        assert!(!may_hide_a_revoke(Some(&closed_with(0, b"bye"))));
+        assert!(!may_hide_a_revoke(None));
+    }
+
+    async fn refusing_peer(code: u32, reason: &'static [u8]) -> Endpoint {
+        let peer = Endpoint::builder(presets::Minimal)
+            .secret_key(SecretKey::generate())
+            .relay_mode(RelayMode::Disabled)
+            .clear_ip_transports()
+            .alpns(vec![SVC_ALPN.to_vec()])
+            .bind_addr("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+            .unwrap()
+            .bind()
+            .await
+            .unwrap();
+        let listening = peer.clone();
+        tokio::spawn(async move {
+            while let Some(incoming) = listening.accept().await {
+                if let Ok(conn) = incoming.await {
+                    conn.close(code.into(), reason);
+                }
+            }
+        });
+        peer
+    }
+
+    /// A bridge that lists `peer`, and the peers its revoke callback ran for.
+    async fn listing(peer: &Endpoint) -> (Bridge, tempfile::TempDir, Arc<Mutex<Vec<String>>>) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        let bridge = Bridge::start(
+            BridgeConfig {
+                key: dir.path().join("bridge.key"),
+                bind: vec!["127.0.0.1:0".parse().unwrap()],
+                relay: RelayMode::Disabled,
+                name: "hub".into(),
+                with_addrs: true,
+                advertise: vec![],
+            },
+            db.clone(),
+            None,
+        )
+        .await
+        .unwrap();
+        let addrs: Vec<String> = peer.bound_sockets().iter().map(|a| a.to_string()).collect();
+        peers::add_peer(&db, &peer.id().to_string(), "peer", &[], &addrs).unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let record = seen.clone();
+        bridge.set_on_revoked(Arc::new(move |id: &str| {
+            record.lock().unwrap().push(id.to_string());
+        }));
+        (bridge, dir, seen)
+    }
+
+    /// The polls below end as soon as the answer is in; this is only for a loaded runner.
+    const ANSWER_WAIT: Duration = Duration::from_secs(10);
+    const ANSWER_POLL: Duration = Duration::from_millis(20);
+    /// How long a revoke that should not happen is given to show up.
+    const NO_REVOKE_SETTLE: Duration = Duration::from_millis(500);
+
+    #[tokio::test]
+    async fn a_connection_reset_after_a_lost_revoke_learns_it_from_the_peers_gate() {
+        let peer = refusing_peer(REJECT_REVOKED, REASON_REVOKED).await;
+        let (bridge, _dir, seen) = listing(&peer).await;
+        let id = peer.id().to_string();
+        let end = tokio::time::Instant::now() + ANSWER_WAIT;
+        // The dial's watcher records the answer after the probe returns, and the peer's close
+        // travels once here too, so a lost one needs another probe.
+        while peers::is_paired(&bridge.db, &id).unwrap() && tokio::time::Instant::now() < end {
+            bridge
+                .revoker
+                .connection_ended(&peer.id(), Some(&ConnectionError::Reset), SVC_ALPN)
+                .await;
+            tokio::time::sleep(ANSWER_POLL).await;
+        }
+        assert!(!peers::is_paired(&bridge.db, &id).unwrap());
+        assert_eq!(seen.lock().unwrap().as_slice(), [id]);
+    }
+
+    #[tokio::test]
+    async fn a_probe_answered_with_anything_but_revoked_revokes_nothing() {
+        let peer = refusing_peer(REJECT_UNPAIRED, REASON_NOT_PAIRED).await;
+        let (bridge, _dir, seen) = listing(&peer).await;
+        let id = peer.id().to_string();
+        bridge
+            .revoker
+            .connection_ended(&peer.id(), Some(&ConnectionError::TimedOut), SVC_ALPN)
+            .await;
+        tokio::time::sleep(NO_REVOKE_SETTLE).await;
+        assert!(peers::is_paired(&bridge.db, &id).unwrap());
+        assert!(seen.lock().unwrap().is_empty());
     }
 
     fn card(edge: &EndpointId) -> Card {

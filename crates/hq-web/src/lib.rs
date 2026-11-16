@@ -506,7 +506,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/coder/{action}",
             axum::routing::post(coder_api::control_handler),
         )
-        .route("/api/fetch-sites", get(fetch_sites_api::list_handler))
+        .route(
+            "/api/fetch-sites",
+            get(fetch_sites_api::list_handler).post(fetch_sites_api::add_domain_handler),
+        )
         .route(
             "/api/fetch-sites/{host}",
             axum::routing::delete(fetch_sites_api::forget_handler),

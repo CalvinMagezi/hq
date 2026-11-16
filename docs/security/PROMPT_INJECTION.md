@@ -198,3 +198,19 @@ Run them with `cargo test -p hq-agent governance`.
   for rule 4.
 - `config_manage` is not registered in native sessions. It only exists in
   the external MCP registry, which is not governed by this layer.
+
+## Trusted domains
+
+The owner can name a domain (`hq trust add example.com`, or Settings, Safety) so `web_fetch` of
+that host or any subdomain stops asking in every chat. The match is on the parsed host, whole
+labels only: `example.com@evil.test` is `evil.test` and `example.com.evil.test` is not covered.
+Only the owner's routes and command write the list (`hq_db::fetch_sites`); no tool a model can
+call does, and HQ never adds a domain itself.
+
+Trust skips the ask and nothing else. A page from a trusted domain still marks the session as
+having read untrusted text, because a trusted site can host injected instructions, and a long
+address still asks.
+
+Do not trust a host many people publish on, such as a code-hosting pages domain or a blog
+platform: a domain covers every subdomain, and each one is somebody else's page. HQ checks the
+shape of the name but does not carry the public suffix list, so it cannot refuse these for you.
