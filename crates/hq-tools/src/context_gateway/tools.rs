@@ -31,6 +31,7 @@ enum Kind {
     Read,
     Expand,
     Related,
+    Ask,
 }
 
 /// What every tool shares. One rate limiter lives here so the window counts across tools.
@@ -45,7 +46,7 @@ pub struct ContextTool {
     kind: Kind,
 }
 
-/// The five tools, sharing one rate limiter.
+/// The six session tools sharing one rate limiter, plus the owner-only trail reader.
 pub fn create_context_tools(vault: Arc<VaultClient>, db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
     let shared = Arc::new(Shared {
         vault,
@@ -58,6 +59,7 @@ pub fn create_context_tools(vault: Arc<VaultClient>, db: Arc<Database>) -> Vec<B
         Kind::Read,
         Kind::Expand,
         Kind::Related,
+        Kind::Ask,
     ]
     .into_iter()
     .map(|kind| {
@@ -66,6 +68,9 @@ pub fn create_context_tools(vault: Arc<VaultClient>, db: Arc<Database>) -> Vec<B
             kind,
         }) as Box<dyn HqTool>
     })
+    .chain(std::iter::once(Box::new(ContextTrailTool {
+        db: shared.db.clone(),
+    }) as Box<dyn HqTool>))
     .collect()
 }
 
@@ -86,6 +91,11 @@ struct ReadArgs {
 struct ExpandArgs {
     from: Vec<String>,
     depth: Option<u8>,
+}
+
+#[derive(Deserialize)]
+struct AskArgs {
+    question: String,
 }
 
 #[derive(Deserialize)]
@@ -138,6 +148,15 @@ impl ContextTool {
             Kind::Related => ContextOp::Related {
                 id: parse_id(&parse::<RelatedArgs>(args)?.id)?,
             },
+            Kind::Ask => {
+                let a: AskArgs = parse(args)?;
+                if a.question.trim().is_empty() {
+                    bail!("question must not be empty");
+                }
+                ContextOp::AskHq {
+                    question: a.question,
+                }
+            }
         })
     }
 }
@@ -159,6 +178,7 @@ impl HqTool for ContextTool {
             Kind::Read => "context_read",
             Kind::Expand => "context_expand",
             Kind::Related => "context_related",
+            Kind::Ask => "context_ask_hq",
         }
     }
 
@@ -173,6 +193,9 @@ impl HqTool for ContextTool {
                 "Follow the knowledge graph outward from notes inside your task's folders."
             }
             Kind::Related => "Notes linked to one note inside your task's folders.",
+            Kind::Ask => {
+                "Ask HQ one bounded question about your task. It is answered only from the folders your task opens to you, with cited sources and explicit gaps. It never widens your access, and a question with no answer in scope says so instead of guessing."
+            }
         }
     }
 
@@ -209,6 +232,10 @@ impl HqTool for ContextTool {
                 json!(["from"]),
             ),
             Kind::Related => (json!({ "id": id }), json!(["id"])),
+            Kind::Ask => (
+                json!({ "question": { "type": "string", "description": "What decision or fact is missing, in one or two sentences" } }),
+                json!(["question"]),
+            ),
         };
         json!({ "type": "object", "properties": properties, "required": required })
     }
@@ -236,6 +263,55 @@ impl HqTool for ContextTool {
     }
 }
 
+/// The owner's view of what a task's sessions were shown. A session token cannot reach it (it is
+/// not in the session allowlist) and a call that carries a proven session id is refused here too.
+pub struct ContextTrailTool {
+    db: Arc<Database>,
+}
+
+#[async_trait]
+impl HqTool for ContextTrailTool {
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        "context_trail"
+    }
+
+    fn description(&self) -> &str {
+        "Owner only: every source the context gateway returned to the sessions of a task, with session, operation, source id and content hash. Never note text."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": { "task_id": { "type": "string", "description": "Task id" } },
+            "required": ["task_id"]
+        })
+    }
+
+    fn category(&self) -> &str {
+        CATEGORY
+    }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        if caller_session(&args).is_some() {
+            bail!("the retrieval trail is for the owner, not for sessions");
+        }
+        let task_id = args
+            .get("task_id")
+            .and_then(Value::as_str)
+            .filter(|t| !t.is_empty())
+            .context("task_id is required")?
+            .to_string();
+        let rows = self
+            .db
+            .with_conn(|c| hq_db::context_audit::trail_for_task(c, &task_id))?;
+        Ok(json!({ "task_id": task_id, "trail": rows }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,6 +330,7 @@ mod tests {
     struct Fixture {
         dir: tempfile::TempDir,
         tools: Vec<Box<dyn HqTool>>,
+        db: Arc<Database>,
     }
 
     fn fixture() -> Fixture {
@@ -295,7 +372,7 @@ mod tests {
         })
         .unwrap();
         let tools = create_context_tools(vault, db.clone());
-        Fixture { dir, tools }
+        Fixture { dir, tools, db }
     }
 
     impl Fixture {
@@ -303,6 +380,9 @@ mod tests {
             let path = self.dir.path().join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, format!("# {rel}\n\n{body}\n")).unwrap();
+            self.db
+                .with_conn(|c| hq_db::search::reconcile_path(c, self.dir.path(), rel).map(|_| ()))
+                .unwrap();
         }
 
         async fn call(&self, name: &str, args: Value) -> Result<Value> {
@@ -406,5 +486,90 @@ mod tests {
             .call("context_read", attested(json!({ "id": "../etc/passwd" })))
             .await;
         assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn ask_hq_answers_from_scope_only_and_cites_sources() {
+        let f = fixture();
+        f.note(&format!("{IN_DIR}/Plan.md"), "launch happens in september");
+        f.note(&format!("{OUT_DIR}/Secret.md"), &format!("launch {SECRET}"));
+        let out = f
+            .call("context_ask_hq", attested(json!({ "question": "launch" })))
+            .await
+            .unwrap();
+        let dump = serde_json::to_string(&out).unwrap();
+        assert!(!dump.contains(SECRET), "{dump}");
+        assert!(dump.contains("Plan.md"), "{dump}");
+    }
+
+    #[tokio::test]
+    async fn ask_hq_with_nothing_in_scope_says_so_and_empty_questions_fail() {
+        let f = fixture();
+        let out = f
+            .call(
+                "context_ask_hq",
+                attested(json!({ "question": "anything about zebras" })),
+            )
+            .await
+            .unwrap();
+        assert!(out["entries"].as_array().unwrap().is_empty());
+        assert!(!out["gaps"].as_array().unwrap().is_empty());
+        let empty = f
+            .call("context_ask_hq", attested(json!({ "question": "  " })))
+            .await;
+        assert!(empty.is_err());
+        let anon = f
+            .call("context_ask_hq", json!({ "question": "hello" }))
+            .await
+            .unwrap();
+        assert_eq!(anon["unavailable"], "no_identity");
+    }
+
+    #[tokio::test]
+    async fn a_task_with_no_allow_prefixes_fails_closed_for_ask_hq() {
+        let f = fixture();
+        f.db.with_conn(|c| hq_db::context_grants::set_allow_prefixes(c, TASK, &[]))
+            .unwrap();
+        let out = f
+            .call("context_ask_hq", attested(json!({ "question": "q" })))
+            .await
+            .unwrap();
+        assert_eq!(out["unavailable"], "unmarked");
+        assert!(out.get("entries").is_none());
+    }
+
+    #[tokio::test]
+    async fn every_returned_source_lands_on_the_trail_and_only_the_owner_reads_it() {
+        let f = fixture();
+        let path = format!("{IN_DIR}/Ok.md");
+        f.note(&path, "readable body");
+        f.call("context_read", attested(json!({ "id": path })))
+            .await
+            .unwrap();
+        f.call(
+            "context_read",
+            attested(json!({ "id": format!("{OUT_DIR}/No.md") })),
+        )
+        .await
+        .unwrap();
+
+        let out = f
+            .call("context_trail", json!({ "task_id": TASK }))
+            .await
+            .unwrap();
+        let rows = out["trail"].as_array().unwrap();
+        assert_eq!(rows.len(), 1, "{out}");
+        assert_eq!(rows[0]["source_id"], path);
+        assert_eq!(rows[0]["session_id"], SESSION);
+        assert!(
+            !serde_json::to_string(&out)
+                .unwrap()
+                .contains("readable body")
+        );
+
+        let from_session = f
+            .call("context_trail", attested(json!({ "task_id": TASK })))
+            .await;
+        assert!(from_session.is_err());
     }
 }

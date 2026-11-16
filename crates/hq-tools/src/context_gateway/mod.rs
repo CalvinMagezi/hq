@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 pub use resolver::DbGrantResolver;
 pub use retrieval::{RATE_MAX_CALLS, RateLimiter, Retriever};
 pub use scope::{PrefixScope, SourceId};
-pub use tools::create_context_tools;
+pub use tools::{ContextTrailTool, create_context_tools};
 
 pub const DEFAULT_MAX_GRAPH_DEPTH: u8 = 2;
 pub const DEFAULT_MAX_RESULTS: usize = 20;
@@ -30,6 +30,10 @@ impl Caps {
     pub const TASK_COMMENT: Caps = Caps(2);
     pub const TASK_UPDATE: Caps = Caps(4);
     pub const ASK_HQ: Caps = Caps(8);
+
+    pub const fn union(self, other: Caps) -> Caps {
+        Caps(self.0 | other.0)
+    }
 
     pub fn contains(self, other: Caps) -> bool {
         self.0 & other.0 == other.0

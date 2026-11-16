@@ -25,6 +25,9 @@ pub const RATE_MAX_CHARS: usize = 200_000;
 const MIN_SHARE_CHARS: usize = 80;
 const SEARCH_OVERFETCH: usize = 3;
 const ORIENT_BUDGET_CHARS: usize = 2_000;
+pub const ASK_MAX_QUESTION_CHARS: usize = 500;
+const ASK_MAX_RESULTS: usize = 5;
+const ASK_BUDGET_CHARS: usize = 4_000;
 
 #[derive(Default)]
 struct Window {
@@ -161,15 +164,23 @@ impl<'a> Retriever<'a> {
                 self.expand(grant, &scope, std::slice::from_ref(id), 1, &mut sink);
                 (String::new(), grant.scope.max_results)
             }
-            ContextOp::AskHq { .. } => {
-                sink.gaps
-                    .push(gap(GapKind::Missing, "asking HQ is not part of retrieval"));
-                (String::new(), 0)
+            ContextOp::AskHq { question } => {
+                let question = question.trim();
+                if question.is_empty() || question.chars().count() > ASK_MAX_QUESTION_CHARS {
+                    sink.gaps.push(gap(
+                        GapKind::Missing,
+                        "the question is empty or too long to answer",
+                    ));
+                    return self.fill(grant, sink, "", 1, 0, now);
+                }
+                self.search(grant, &scope, question, ASK_MAX_RESULTS, &mut sink);
+                (question.to_string(), ASK_MAX_RESULTS)
             }
         };
         let budget = match op {
             ContextOp::Read { max_chars, .. } => (*max_chars).min(total),
             ContextOp::Orient => ORIENT_BUDGET_CHARS.min(total),
+            ContextOp::AskHq { .. } => ASK_BUDGET_CHARS.min(total),
             _ => total,
         };
         self.fill(grant, sink, &query, limit.max(1), budget, now)
@@ -358,7 +369,20 @@ impl<'a> Retriever<'a> {
             denied,
         };
         // An audit failure must not turn into a read failure or leak through the result.
-        let _ = self.db.with_conn(|c| context_audit::record(c, &row, now));
+        let _ = self.db.with_conn(|c| {
+            context_audit::record(c, &row, now)?;
+            for entry in &result.entries {
+                let trail = context_audit::TrailRow {
+                    task_id: &grant.task_id,
+                    session_id: &grant.session_id,
+                    op: row.op,
+                    source_id: &entry.id,
+                    content_hash: &entry.content_hash,
+                };
+                context_audit::record_trail(c, &trail, now)?;
+            }
+            Ok(())
+        });
     }
 }
 

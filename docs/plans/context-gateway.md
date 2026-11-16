@@ -50,7 +50,7 @@ split per source and what does not fit is an `OverBudget` gap. Calls are rate li
 
 ## Not yet built
 
-Adapters for other harnesses, `ask_hq`, `include_task_links`, and evaluation.
+Adapters for other harnesses, `include_task_links`, and evaluation.
 
 ## Phase 3: the tools
 
@@ -60,3 +60,19 @@ session token can call them. The session comes only from the id the gateway atte
 `hqs_` token; the schemas carry no task, session or scope field. A call with no proven session, or
 one whose grant cannot be resolved, returns a typed `unavailable` result and reads nothing. One
 rate limiter is shared across the five tools.
+
+## Phase 4: `context_ask_hq` and the retrieval trail
+
+`context_ask_hq` takes one bounded question (at most `ASK_MAX_QUESTION_CHARS`). It is answered
+only from the task's folders: a keyword search over the same scope, at most five cited sources
+and a smaller character budget, so it never widens access and calls no other tool. When nothing
+in scope matches it returns an empty result with a `no_match` gap; HQ never answers from memory.
+It needs `Caps::ASK_HQ`, which the resolver grants beside read. A task with no `allow_prefixes`
+fails closed (`unmarked`) exactly like the read tools. The answer is synchronous: there is no
+pending or answered state, and no owner hand-off for judgment questions yet.
+
+The trail: every source a call returns writes one `context_gateway_trail` row (task, session,
+operation, source id, content hash, time). Never note text and never the query, so a resumed
+session can fetch the cited sources again and the owner can see what was shown.
+`context_trail` (owner only, not in `SESSION_ALLOWLIST`, and refused when a proven session id is
+attached) reads it by task id. Counts-only audit rows in `context_gateway_audit` are unchanged.
