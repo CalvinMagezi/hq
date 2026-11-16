@@ -156,6 +156,9 @@ pub fn status(vault: &Path, path: &str) -> Result<FileStatus> {
     let paths = SuitePaths::new(vault);
     let notes = VaultNotes::new(paths.clone());
     let job = job_for(&paths, &rel);
+    if job.is_none() && !hq_suite_store::trash::exists(&paths, &rel) {
+        anyhow::bail!("That file is not in the vault.");
+    }
     Ok(status_of(&shrinker(&paths, &notes), &rel, job))
 }
 

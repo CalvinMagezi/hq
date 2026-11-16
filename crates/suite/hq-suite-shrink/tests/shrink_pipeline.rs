@@ -674,6 +674,20 @@ async fn abandoning_an_adopted_shrink_puts_the_note_back_as_it_was() {
 }
 
 #[tokio::test]
+async fn an_adopted_job_can_be_abandoned_after_its_note_was_deleted() {
+    let original = docx("Report", &big_pictures());
+    let (d, paths) = vault_with(SOURCE, &original);
+    seed_imported_note(&d, &original);
+    let notes = FolderNotes(paths.clone());
+    let s = shrinker(&paths, &notes, &NoFaults);
+    let preview = s.prepare(SOURCE, DAY).await.unwrap();
+    std::fs::remove_file(d.path().join(IMPORTED_NOTE)).unwrap();
+    s.abandon(&preview.job).unwrap();
+    assert_eq!(only_job(&paths).step, Step::Abandoned);
+    assert_eq!(std::fs::read(d.path().join(SOURCE)).unwrap(), original);
+}
+
+#[tokio::test]
 async fn a_note_edited_since_the_draft_is_never_overwritten_or_reverted() {
     let original = docx("Report", &big_pictures());
     let (d, paths) = vault_with(SOURCE, &original);

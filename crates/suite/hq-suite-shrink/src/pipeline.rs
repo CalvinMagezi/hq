@@ -607,6 +607,14 @@ impl<'a> Shrinker<'a> {
             adopted_note_sha256: adoptable.as_ref().map(|(_, t)| sha256_bytes(t.as_bytes())),
         };
         if let Some((_, existing)) = &adoptable {
+            // A second request for the same file may have gone further while this one worked:
+            // then the note is already its draft, and its earlier text is the one on file.
+            if let Ok(mut other) = journal.load(&id)
+                && !other.step.is_terminal()
+            {
+                self.run_to_verified(&mut other)?;
+                return Ok(self.preview_of(&other));
+            }
             journal.write_prior(&id, existing)?;
         }
         journal.write_draft(&id, &text)?;
@@ -935,10 +943,12 @@ impl<'a> Shrinker<'a> {
         if job.adopted_note_sha256.is_some() {
             // The note was the person's before this job: put its text back, if nobody has
             // edited it since the draft was written.
-            let prior = journal.read_prior(&job.id)?;
-            self.notes.modify(&job.note, &|text| {
-                Ok((sha256_bytes(text.as_bytes()) == job.note_sha256).then(|| prior.clone()))
-            })?;
+            if self.notes.read(&job.note)?.is_some() {
+                let prior = journal.read_prior(&job.id)?;
+                self.notes.modify(&job.note, &|text| {
+                    Ok((sha256_bytes(text.as_bytes()) == job.note_sha256).then(|| prior.clone()))
+                })?;
+            }
         } else {
             self.notes
                 .remove_if_unchanged(&job.note, &job.note_sha256)?;

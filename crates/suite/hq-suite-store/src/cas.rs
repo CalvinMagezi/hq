@@ -150,6 +150,9 @@ impl Cas {
             fsx::atomic_write(&path, bytes)?;
             return Ok((r, Stored::New));
         }
+        // Rewritten with the same bytes so its age restarts: a picture a record is about to link
+        // again must not look old enough to a cleanup that has not yet seen the new note.
+        fsx::atomic_write(&path, bytes)?;
         Ok((r, Stored::Existing))
     }
 
@@ -238,6 +241,23 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let c = Cas::new(SuitePaths::new(d.path()));
         (d, c)
+    }
+
+    #[test]
+    fn storing_a_picture_again_restarts_its_age() {
+        let (d, c) = cas();
+        let (r, _) = c.put(b"picture bytes", "webp").unwrap();
+        let path = d.path().join(r.rel());
+        let long_ago = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000);
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+        let (_, stored) = c.put(b"picture bytes", "webp").unwrap();
+        assert_eq!(stored, Stored::Existing);
+        assert!(fs::metadata(&path).unwrap().modified().unwrap() > long_ago);
     }
 
     #[test]

@@ -251,18 +251,67 @@ fn over_budget_an_original_past_its_window_goes_and_its_note_says_so() {
 fn an_original_inside_its_window_is_never_taken_and_the_pass_says_it_is_over() {
     let (d, p) = setup();
     fs::write(d.path().join(NOTE), note_text("trash", &[])).unwrap();
+    let recent = "_trash/2026-02-20/Notebooks/a.docx";
+    let file = d.path().join(recent);
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(&file, vec![7u8; 500]).unwrap();
+    let mut j = job("sj-a", Step::Done, "2026-01-01", vec![]);
+    j.disposition = Some(Disposition::Trash {
+        target: recent.into(),
+    });
+    Journal::new(&p).create(&j).unwrap();
+    let s = Settings {
+        budget_bytes: Some(100),
+        ..Settings::default()
+    };
+    let out = run(&p, &s);
+    assert_eq!(
+        out.originals_expired, 0,
+        "age counts from the day it was set aside"
+    );
+    assert!(out.over_budget);
+    assert!(trash::exists(&p, recent));
+}
+
+#[test]
+fn an_original_is_kept_when_its_record_is_not_whole() {
+    let (d, p) = setup();
     put_original(&d, 500);
+    let r = picture(&p, 1);
+    let plan = MediaPlan {
+        cas: r.clone(),
+        bytes: 100,
+    };
     Journal::new(&p)
-        .create(&job("sj-a", Step::Done, "2026-02-20", vec![]))
+        .create(&job("sj-a", Step::Done, "2026-01-01", vec![plan]))
         .unwrap();
+    // The note is missing.
     let s = Settings {
         budget_bytes: Some(100),
         ..Settings::default()
     };
     let out = run(&p, &s);
     assert_eq!(out.originals_expired, 0);
-    assert!(out.over_budget);
+    assert!(out.skipped.contains(&"a record is not whole"));
     assert!(trash::exists(&p, TRASHED));
+    // The note exists but no longer links the picture.
+    fs::write(d.path().join(NOTE), note_text("trash", &[])).unwrap();
+    assert_eq!(run(&p, &s).originals_expired, 0);
+    assert!(trash::exists(&p, TRASHED));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_note_makes_the_scan_incomplete_so_nothing_is_removed() {
+    let (d, p) = setup();
+    let orphan = picture(&p, 2);
+    fs::write(d.path().join("real.md"), note_text("kept", &[])).unwrap();
+    std::os::unix::fs::symlink(d.path().join("real.md"), d.path().join("Notebooks/link.md"))
+        .unwrap();
+    let out = run(&p, &Settings::default());
+    assert_eq!(out.media_removed, 0);
+    assert!(out.skipped.contains(&"a note could not be read"));
+    assert!(Cas::new(p).has(&orphan));
 }
 
 #[test]

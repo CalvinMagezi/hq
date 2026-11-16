@@ -11,9 +11,15 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use hq_core::config::HqConfig;
 use serde::Deserialize;
+use tokio::sync::Semaphore;
 
 use crate::WsState;
 use crate::error::ApiError;
+
+/// Shrinks at once. Each decodes a whole document and its pictures, so a few at a time is what a
+/// phone can carry; the rest wait their turn.
+const CONCURRENT_SHRINKS: usize = 2;
+static SHRINK_SLOTS: Semaphore = Semaphore::const_new(CONCURRENT_SHRINKS);
 
 pub(crate) fn routes() -> Router<Arc<WsState>> {
     Router::new()
@@ -70,10 +76,13 @@ pub(crate) async fn shrink_handler(
     // Detached: a phone that gives up waiting must not cancel a shrink halfway, which would leave
     // pictures stored without a job and make the retry's saving look larger than it is.
     let vault = state.vault_path.clone();
-    let status = tokio::spawn(async move { hq_suite_adapter::api::prepare(&vault, &b.path).await })
-        .await
-        .map_err(ApiError::internal)?
-        .map_err(refused)?;
+    let status = tokio::spawn(async move {
+        let _slot = SHRINK_SLOTS.acquire().await;
+        hq_suite_adapter::api::prepare(&vault, &b.path).await
+    })
+    .await
+    .map_err(ApiError::internal)?
+    .map_err(refused)?;
     Ok(Json(status))
 }
 

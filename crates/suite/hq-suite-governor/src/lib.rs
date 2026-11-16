@@ -202,7 +202,10 @@ fn scan_references(vault: &Path) -> (HashSet<CasRef>, bool) {
                 complete = false;
                 continue;
             };
-            if ft.is_dir() {
+            if ft.is_symlink() {
+                // A link could lead to a note this scan cannot account for.
+                complete = false;
+            } else if ft.is_dir() {
                 let top = dir == vault && SCAN_SKIP.contains(&name.as_str());
                 if !top {
                     stack.push(path);
@@ -248,14 +251,14 @@ fn mark_gone(
     Ok(())
 }
 
-fn collect_media(
-    paths: &SuitePaths,
-    jobs: &[Job],
-    now: SystemTime,
-    out: &mut Outcome,
-) -> Option<()> {
+fn collect_media(paths: &SuitePaths, now: SystemTime, out: &mut Outcome) -> Option<()> {
     let (mut refs, complete) = scan_references(paths.vault());
     if !complete {
+        return None;
+    }
+    // Listed after the scan, so a job made while it ran is not missed.
+    let (jobs, damaged) = Journal::new(paths).list();
+    if !damaged.is_empty() {
         return None;
     }
     for job in jobs.iter().filter(|j| !j.step.is_terminal()) {
@@ -291,6 +294,25 @@ fn clear_cache(paths: &SuitePaths, out: &mut Outcome) {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// The day an original was set aside, from the `_trash/<day>/...` path it went to.
+fn set_aside_day(target: &str) -> Option<NaiveDate> {
+    let day = target.strip_prefix("_trash/")?.split('/').next()?;
+    NaiveDate::parse_from_str(day, "%Y-%m-%d").ok()
+}
+
+/// Whether the record that stands in for an original is still whole: its note is there and links
+/// every picture the job stored, and each picture is intact. Only then may the original go.
+fn record_is_whole(paths: &SuitePaths, notes: &dyn Notes, job: &Job) -> bool {
+    let Ok(Some(text)) = notes.read(&job.note) else {
+        return false;
+    };
+    let linked = references_in(&text);
+    let cas = Cas::new(paths.clone());
+    job.media
+        .iter()
+        .all(|m| linked.contains(&m.cas) && cas.verify(&m.cas).is_ok())
+}
+
 fn expire_originals(
     paths: &SuitePaths,
     notes: &dyn Notes,
@@ -300,22 +322,28 @@ fn expire_originals(
     budget: u64,
     out: &mut Outcome,
 ) -> Result<(), GovernError> {
-    let mut aged: Vec<(&Job, NaiveDate)> = jobs
+    let mut aged: Vec<(&Job, &str, NaiveDate)> = jobs
         .iter()
         .filter(|j| is_set_aside(j))
-        .filter_map(|j| Some((j, NaiveDate::parse_from_str(&j.day, "%Y-%m-%d").ok()?)))
-        .filter(|(_, day)| (today - *day).num_days() >= i64::from(settings.cold_window_days))
+        .filter_map(|j| {
+            let target = cold_target(j)?;
+            Some((j, target, set_aside_day(target)?))
+        })
+        .filter(|(_, _, day)| (today - *day).num_days() >= i64::from(settings.cold_window_days))
         .collect();
-    aged.sort_by_key(|(_, day)| *day);
-    for (job, _) in aged {
+    aged.sort_by_key(|(_, _, day)| *day);
+    for (job, target, _) in aged {
         if report(paths).total() <= budget {
             break;
         }
-        let Some(target) = cold_target(job) else {
-            continue;
-        };
         let size = file_len(paths, target);
         if size == 0 || trash::exists(paths, &job.source) {
+            continue;
+        }
+        if !record_is_whole(paths, notes, job) {
+            if !out.skipped.contains(&"a record is not whole") {
+                out.skipped.push("a record is not whole");
+            }
             continue;
         }
         let Ok(path) = paths.resolve(target) else {
@@ -324,7 +352,8 @@ fn expire_originals(
         if fs::remove_file(path).is_ok() {
             out.originals_expired += 1;
             out.original_bytes_freed += size;
-            set_original_state(notes, &job.note, "gone", 0)?;
+            // The file is gone either way; a note that cannot be marked now is marked next pass.
+            let _ = set_original_state(notes, &job.note, "gone", 0);
         }
     }
     Ok(())
@@ -348,7 +377,7 @@ pub fn govern(
         return Ok(out);
     }
     mark_gone(paths, notes, &jobs, &mut out)?;
-    if collect_media(paths, &jobs, now, &mut out).is_none() {
+    if collect_media(paths, now, &mut out).is_none() {
         out.skipped.push("a note could not be read");
     }
     let Some(budget) = settings.budget_bytes else {
