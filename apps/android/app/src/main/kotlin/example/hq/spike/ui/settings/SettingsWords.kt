@@ -333,6 +333,10 @@ object SettingsWords {
 
     enum class SafetyTab(@androidx.annotation.StringRes val label: Int) { Safety(R.string.settings_tab_safety), Time(R.string.settings_tab_time), Helpers(R.string.place_helpers), Tools(R.string.settings_tab_tools) }
 
+    /** Any section of Safety lives on the Safety tab, so a link to one must not open on the tab last used. */
+    fun safetyTabFor(page: SettingsPage, section: String?, current: SafetyTab): SafetyTab =
+        if (page == SettingsPage.Safety && section != null) SafetyTab.Safety else current
+
     /** `inbox.fleet.helper_policy`: what helpers may ask the owner. [id] is HQ's word for it. */
     enum class HelperPolicy(val id: String, @androidx.annotation.StringRes val title: Int, @androidx.annotation.StringRes val about: Int) {
         Nothing("nothing", R.string.settings_helper_policy_nothing, R.string.settings_helper_policy_nothing_about),

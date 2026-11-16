@@ -382,7 +382,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             it.copy(
                 stack = it.stack + page,
                 section = section,
-                safetyTab = if (page == SettingsPage.Safety && section != null) SettingsWords.SafetyTab.Safety else it.safetyTab,
+                safetyTab = SettingsWords.safetyTabFor(page, section, it.safetyTab),
             )
         }
         if (page == SettingsPage.Notifications) loadSilences()

@@ -1,6 +1,5 @@
 package example.hq.spike.ui.settings
 
-import android.app.Application
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
@@ -29,7 +28,6 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import androidx.test.core.app.ApplicationProvider
 import example.hq.spike.testing.testWords
 import example.hq.spike.ui.shell.Links
 import example.hq.spike.ui.theme.HqTheme
@@ -128,16 +126,12 @@ class SettingsSearchTest {
     }
 
     @Test fun openingAnySafetySectionForcesSafetyTab() {
-        val vm = SettingsViewModel(ApplicationProvider.getApplicationContext<Application>())
-        vm.actions.onTab(SettingsWords.SafetyTab.Time)
-        assertEquals(SettingsWords.SafetyTab.Time, vm.state.value.safetyTab)
-
-        vm.actions.onPageSection(SettingsPage.Safety, "trusted_sites")
-        assertEquals(SettingsWords.SafetyTab.Safety, vm.state.value.safetyTab)
-
-        vm.actions.onTab(SettingsWords.SafetyTab.Helpers)
-        vm.actions.onPageSection(SettingsPage.Safety, "origins")
-        assertEquals(SettingsWords.SafetyTab.Safety, vm.state.value.safetyTab)
+        for (tab in SettingsWords.SafetyTab.entries) {
+            assertEquals(SettingsWords.SafetyTab.Safety, SettingsWords.safetyTabFor(SettingsPage.Safety, "trusted_sites", tab))
+            assertEquals(SettingsWords.SafetyTab.Safety, SettingsWords.safetyTabFor(SettingsPage.Safety, "origins", tab))
+        }
+        assertEquals(SettingsWords.SafetyTab.Time, SettingsWords.safetyTabFor(SettingsPage.Safety, null, SettingsWords.SafetyTab.Time))
+        assertEquals(SettingsWords.SafetyTab.Helpers, SettingsWords.safetyTabFor(SettingsPage.Keys, "speech", SettingsWords.SafetyTab.Helpers))
     }
 
     @Test fun scrollOffsetSubtractsRootTopEvenWhenRootTopArrivesLate() {
