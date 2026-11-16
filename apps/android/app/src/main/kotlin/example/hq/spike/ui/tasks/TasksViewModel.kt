@@ -26,7 +26,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-data class TaskLine(val text: String, val action: String? = null)
+data class TaskLine(val text: String, val action: String? = null, val timeoutMs: Long? = null)
 
 /** A task opened on its own page, with what hangs off it. [prompt] is "send back", "status" or "priority" while that step is open. */
 data class TaskDetail(
@@ -73,6 +73,7 @@ data class TasksUi(
     val tab: TaskTab = TaskTab.Today,
     val tasks: List<TaskItem> = emptyList(),
     val expanded: Set<String> = emptySet(),
+    val waitingOpen: Map<String, Boolean> = emptyMap(),
     val hidden: Set<String> = emptySet(),
     val detail: TaskDetail? = null,
     val quick: QuickState? = null,
@@ -88,6 +89,7 @@ data class TasksUi(
     val bulking: Boolean = false,
     /** A bulk change waiting for the owner's yes, and whether the archived list has been read at least once. */
     val bulkAsk: Bulk? = null,
+    val bulkReviewAsk: WaitingGroup? = null,
     val archivedLoaded: Boolean = false,
     /** What the All tab is narrowed to, the tree it is chosen from (read when the sheet first opens), and whether that sheet is open. */
     val scope: TaskScope = TaskScope.Everything,
@@ -119,6 +121,11 @@ data class TasksUi(
             TaskTab.All -> TasksLogic.allList(w, shown.filter(keep), chip, archived.filter(keep))
         }
     } ?: emptyList()
+
+    /** Initiative sub-groups for the Waiting on you section on the Today tab. */
+    val waitingGroups: List<WaitingGroup> get() = words?.let { w ->
+        groups.firstOrNull { it.key == "waiting" }?.let { WaitingGroups.group(w, it.tasks, tree) }
+    } ?: emptyList()
 }
 
 /** The briefing read from this phone's HQ and a server HQ, each with when the phone last read it. A server part read from the saved copy is [serverStale]. */
@@ -140,6 +147,7 @@ class TasksActions(
     val onTab: (TaskTab) -> Unit = {},
     val onRefresh: () -> Unit = {},
     val onToggleGroup: (String) -> Unit = {},
+    val onToggleWaitingGroup: (String) -> Unit = {},
     val onDone: (TaskItem) -> Unit = {},
     val onTomorrow: (TaskItem) -> Unit = {},
     val onUndo: () -> Unit = {},
@@ -169,6 +177,8 @@ class TasksActions(
     val onBulkPrompt: (String?) -> Unit = {},
     val onBulk: (Bulk) -> Unit = {},
     val onBulkAsk: (Bulk?) -> Unit = {},
+    val onBulkReviewAsk: (WaitingGroup?) -> Unit = {},
+    val onBulkReviewConfirm: (WaitingGroup) -> Unit = {},
     val onAway: (Boolean) -> Unit = {},
     val onAwayInitiative: (String) -> Unit = {},
     val onAwayToday: () -> Unit = {},
@@ -182,12 +192,15 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     private var undo: (suspend () -> Unit)? = null
     private var lineJob: Job? = null
     private var refreshSeq = 0
+    private var treeFailedAtMs: Long? = null
+    private var treeJob: Job? = null
     private val writing = mutableSetOf<String>()
     private val restoring = mutableSetOf<String>()
 
     val actions = TasksActions(
         onTab = ::chooseTab, onRefresh = { viewModelScope.launch { refresh() } },
         onToggleGroup = { k -> _state.update { it.copy(expanded = if (k in it.expanded) it.expanded - k else it.expanded + k) } },
+        onToggleWaitingGroup = { k -> _state.update { it.copy(waitingOpen = WaitingGroups.toggleOpen(it.waitingOpen, k, it.waitingGroups)) } },
         onDone = ::done, onTomorrow = ::tomorrow, onUndo = ::undoLast, onDismissLine = { _state.update { it.copy(line = null) }; undo = null },
         onOpen = ::open, onClose = { _state.update { it.copy(detail = null) } }, onMarkDone = { _state.value.detail?.task?.let(::done); _state.update { it.copy(detail = null) } },
         onPrompt = { p -> detail { it.copy(prompt = p) } },
@@ -200,6 +213,8 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         onSelectAll = { ids -> _state.update { if (it.bulking) it else it.copy(selected = ids.toSet()) } },
         onClearSelection = { _state.update { if (it.bulking) it else it.copy(selected = emptySet(), bulkPrompt = null) } },
         onBulkPrompt = { p -> _state.update { it.copy(bulkPrompt = p) } }, onBulk = ::askBulk, onBulkAsk = { c -> if (c == null) _state.update { it.copy(bulkAsk = null) } else runBulk(c) },
+        onBulkReviewAsk = { g -> _state.update { if (it.bulking) it else it.copy(bulkReviewAsk = g) } },
+        onBulkReviewConfirm = ::runBulkReview,
         onAway = ::openAway,
         onAwayInitiative = { id -> _state.update { it.copy(tab = TaskTab.All, chip = AllChip.Done, scope = TaskScope.Initiative(id), selected = emptySet(), away = it.away.copy(open = false)) } },
         onAwayToday = { _state.update { it.copy(tab = TaskTab.Today, away = it.away.copy(open = false)) } },
@@ -313,7 +328,34 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 loaded = true, offline = false, tasks = tasks, sessions = sessions ?: s.sessions, archived = archived ?: s.archived, archivedLoaded = s.archivedLoaded || archived != null,
                 hidden = s.hidden.filter { it in writing }.toSet(), today = LocalDate.now(),
                 detail = s.detail?.let { d -> tasks.firstOrNull { it.id == d.task.id }?.let { fresh -> d.copy(task = fresh) } ?: d },
-            ).let { next -> next.copy(selected = next.selected intersect next.visibleIds) }
+            ).let { next ->
+                next.copy(
+                    selected = next.selected intersect next.visibleIds,
+                    waitingOpen = WaitingGroups.recordDefaults(next.waitingOpen, next.waitingGroups),
+                )
+            }
+        }
+        maybeRefreshTree()
+    }
+
+    /** Loads the initiative tree off the critical path when Today shows Waiting tasks and cooldown allows. */
+    private fun maybeRefreshTree() {
+        val s = _state.value
+        if (s.tab != TaskTab.Today) return
+        val waitingTasks = s.groups.firstOrNull { it.key == "waiting" }?.tasks.orEmpty()
+        if (waitingTasks.isEmpty()) return
+        val unknown = WaitingGroups.hasUnknownInitiative(waitingTasks, s.tree)
+        if (!WaitingGroups.shouldReadTree(s.tree, treeFailedAtMs, System.currentTimeMillis(), unknown)) return
+        if (treeJob?.isActive == true) return
+        treeJob = viewModelScope.launch {
+            try {
+                val fetched = client.taskTree()
+                treeFailedAtMs = null
+                _state.update { it.copy(tree = fetched, treeFailed = false) }
+            } catch (e: HqUnavailable) {
+                treeFailedAtMs = System.currentTimeMillis()
+                _state.update { it.copy(treeFailed = true) }
+            }
         }
     }
 
@@ -348,6 +390,33 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                     refresh()
                 }
             } else say(BulkEdit.summary(example.hq.spike.ui.shell.Words.of(getApplication()), change, results))
+            refresh()
+        }
+    }
+
+    /** Moves old ready_for_review tasks in [group] to complete and offers an 8-second Undo for the ones that actually changed. */
+    private fun runBulkReview(group: WaitingGroup) {
+        if (_state.value.bulking) return
+        val currentEligible = WaitingGroups.eligibleForGroup(_state.value.tasks, group.initiativeId)
+        if (currentEligible.isEmpty()) {
+            _state.update { it.copy(bulkReviewAsk = null) }
+            return
+        }
+        _state.update { it.copy(bulkReviewAsk = null, bulking = true) }
+        viewModelScope.launch {
+            val outcome = WaitingBulkReview.markReviewed(currentEligible) { id, body -> client.patchTask(id, body) }
+            refreshSeq++
+            _state.update { it.copy(bulking = false) }
+            val line = WaitingBulkReview.summaryLine(w(), outcome)
+            if (outcome.moved.isNotEmpty()) {
+                say(line, w().s(R.string.undo), timeoutMs = WaitingGroups.UNDO_REVIEWED_MS) {
+                    val undoOutcome = WaitingBulkReview.undoReviewed(outcome.moved) { id, body -> client.patchTask(id, body) }
+                    if (undoOutcome.failedCount > 0) say(w().s(R.string.tasks_undo_partial_fail, undoOutcome.failedCount.toString()))
+                    refresh()
+                }
+            } else {
+                say(line)
+            }
             refresh()
         }
     }
@@ -452,9 +521,9 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         else -> notAnswering
     })
 
-    private fun say(text: String, action: String? = null, undoWith: (suspend () -> Unit)? = null) {
+    private fun say(text: String, action: String? = null, timeoutMs: Long? = null, undoWith: (suspend () -> Unit)? = null) {
         undo = undoWith
-        _state.update { it.copy(line = TaskLine(text, action)) }
+        _state.update { it.copy(line = TaskLine(text, action, timeoutMs)) }
     }
 
     /** Finishes a task at once and offers Undo; a 409 says it changed meanwhile and reloads. */
