@@ -110,25 +110,24 @@ impl HqTool for VaultWriteNoteTool {
             modified_at: chrono::Utc::now(),
         };
 
-        crate::provenance::keep_before_tool_write(
-            self.db.as_ref(),
-            self.vault.vault_path(),
-            &path,
-            &args,
-        )
-        .await;
         let vault = self.vault.clone();
+        let db = self.db.clone();
         let path_ret = path.clone();
-        tokio::task::spawn_blocking(move || vault.write_note(&path, &note)).await??;
-
-        sync_note_index_and_cache(self.db.as_ref(), &path_ret, &content, &title, &tags);
-        crate::provenance::record_tool_write(
-            self.db.as_ref(),
-            self.vault.vault_path(),
-            &path_ret,
-            &args,
-        )
-        .await;
+        // Run keep + write + record inside spawn_blocking so the NoteGuard is never held across .await.
+        tokio::task::spawn_blocking(move || {
+            crate::provenance::locked_tool_write(
+                db.as_ref(),
+                vault.vault_path(),
+                &path,
+                &args,
+                || {
+                    vault.write_note(&path, &note)?;
+                    sync_note_index_and_cache(db.as_ref(), &path, &content, &title, &tags);
+                    Ok(())
+                },
+            )
+        })
+        .await??;
 
         let abs_path = self.vault.vault_path().join(&path_ret);
         Ok(json!({ "ok": true, "path": path_ret, "abs_path": abs_path.to_string_lossy() }))
@@ -186,38 +185,40 @@ impl HqTool for VaultAppendNoteTool {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
-        let heading = args.get("heading").and_then(|v| v.as_str());
+        let heading = args
+            .get("heading")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
 
         validate_write_path(self.vault.vault_path(), &path)?;
 
-        crate::provenance::keep_before_tool_write(
-            self.db.as_ref(),
-            self.vault.vault_path(),
-            &path,
-            &args,
-        )
-        .await;
         let vault = self.vault.clone();
+        let db = self.db.clone();
         let path_owned = path.clone();
         let content_owned = content.clone();
-        let heading_owned = heading.map(|s| s.to_string());
+        let heading_owned = heading.clone();
 
-        let (title, updated_content, tags) =
-            tokio::task::spawn_blocking(move || -> Result<(String, String, Vec<String>)> {
-                vault.append_to_note(&path_owned, &content_owned, heading_owned.as_deref())?;
-                let note = vault.read_note(&path_owned)?;
-                Ok((note.title, note.content, note.tags))
-            })
-            .await??;
-
-        sync_note_index_and_cache(self.db.as_ref(), &path, &updated_content, &title, &tags);
-        crate::provenance::record_tool_write(
-            self.db.as_ref(),
-            self.vault.vault_path(),
-            &path,
-            &args,
-        )
-        .await;
+        tokio::task::spawn_blocking(move || {
+            crate::provenance::locked_tool_write(
+                db.as_ref(),
+                vault.vault_path(),
+                &path_owned,
+                &args,
+                || {
+                    vault.append_to_note(&path_owned, &content_owned, heading_owned.as_deref())?;
+                    let note = vault.read_note(&path_owned)?;
+                    sync_note_index_and_cache(
+                        db.as_ref(),
+                        &path_owned,
+                        &note.content,
+                        &note.title,
+                        &note.tags,
+                    );
+                    Ok(())
+                },
+            )
+        })
+        .await??;
 
         Ok(json!({ "ok": true, "path": path, "target_heading": heading }))
     }
@@ -282,34 +283,33 @@ impl HqTool for VaultPatchSectionTool {
 
         validate_write_path(self.vault.vault_path(), &path)?;
 
-        crate::provenance::keep_before_tool_write(
-            self.db.as_ref(),
-            self.vault.vault_path(),
-            &path,
-            &args,
-        )
-        .await;
         let vault = self.vault.clone();
+        let db = self.db.clone();
         let path_owned = path.clone();
         let heading_owned = heading.clone();
         let content_owned = content.clone();
 
-        let (title, updated_content, tags) =
-            tokio::task::spawn_blocking(move || -> Result<(String, String, Vec<String>)> {
-                vault.patch_section(&path_owned, &heading_owned, &content_owned)?;
-                let note = vault.read_note(&path_owned)?;
-                Ok((note.title, note.content, note.tags))
-            })
-            .await??;
-
-        sync_note_index_and_cache(self.db.as_ref(), &path, &updated_content, &title, &tags);
-        crate::provenance::record_tool_write(
-            self.db.as_ref(),
-            self.vault.vault_path(),
-            &path,
-            &args,
-        )
-        .await;
+        tokio::task::spawn_blocking(move || {
+            crate::provenance::locked_tool_write(
+                db.as_ref(),
+                vault.vault_path(),
+                &path_owned,
+                &args,
+                || {
+                    vault.patch_section(&path_owned, &heading_owned, &content_owned)?;
+                    let note = vault.read_note(&path_owned)?;
+                    sync_note_index_and_cache(
+                        db.as_ref(),
+                        &path_owned,
+                        &note.content,
+                        &note.title,
+                        &note.tags,
+                    );
+                    Ok(())
+                },
+            )
+        })
+        .await??;
 
         Ok(json!({ "ok": true, "path": path, "patched_heading": heading }))
     }
@@ -368,5 +368,40 @@ mod note_parts_tests {
         let parts =
             hq_vault::frontmatter::merge_leading_frontmatter("T".into(), content, Vec::new());
         assert_eq!(parts.content, content);
+    }
+
+    #[tokio::test]
+    async fn tool_write_waits_for_shared_note_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Arc::new(VaultClient::new(dir.path().to_path_buf()).unwrap());
+        let tool = Arc::new(VaultWriteNoteTool::new(vault));
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let locker = std::thread::spawn(move || {
+            let _held = hq_vault::note_lock::lock_note("Notebooks/shared.md");
+            locked_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        locked_rx.recv().unwrap();
+
+        let tool_clone = tool.clone();
+        let mut handle = tokio::spawn(async move {
+            tool_clone
+                .execute(json!({
+                    "path": "Notebooks/shared.md",
+                    "title": "Shared",
+                    "content": "body",
+                }))
+                .await
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), &mut handle)
+                .await
+                .is_err(),
+            "tool write must wait while hq_vault::note_lock is held"
+        );
+        release_tx.send(()).unwrap();
+        locker.join().unwrap();
+        handle.await.unwrap().unwrap();
     }
 }

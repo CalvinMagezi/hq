@@ -168,24 +168,38 @@ impl HqTool for VaultNoteShortcut {
         let relative_path = format!("Notebooks/{}/{}.md", folder, title);
         let note_path = self.vault_path.join(&relative_path);
 
-        if let Some(parent) = note_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-
         let body = format!(
             "---\ntitle: {}\ncreated: {}\n---\n\n{}",
             title, date, content
         );
-        if let Some(recorder) = self.recorder.clone() {
-            let (rel, args) = (relative_path.clone(), args.clone());
-            let _ = tokio::task::spawn_blocking(move || recorder.before_write(&rel, &args)).await;
-        }
-        tokio::fs::write(&note_path, body).await?;
-
-        if let Some(recorder) = self.recorder.clone() {
-            let (rel, args) = (relative_path.clone(), args.clone());
-            let _ = tokio::task::spawn_blocking(move || recorder.after_write(&rel, &args)).await;
-        }
+        let recorder = self.recorder.clone();
+        let rel = relative_path.clone();
+        // Run keep + write + record inside spawn_blocking so the NoteGuard is never held across .await.
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let _held = hq_vault::note_lock::lock_note(&rel);
+            if let Some(ref rec) = recorder {
+                rec.before_write(&rel, &args);
+            }
+            if let Some(parent) = note_path.parent()
+                && let Err(e) = std::fs::create_dir_all(parent)
+            {
+                if let Some(ref rec) = recorder {
+                    rec.discard_kept(&rel, &args);
+                }
+                return Err(e.into());
+            }
+            if let Err(e) = std::fs::write(&note_path, body) {
+                if let Some(ref rec) = recorder {
+                    rec.discard_kept(&rel, &args);
+                }
+                return Err(e.into());
+            }
+            if let Some(ref rec) = recorder {
+                rec.after_write(&rel, &args);
+            }
+            Ok(())
+        })
+        .await??;
 
         Ok(json!({"written": true, "path": relative_path}))
     }

@@ -154,6 +154,8 @@ pub(crate) async fn note_link_handler(
     if abs.extension().is_none_or(|e| e != NOTE_EXT) {
         return ApiError::bad_request("only notes have a link").into_response();
     }
+    // Read, modify and write happen with no await in between, under the note's lock.
+    let _held = hq_vault::note_lock::lock_note(&rel);
     let raw = match std::fs::read_to_string(&abs) {
         Ok(raw) => raw,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {

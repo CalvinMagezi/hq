@@ -44,27 +44,6 @@ fn checked_note(state: &WsState, requested: &str) -> Result<(PathBuf, String), A
     Ok((abs, effective))
 }
 
-/// How many locks the notes share. A path always maps to the same one, so two writers of one note
-/// meet; unrelated notes may share a lock, which only makes them wait a moment.
-const NOTE_LOCKS: usize = 32;
-
-/// Held while a note is read, compared and written, so nothing slips in between those steps.
-/// Both the owner's save and the restore take it.
-pub(crate) fn lock_note(rel: &str) -> std::sync::MutexGuard<'static, ()> {
-    use std::hash::{Hash, Hasher};
-    static LOCKS: [std::sync::Mutex<()>; NOTE_LOCKS] =
-        [const { std::sync::Mutex::new(()) }; NOTE_LOCKS];
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    // `a//b` and `./a/b` name the same file, so they must pick the same lock.
-    for part in rel.split('/').filter(|p| !p.is_empty() && *p != ".") {
-        part.hash(&mut hasher);
-    }
-    let slot = (hasher.finish() % NOTE_LOCKS as u64) as usize;
-    LOCKS[slot]
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 /// HQ's version `id` of `path` and the earlier text it replaced. `None` unless `id` is a version
 /// of this note and either HQ's latest change (which the kept text was armed for) or, when
 /// `latest_change_only` is off, the kept text's own version. Anything else is not found, never
@@ -132,7 +111,7 @@ pub(crate) async fn restore_version_handler(
     };
     let worker = state.clone();
     let done = tokio::task::spawn_blocking(move || {
-        let _held = lock_note(&rel);
+        let _held = hq_vault::note_lock::lock_note(&rel);
         let (prev, version) = earlier_text(&worker, &rel, id, true)?;
         // Only HQ's change that is still the note is rolled back; a newer edit is never lost.
         let current = file_hash(&worker.vault_path, &rel);
@@ -166,23 +145,6 @@ mod tests {
 
     const BODY_LIMIT: usize = 1 << 20;
 
-    #[test]
-    fn spellings_of_one_path_share_a_lock() {
-        let _held = super::lock_note("Notebooks/Inbox/a.md");
-        let (tx, rx) = std::sync::mpsc::channel();
-        let other = std::thread::spawn(move || {
-            let _again = super::lock_note("./Notebooks//Inbox/a.md");
-            tx.send(()).unwrap();
-        });
-        // The second spelling must wait for the first; if it got another lock it would not.
-        assert!(
-            rx.recv_timeout(std::time::Duration::from_millis(300))
-                .is_err()
-        );
-        drop(_held);
-        rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
-        other.join().unwrap();
-    }
     const REL: &str = "Notebooks/Inbox/a.md";
     const OWNER_TEXT: &str = "---\ntitle: A\n---\nthe owner wrote this";
 
@@ -467,5 +429,148 @@ mod tests {
                 .0,
             StatusCode::BAD_REQUEST
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn restore_racing_an_hq_tool_write_never_overwrites_the_newer_write() {
+        use hq_tools::registry::HqTool;
+
+        for iter in 0..50 {
+            let (v, state, app) = setup();
+            let id = hq_edits(&v, &state, "---\ntitle: A\n---\nHQ v1");
+            let vault = Arc::new(hq_vault::VaultClient::new(v.path().to_path_buf()).unwrap());
+            let tool = Arc::new(hq_tools::vault::VaultWriteNoteTool::new_with_cache(
+                vault,
+                Arc::new(state.db.clone()),
+            ));
+
+            let barrier = Arc::new(std::sync::Barrier::new(2));
+            let handle = tokio::runtime::Handle::current();
+
+            let b1 = barrier.clone();
+            let h1 = handle.clone();
+            let app1 = app.clone();
+            let t1 = std::thread::spawn(move || {
+                b1.wait();
+                h1.block_on(call(
+                    &app1,
+                    "POST",
+                    "/api/note/restore-version",
+                    &restore_body(id),
+                ))
+            });
+
+            let b2 = barrier.clone();
+            let h2 = handle.clone();
+            let mut args = helper_args();
+            args["path"] = json!(REL);
+            args["title"] = json!("A");
+            args["content"] = json!("HQ v2");
+            let t2 = std::thread::spawn(move || {
+                b2.wait();
+                h2.block_on(tool.execute(args)).unwrap();
+            });
+
+            let (status, _) = t1.join().unwrap();
+            t2.join().unwrap();
+
+            // If the restore ran first it returns 200 and the HQ write applies on top. If the HQ
+            // write ran first, `after_write` re-tied `note_prev.for_hash` to HQ v2 so `earlier_text`
+            // returns 404 (or 409 if the disk hash changed before `for_hash` updated).
+            assert!(
+                matches!(
+                    status,
+                    StatusCode::OK | StatusCode::CONFLICT | StatusCode::NOT_FOUND
+                ),
+                "iter {iter}: unexpected status {status}"
+            );
+            let on_disk = std::fs::read_to_string(v.path().join(REL)).unwrap();
+            assert!(
+                on_disk.contains("HQ v2"),
+                "iter {iter}: restore overwrote newer HQ write (status={status}): {on_disk}"
+            );
+            let final_hash = hq_db::search::content_hash(&on_disk);
+            let prov = state
+                .db
+                .with_conn(|c| hq_db::provenance::current(c, REL, &final_hash))
+                .unwrap()
+                .unwrap();
+            assert_eq!(prov.source_kind, hq_db::provenance::SourceKind::Agent);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn restore_and_hq_tool_write_both_wait_for_shared_note_lock() {
+        use hq_tools::registry::HqTool;
+
+        let (v, state, app) = setup();
+        let id = hq_edits(&v, &state, "---\ntitle: A\n---\nHQ v1");
+        let vault = Arc::new(hq_vault::VaultClient::new(v.path().to_path_buf()).unwrap());
+        let tool = Arc::new(hq_tools::vault::VaultWriteNoteTool::new_with_cache(
+            vault,
+            Arc::new(state.db.clone()),
+        ));
+
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let locker = std::thread::spawn(move || {
+            let _held = hq_vault::note_lock::lock_note(REL);
+            locked_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        locked_rx.recv().unwrap();
+
+        let app1 = app.clone();
+        let mut restore_fut = tokio::spawn(async move {
+            call(
+                &app1,
+                "POST",
+                "/api/note/restore-version",
+                &restore_body(id),
+            )
+            .await
+        });
+
+        let mut args = helper_args();
+        args["path"] = json!(REL);
+        args["title"] = json!("A");
+        args["content"] = json!("HQ v2");
+        let mut write_fut = tokio::spawn(async move { tool.execute(args).await.unwrap() });
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), &mut restore_fut)
+                .await
+                .is_err(),
+            "restore must wait while note lock is held"
+        );
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), &mut write_fut)
+                .await
+                .is_err(),
+            "HQ tool write must wait while note lock is held"
+        );
+
+        release_tx.send(()).unwrap();
+        locker.join().unwrap();
+
+        let (status, _) = restore_fut.await.unwrap();
+        write_fut.await.unwrap();
+
+        assert!(matches!(
+            status,
+            StatusCode::OK | StatusCode::CONFLICT | StatusCode::NOT_FOUND
+        ));
+        let on_disk = std::fs::read_to_string(v.path().join(REL)).unwrap();
+        assert!(
+            on_disk.contains("HQ v2"),
+            "restore overwrote newer HQ write (status={status}): {on_disk}"
+        );
+        let final_hash = hq_db::search::content_hash(&on_disk);
+        let prov = state
+            .db
+            .with_conn(|c| hq_db::provenance::current(c, REL, &final_hash))
+            .unwrap()
+            .unwrap();
+        assert_eq!(prov.source_kind, hq_db::provenance::SourceKind::Agent);
     }
 }
