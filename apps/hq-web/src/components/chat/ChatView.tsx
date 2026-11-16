@@ -27,7 +27,7 @@ import { useChatOutbox } from './useChatOutbox'
 import { useDraft } from './draftStore'
 import { useFileDrop } from './useFileDrop'
 import { useThreadSessions } from './useThreadSessions'
-import { SessionsPanel } from './SessionsPanel'
+import { SessionsPanel, DrivingStrip } from './SessionsPanel'
 import { ChatApprovals } from './ChatApprovals'
 
 const FOCUS_DELAY_MS = 50
@@ -333,6 +333,7 @@ export function ChatView({ active, threadId }: Props) {
           <Info className="a-ic sm" aria-hidden="true" />
         </button>
       </div>
+      <DrivingStrip sessions={watched.sessions} onOpen={() => setSideOpen(true)} />
 
       <MessageList
         threadId={activeThreadId}

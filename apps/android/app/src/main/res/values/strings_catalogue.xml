@@ -1867,6 +1867,9 @@
     <string name="chat_banner_saved_window">Saved in HQ Hub at %1$s.</string>
     <string name="chat_details">Details</string>
     <string name="chat_watching">Watching</string>
+    <string name="chat_driving_one">HQ is driving %1$s on %2$s</string>
+    <string name="chat_driving_one_no_task">HQ is driving %1$s</string>
+    <string name="chat_driving_many">HQ is driving %1$s agents</string>
     <string name="chat_watching_count">Watching %1$s</string>
     <string name="chat_answer_it">Answer it</string>
     <string name="chat_answer_in_helpers">Answer it in Helpers</string>
@@ -3959,6 +3962,9 @@
     <string name="sessions_status_done">Done</string>
     <string name="sessions_status_unknown">Not running</string>
     <string name="sessions_unnamed">Agent</string>
+    <string name="sessions_driving_one">HQ is driving %1$s on %2$s</string>
+    <string name="sessions_driving_one_no_task">HQ is driving %1$s</string>
+    <string name="sessions_driving_many">HQ is driving %1$s agents</string>
     <string name="sessions_drive_refused">Drive stays off until this agent has a goal and a way to tell it is done.</string>
     <string name="sessions_drive_failed">Couldn\'t change that. Try again.</string>
     <string name="sessions_unwatch_failed">Couldn\'t stop watching. Try again.</string>

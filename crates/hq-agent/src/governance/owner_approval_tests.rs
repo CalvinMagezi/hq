@@ -310,9 +310,9 @@ fn only_a_session_this_chat_drives_counts_as_its_own_send_target() {
                 },
             )?;
         }
-        registry::watch_from_chat(c, "hs-own", "web:t1", true)?;
-        registry::watch_from_chat(c, "hs-other", "web:t2", true)?;
-        registry::watch_from_chat(c, "hs-observed", "web:t1", false)?;
+        registry::watch_from_chat(c, "hs-own", "t1", true)?;
+        registry::watch_from_chat(c, "hs-other", "t2", true)?;
+        registry::watch_from_chat(c, "hs-observed", "t1", false)?;
         Ok(())
     })
     .unwrap();

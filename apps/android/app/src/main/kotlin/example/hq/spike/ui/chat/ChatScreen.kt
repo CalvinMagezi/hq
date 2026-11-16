@@ -86,6 +86,7 @@ fun ChatScreen(
                 NameRow(state.title, state.messages.any { it.spoken }, actions.onOpenChats, Modifier.weight(1f))
                 if (state.sessions.count > 0) SessionsButton(state.sessions, actions.onOpenSessions)
             }
+            DrivingStrip(state.sessions, actions.onOpenSessions)
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (state.messages.isEmpty() && state.live == null) EmptyChat(Suggestions.visible(state.suggestions, state.pillsCleared), actions.onDraft, state.pillChoices, actions.onFewer, actions.onNever) else Conversation(state, actions)
                 SlashPalette(state.draft, actions.onSlash, Modifier.align(Alignment.BottomCenter))

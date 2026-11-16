@@ -18,6 +18,11 @@ class SessionsReducerTest {
         assertEquals(0, SessionsUi().count)
     }
 
+    @Test fun onlyRunningAgentsWithDriveOnCountAsDriven() {
+        val ui = SessionsUi(sessions = listOf(session("a", drive = true), session("b", drive = true, running = false), session("c")))
+        assertEquals(listOf("a"), ui.driving.map { it.id })
+    }
+
     @Test fun aWakeNotYetHandledCountsAsWaitingButOnlyWhileRunning() {
         val ui = SessionsUi(sessions = listOf(session("a", wake = true), session("b", wake = true, running = false)))
         assertEquals(1, ui.waiting)

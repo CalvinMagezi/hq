@@ -259,3 +259,21 @@ function answerLine(a: AutoAnswer): string {
   if (a.by !== DRIVE_ANSWERER) return t('chat_say_yes_by', { time, by: a.by, kind: a.kind })
   return t(a.declined ? 'chat_say_yes_declined' : 'chat_say_yes_allowed', { time, kind: a.kind })
 }
+
+/** One line under the chat title while HQ answers for at least one running helper; opens the details. */
+export function DrivingStrip({ sessions, onOpen }: { sessions: WatchedSession[]; onOpen: () => void }) {
+  const driving = sessions.filter((s) => s.status === 'running' && s.drive)
+  if (driving.length === 0) return null
+  const [one] = driving
+  const text =
+    driving.length > 1
+      ? t('chat_driving_many', { n: String(driving.length) })
+      : one.task
+        ? t('chat_driving_one', { agent: agentName(one.harness), task: one.task.display_id })
+        : t('chat_driving_one_no_task', { agent: agentName(one.harness) })
+  return (
+    <button type="button" className="a-btn quiet compact" style={{ alignSelf: 'flex-start' }} onClick={onOpen}>
+      {text}
+    </button>
+  )
+}

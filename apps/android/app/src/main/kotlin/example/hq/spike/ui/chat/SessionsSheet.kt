@@ -92,7 +92,7 @@ fun SessionsSheet(sessions: SessionsUi, actions: ChatActions) {
 private fun SessionRow(s: WatchedSession, busy: Boolean, actions: ChatActions) {
     val name = SessionsReducer.name(s, stringResource(R.string.sessions_unnamed))
     val status = stringResource(statusWords(s))
-    val line = listOfNotNull(s.taskDisplayId, status).joinToString(" · ")
+    val line = listOfNotNull(s.harness.takeIf { it.isNotBlank() && it != name }, s.taskDisplayId, status).joinToString(" · ")
     val switchLabel = stringResource(R.string.sessions_drive_label, name)
     val stopLabel = stringResource(R.string.sessions_stop_watching_named, name)
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -126,4 +126,24 @@ private fun statusWords(s: WatchedSession): Int = when {
     s.agentStatus == "done" -> R.string.sessions_status_done
     s.agentStatus == "idle" -> R.string.sessions_status_idle
     else -> R.string.sessions_status_unknown
+}
+
+/** One line under the chat header while HQ drives at least one agent, so the owner can see it without opening the sheet. */
+@Composable
+fun DrivingStrip(sessions: SessionsUi, onClick: () -> Unit) {
+    val driving = sessions.driving
+    if (driving.isEmpty()) return
+    val one = driving.singleOrNull()
+    val text = when {
+        one == null -> stringResource(R.string.sessions_driving_many, driving.size)
+        one.taskDisplayId != null -> stringResource(R.string.sessions_driving_one, SessionsReducer.name(one, stringResource(R.string.sessions_unnamed)), one.taskDisplayId)
+        else -> stringResource(R.string.sessions_driving_one_no_task, SessionsReducer.name(one, stringResource(R.string.sessions_unnamed)))
+    }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = TouchTarget).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(Mts.BrandGreen))
+        Text(text, style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
 }
