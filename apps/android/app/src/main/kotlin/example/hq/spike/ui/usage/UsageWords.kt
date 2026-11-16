@@ -176,7 +176,9 @@ object UsageWords {
     private fun serviceChips(s: UsageSnapshot): List<BalanceChip> {
         val chain = chain(s.settings, s.providers)
         if (chain.isEmpty()) return listOfNotNull(copilotChip(s.copilot)) + s.providers.arr("backends").items().mapNotNull { r -> providerChip(r.optString("backend"), r) }
-        return chain.distinctBy { it.provider }.mapNotNull { row -> if (row.provider == COPILOT) copilotChip(s.copilot) else providerChip(row.provider, providerRow(s.providers, row.backend)) }
+        val inChain = chain.distinctBy { it.provider }.mapNotNull { row -> if (row.provider == COPILOT) copilotChip(s.copilot) else providerChip(row.provider, providerRow(s.providers, row.backend)) }
+        // The web app shows the Copilot balance whenever the plan is metered, even when the order does not list it; so does the phone.
+        return if (chain.any { it.provider == COPILOT }) inChain else inChain + listOfNotNull(copilotChip(s.copilot))
     }
 
     /** Credits left on the GitHub Copilot plan, from /api/copilot-usage. Null when the plan is not metered or unreadable. */
