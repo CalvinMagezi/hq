@@ -68,6 +68,7 @@ function HelpersTabBody({ h }: { h: HqSettings['agent_host'] }) {
         {h.idle_reap_hours ? t('settings_helpers_idle_value', { n: h.idle_reap_hours }) : t('settings_helpers_idle_never')}
       </Line>
       <Line label={t('settings_helpers_answer')}>{onOff(h.drive_new_watches)}</Line>
+      <Line label={t('settings_helpers_untrusted')} sub={t('settings_helpers_untrusted_sub')}>{onOff(h.drive_after_untrusted_reads === true)}</Line>
       <Line label={t('settings_helpers_check')}>{t('settings_helpers_check_value', { n: h.driver_checkin_minutes })}</Line>
       <Line label={t('settings_helpers_budget')}>{h.driver_nudge_budget}</Line>
       <Line label={t('settings_helpers_stuck')} sub={t('settings_helpers_stuck_sub')}>
