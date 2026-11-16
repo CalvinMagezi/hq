@@ -67,3 +67,9 @@
 .an-folder>span{flex:1 1 0;min-width:0}
 .an-folder i{display:block;font:400 13px/18px var(--font-sans);font-style:normal;color:var(--ink-muted)}
 .an-pin-link{display:flex;flex-direction:column;gap:4px;text-decoration:none;color:inherit}
+.an-suite{display:flex;flex-direction:column;gap:4px;margin:0 16px 8px;padding:8px 16px;border-radius:var(--radius-md);border:1px solid var(--line);background:var(--surface-100);font:400 14px/20px var(--font-sans);color:var(--ink)}
+.an-suite p{margin:0}
+.an-suite small{font:400 13px/18px var(--font-sans);color:var(--ink-muted)}
+.an-suite-btns{display:flex;flex-wrap:wrap;gap:16px;align-items:center}
+.an-suite-btns button{min-height:44px;background:none;border:0;padding:0;cursor:pointer;font:700 14px/20px var(--font-sans);color:var(--text-blue)}
+.an-suite-btns span{color:var(--ink-muted)}

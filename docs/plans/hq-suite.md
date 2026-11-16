@@ -138,11 +138,12 @@ M0, then made a hard CI limit.
   (`/api/suite/media`, `ui/chat/blocks/VaultImage.kt`; chat still blocks them), the `office_file`
   chat tool exists (`confirm` asks the owner, `docs/security/OWNER_APPROVAL.md`), and CI checks
   the size budget on pull requests that touch the suite (`.github/workflows/suite-size.yml`).
+  The web note page has the same bar (`components/notes/SuiteBar.tsx`).
 
 ## Next
 
 1. **Cold sinks (M3).** The original can only go to the vault's trash today.
-2. **Web screens** for the same bar (milestone M2).
+2. **Web editors** (Docs, Sheets) beyond the bar (milestone M2).
 3. **Adoption beyond the neighbour.** A note an import placed under another name, or in
    `Notebooks/Imports/<month>/` for a file outside `Notebooks/`, is not adopted: the lookup is
    the note beside the file. An index lookup by `source_sha256` would close that.

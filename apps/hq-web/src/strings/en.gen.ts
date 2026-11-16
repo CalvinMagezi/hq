@@ -2099,4 +2099,10 @@ export const en = {
   trail_github_reconnect: "Needs reconnecting",
   trail_work_tasks: "What HQ is tracking and doing",
   trail_work_helpers: "The agents HQ runs, and starting one",
+  suite_bar_make_smaller: "Make it smaller",
+  suite_bar_move: "Move the original to the trash",
+  suite_bar_not_now: "Not now",
+  suite_bar_undo: "Undo",
+  suite_bar_working: "Working on it…",
+  suite_bar_failed: "Couldn't do that, try again.",
 } as const
