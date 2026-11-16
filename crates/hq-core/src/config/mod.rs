@@ -81,7 +81,8 @@ pub use skills::{BuiltinSkillsConfig, SkillsConfig};
 pub use stack::{Specialist, StackConfig};
 pub use tasks::{
     ALL_TIERS, AutonomyGate, DEFAULT_LEASE_TTL_SECS, DEFAULT_STALE_AFTER_HOURS, LeaseMode,
-    MIN_LEASE_TTL_SECS, ReleaseCheck, TasksConfig, VerificationConfig, VerificationMode,
+    MAX_AUTO_ARCHIVE_DAYS, MIN_AUTO_ARCHIVE_DAYS, MIN_LEASE_TTL_SECS, ReleaseCheck, TasksConfig,
+    VerificationConfig, VerificationMode,
 };
 pub use usage_ledger::UsageLedgerConfig;
 pub use vault_watch::{VaultWatchConfig, VaultWatchMode};

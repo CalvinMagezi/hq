@@ -18,12 +18,15 @@ interface Props {
   onDone: () => void
   onStatus: (status: TaskStatus) => void
   onPriority: (priority: TaskPriority | null) => void
+  /** Archives the ticked tasks, or brings them back when the list is the archive. */
+  archiveLabel: 'Archive' | 'Unarchive'
+  onArchive: () => void
 }
 
 type Menu = 'status' | 'priority'
 
 /** The bar that takes the place of the tabs while tasks are being picked. */
-export function BulkActionBar({ total, ticked, progress, message, onSelectAll, onClear, onDone, onStatus, onPriority }: Props) {
+export function BulkActionBar({ total, ticked, progress, message, onSelectAll, onClear, onDone, onStatus, onPriority, archiveLabel, onArchive }: Props) {
   const [menu, setMenu] = useState<Menu | null>(null)
   const running = progress !== null
   const none = ticked === 0
@@ -64,6 +67,9 @@ export function BulkActionBar({ total, ticked, progress, message, onSelectAll, o
         ))}
         <MenuItem onClick={() => pick(() => onPriority(null))}>{t('tasks_bulk_no_priority')}</MenuItem>
       </MenuButton>
+      <button type="button" disabled={running || none} onClick={onArchive} className="a-btn compact quiet">
+        {archiveLabel === 'Archive' ? t('tasks_archive_action') : t('tasks_unarchive_action')}
+      </button>
       <button type="button" disabled={running} onClick={onDone} className="a-btn compact">
         {t('safe_done_button')}
       </button>

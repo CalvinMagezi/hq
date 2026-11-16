@@ -240,7 +240,7 @@ impl HqTool for InitiativeListTool {
         Ok(json!({
             "initiatives": initiatives.iter().map(|i| json!({
                 "id": i.id, "space_id": i.space_id, "folder_id": i.folder_id, "name": i.name,
-                "slug": i.slug, "id_prefix": i.id_prefix,
+                "slug": i.slug, "id_prefix": i.id_prefix, "shelved_at": i.shelved_at,
             })).collect::<Vec<_>>()
         }))
     }

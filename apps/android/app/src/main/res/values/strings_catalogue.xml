@@ -864,7 +864,7 @@
     <string name="bulk_done_act">Mark %1$s tasks done</string>
     <string name="bulk_done_line">%1$s tasks done</string>
     <string name="undo">Undo</string>
-    <string name="undo_task_archived">Task archived</string>
+    <string name="undo_task_archived">Task deleted</string>
     <string name="undo_chat_archived">Chat archived</string>
     <string name="undo_update_cleared">Update cleared</string>
     <string name="undo_task_discarded">Task discarded</string>
@@ -1077,7 +1077,7 @@
     <string name="undo_named">Undo: %1$s</string>
     <string name="done_limit_deleted">“%1$s” deleted</string>
     <string name="fail_change_some_tasks">%1$s done. Couldn\'t change %2$s. It changed on another device, or too much time passed.</string>
-    <string name="fail_archive_task_no_reply">Couldn\'t archive the task. HQ didn\'t answer in time. Try again.</string>
+    <string name="fail_archive_task_no_reply">Couldn\'t delete the task. HQ didn\'t answer in time. Try again.</string>
     <string name="fail_clear_updates_no_reply">Couldn\'t clear the updates. HQ didn\'t answer in time. Try again.</string>
     <string name="fail_delete_limit_no_reply">Couldn\'t delete the limit. HQ didn\'t answer in time. Try again.</string>
     <string name="fail_answer_refused">Couldn\'t send your answer. HQ refused it. Nothing was done.</string>
@@ -3070,6 +3070,7 @@
     <string name="tasks_empty_review">Nothing is waiting to be checked.</string>
     <string name="tasks_empty_done">Nothing is done yet.</string>
     <string name="tasks_empty_archived">Nothing is archived.</string>
+    <string name="tasks_empty_deleted">Nothing is deleted.</string>
     <string name="tasks_empty_today">Nothing for today.</string>
     <string name="tasks_empty_upcoming">Nothing coming up.</string>
     <string name="tasks_blocked">Blocked</string>
@@ -3129,7 +3130,7 @@
     <string name="tasks_hq_codes_note">HQ starts work on it here in a few minutes. It sends the change to %1$s on GitHub for you to check. Say in the notes what to change.</string>
     <string name="tasks_what_was_done">What was done</string>
     <string name="tasks_archive_hint">It can be brought back with Undo.</string>
-    <string name="tasks_archived_notice">Archived %1$s. Restore it to work on it again, with its comments and sub-tasks.</string>
+    <string name="tasks_archived_notice">Deleted %1$s. Restore it to work on it again, with its comments and sub-tasks.</string>
     <string name="tasks_hide_details">Hide details</string>
     <string name="tasks_show_details">Show details</string>
     <string name="tasks_finished_ago">HQ says this is finished, %1$s. Look it over, then mark it done.</string>
@@ -4031,4 +4032,32 @@
     <string name="capture_refused_toast">Saved on phone, HQ refused: %1$s.</string>
     <string name="capture_queued_toast">Saved, will send when HQ is back.</string>
     <string name="capture_saved_toast">Saved</string>
+    <string name="tasks_archive_action">Archive</string>
+    <string name="tasks_unarchive_action">Unarchive</string>
+    <string name="tasks_delete_action">Delete</string>
+    <string name="tasks_archive_list_hint">Archive this list</string>
+    <string name="tasks_archive_list_label">Archive %1$s</string>
+    <string name="tasks_archived_lists">Archived lists</string>
+    <string name="tasks_unarchive_list_hint">Bring this list back</string>
+    <string name="tasks_unarchive_list_label">Unarchive %1$s</string>
+    <string name="tasks_shelved_notice">Archived %1$s. Hidden from the lists only: agents still see it and can work on it.</string>
+    <string name="tasks_hidden_by_notice">Its %1$s %2$s is archived, so it is hidden from the lists. Agents still see it.</string>
+    <string name="tasks_unarchive_kind">Unarchive %1$s</string>
+    <string name="tasks_chip_deleted">Deleted</string>
+    <string name="tasks_all_lists">all lists</string>
+    <string name="tasks_undo">Undo</string>
+    <string name="tasks_undo_failed">Undo failed</string>
+    <string name="tasks_sweep_button">Tidy up</string>
+    <string name="tasks_sweep_hint">Hide old completed tasks from the lists</string>
+    <string name="tasks_sweep_dialog">Archive old completed tasks</string>
+    <string name="tasks_sweep_prompt">Archive completed tasks in %1$s that finished more than</string>
+    <string name="tasks_sweep_days_label">Age in days</string>
+    <string name="tasks_sweep_days_option">%1$s days ago</string>
+    <string name="tasks_sweep_counting">Counting...</string>
+    <string name="tasks_sweep_empty">Nothing to archive.</string>
+    <plurals name="tasks_sweep_count">
+        <item quantity="one">%1$s task will leave the lists. Agents still see it, and you can undo this.</item>
+        <item quantity="other">%1$s tasks will leave the lists. Agents still see them, and you can undo this.</item>
+    </plurals>
+    <string name="tasks_sweep_error">Could not archive</string>
 </resources>

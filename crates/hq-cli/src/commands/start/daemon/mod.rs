@@ -516,6 +516,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("collection-tip", Duration::from_secs(604800)),
         DaemonTask::with_default_timeout("verify-audit", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("verify-briefing", Duration::from_secs(3600)),
+        // Archives old completed tasks when `tasks.auto_archive_after_days` is set; display only.
+        DaemonTask::with_default_timeout("task-auto-archive", Duration::from_secs(86400)),
     ]
 }
 
@@ -678,6 +680,7 @@ async fn dispatch_task(
         "scheduled-offers" => tasks_periodic::run_scheduled_offers(db).await,
         "link-capture" => tasks_periodic::run_link_capture(vault_path, db, config).await,
         "collection-tip" => tasks_periodic::run_collection_tip(db, config).await,
+        "task-auto-archive" => tasks_periodic::run_task_auto_archive(db, config).await,
 
         unknown => {
             warn!(task = unknown, "daemon: unknown task");

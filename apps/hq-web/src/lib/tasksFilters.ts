@@ -1,10 +1,10 @@
 import type { TaskItem, TaskStatus } from './tasksApi'
 
 export type TaskTab = 'today' | 'upcoming' | 'all'
-export type TaskChip = 'active' | 'stuck' | 'ready' | 'done' | 'archived'
+export type TaskChip = 'active' | 'stuck' | 'ready' | 'done' | 'archived' | 'deleted'
 
 export const TABS: readonly TaskTab[] = ['today', 'upcoming', 'all']
-export const CHIPS: readonly TaskChip[] = ['active', 'stuck', 'ready', 'done', 'archived']
+export const CHIPS: readonly TaskChip[] = ['active', 'stuck', 'ready', 'done', 'archived', 'deleted']
 
 const CHIP_STATUS: Partial<Record<TaskChip, TaskStatus>> = { stuck: 'blocked', ready: 'ready_for_review', done: 'complete' }
 
