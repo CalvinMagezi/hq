@@ -1,0 +1,69 @@
+name: Suite size
+
+# Fails a pull request that makes the HQ Suite add more than its budget (6 MiB, docs/plans/hq-suite.md)
+# to the `hq` binary, on the laptop build and on the phone build (aarch64-linux-android).
+# Only runs when the suite, the feature wiring or the script changes.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/suite/**"
+      - "crates/hq-cli/Cargo.toml"
+      - "crates/hq-web/Cargo.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "scripts/check-suite-size.sh"
+      - ".github/workflows/suite-size.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.98.1"
+  NDK_VERSION: "28.2.13676358"
+  ANDROID_API: "26"
+  HQ_TARGET: aarch64-linux-android
+
+jobs:
+  size:
+    name: Suite adds at most its budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target "$HQ_TARGET"
+          rustup default "$RUST_TOOLCHAIN"
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: suite-size
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Laptop build
+        run: bash scripts/check-suite-size.sh
+
+      - name: Install the NDK
+        run: |
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$sdk/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION"
+          echo "NDK=$sdk/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Phone build
+        run: |
+          HQ_UPDATE_PUBKEY=$(sed -n 2p release/minisign.pub)
+          export HQ_UPDATE_PUBKEY
+          tc="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export ANDROID_NDK_HOME="$NDK" ANDROID_NDK_ROOT="$NDK"
+          export CC_aarch64_linux_android="$tc/aarch64-linux-android${ANDROID_API}-clang"
+          export AR_aarch64_linux_android="$tc/llvm-ar"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$tc/aarch64-linux-android${ANDROID_API}-clang"
+          export PATH="$tc:$PATH"
+          bash scripts/check-suite-size.sh "$HQ_TARGET"
