@@ -340,6 +340,7 @@ impl HqTool for HarnessSessionSpawnTool {
                 &self.db,
                 &cfg.agent_host.spawn_limits,
                 &cfg.budgets,
+                &harness,
                 chrono::Utc::now().timestamp(),
             )?),
             Some(_) => None,

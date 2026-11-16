@@ -761,6 +761,17 @@ pub fn count_active_unparented(conn: &Connection) -> Result<i64> {
     )?)
 }
 
+/// `count_active_unparented` for one harness.
+pub fn count_active_unparented_for_harness(conn: &Connection, harness: &str) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM harness_sessions WHERE status = 'running' \
+         AND parent_session_id IS NULL AND harness = ?1 \
+         AND (last_agent_status IS NULL OR last_agent_status NOT IN ('idle', 'done'))",
+        params![harness],
+        |r| r.get(0),
+    )?)
+}
+
 /// Sessions with no parent started in the last `minutes`, running or not.
 pub fn count_unparented_started_since(conn: &Connection, minutes: i64) -> Result<i64> {
     Ok(conn.query_row(
