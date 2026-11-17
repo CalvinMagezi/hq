@@ -120,8 +120,11 @@ impl AgentSession {
         let result = self.run_turns(stream).await;
         self.end_run(&result);
 
-        // Once per prompt, on the exchange the user actually saw.
+        // Once per prompt, on the exchange the user actually saw. A tainted turn is skipped:
+        // its reply may repeat text from outside, and memory outlives the session.
+        let tainted = self.taint.as_ref().is_some_and(|t| t.is_tainted());
         if let (Some(callback), Ok(done)) = (&self.post_turn_callback, &result)
+            && !tainted
             && !done.text().trim().is_empty()
         {
             let exchange = vec![

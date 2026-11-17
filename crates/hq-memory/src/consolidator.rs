@@ -20,6 +20,9 @@ use crate::db::{get_consolidation_history, get_unconsolidated_memories, store_co
 use crate::llm_bridge::MemoryLlm;
 use crate::types::{Connection, ConsolidationResult, Memory};
 
+/// Tags an auto-generated MEMORY.md line as model output, not something the owner stated.
+const INFERRED_MARKER: &str = "(inferred)";
+
 /// Max lines in the auto-generated insights section of MEMORY.md.
 /// Matches Claude Code's MAX_ENTRYPOINT_LINES.
 const MAX_INDEX_LINES: usize = 200;
@@ -245,7 +248,7 @@ impl MemoryConsolidator {
                 // Truncate each line to ~150 chars (matching Claude Code's index style)
                 let preview: String = c.insight.chars().take(140).collect();
                 format!(
-                    "- [{}] {}",
+                    "- [{}] {INFERRED_MARKER} {}",
                     &c.created_at[..10.min(c.created_at.len())],
                     preview
                 )
@@ -645,6 +648,8 @@ impl MemoryConsolidator {
         let content = format!(
             r#"---
 noteType: consolidation-insight
+status: inferred
+source_kind: generated
 tags: [{tags_str}]
 sources: [{sources_str}]
 harnesses: [{harnesses_str}]
@@ -735,6 +740,34 @@ fn cluster_by_topic(memories: &[Memory]) -> HashMap<String, Vec<Memory>> {
 mod tests {
     use super::*;
     use hq_db::Database;
+
+    #[test]
+    fn insight_note_is_marked_generated_and_inferred() {
+        let dir = std::env::temp_dir().join(format!("hq-consolidator-mark-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let c = MemoryConsolidator::new(Database::open_memory().unwrap(), dir.clone());
+        let mut out = Vec::new();
+        c.prepare_insight_note(&[], "an insight", &[], &mut out)
+            .unwrap();
+        let content = &out[0].1;
+        assert!(content.contains("\nstatus: inferred\n"), "{content}");
+        assert!(content.contains("\nsource_kind: generated\n"), "{content}");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn memory_index_lines_carry_the_inferred_marker() {
+        let db = Database::open_memory().unwrap();
+        crate::db::store_consolidation(&db, &[1], "a grounded insight", &[]).unwrap();
+        let dir = std::env::temp_dir().join(format!("hq-consolidator-idx-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("_system")).unwrap();
+        MemoryConsolidator::new(db, dir.clone())
+            .refresh_memory_file()
+            .unwrap();
+        let md = std::fs::read_to_string(dir.join("_system/MEMORY.md")).unwrap();
+        assert!(md.contains("(inferred) a grounded insight"), "{md}");
+        std::fs::remove_dir_all(dir).ok();
+    }
 
     #[test]
     fn a_topic_cannot_add_a_frontmatter_key() {
