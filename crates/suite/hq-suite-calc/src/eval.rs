@@ -66,6 +66,7 @@ pub const FUNCTIONS: &[&str] = &[
     "CHAR",
     "ROWS",
     "TEXTJOIN",
+    "LET",
 ];
 
 type R = Result<Value, CalcError>;
@@ -99,6 +100,8 @@ fn run(e: &Expr, ctx: &mut dyn Cells) -> R {
             Ok(Value::Bool(compare(*op, &a, &b)))
         }
         Expr::Call(name, args) => call(name, args, ctx),
+        // A name nothing bound: a defined name in the workbook, which this engine does not know.
+        Expr::Var(_) => Err(CalcError::Name),
     }
 }
 
@@ -518,6 +521,7 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
             let months = num(&run(&args[1], ctx)?)?.trunc() as i64;
             Ok(Value::Num(add_months(serial as i64, months)? as f64))
         }
+        "LET" => let_call(args, ctx),
         "POWER" | "QUOTIENT" => {
             arity(args, 2, 2)?;
             let (x, y) = (num(&run(&args[0], ctx)?)?, num(&run(&args[1], ctx)?)?);
@@ -960,4 +964,72 @@ fn wildcard_match(pattern: &str, text: &str) -> bool {
     }
     let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), text.chars().collect());
     go(&p, &t)
+}
+
+/// Most nodes a `LET` may expand to, so names that build on names cannot grow without limit.
+const MAX_LET_NODES: usize = 20_000;
+
+fn size(e: &Expr) -> usize {
+    1 + match e {
+        Expr::Neg(x) | Expr::Percent(x) => size(x),
+        Expr::Binary(_, a, b) | Expr::Compare(_, a, b) => size(a) + size(b),
+        Expr::Call(_, args) => args.iter().map(size).sum(),
+        _ => 0,
+    }
+}
+
+/// `e` with every use of the name `name` replaced by `with`.
+fn substitute(e: &Expr, name: &str, with: &Expr) -> Expr {
+    let sub = |x: &Expr| Box::new(substitute(x, name, with));
+    match e {
+        Expr::Var(v) if v.eq_ignore_ascii_case(name) => with.clone(),
+        Expr::Neg(x) => Expr::Neg(sub(x)),
+        Expr::Percent(x) => Expr::Percent(sub(x)),
+        Expr::Binary(op, a, b) => Expr::Binary(*op, sub(a), sub(b)),
+        Expr::Compare(op, a, b) => Expr::Compare(*op, sub(a), sub(b)),
+        Expr::Call(f, args) => Expr::Call(
+            f.clone(),
+            args.iter().map(|a| substitute(a, name, with)).collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// `LET(a, 1, b, a+1, b*2)`: each name stands for its value in what follows. Calculations here
+/// are pure, so putting the value expression where the name is gives the same answer.
+fn let_call(args: &[Expr], ctx: &mut dyn Cells) -> R {
+    if args.len() < 3 || args.len() % 2 == 0 {
+        return Err(CalcError::Value);
+    }
+    let (pairs, body) = args.split_at(args.len() - 1);
+    let mut rest: Vec<Expr> = pairs.to_vec();
+    rest.push(body[0].clone());
+    let mut i = 0;
+    while i + 1 < rest.len() - 1 {
+        let Expr::Var(name) = &rest[i] else {
+            return Err(CalcError::Value);
+        };
+        let (name, value) = (name.clone(), rest[i + 1].clone());
+        let mut j = i + 2;
+        while j < rest.len() {
+            let is_name_slot = j < rest.len() - 1 && (j - i) % 2 == 0;
+            if is_name_slot {
+                // A name bound again hides this one from there on, but its own value is still
+                // worked out with this one in scope.
+                let rebinds = matches!(&rest[j], Expr::Var(n) if n.eq_ignore_ascii_case(&name));
+                if rebinds {
+                    rest[j + 1] = substitute(&rest[j + 1], &name, &value);
+                    break;
+                }
+            } else {
+                rest[j] = substitute(&rest[j], &name, &value);
+                if size(&rest[j]) > MAX_LET_NODES {
+                    return Err(CalcError::Value);
+                }
+            }
+            j += 1;
+        }
+        i += 2;
+    }
+    run(&rest[rest.len() - 1], ctx)
 }

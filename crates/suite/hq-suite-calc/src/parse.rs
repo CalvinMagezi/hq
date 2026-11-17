@@ -23,6 +23,8 @@ pub enum Expr {
     /// `<>`, `<=` and `>=` are written as `n`, `l` and `g`.
     Compare(char, Box<Expr>, Box<Expr>),
     Call(String, Vec<Expr>),
+    /// A name a `LET` binds. Outside a `LET` it has no value.
+    Var(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -375,7 +377,8 @@ impl Parser<'_> {
             })
         };
         let Some(from) = cell_ref(first) else {
-            return Err(ParseError(format!("`{first}` is not a cell or a function")));
+            // Not a cell: a name for `LET` to bind, or a defined name this engine does not know.
+            return Ok(Expr::Var(first.to_string()));
         };
         let from = place(from)?;
         if self.peek() != Some(&Tok::Colon) {

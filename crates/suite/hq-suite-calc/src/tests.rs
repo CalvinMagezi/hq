@@ -259,7 +259,7 @@ fn every_listed_function_exists_and_an_unlisted_one_does_not() {
         );
     }
     assert_eq!(
-        at(&sheet(&[("A1", "=LET(1,2,3)")]), "A1"),
+        at(&sheet(&[("A1", "=NOSUCHFUNCTION(1,2,3)")]), "A1"),
         Value::Err(CalcError::Name)
     );
 }
@@ -320,7 +320,7 @@ fn a_loaded_value_keeps_its_type() {
 #[test]
 fn an_error_handler_does_not_hide_what_the_engine_cannot_calculate() {
     let s = sheet(&[
-        ("A1", "=LET(1,2,3)"),
+        ("A1", "=NOSUCHFUNCTION(1,2,3)"),
         ("B1", "=IFERROR(A1,0)"),
         ("B2", "=ISERROR(A1)"),
         ("B3", "=IFERROR(1/0,7)"),
@@ -544,4 +544,43 @@ fn wildcards_and_the_small_math_and_text_functions_agree_with_a_spreadsheet() {
         Value::Text("apple pie, pear, applesauce, x".into())
     );
     assert_eq!(at(&s, "D3"), Value::Text("-x".into()));
+}
+
+#[test]
+fn let_binds_names_in_order_and_an_unbound_name_is_not_calculated() {
+    let s = sheet(&[
+        ("A1", "10"),
+        ("B1", "=LET(x,A1,y,x*2,y+x)"),
+        ("B2", "=LET(_xlpm.a,3,_xlpm.a*_xlpm.a)"),
+        ("B3", "=LET(x,1,x+unknown)"),
+        ("B4", "=LET(x,1)"),
+        ("B5", "=LET(x,A1,x,x+1,x)"),
+        ("B6", "=SUM(LET(x,A1,x),5)"),
+    ]);
+    assert_eq!(at(&s, "B1"), n(30.0));
+    assert_eq!(at(&s, "B2"), n(9.0));
+    assert_eq!(at(&s, "B3"), Value::Err(CalcError::Name));
+    assert_eq!(at(&s, "B4"), Value::Err(CalcError::Value));
+    assert_eq!(
+        at(&s, "B5"),
+        n(11.0),
+        "a name bound again takes its new value from there on"
+    );
+    assert_eq!(at(&s, "B6"), n(15.0));
+}
+
+#[test]
+fn names_that_build_on_names_stop_at_a_limit() {
+    let mut f = String::from("=LET(a,1");
+    let mut prev = "a".to_string();
+    for i in 0..40 {
+        let name = format!("v{i}");
+        f.push_str(&format!(",{name},{prev}+{prev}"));
+        prev = name;
+    }
+    f.push_str(&format!(",{prev})"));
+    assert_eq!(
+        at(&sheet(&[("A1", &f)]), "A1"),
+        Value::Err(CalcError::Value)
+    );
 }
