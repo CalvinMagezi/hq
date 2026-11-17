@@ -757,6 +757,10 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     suspend fun suiteFile(path: String): SuiteFile =
         send(authed("/api/suite/file?path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()) { SuiteWire.file(JSONObject(it)) }
 
+    /** The `index`th `sheet` block of the note at [path], calculated and formatted by hq (a window of at most 30 rows by 10 columns). */
+    suspend fun suiteSheet(path: String, index: Int): SheetView =
+        send(authed("/api/suite/sheet?path=${java.net.URLEncoder.encode(path, "UTF-8")}&index=$index").build()) { SheetWire.view(JSONObject(it)) }
+
     /** Writes the smaller record and checks it. The original does not move until [suiteConfirm]. */
     suspend fun suiteShrink(path: String): SuiteFile = suiteAction("/api/suite/shrink", JSONObject().put("path", path))
 

@@ -30,11 +30,21 @@ pub(crate) fn routes() -> Router<Arc<WsState>> {
         .route("/api/suite/undo", post(undo_handler))
         .route("/api/suite/storage", get(storage_handler))
         .route("/api/suite/media", get(media_handler))
+        .route("/api/suite/sheet", get(sheet_handler))
 }
 
 #[derive(Deserialize)]
 pub(crate) struct PathQuery {
     path: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SheetQuery {
+    path: String,
+    /// Which `sheet` block of the note (zero-based, default the first).
+    index: Option<usize>,
+    row: Option<u32>,
+    col: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -134,6 +144,24 @@ pub(crate) async fn media_handler(
         ],
         bytes,
     ))
+}
+
+pub(crate) async fn sheet_handler(
+    State(state): State<Arc<WsState>>,
+    Query(q): Query<SheetQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let view = blocking(move || {
+        hq_suite_adapter::sheets::view(
+            &vault,
+            &q.path,
+            q.index.unwrap_or(0),
+            q.row.unwrap_or(0),
+            q.col.unwrap_or(0),
+        )
+    })
+    .await?;
+    Ok(Json(view))
 }
 
 pub(crate) async fn storage_handler(

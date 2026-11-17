@@ -39,6 +39,22 @@ fun notesFixture(name: String?): NotesUi? {
     val reader = ReaderPhase.Ready(sheet, "edited 1d ago")
     val longSheet = NoteSheet("Notebooks/Projects/Agent-HQ/Build-Plan-And-Cutover.md", "Build-Plan-And-Cutover", "Projects › Agent-HQ", longNote(), false, null)
     val longReader = ReaderPhase.Ready(longSheet, "edited 33m ago")
+    if (name == "n-suite-sheet") {
+        val cell = { t: String, f: Boolean, n: Boolean -> example.hq.spike.data.SheetCell(t, f, n, false) }
+        example.hq.spike.ui.chat.blocks.SheetFixture.view = example.hq.spike.data.SheetView(
+            "Stock",
+            listOf(
+                listOf(cell("item", false, false), cell("qty", false, false), cell("price", false, false), cell("total", false, false)),
+                listOf(cell("Sugar", false, false), cell("40", false, true), cell("UGX 4,200", false, true), cell("UGX 168,000", true, true)),
+                listOf(cell("Salt", false, false), cell("25", false, true), cell("UGX 1,800", false, true), cell("UGX 45,000", true, true)),
+                listOf(cell("Total", false, false), cell("", false, false), cell("", false, false), cell("UGX 213,000", true, true)),
+            ),
+            0, 0, 4, 4, "Stock: 4 rows, 4 columns",
+        )
+        val body = "# Stock\n\n```sheet name=\"Stock\" types=\"text,int,ugx,ugx\"\n| item | qty | price | total |\n|---|---|---|---|\n| Sugar | 40 | 4200 | =B2*C2 |\n```\n\nPrices as of this week."
+        val sheet = NoteSheet("Notebooks/Stock.md", "Stock", "Notebooks", body, false, null)
+        return home.copy(stack = listOf(NotesRoute.Reader(sheet.path)), reader = ReaderPhase.Ready(sheet, "edited just now"))
+    }
     if (name?.startsWith("n-suite-") == true) {
         val source = "Notebooks/Inbox/Imports/Quarterly report.docx"
         val note = "---\ntitle: Quarterly report\nsource: $source\nsource_sha256: ${"ab".repeat(32)}\n---\n\n# Quarterly report\n\nImported from a Word document."

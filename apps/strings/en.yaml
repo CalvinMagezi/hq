@@ -4046,6 +4046,8 @@ suite_bar_move: "Move the original to the trash"
 suite_bar_not_now: "Not now"
 suite_bar_undo: "Undo"
 suite_bar_working: "Working on it…"
+suite_sheet_drawing: "Drawing your sheet…"
+suite_sheet_more: "Showing {shown} of {total} rows"
 suite_bar_failed: "Couldn't do that, try again."
 
 # Chat problem bar, send states, follow-up chips and title menu (W3b)
