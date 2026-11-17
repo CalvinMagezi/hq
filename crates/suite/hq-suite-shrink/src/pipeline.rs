@@ -18,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use crate::place;
 use hq_convert::ingest::ConvertOptions;
 use hq_convert::ingest::sniff::{Kind, sniff};
 use hq_suite_ingest::{FailureKind, ImageFormat, for_each_media, read_document};
@@ -178,6 +179,7 @@ impl Default for Options {
             convert: ConvertOptions {
                 ocr: hq_convert::ingest::OcrMode::Off,
                 external_office: false,
+                image_markers: true,
                 ..ConvertOptions::default()
             },
             max_source_bytes: 64 * 1024 * 1024,
@@ -301,6 +303,8 @@ fn one_line(s: &str) -> String {
 
 struct Stored1 {
     plans: Vec<MediaPlan>,
+    /// Which stored picture each package part became, for putting pictures where they sat.
+    by_part: HashMap<String, hq_suite_store::CasRef>,
     /// Bytes of objects that were not in the store before this job.
     new_bytes: u64,
     recompressed: u32,
@@ -318,14 +322,16 @@ fn store_pictures(
 ) -> Result<Stored1, ShrinkError> {
     let mut out = Stored1 {
         plans: Vec::new(),
+        by_part: HashMap::new(),
         new_bytes: 0,
         recompressed: 0,
         kept: 0,
     };
     let mut failure: Option<ShrinkError> = None;
-    let mut seen: HashMap<String, ()> = HashMap::new();
+    let mut seen: HashMap<String, hq_suite_store::CasRef> = HashMap::new();
     let scan = for_each_media(bytes, kind, limits, |m| {
-        if seen.insert(m.sha256.clone(), ()).is_some() {
+        if let Some(done) = seen.get(&m.sha256) {
+            out.by_part.insert(m.part.to_string(), done.clone());
             return ControlFlow::Continue(());
         }
         let encoder = match m.format {
@@ -350,6 +356,8 @@ fn store_pictures(
         }
         match cas.put(&chosen.0, chosen.1) {
             Ok((r, _)) => {
+                seen.insert(m.sha256.clone(), r.clone());
+                out.by_part.insert(m.part.to_string(), r.clone());
                 // A picture another job's record already links costs this one nothing. One only an
                 // earlier, unfinished attempt of this job stored does cost it, so a retry never
                 // makes the saving look larger.
@@ -544,6 +552,7 @@ impl<'a> Shrinker<'a> {
                 let name = source.rsplit('/').next().unwrap_or(source);
                 one_line(name.rsplit_once('.').map_or(name, |(s, _)| s))
             });
+        let placed = place::place(&doc.markdown, &note_rel, &pictures.by_part);
         let text = match &adoptable {
             Some((_, existing)) => {
                 self.draft_adopted(existing, &note_rel, data.len() as u64, day, &doc, &pictures)?
@@ -557,6 +566,7 @@ impl<'a> Shrinker<'a> {
                 day,
                 &doc,
                 &pictures,
+                &placed,
             )?,
         };
 
@@ -580,6 +590,7 @@ impl<'a> Shrinker<'a> {
             return Err(refuse(Refusal::NotSmaller { saved_bytes: saved }));
         }
 
+        let none_stored = pictures.plans.is_empty();
         let mut job = Job {
             version: hq_suite_store::journal::JOURNAL_VERSION,
             id: id.clone(),
@@ -596,6 +607,13 @@ impl<'a> Shrinker<'a> {
                 .loss_kinds
                 .iter()
                 .map(|k| loss_label(*k))
+                // Pictures that were all placed or listed are carried, not omitted.
+                .filter(|k| {
+                    adoptable.is_some()
+                        || *k != "images_omitted"
+                        || placed.1.unresolved > 0
+                        || none_stored
+                })
                 .collect(),
             fidelity: doc.projection.fidelity.as_str().to_string(),
             pictures_recompressed: pictures.recompressed,
@@ -714,6 +732,7 @@ impl<'a> Shrinker<'a> {
         day: &str,
         doc: &hq_suite_ingest::DocumentText,
         pictures: &Stored1,
+        placed: &(String, place::Placement),
     ) -> Result<String, ShrinkError> {
         let mut fm = String::new();
         let mut set = |k: &str, v: Scalar| -> Result<(), ShrinkError> {
@@ -738,11 +757,18 @@ impl<'a> Shrinker<'a> {
         set(KEY_ORIGINAL_STATE, Scalar::Str("kept".into()))?;
         set(KEY_ORIGINAL_BYTES, Scalar::Int(bytes as i64))?;
         set(KEY_SHRUNK_AT, Scalar::Str(day.to_string()))?;
-        let mut body = doc.markdown.trim_end().to_string();
+        let mut body = placed.0.trim_end().to_string();
         body.push('\n');
-        if !pictures.plans.is_empty() {
+        // Pictures the text had no place for (a header, a text box, a format the importer cannot
+        // locate) follow at the end.
+        let rest: Vec<_> = pictures
+            .plans
+            .iter()
+            .filter(|p| !placed.1.placed.contains(&p.cas))
+            .collect();
+        if !rest.is_empty() {
             body.push_str("\n## Pictures\n");
-            for (i, p) in pictures.plans.iter().enumerate() {
+            for (i, p) in rest.iter().enumerate() {
                 body.push('\n');
                 body.push_str(
                     &p.cas
