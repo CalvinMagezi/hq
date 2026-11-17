@@ -36,10 +36,12 @@ interface FolderViewProps {
     /** Notes inside each sub-folder, by path, once known. */
     counts?: Record<string, number>
     onNewHere: () => void
+    /** Opens the sheet that moves or renames this folder; not given for the Vault's top folder. */
+    onMove?: () => void
 }
 
 /** A folder: its sub-folders, then its notes A to Z. A long list stops at 25 until "See all". */
-export function FolderView({ dirPath, entries, counts, onNewHere }: FolderViewProps) {
+export function FolderView({ dirPath, entries, counts, onNewHere, onMove }: FolderViewProps) {
     const [all, setAll] = useState(false)
     const folders = entries.filter((e) => e.isDir)
     const notes = entries.filter((e) => !e.isDir).sort((a, b) => a.name.localeCompare(b.name))
@@ -50,6 +52,12 @@ export function FolderView({ dirPath, entries, counts, onNewHere }: FolderViewPr
             detail={
                 <>
                     <PaneHead title={noteName(dirPath)} back={<BackLink path={dirPath} />}>
+                        {onMove && (
+                            <button type="button" className="a-btn quiet compact" onClick={onMove}>
+                                <FolderInput className="a-ic" aria-hidden="true" />
+                                {t('notes_move_folder')}
+                            </button>
+                        )}
                         <button type="button" className="a-btn compact" onClick={onNewHere}>
                             <Plus className="a-ic" aria-hidden="true" />
                             {t('notes_new_note_here')}

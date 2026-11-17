@@ -201,6 +201,12 @@ export async function moveNote(from: string, to: string, dryRun: boolean): Promi
   return { from: r.from, to: r.to, referrers: r.referrers ?? [], linksRewritten: r.links_rewritten ?? 0 }
 }
 
+/** Moves a folder of notes, or with `dryRun` lists what would move. The notes keep their names, so links keep working. */
+export async function moveFolder(from: string, to: string, dryRun: boolean): Promise<{ from: string; to: string; notes: string[] }> {
+  const r = await hqJson<{ from: string; to: string; notes?: string[] }>('/api/folder/move', 'POST', { from, to, dry_run: dryRun })
+  return { from: r.from, to: r.to, notes: r.notes ?? [] }
+}
+
 /** Moves the note to the Trash; `trash_path` is what Undo restores from. */
 export function deleteNote(path: string): Promise<{ success: boolean; trash_path: string }> {
   return hqJson(`/api/note?path=${encodeURIComponent(path)}`, 'DELETE')

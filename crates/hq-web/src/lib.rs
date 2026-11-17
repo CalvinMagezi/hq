@@ -407,6 +407,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         )
         .route("/api/note/create", post(vault_api::note_create_handler))
         .route("/api/note/move", post(vault_api::note_move_handler))
+        .route("/api/folder/move", post(vault_api::folder_move_handler))
         .route("/api/note/versions", get(vault_api::note_versions_handler))
         .route("/api/note/link", post(note_ids::note_link_handler))
         .route("/api/note/by-id/{id}", get(note_ids::note_by_id_handler))

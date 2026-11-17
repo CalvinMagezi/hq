@@ -150,3 +150,7 @@ a.vn-crumb:hover,.vn-crumb-btn:hover{background:var(--surface-200);color:var(--i
 .vn-row.is-system{opacity:.65}
 .vn-lock{color:var(--ink-muted);flex:none}
 .vn-missing{margin-top:24px}
+
+/* Dragging a note or folder onto a folder in the tree. */
+.vn-row.is-drop,.vn-tree-body.is-drop{outline:2px solid var(--brand-green);outline-offset:-2px;background:var(--surface-200)}
+.vn-row[draggable="true"]{cursor:grab}

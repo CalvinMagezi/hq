@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { createElement, type ReactElement } from 'react'
 import { RouterProvider, createMemoryHistory, createRootRoute, createRouter } from '@tanstack/react-router'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { NoteTreeNode } from '~/lib/vaultApi'
 import { FolderTree, LocationBar } from './VaultNav'
 import { VaultMissing } from './VaultMissing'
@@ -13,7 +14,8 @@ async function inRouter(view: ReactElement): Promise<string> {
     history: createMemoryHistory({ initialEntries: ['/'] }),
   })
   await router.load()
-  return renderToStaticMarkup(createElement(RouterProvider, { router }))
+  // The tree moves things through the query cache, so it needs one.
+  return renderToStaticMarkup(createElement(QueryClientProvider, { client: new QueryClient() }, createElement(RouterProvider, { router })))
 }
 
 const noop = () => {}
@@ -218,5 +220,13 @@ describe('a path that is gone', () => {
     const html = await page('Notebooks/Lost/Gone.md')
     expect(html).toContain('Go to Vault')
     expect(html).toContain('href="/notes"')
+  })
+})
+
+describe('dragging in the folder tree', () => {
+  test('notes and folders can be dragged, and system folders cannot', async () => {
+    const html = await inRouter(createElement(FolderTree, { root: TREE, loading: false, failed: false, current: null, open: new Set(['Notebooks/Projects']), showAll: new Set<string>(), showSystem: true, onToggle: noop, onShowAll: noop, onShowSystem: noop, onCollapseAll: noop, onReveal: noop }))
+    expect(html).toMatch(/data-path="Notebooks\/Projects"[^>]*draggable="true"/)
+    expect(html).toMatch(/data-path="Notebooks\/_system"[^>]*draggable="false"/)
   })
 })

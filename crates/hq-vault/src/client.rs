@@ -102,6 +102,16 @@ impl VaultClient {
         crate::reorg::move_note(&self.vault_path, from, to, dry_run)
     }
 
+    /// Move a folder of notes inside `Notebooks/`. See `reorg::move_folder`.
+    pub fn move_folder(
+        &self,
+        from: &str,
+        to: &str,
+        dry_run: bool,
+    ) -> Result<crate::reorg::FolderMoveReport> {
+        crate::reorg::move_folder(&self.vault_path, from, to, dry_run)
+    }
+
     /// Move a note into `_trash/` (never a hard delete). Returns the trash path.
     pub fn trash_note(&self, rel_path: &str, dry_run: bool) -> Result<String> {
         crate::reorg::trash_note(&self.vault_path, rel_path, dry_run)

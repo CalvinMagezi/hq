@@ -98,13 +98,20 @@ function subfolderCounts(tree: NoteTreeNode | undefined): Record<string, number>
 
 function FolderRoute({ dirPath, entries }: { dirPath: string; entries: DirEntry[] }) {
     const tree = useQuery(noteTreeQuery(dirPath))
+    const [moving, setMoving] = useState(false)
+    // The top folder and the system folders stay where they are.
+    const movable = dirPath.startsWith('Notebooks/') && !dirPath.split('/').some((p) => p.startsWith('_'))
     return (
-        <FolderView
-            dirPath={dirPath}
-            entries={entries}
-            counts={subfolderCounts(tree.data?.tree)}
-            onNewHere={() => window.dispatchEvent(new CustomEvent('hq:open-quick-note', { detail: { folder: dirPath } }))}
-        />
+        <>
+            {moving && <MoveNote path={dirPath} kind="folder" onClose={() => setMoving(false)} />}
+            <FolderView
+                dirPath={dirPath}
+                entries={entries}
+                counts={subfolderCounts(tree.data?.tree)}
+                onNewHere={() => window.dispatchEvent(new CustomEvent('hq:open-quick-note', { detail: { folder: dirPath } }))}
+                onMove={movable ? () => setMoving(true) : undefined}
+            />
+        </>
     )
 }
 

@@ -64,8 +64,14 @@ deleted; the tree is the one component above.
 - Move and rename: built for a note. `POST /api/note/move` (`{from, to, dry_run}`) runs the same code as the
   `vault_move` tool, so links to the note in other notes are rewritten (the open question is answered: they
   follow) and the index follows. The note bar's Move opens a sheet where typing a new place asks for a dry run
-  and says how many notes link here; Move does it and Undo moves it back. Not built: moving a folder, and drag
-  and drop in the tree (the server moves notes, not folders).
+  and says how many notes link here; Move does it and Undo moves it back.
+- Folder moves and drag and drop: `POST /api/folder/move` (`{from, to, dry_run}`) renames the folder inside
+  Notebooks, refuses a destination that exists, a move into itself, and the protected folders, and re-indexes
+  every note under it (search, link graph, provenance). Wikilinks are by note name, so none needs rewriting.
+  In the tree, notes and folders drag onto a folder (or onto the tree's empty space for the top folder); system
+  folders neither drag nor take a drop; the toast offers Undo. The folder page has a Move button for keyboard
+  and touch, so dragging is never the only way. Not built: moving several things at once, and a notes-only
+  folder move that also keeps plain relative markdown links working (the vault rewrites wikilinks only).
 - New folder, sort by Modified and the grid view on the folder page: the directory listing carries no
   modified time, and nothing creates an empty folder.
 - Scroll position on Back is whatever the router restores; it is not guaranteed by this change.
@@ -215,8 +221,6 @@ HQ Hub (`crates/hq-desktop/src/menu.rs`):
 
 ## Open questions that block parts of the above
 
-- Moving a folder and drag and drop: the server moves notes only. Folders need a route that moves every note
-  under them and rewrites their links as one change.
 - Is the claude.ai connector retired? `docs/plans/web-matches-phone/plan.md` says so, and this repo's
   overview still documents it. Settings shows a "Claude on the web" row only if it is not.
 - Does HQ Hub's helper count and notice follow `agent_host.driver_grace_minutes`, as the Inbox does?

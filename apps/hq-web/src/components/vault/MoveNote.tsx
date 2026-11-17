@@ -3,9 +3,9 @@ import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { t, tn } from '~/strings'
 import { Sheet } from '~/components/ui/Sheet'
-import { moveNote } from '~/lib/vaultApi'
+import { moveFolder, moveNote } from '~/lib/vaultApi'
 import { vaultKeys } from '~/lib/queries'
-import { normalizeTarget, placeOf } from '~/lib/moveNote'
+import { normalizeTarget, placeOf, type MoveKind } from '~/lib/moveNote'
 import { toastUndo } from '~/lib/toast'
 
 const PREVIEW_DELAY_MS = 400
@@ -14,14 +14,15 @@ const PREVIEW_DELAY_MS = 400
  * Moves or renames a note. Typing a new place asks HQ who links to it (a dry run), so the person sees what
  * follows before choosing; Move does it, and Undo on the toast moves it back, links and all.
  */
-export function MoveNote({ path, onClose }: { path: string; onClose: () => void }) {
+export function MoveNote({ path, kind = 'note', onClose }: { path: string; kind?: MoveKind; onClose: () => void }) {
   const [text, setText] = useState(path)
   const [linked, setLinked] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
   const client = useQueryClient()
-  const target = normalizeTarget(text, path)
+  const target = normalizeTarget(text, path, kind)
+  const run = (from: string, to: string, dryRun: boolean) => (kind === 'folder' ? moveFolder(from, to, dryRun).then((r) => r.notes.length) : moveNote(from, to, dryRun).then((r) => r.referrers.length))
 
   // Who links here, asked once the typing pauses.
   useEffect(() => {
@@ -30,15 +31,15 @@ export function MoveNote({ path, onClose }: { path: string; onClose: () => void 
     const to = target.path
     let live = true
     const timer = window.setTimeout(() => {
-      moveNote(path, to, true)
-        .then((r) => live && setLinked(r.referrers.length))
+      run(path, to, true)
+        .then((n) => live && setLinked(n))
         .catch(() => undefined)
     }, PREVIEW_DELAY_MS)
     return () => {
       live = false
       window.clearTimeout(timer)
     }
-  }, [target.path, path])
+  }, [target.path, path, kind])
 
   const go = async () => {
     if (!target.path || busy) return
@@ -46,12 +47,12 @@ export function MoveNote({ path, onClose }: { path: string; onClose: () => void 
     setBusy(true)
     setError(null)
     try {
-      await moveNote(path, to, false)
+      await run(path, to, false)
       void client.invalidateQueries({ queryKey: vaultKeys.all })
       toastUndo(
         t('move_done', { place: placeOf(to) }),
         async () => {
-          await moveNote(to, path, false)
+          await run(to, path, false)
           void client.invalidateQueries({ queryKey: vaultKeys.all })
           void navigate({ to: '/notes/$', params: { _splat: path } })
         },
@@ -67,7 +68,7 @@ export function MoveNote({ path, onClose }: { path: string; onClose: () => void 
 
   return (
     <Sheet
-      title={t('move_title')}
+      title={t(kind === 'folder' ? 'move_folder_title' : 'move_title')}
       placement="center"
       busy={busy}
       onClose={onClose}
@@ -103,7 +104,7 @@ export function MoveNote({ path, onClose }: { path: string; onClose: () => void 
         {target.problem && <p role="status" className="a-body-sm a-warn-t">{t(target.problem)}</p>}
         {!target.problem && linked !== null && (
           <p role="status" className="a-body-sm">
-            {linked === 0 ? t('move_no_links') : tn('move_links', linked)}
+            {kind === 'folder' ? (linked === 0 ? t('move_folder_empty') : tn('move_folder_notes', linked)) : linked === 0 ? t('move_no_links') : tn('move_links', linked)}
           </p>
         )}
         {error && <p role="alert" className="a-body-sm a-warn-t">{error}</p>}

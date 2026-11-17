@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Link, Outlet, useNavigate, useRouter, useRouterState } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
   ArrowRight,
@@ -16,7 +16,10 @@ import {
   PanelLeft,
   Trash2,
 } from 'lucide-react'
-import type { NoteTreeNode } from '~/lib/vaultApi'
+import { moveFolder, moveNote, type NoteTreeNode } from '~/lib/vaultApi'
+import { dropTarget, placeOf, type Dragged } from '~/lib/moveNote'
+import { toastAlert, toastUndo } from '~/lib/toast'
+import { vaultKeys } from '~/lib/queries'
 import { noteTreeQuery } from '~/lib/queries'
 import { usePersistedState } from '~/lib/usePersistedState'
 import { Sheet } from '~/components/ui/Sheet'
@@ -386,6 +389,13 @@ interface TreeRowViewProps {
   onToggle: (path: string, open: boolean) => void
   onShowAll: (folder: string) => void
   onNavigate?: () => void
+  /** What is being dragged, if anything, and where it may land. */
+  dragging: Dragged | null
+  dropOn: string | null
+  onDragStart: (drag: Dragged) => void
+  onDragEnd: () => void
+  onDragOverFolder: (folder: string) => void
+  onDropOn: (folder: string) => void
 }
 
 function RowChevron({ row, onToggle }: { row: TreeRow; onToggle: (path: string, open: boolean) => void }) {
@@ -406,7 +416,7 @@ function RowIcon({ row }: { row: TreeRow }) {
   return <FileText className="a-ic xs" />
 }
 
-function TreeRowView({ row, tabStop, current, onPath, onFocusRow, onToggle, onShowAll, onNavigate }: TreeRowViewProps) {
+function TreeRowView({ row, tabStop, current, onPath, onFocusRow, onToggle, onShowAll, onNavigate, dragging, dropOn, onDragStart, onDragEnd, onDragOverFolder, onDropOn }: TreeRowViewProps) {
   const indent = { paddingInlineStart: `${8 + row.depth * 16}px` }
   if (row.kind === 'more') {
     return (
@@ -420,7 +430,10 @@ function TreeRowView({ row, tabStop, current, onPath, onFocusRow, onToggle, onSh
   }
   const selected = row.path === current
   const system = row.kind === 'folder' && row.system
-  const className = ['vn-row', selected ? 'is-on' : '', onPath && !selected ? 'is-path' : '', system ? 'is-system' : ''].filter(Boolean).join(' ')
+  // A folder takes a drop when the thing dragged could land in it; a system folder never does.
+  const folderPath = row.kind === 'folder' ? row.path : null
+  const canDrop = folderPath !== null && dragging !== null && dropTarget(dragging, folderPath) !== null
+  const className = ['vn-row', selected ? 'is-on' : '', onPath && !selected ? 'is-path' : '', system ? 'is-system' : '', canDrop && dropOn === folderPath ? 'is-drop' : ''].filter(Boolean).join(' ')
   const label = row.kind === 'folder' ? t('vault_tree_count_label', { name: row.name, n: row.count }) : undefined
   return (
     <div
@@ -434,6 +447,28 @@ function TreeRowView({ row, tabStop, current, onPath, onFocusRow, onToggle, onSh
       className={className}
       style={indent}
       onFocus={() => onFocusRow(row.path)}
+      draggable={!system}
+      onDragStart={(e) => {
+        e.stopPropagation()
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', row.path)
+        onDragStart({ kind: row.kind === 'folder' ? 'folder' : 'note', path: row.path })
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={(e) => {
+        // A row never lets a drop fall through to the tree behind it, which would mean "the top folder".
+        e.stopPropagation()
+        if (!canDrop || !folderPath) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        onDragOverFolder(folderPath)
+      }}
+      onDrop={(e) => {
+        e.stopPropagation()
+        if (!canDrop || !folderPath) return
+        e.preventDefault()
+        onDropOn(folderPath)
+      }}
     >
       <RowChevron row={row} onToggle={onToggle} />
       <span className="vn-kind" aria-hidden="true">
@@ -459,6 +494,37 @@ export function FolderTree({ root, loading, failed, current, open, showAll, show
   const ancestors = useMemo(() => new Set(current ? ancestorPaths(`${current}/x`) : []), [current])
   const [focusPath, setFocusPath] = useState<string | null>(null)
   const tree = useRef<HTMLDivElement>(null)
+  const client = useQueryClient()
+  const [dragging, setDragging] = useState<Dragged | null>(null)
+  const [dropOn, setDropOn] = useState<string | null>(null)
+
+  /** Moves what was dragged into the folder, tells the person, and offers Undo. The open page follows if it moved. */
+  const dropInto = (folder: string) => {
+    const drag = dragging
+    setDragging(null)
+    setDropOn(null)
+    const move = drag && dropTarget(drag, folder)
+    if (!move) return
+    const run = (from: string, to: string) => (move.kind === 'folder' ? moveFolder(from, to, false) : moveNote(from, to, false))
+    const reopen = (from: string, to: string) => {
+      if (current === from || current?.startsWith(`${from}/`)) void navigate({ to: '/notes/$', params: { _splat: `${to}${current.slice(from.length)}` } })
+    }
+    run(move.from, move.to)
+      .then(() => {
+        void client.invalidateQueries({ queryKey: vaultKeys.all })
+        reopen(move.from, move.to)
+        toastUndo(
+          t('move_drop_label', { name: placeOf(move.from).split('/').pop() ?? '', place: folder === 'Notebooks' ? t('vault_nav_label') : placeOf(folder) }),
+          async () => {
+            await run(move.to, move.from)
+            void client.invalidateQueries({ queryKey: vaultKeys.all })
+            reopen(move.to, move.from)
+          },
+          t('move_undone'),
+        )
+      })
+      .catch((e) => toastAlert(t('move_failed', { why: e instanceof Error ? e.message : '' })))
+  }
 
   // Tab lands on the open row, or on the first when none is open.
   const tabStop = (() => {
@@ -518,9 +584,44 @@ export function FolderTree({ root, loading, failed, current, open, showAll, show
       )}
       {failed && !root && <p className="a-body-sm a-muted vn-tree-note">{t('vault_tree_failed')}</p>}
       {root && (
-        <div ref={tree} className="vn-tree-body" role="tree" aria-label={t('vault_tree_label')} onKeyDown={onKeyDown}>
+        <div
+          ref={tree}
+          className={`vn-tree-body${dragging && dropOn === 'Notebooks' ? ' is-drop' : ''}`}
+          role="tree"
+          aria-label={t('vault_tree_label')}
+          onKeyDown={onKeyDown}
+          onDragOver={(e) => {
+            if (!dragging || !dropTarget(dragging, 'Notebooks')) return
+            e.preventDefault()
+            setDropOn('Notebooks')
+          }}
+          onDrop={(e) => {
+            if (!dragging || !dropTarget(dragging, 'Notebooks')) return
+            e.preventDefault()
+            dropInto('Notebooks')
+          }}
+        >
           {rows.map((row) => (
-            <TreeRowView key={row.path} row={row} tabStop={tabStop} current={current} onPath={ancestors.has(row.path)} onFocusRow={setFocusPath} onToggle={onToggle} onShowAll={onShowAll} onNavigate={onNavigate} />
+            <TreeRowView
+              key={row.path}
+              row={row}
+              tabStop={tabStop}
+              current={current}
+              onPath={ancestors.has(row.path)}
+              onFocusRow={setFocusPath}
+              onToggle={onToggle}
+              onShowAll={onShowAll}
+              onNavigate={onNavigate}
+              dragging={dragging}
+              dropOn={dropOn}
+              onDragStart={setDragging}
+              onDragEnd={() => {
+                setDragging(null)
+                setDropOn(null)
+              }}
+              onDragOverFolder={setDropOn}
+              onDropOn={dropInto}
+            />
           ))}
         </div>
       )}
