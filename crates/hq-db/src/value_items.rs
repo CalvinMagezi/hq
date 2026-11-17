@@ -648,6 +648,26 @@ pub fn restore_dismissed(db: &Database, id: &str, window_secs: i64) -> Result<bo
     })
 }
 
+/// How long a cleared agent-dialog notice can be put back from Done.
+pub const CLEARED_DIALOG_RESTORE_DAYS: i64 = 30;
+
+/// Puts back a cleared agent-dialog notice that was never answered, within `window_secs`. A request that
+/// asks the owner a decision cannot come back this way (see `restore_dismissed`); a notice of an agent's open
+/// dialog can, since clearing it answered nothing and sent the agent nothing. Returns false for any other
+/// item, one answered since, or one cleared longer ago.
+pub fn restore_cleared_dialog(db: &Database, id: &str, window_secs: i64) -> Result<bool> {
+    db.with_conn(|c| {
+        let n = c.execute(
+            "UPDATE value_items SET state='delivered', engagement=NULL, engaged_at=NULL, cleared_at=NULL \
+             WHERE id = ?1 AND state = 'dismissed' \
+               AND EXISTS (SELECT 1 FROM dialog_alerts d WHERE d.item_id = ?1 AND d.answered_at IS NULL) \
+               AND julianday(engaged_at) >= julianday('now', ?2)",
+            params![id, format!("-{window_secs} seconds")],
+        )?;
+        Ok(n > 0)
+    })
+}
+
 pub fn dismiss_by_id(db: &Database, id_or_token: &str) -> Result<bool> {
     if id_or_token.len() < MIN_ID_PREFIX_LEN {
         anyhow::bail!(

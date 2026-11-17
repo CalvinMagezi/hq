@@ -553,6 +553,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             post(notifications_api::restore_many_handler),
         )
         .route(
+            "/api/notifications/restore-cleared",
+            post(notifications_api::restore_cleared_handler),
+        )
+        .route(
             "/api/notifications/{id}/read",
             post(notifications_api::read_handler),
         )

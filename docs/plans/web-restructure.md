@@ -152,8 +152,14 @@ Inbox (`routes/inbox.tsx`, `components/notifications/`, `lib/inboxView.ts`):
   row "Waiting for later" brings it back. Done lists the sites allowed for good, each with Remove.
 - Keys: J and K (and the arrows) move, Esc goes back, E clears an update, H says Later, Z undoes the last
   clear. An approval has no key.
-- Not built: the catch-up card for a pile (it needs a server rule for what "finished or stopped" means),
-  the reason line on each item (no field carries it), "Waiting for later" for offers (the server holds
+- The catch-up card (`lib/catchUp.ts`): past five waiting requests, if some are the notice of an agent's open
+  dialog whose helper is no longer running (or that has waited over a day), one card says so and offers Clear old
+  (they are cleared, not allowed) or to show only what needs the person. A sign-in, an approval or a question for
+  the owner is never in the set. Clearing uses the existing per-item dismiss, six at a time; the toast offers Undo.
+  Done lists them under "No longer waiting" with Restore and Restore all, for 30 days. The server side is
+  `POST /api/notifications/restore-cleared`, which puts back only unanswered agent-dialog notices (a decision
+  never comes back that way, as before).
+- Not built: the reason line on each item (no field carries it), "Waiting for later" for offers (the server holds
   those), U to mark unread (no route), and the "Helpers ask me for" setting (see Safety below).
 
 Settings (`lib/settingsGroups.ts`, `components/settings/`):

@@ -15,6 +15,7 @@ import {
   restoreNotification,
   restoreNotifications,
   fetchTrustedSites,
+  restoreClearedDialogs,
   forgetTrustedSite,
   clearableUpdateIds,
   inInboxTab,
@@ -28,6 +29,8 @@ import { t, tn } from '~/strings'
 import { failureLine } from '~/lib/version'
 import { InboxView } from '~/components/notifications/InboxView'
 import type { UpdateFilter } from '~/components/notifications/updateKind'
+import { globalSessionsApi } from '~/lib/sessionsApi'
+import { clearedDialogs, inBatches, pileOf, staleRequests } from '~/lib/catchUp'
 import { LATER_MS, neighbour, preferredItem, readLater, splitLater, writeLater, type LaterMap } from '~/lib/inboxView'
 
 export const Route = createFileRoute('/inbox')({
@@ -203,7 +206,6 @@ function NotificationsPage() {
     () => (activeTab === 'all' ? splitLater(matching, later, clock) : { waiting: [], rest: matching }),
     [matching, later, clock, activeTab],
   )
-  const items = rest
 
   const sendLater = (id: string) => {
     const next = { ...later, [id]: Date.now() + LATER_MS }
@@ -221,6 +223,44 @@ function NotificationsPage() {
     setLater(back)
     writeLater(back)
   }
+
+  // The catch-up card: past five waiting requests, the ones from helpers that are done can be cleared together.
+  const helperSessions = useQuery({ queryKey: ['search', 'helpers'], queryFn: () => globalSessionsApi.list({}), enabled: activeTab === 'pending', staleTime: 30_000, retry: false })
+  const [onlyNeeds, setOnlyNeeds] = useState(false)
+  const [clearing, setClearing] = useState(false)
+  const waitingRequests = notifications.filter((n) => inInboxTab(n, 'pending') && n.state === 'pending')
+  // Without an answer about the helpers nothing is called old, so nothing is offered for clearing by mistake.
+  const stale = useMemo(() => (helperSessions.data ? staleRequests(waitingRequests, helperSessions.data) : []), [waitingRequests, helperSessions.data])
+  const pile = activeTab === 'pending' ? pileOf(waitingRequests, stale) : null
+  // "Show the ones that need you" sets the old ones aside without clearing them.
+  const staleIds = useMemo(() => new Set(stale.map((n) => n.id)), [stale])
+  const items = onlyNeeds && pile ? rest.filter((n) => !staleIds.has(n.id)) : rest
+  const clearOld = async () => {
+    setClearing(true)
+    try {
+      const cleared = await inBatches(stale, 6, (n) => executeNotificationAction(n.id, 'dismiss'))
+      await loadData()
+      if (cleared.length > 0) {
+        const ids = cleared.map((n) => n.id)
+        toastUndo(
+          tn('inbox_pile_cleared', ids.length),
+          async () => {
+            await restoreClearedDialogs(ids)
+            await loadData()
+          },
+          t('restored_updates'),
+        )
+      }
+      if (cleared.length < stale.length) toastAlert(t('inbox_pile_failed'))
+    } finally {
+      setClearing(false)
+    }
+  }
+  const restoreGone = (ids: string[]) =>
+    restoreClearedDialogs(ids)
+      .then(loadData)
+      .then(() => toastNotice(tn('inbox_gone_restored', ids.length)))
+      .catch(failed)
 
   const sites = useQuery({ queryKey: ['inbox-sites'], queryFn: fetchTrustedSites, enabled: activeTab === 'resolved', staleTime: 30_000 })
   const forgetSite = (site: string) =>
@@ -304,6 +344,13 @@ function NotificationsPage() {
       onClearDone={activeTab === 'resolved' && items.length > 0 ? handleClearDone : undefined}
       onSilence={handleSilence}
       later={waiting}
+      pile={pile}
+      pileBusy={clearing}
+      onClearOld={() => void clearOld()}
+      onlyNeeds={onlyNeeds}
+      onToggleNeeds={() => setOnlyNeeds((v) => !v)}
+      cleared={activeTab === 'resolved' ? clearedDialogs(notifications) : undefined}
+      onRestore={(ids) => void restoreGone(ids)}
       onLater={sendLater}
       onBringBack={bringBack}
       sites={sites.data?.sites}

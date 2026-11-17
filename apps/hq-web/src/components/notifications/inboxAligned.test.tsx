@@ -261,3 +261,21 @@ describe('the Inbox on a wide screen', () => {
     expect(html).toContain('Remove')
   })
 })
+
+describe('the catch-up card', () => {
+  test('appears over the list with Clear old and a way to see only what needs the person', async () => {
+    const html = await view({ items: [approval], needsCount: 8, pile: { waiting: 8, old: 5, rest: 3 }, onClearOld: () => undefined, onToggleNeeds: () => undefined })
+    expect(html).toContain('8 are waiting.')
+    expect(html).toContain('5 are from helpers that already finished or stopped')
+    expect(html).toContain('They are cleared, not allowed.')
+    expect(html).toContain('Clear old')
+    expect(html).toContain('Show the 3 that need you')
+  })
+  test('is not drawn without a pile, and Done lists what was cleared with Restore', async () => {
+    expect(await view({ items: [approval] })).not.toContain('Clear old')
+    const gone = item({ id: 'g', state: 'dismissed', metadata: { dialog: { session_id: 's', seq: 1, kind: 'q', question: null, command: null, options: [], approve: null, answered: false } } })
+    const html = await view({ tab: 'resolved', cleared: [gone] })
+    expect(html).toContain('No longer waiting · 1')
+    expect(html).toContain('Cleared, not allowed. Kept 30 days.')
+  })
+})

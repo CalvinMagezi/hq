@@ -531,6 +531,34 @@ pub(crate) async fn restore_notification_handler(
     }
 }
 
+/// `POST /api/notifications/restore-cleared`: puts back agent-dialog notices cleared from the Inbox (the catch-up
+/// card's Undo, and Restore in Done). Only an unanswered dialog notice can come back, for 30 days; a decision
+/// never does. Answers how many came back.
+pub(crate) async fn restore_cleared_handler(
+    State(state): State<Arc<WsState>>,
+    Json(body): Json<RestoreManyRequest>,
+) -> Response {
+    if body.ids.len() > MAX_RESTORE {
+        return ApiError::bad_request("too many items to restore at once").into_response();
+    }
+    let window = hq_db::value_items::CLEARED_DIALOG_RESTORE_DAYS * 24 * 60 * 60;
+    let mut restored = 0;
+    for id in &body.ids {
+        let Some(val_id) = id.strip_prefix("val_") else {
+            return ApiError::bad_request("unrecognized notification ID format").into_response();
+        };
+        match hq_db::value_items::restore_cleared_dialog(&state.db, val_id, window) {
+            Ok(true) => restored += 1,
+            Ok(false) => {}
+            Err(e) => return ApiError::internal(e).into_response(),
+        }
+    }
+    done(
+        &state,
+        serde_json::json!({ "ok": true, "restored": restored }),
+    )
+}
+
 /// Answers the item whose id is exactly `val_id`. Never a prefix: one approval approves exactly
 /// that request, and an approval is signed wherever it lands, so the inbox never shows
 /// "approved" for something the approval gate treats as unapproved. An item already answered,
@@ -1013,6 +1041,57 @@ mod tests {
             .find(|n| n.id == format!("val_{}", plain.id))
             .unwrap();
         assert!(news.metadata.dialog.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_cleared_dialog_notice_comes_back_but_a_decision_never_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(WsState::new(dir.path().to_path_buf(), None));
+        let db = &state.db;
+        let mk = |title: &str| {
+            let item = hq_core::types::ValueItem::new(
+                "session-supervisor",
+                hq_core::types::ValueKind::ActionNeeded,
+                title,
+                "blocked",
+            );
+            hq_db::value_items::insert(db, &item).unwrap();
+            item.id
+        };
+        let notice = mk("Helper is waiting");
+        let decision = mk("Allow this?");
+        hq_db::dialog_alerts::record(
+            db,
+            &hq_db::dialog_alerts::NewDialogAlert {
+                item_id: &notice,
+                session_id: "hs-1",
+                pending_seq: 1,
+                kind: "path",
+                question: None,
+                command: None,
+                options: &[],
+            },
+        )
+        .unwrap();
+        for id in [&notice, &decision] {
+            hq_db::value_items::answer_by_id(db, id, "dismissed").unwrap();
+        }
+        let body =
+            serde_json::json!({ "ids": [format!("val_{notice}"), format!("val_{decision}")] });
+        let res = restore_cleared_handler(
+            State(state.clone()),
+            Json(serde_json::from_value(body).unwrap()),
+        )
+        .await;
+        assert_eq!(res.status(), axum::http::StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let out: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(out["restored"], 1, "only the dialog notice comes back");
+        let pending = scan_value_items(db, Some("pending")).unwrap();
+        assert!(pending.iter().any(|n| n.id == format!("val_{notice}")));
+        assert!(!pending.iter().any(|n| n.id == format!("val_{decision}")));
     }
 
     #[tokio::test]

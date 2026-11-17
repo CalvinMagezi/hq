@@ -6,6 +6,7 @@ import { groupByDay } from '~/lib/inboxCard'
 import type { InboxTab, NotificationItem, SilenceTopic } from '~/lib/notificationsApi'
 import { t, tn, type StringKey } from '~/strings'
 import { digestOf, splitHelpers } from '~/lib/inboxView'
+import type { Pile } from '~/lib/catchUp'
 import { NotificationCard } from './NotificationCard'
 import { NotificationDetail } from './NotificationDetail'
 import { NotifyCard } from './NotifyCard'
@@ -54,6 +55,16 @@ export interface InboxViewProps {
   /** Sites the owner allowed once and for all; Done lists them so removing one is a visible button. */
   sites?: string[]
   onForgetSite?: (site: string) => void
+  /** More than five requests wait and some are from helpers that are done: one card offers to clear those. */
+  pile?: Pile | null
+  pileBusy?: boolean
+  onClearOld?: () => void
+  /** Whether the list shows only what needs the person, with the old ones set aside. */
+  onlyNeeds?: boolean
+  onToggleNeeds?: () => void
+  /** Agent-dialog notices cleared from the Inbox, listed in Done with Restore. */
+  cleared?: NotificationItem[]
+  onRestore?: (ids: string[]) => void
   /** Silences the topic of the open item. */
   onSilence?: (topic: SilenceTopic) => void
   onAction(id: string, action: string): Promise<void>
@@ -195,6 +206,20 @@ export function InboxView(p: InboxViewProps) {
             </button>
           </div>
         )}
+        {p.tab === 'pending' && p.pile && (
+          <section className="a-card hq-pile" aria-label={t('inbox_pile_title', { n: String(p.pile.waiting) })}>
+            <b>{t('inbox_pile_title', { n: String(p.pile.waiting) })}</b>
+            <p className="a-body-sm">{t('inbox_pile_line', { old: String(p.pile.old) })}</p>
+            <div className="a-btns">
+              <button type="button" className="a-btn secondary" disabled={p.pileBusy} onClick={p.onClearOld}>
+                {t('inbox_pile_clear')}
+              </button>
+              <button type="button" className="a-btn quiet" onClick={p.onToggleNeeds}>
+                {p.onlyNeeds ? t('inbox_pile_show_all') : t('inbox_pile_show', { n: String(p.pile.rest) })}
+              </button>
+            </div>
+          </section>
+        )}
         {p.tab === 'pending' ? (
           <div className="hq-inbox-list">
             <NotifyCard />
@@ -221,6 +246,21 @@ export function InboxView(p: InboxViewProps) {
                     </button>
                   </div>
                 ))}
+              </Fold>
+            )}
+            {p.tab === 'resolved' && p.cleared && p.cleared.length > 0 && (
+              <Fold title={t('inbox_gone_title', { n: String(p.cleared.length) })} line={t('inbox_gone_line')}>
+                {p.cleared.map((n) => (
+                  <div key={n.id} className="hq-later-row">
+                    <UpdateRow notification={n} />
+                    <button type="button" className="a-btn quiet compact" onClick={() => p.onRestore?.([n.id])}>
+                      {t('inbox_gone_restore')}
+                    </button>
+                  </div>
+                ))}
+                <button type="button" className="a-btn secondary compact" onClick={() => p.onRestore?.(p.cleared?.map((n) => n.id) ?? [])}>
+                  {t('inbox_gone_restore_all', { n: String(p.cleared.length) })}
+                </button>
               </Fold>
             )}
             {p.tab === 'resolved' && p.sites && p.sites.length > 0 && (

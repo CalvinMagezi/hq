@@ -166,6 +166,11 @@ export function restoreNotification(id: string): Promise<{ ok: boolean }> {
 }
 
 /** Puts a set of cleared updates back (Undo of "Clear all updates"). */
+/** Puts back agent-dialog notices cleared from the Inbox: the catch-up card's Undo and Restore in Done. */
+export function restoreClearedDialogs(ids: string[]): Promise<{ ok: boolean; restored: number }> {
+  return hqJson('/api/notifications/restore-cleared', 'POST', { ids })
+}
+
 export function restoreNotifications(ids: string[]): Promise<{ ok: boolean }> {
   return hqJson('/api/notifications/restore', 'POST', { ids })
 }

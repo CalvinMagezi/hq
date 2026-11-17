@@ -1208,6 +1208,24 @@
     <string name="inbox_site_allowed">Allowed for this site</string>
     <string name="inbox_site_remove">Remove</string>
     <string name="inbox_site_removed">Rule removed.</string>
+    <string name="inbox_pile_title">%1$s are waiting.</string>
+    <string name="inbox_pile_line">%1$s are from helpers that already finished or stopped, or are over a day old. Clear those\? They are cleared, not allowed.</string>
+    <string name="inbox_pile_clear">Clear old</string>
+    <string name="inbox_pile_show">Show the %1$s that need you</string>
+    <string name="inbox_pile_show_all">Show all</string>
+    <plurals name="inbox_pile_cleared">
+        <item quantity="one">Cleared %1$s</item>
+        <item quantity="other">Cleared %1$s</item>
+    </plurals>
+    <string name="inbox_pile_failed">Could not clear them. Try again.</string>
+    <string name="inbox_gone_title">No longer waiting · %1$s</string>
+    <string name="inbox_gone_line">Cleared, not allowed. Kept 30 days.</string>
+    <string name="inbox_gone_restore">Restore</string>
+    <string name="inbox_gone_restore_all">Restore all %1$s</string>
+    <plurals name="inbox_gone_restored">
+        <item quantity="one">Restored %1$s</item>
+        <item quantity="other">Restored %1$s</item>
+    </plurals>
     <string name="inbox_search">Search the Inbox</string>
     <string name="inbox_badge_needs">Needs your OK</string>
     <string name="inbox_badge_update">Update</string>
