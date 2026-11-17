@@ -11,6 +11,7 @@ pub mod calc;
 pub mod docs;
 pub mod governor;
 pub mod measure;
+pub mod peer;
 pub mod restore;
 pub mod sheets;
 pub mod shrink;
