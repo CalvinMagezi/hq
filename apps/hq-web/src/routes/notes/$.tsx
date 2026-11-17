@@ -19,6 +19,8 @@ import { noteQuery, noteTreeQuery, vaultKeys } from '~/lib/queries'
 import { MarkdownViewer } from '~/components/MarkdownViewer'
 import { ImageViewer } from '~/components/ImageViewer'
 import { NoteEditor } from '~/components/NoteEditor'
+import { SuiteBar } from '~/components/notes/SuiteBar'
+import { suiteSourceOf } from '~/lib/suiteApi'
 import { useHQStore } from '~/store/hqStore'
 import { CopyPathMenu, type CopyMenuState } from '~/components/CopyPathMenu'
 import { ExportMenu, type ExportMenuState } from '~/components/ExportMenu'
@@ -348,7 +350,18 @@ ${safeHtml}
                 />
             )
         } else {
-            viewer = <MarkdownViewer content={content} activePath={filePath} zoom={mdZoom} />
+            const suiteSource = suiteSourceOf(content)
+            viewer = (
+                <>
+                    {suiteSource && (
+                        <SuiteBar
+                            source={suiteSource}
+                            onChanged={() => queryClient.invalidateQueries({ queryKey: vaultKeys.note(filePath) })}
+                        />
+                    )}
+                    <MarkdownViewer content={content} activePath={filePath} zoom={mdZoom} />
+                </>
+            )
         }
     } else if (ext === 'docx') {
         viewer = <DocxViewer path={filePath} />

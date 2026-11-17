@@ -1,0 +1,19 @@
+[package]
+name = "hq-suite-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Durable storage for the HQ Suite: atomic files, content-addressed media, trash and the shrink journal"
+
+# Pure file handling. Paths come in through SuitePaths; nothing here finds the vault itself
+# (crates/suite/CLAUDE.md).
+[dependencies]
+hex = { workspace = true }
+hq-suite-md = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

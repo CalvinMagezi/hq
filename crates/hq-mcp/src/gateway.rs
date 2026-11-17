@@ -609,6 +609,14 @@ pub fn needs_owner_confirmation(registry: &ToolRegistry, tool: &str, args: &Valu
             .and_then(Value::as_str)
             .is_some_and(|o| !o.is_empty());
     }
+    // Moving an original to the trash waits; reading, preparing a record and undoing do not.
+    if tool == hq_tools::office::OFFICE_TOOL {
+        let action = args
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        return hq_tools::office::moves_original(action);
+    }
     if VAULT_WRITE_TOOLS.contains(&tool) {
         return VAULT_PATH_ARGS
             .iter()
@@ -1115,6 +1123,27 @@ mod tests {
             "gatewaypolicy_discover",
             &json!({})
         ));
+    }
+
+    #[test]
+    fn a_connector_moving_an_office_original_waits_and_the_rest_does_not() {
+        let registry = ToolRegistry::new();
+        let call = |a: &str| json!({ "action": a, "path": "Notebooks/a.docx" });
+        assert!(needs_owner_confirmation(
+            &registry,
+            "office_file",
+            &call("confirm")
+        ));
+        for safe in ["status", "shrink", "abandon", "undo"] {
+            assert!(
+                !needs_owner_confirmation(&registry, "office_file", &call(safe)),
+                "{safe}"
+            );
+        }
+        assert!(
+            needs_owner_confirmation(&registry, "office_file", &json!({})),
+            "no action asks"
+        );
     }
 
     #[test]

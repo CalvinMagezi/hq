@@ -12,7 +12,7 @@ sealed interface Block {
     data class Code(val lang: String, val text: String, val closed: Boolean) : Block
     data class ChartBlock(val result: ChartParse, val source: String, val closed: Boolean) : Block
     data class Table(val headers: List<String>, val aligns: List<Align>, val rows: List<List<String>>) : Block
-    data class Image(val alt: String) : Block
+    data class Image(val alt: String, val src: String = "") : Block
 }
 
 /**
@@ -32,7 +32,7 @@ fun parseBlocks(text: String, streaming: Boolean = false): List<Block> {
             fence != null -> i = fenced(lines, i, fence.groupValues[1], out, streaming)
             HEADING.matches(line) -> { val m = HEADING.matchEntire(line)!!; out += Block.Heading(m.groupValues[1].length, m.groupValues[2].trim()); i++ }
             HRULE.matches(line) -> i++
-            IMAGE.matches(line) -> { out += Block.Image(IMAGE.matchEntire(line)!!.groupValues[1]); i++ }
+            IMAGE.matches(line) -> { IMAGE.matchEntire(line)!!.groupValues.let { out += Block.Image(it[1], it[2].trim()) }; i++ }
             line.contains('|') && i + 1 < lines.size && TABLE_RULE.matches(lines[i + 1]) -> i = table(lines, i, out)
             QUOTE.containsMatchIn(line) -> i = quote(lines, i, out)
             CHECK.matches(line) -> i = checklist(lines, i, out)
@@ -47,7 +47,7 @@ private val FENCE = Regex("^\\s*```\\s*([\\w+-]*)\\s*$")
 private val CLOSING_FENCE = Regex("^\\s*```\\s*$")
 private val HEADING = Regex("^(#{1,6})\\s+(.*)$")
 private val HRULE = Regex("^\\s*([-*_])(\\s*\\1){2,}\\s*$")
-private val IMAGE = Regex("^\\s*!\\[([^\\]]*)]\\([^)]*\\)\\s*$")
+private val IMAGE = Regex("^\\s*!\\[([^\\]]*)]\\(([^)]*)\\)\\s*$")
 private val TABLE_RULE = Regex("^\\s*\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)*\\|?\\s*$")
 private val QUOTE = Regex("^\\s*>")
 private val CHECK = Regex("^\\s*[-*+]\\s+\\[( |x|X)]\\s+.*$")

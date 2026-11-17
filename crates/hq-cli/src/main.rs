@@ -323,6 +323,12 @@ enum Commands {
     /// Restore an encrypted backup into a new or empty folder (the same as `hq backup restore`)
     Restore(RestoreArgs),
 
+    /// The HQ Suite (documents, storage): measure, shrink, undo (`hq suite --help`)
+    Suite {
+        #[command(subcommand)]
+        command: commands::suite::SuiteCommand,
+    },
+
     /// Set up API keys interactively, or set one with `hq env set <provider>`
     Env {
         #[command(subcommand)]
@@ -1049,6 +1055,8 @@ fn lite_rule(command: &Commands) -> LiteRule {
         | Commands::Lite { .. }
         | Commands::Backup { .. }
         | Commands::Restore(_)
+        // The suite reads and writes only the vault and its own folders; it calls out to nothing.
+        | Commands::Suite { .. }
         | Commands::Env { .. }
         | Commands::Task { .. }
         | Commands::Verify { .. }
@@ -1234,6 +1242,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Lite { sub, folder } => commands::lite::lite(config, &sub, folder.as_deref()),
         Commands::Backup { command } => commands::backup::run(config, command),
         Commands::Restore(args) => commands::backup::restore(config, &args),
+        Commands::Suite { command } => commands::suite::run(config, command).await,
         Commands::Pair { platform } => commands::pair::run(config, &platform),
         Commands::Env { action: None } => commands::env::run(config).await,
         Commands::Env {
@@ -1502,6 +1511,8 @@ mod lite_rule_tests {
             &["backup", "keygen", "x"],
             &["backup", "verify", "x"],
             &["restore", "x", "--into", "y"],
+            &["suite", "measure", "x"],
+            &["suite", "jobs"],
             &["doctor", "--windows"],
             &["uninstall", "lite"],
             &["task", "list"],

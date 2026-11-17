@@ -43,6 +43,7 @@ off everywhere.
 - scheduling an unattended turn: `watch_create`. A watch firing runs later with the owner's tools
   and nobody to ask, so the model (or text it read) setting one up is asked about once, here
 - other machines and agents: `host_add`, `host_send`, `agent_send_message`, and starting a coding agent (`harness_session_spawn`, `harness_session_handoff`, `agent_delegate`), which is as strong as `bash`. Steering an agent already started (`harness_session_send`, `harness_session_answer`) does not ask in a clean session; see below for a tainted one
+- moving an office file's original to the trash: `office_file` with `action: confirm` (the HQ Suite; the original stays recoverable for 30 days, and `status`, `shrink`, `abandon` and `undo` never ask)
 - exports to a path: `convert_from_markdown`, `vault_export` and `vault_export_pdf` when given `output`
 - the owner's other accounts: `google_workspace` and the tools of remote MCP servers (`remote_mcp:`), except the ones a server marks read-only (see below)
 - the owner's phone calendar: `calendar_update_event` and `calendar_delete_event`. Unlike the rest of

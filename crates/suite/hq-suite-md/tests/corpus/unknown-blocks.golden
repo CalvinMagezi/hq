@@ -1,0 +1,9 @@
+frontmatter: 43 bytes
+meta: SuiteMeta { kind: None, fidelity: None, original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None }
+ 0 Paragraph | Text before.
+ 1 Code { lang: Some("sheet2") } | ```sheet2 name=future
+ 2 Code { lang: Some("fields") } | ```fields
+ 3 Code { lang: Some("kanban") } | ```kanban board=main
+ 4 Paragraph | Text after.
+diag Info block.unknown_type [block 1] `sheet2` is not a block type this version knows; it is kept as code
+diag Info block.unknown_type [block 3] `kanban` is not a block type this version knows; it is kept as code

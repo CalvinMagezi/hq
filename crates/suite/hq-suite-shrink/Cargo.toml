@@ -1,0 +1,29 @@
+[package]
+name = "hq-suite-shrink"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shrinking documents and media into the small record, and measuring how much that saves"
+
+# May know the other suite crates and hq-convert, nothing else of HQ (crates/suite/CLAUDE.md).
+[dependencies]
+hq-convert = { workspace = true }
+hq-suite-ingest = { workspace = true }
+hq-suite-md = { workspace = true }
+hq-suite-store = { workspace = true }
+# Same feature set as hq-export, so the phone binary links one copy of each codec.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+# Lossy WebP through libwebp (C), chosen by measurement over pure-Rust WebP and AVIF
+# (docs/suite/MEASURE.md). AVIF was dropped for want of a decoder and for encode time on a phone.
+webp = { version = "0.3", default-features = false }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+zip = { version = "9", default-features = false, features = ["deflate"] }

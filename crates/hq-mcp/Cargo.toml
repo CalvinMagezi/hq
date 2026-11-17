@@ -8,6 +8,7 @@ default = [
     "gws",
 ]
 gws = ["hq-tools/gws"]
+suite = ["hq-tools/suite"]
 
 [dependencies]
 hq-core = { workspace = true }

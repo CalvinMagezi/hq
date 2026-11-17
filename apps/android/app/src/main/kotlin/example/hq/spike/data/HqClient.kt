@@ -44,6 +44,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     @Volatile private var bearer: String? = null
 
     /** Starting a helper answers only once the agent has settled, and an export of a large note is made before it is sent; both can take longer than any other call here. */
+    /** A shrink decodes and re-encodes every picture, about 25 seconds for a 3 MB document on a Galaxy A32. */
+    private val suiteHttp by lazy { http.newBuilder().readTimeout(SUITE_READ_SECONDS, TimeUnit.SECONDS).callTimeout(0, TimeUnit.SECONDS).build() }
     private val startHttp by lazy { http.newBuilder().readTimeout(START_READ_SECONDS, TimeUnit.SECONDS).build() }
 
     private val http = OkHttpClient.Builder()
@@ -751,6 +753,51 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         }
     }
 
+    /** Where the office file at [path] stands for the HQ Suite (made smaller, waiting for an answer, or untouched). */
+    suspend fun suiteFile(path: String): SuiteFile =
+        send(authed("/api/suite/file?path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()) { SuiteWire.file(JSONObject(it)) }
+
+    /** Writes the smaller record and checks it. The original does not move until [suiteConfirm]. */
+    suspend fun suiteShrink(path: String): SuiteFile = suiteAction("/api/suite/shrink", JSONObject().put("path", path))
+
+    suspend fun suiteConfirm(job: String): SuiteFile = suiteAction("/api/suite/confirm", JSONObject().put("job", job))
+
+    suspend fun suiteAbandon(job: String): SuiteFile = suiteAction("/api/suite/abandon", JSONObject().put("job", job))
+
+    suspend fun suiteUndo(job: String): SuiteFile = suiteAction("/api/suite/undo", JSONObject().put("job", job))
+
+    /** A picture from the suite's media store, by its vault path (`_media/cas/...`); hq serves nothing else here. */
+    suspend fun suiteMedia(path: String): ByteArray = withContext(Dispatchers.IO) {
+        val request = authed("/api/suite/media?path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()
+        try {
+            http.newCall(request).execute().use { r ->
+                if (r.code == HTTP_UNAUTHORIZED) refused()
+                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/suite/media", status = r.code)
+                r.body.bytes()
+            }
+        } catch (e: IOException) {
+            throw if (e is HqUnavailable) e else HqUnavailable("hq is not reachable", e)
+        }
+    }
+
+    /** A suite action: a 422 carries a sentence for the person, which [SuiteRefused] hands on. */
+    private suspend fun suiteAction(route: String, body: JSONObject): SuiteFile = withContext(Dispatchers.IO) {
+        val request = authed(route).post(body.toString().toRequestBody("application/json".toMediaType())).build()
+        try {
+            suiteHttp.newCall(request).execute().use { r ->
+                if (r.code == HTTP_UNAUTHORIZED) refused()
+                val text = r.body.string()
+                if (r.code == HTTP_UNPROCESSABLE) throw SuiteRefused(SuiteWire.refusal(text) ?: "hq could not do that")
+                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for $route", status = r.code)
+                SuiteWire.file(JSONObject(text))
+            }
+        } catch (e: IOException) {
+            throw if (e is HqUnavailable || e is SuiteRefused) e else HqUnavailable("hq is not reachable", e)
+        } catch (e: org.json.JSONException) {
+            throw HqUnavailable("hq sent something unreadable", e, status = HqUnavailable.UNREADABLE)
+        }
+    }
+
     /** The vault paths of the pinned notes. */
     suspend fun pinned(): Set<String> =
         send(authed("/api/pinned").build()) { text -> JSONObject(text).optJSONArray("notes").objects().mapNotNull { it.optString("path").ifBlank { null } }.toSet() }
@@ -881,6 +928,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         private const val HTTP_CONFLICT = 409
         private const val HTTP_BAD_REQUEST = 400
         private const val HTTP_UNAUTHORIZED = 401
+        private const val HTTP_UNPROCESSABLE = 422
+        private const val SUITE_READ_SECONDS = 300L
         private const val BEARER = "Bearer "
         private const val CONNECT_SECONDS = 3L
         private const val READ_SECONDS = 20L

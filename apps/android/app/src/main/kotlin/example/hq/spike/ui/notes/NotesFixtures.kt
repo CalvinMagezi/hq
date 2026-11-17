@@ -39,6 +39,28 @@ fun notesFixture(name: String?): NotesUi? {
     val reader = ReaderPhase.Ready(sheet, "edited 1d ago")
     val longSheet = NoteSheet("Notebooks/Projects/Agent-HQ/Build-Plan-And-Cutover.md", "Build-Plan-And-Cutover", "Projects › Agent-HQ", longNote(), false, null)
     val longReader = ReaderPhase.Ready(longSheet, "edited 33m ago")
+    if (name?.startsWith("n-suite-") == true) {
+        val source = "Notebooks/Inbox/Imports/Quarterly report.docx"
+        val note = "---\ntitle: Quarterly report\nsource: $source\nsource_sha256: ${"ab".repeat(32)}\n---\n\n# Quarterly report\n\nImported from a Word document."
+        val file = { state: String, headline: String, details: List<String>, shrink: Boolean, confirm: Boolean, undo: Boolean ->
+            example.hq.spike.data.SuiteFile(
+                source, state, if (shrink) null else "sj-751bd766cd684884", "Notebooks/Inbox/Imports/Quarterly report.md", 930652, headline, details,
+                shrink, confirm, confirm, undo,
+            )
+        }
+        SuiteBarFixture.state = when (name) {
+            "n-suite-ready" -> file("ready", "Quarterly report.docx can be made smaller.", emptyList(), true, false, false) to null
+            "n-suite-prepared" -> file(
+                "prepared", "Quarterly report.docx can shrink from 3.4 MB to 2.5 MB.",
+                listOf("Original 3.4 MB, record 2.5 MB: 909 KB saved.", "The note does not keep page layout (margins, fonts, columns).", "Your original has not been moved."),
+                false, true, false,
+            ) to null
+            "n-suite-shrunk" -> file("shrunk", "Quarterly report.docx was made smaller. 909 KB saved; the original is in the trash for 30 days.", emptyList(), false, false, true) to null
+            else -> file("ready", "", emptyList(), true, false, false) to "The note would not be smaller than the file, so there is nothing to save."
+        }
+        val sheet = NoteSheet("Notebooks/Inbox/Imports/Quarterly report.md", "Quarterly report", "Inbox › Imports", note, false, null)
+        return home.copy(stack = listOf(NotesRoute.Reader(sheet.path)), reader = ReaderPhase.Ready(sheet, "edited just now"))
+    }
     return when (name) {
         "n-real-reader" -> home.copy(stack = listOf(NotesRoute.Reader(longSheet.path)), reader = longReader)
         "n-home" -> home

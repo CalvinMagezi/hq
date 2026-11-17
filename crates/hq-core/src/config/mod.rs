@@ -26,6 +26,7 @@ mod relay;
 mod self_update;
 mod skills;
 mod stack;
+mod suite;
 mod tasks;
 mod usage_ledger;
 mod vault_watch;
@@ -79,6 +80,7 @@ pub use relay::*;
 pub use self_update::SelfUpdateConfig;
 pub use skills::{BuiltinSkillsConfig, SkillsConfig};
 pub use stack::{Specialist, StackConfig};
+pub use suite::SuiteConfig;
 pub use tasks::{
     ALL_TIERS, AutonomyGate, DEFAULT_LEASE_TTL_SECS, DEFAULT_STALE_AFTER_HOURS, LeaseMode,
     MAX_AUTO_ARCHIVE_DAYS, MIN_AUTO_ARCHIVE_DAYS, MIN_LEASE_TTL_SECS, ReleaseCheck, TasksConfig,
@@ -302,6 +304,10 @@ pub struct HqConfig {
     /// Watches Notebooks/ so edits made outside HQ reach search in seconds.
     #[serde(default)]
     pub vault_watch: VaultWatchConfig,
+
+    /// The HQ Suite's storage governor and budget.
+    #[serde(default)]
+    pub suite: SuiteConfig,
 
     /// How long chat threads keep their history: fold blocks over older messages instead of a
     /// hard cut. See `docs/plans/context-fold.md`.
@@ -541,6 +547,7 @@ impl Default for HqConfig {
             inbox: InboxConfig::default(),
             backup: BackupConfig::default(),
             vault_watch: VaultWatchConfig::default(),
+            suite: SuiteConfig::default(),
             context_fold: ContextFoldConfig::default(),
             usage_ledger: UsageLedgerConfig::default(),
             mcp_connector: McpConnectorConfig::default(),

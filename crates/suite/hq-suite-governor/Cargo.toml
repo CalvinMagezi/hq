@@ -1,0 +1,18 @@
+[package]
+name = "hq-suite-governor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Keeps the HQ Suite's storage in check: a plain report, orphan media, aged-out originals and a budget"
+
+# Pure file logic. The clock, the budget and the vault path come in from the adapter
+# (crates/suite/CLAUDE.md).
+[dependencies]
+chrono = { workspace = true }
+hq-suite-md = { workspace = true }
+hq-suite-shrink = { workspace = true }
+hq-suite-store = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

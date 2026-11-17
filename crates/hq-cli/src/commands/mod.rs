@@ -104,6 +104,7 @@ pub mod stack;
 pub mod start;
 pub mod status;
 pub mod stop;
+pub mod suite;
 pub mod task;
 pub mod tasks;
 pub mod tools;

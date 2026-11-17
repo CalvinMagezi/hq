@@ -1,0 +1,13 @@
+ 0 Heading { level: 1 } | # Fences in odd places
+ 1 List { ordered: false } | - a list item with a fence:
+ 2 Quote | > ```tile from=A1:A2 fn=sum
+ 3 Typed(Sheet) | ~~~sheet name=tilde
+     header: sheet name=tilde
+     closed: true
+ 4 Typed(Sheet) | ````sheet name=long
+     header: sheet name=long
+     closed: true
+ 5 Code { lang: Some("sheet") } | ```sheet name=indented-one-space
+diag Info block.nested [block 1] a `sheet` block inside a list or quote is kept as code; typed blocks sit at the top level
+diag Info block.nested [block 2] a `tile` block inside a list or quote is kept as code; typed blocks sit at the top level
+diag Info block.indented [block 5] a `sheet` block must start in the first column; this one is kept as code

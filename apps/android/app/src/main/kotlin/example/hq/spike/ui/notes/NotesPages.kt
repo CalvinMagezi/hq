@@ -196,15 +196,20 @@ private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions, onAsk: 
     val blocks = remember(note.body) { parseBlocks(NoteText.withoutFrontmatter(note.body)) }
     val copied = stringResource(R.string.chat_copied)
     val handlers = remember(actions, copied) { BlockActions(onOpenNote = actions.onOpenNote, onCopied = { actions.onNotice(copied) }) }
+    androidx.compose.runtime.CompositionLocalProvider(
+        example.hq.spike.ui.chat.blocks.LocalNoteFolder provides note.path.substringBeforeLast('/', ""),
+    ) {
     Column(Modifier.fillMaxSize()) {
         TopBar(note.title, listOf(note.trail, phase.edited).filter { it.isNotBlank() }.joinToString(" · "), actions.onBack) {
             GreenPill(stringResource(R.string.note_editor_edit), Modifier.padding(end = 4.dp), onClick = actions.onEdit)
             IconAction(HqIcons.MoreVertical, stringResource(R.string.tasks_more), iconSize = 24.dp) { actions.onMenu(true) }
         }
         if (VaultRules.markOf(note.review) == ReviewMark.Changed) ChangedBar(actions.onKeep)
+        suiteSourceOf(note.body)?.let { SuiteBar(it, actions.onNotice, actions.onReload) }
         ReaderHeader(note, onAsk)
         // Lazy, so a long note opens by drawing the screenful in view, not every block of it.
         SelectionContainer(Modifier.weight(1f)) { NoteBody(note.path, blocks, handlers, note.truncated, actions) }
+    }
     }
 }
 

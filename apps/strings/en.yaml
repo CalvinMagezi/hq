@@ -1843,6 +1843,7 @@ step_note_deleted: "Deleted a note"
 step_notes_looked: "Looked through your Vault"
 step_notes_worked: "Worked with your Vault"
 step_notes_imported: "Added files to your Vault"
+step_office_file: "Making a document smaller"
 step_document_made: "Made a document"
 step_document_read: "Read a document"
 step_picture_read: "Read the text in a picture"
@@ -4038,6 +4039,14 @@ sessions_drive_refused: "Drive stays off until it has a goal and done check."
 sessions_drive_failed: "Couldn't change that, try again."
 sessions_unwatch_failed: "Couldn't stop watching. Try again."
 sessions_load_failed: "Couldn't load the agents, try again."
+
+# The HQ Suite bar in the note reader: make the original file smaller, agree, say no, undo
+suite_bar_make_smaller: "Make it smaller"
+suite_bar_move: "Move the original to the trash"
+suite_bar_not_now: "Not now"
+suite_bar_undo: "Undo"
+suite_bar_working: "Working on it…"
+suite_bar_failed: "Couldn't do that, try again."
 
 # Chat problem bar, send states, follow-up chips and title menu (W3b)
 chat_problem_offline: "You're offline. Unsent messages show Not sent with Try again."
