@@ -25,6 +25,9 @@ const WATCH_STARTING_TOOLS: &[&str] = &[
     "harness_session_goal",
 ];
 
+/// Tools whose record a tainted turn may write only as an inference, never as something the owner said.
+const INFERRED_ONLY_TOOLS: &[&str] = &["vault_person_record_fact"];
+
 /// Answer a harness session's dialog, by option or by keys; a tainted turn may not pick an
 /// option that widens what the agent may do from now on, nor press keys at a dialog.
 const DIALOG_ANSWER_TOOLS: &[&str] = &["harness_session_answer", "harness_session_send"];
@@ -38,7 +41,9 @@ pub(super) fn without_default_drive(
     taint: &TaintTracker,
 ) -> Value {
     if taint.is_tainted()
-        && (WATCH_STARTING_TOOLS.contains(&tool_name) || DIALOG_ANSWER_TOOLS.contains(&tool_name))
+        && (WATCH_STARTING_TOOLS.contains(&tool_name)
+            || DIALOG_ANSWER_TOOLS.contains(&tool_name)
+            || INFERRED_ONLY_TOOLS.contains(&tool_name))
         && let Some(obj) = args.as_object_mut()
     {
         obj.insert(
@@ -184,5 +189,20 @@ mod tests {
                 .get(hq_tools::harness_session::UNTRUSTED_TURN_ARG)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_tainted_turn_marks_a_person_fact_so_it_is_recorded_as_inferred() {
+        let taint = TaintTracker::new();
+        let args = json!({ "person": "bob", "source_kind": "user_stated" });
+        let clean = without_default_drive("vault_person_record_fact", args.clone(), &taint);
+        assert!(
+            clean
+                .get(hq_tools::harness_session::UNTRUSTED_TURN_ARG)
+                .is_none()
+        );
+        taint.mark("web_fetch");
+        let marked = without_default_drive("vault_person_record_fact", args, &taint);
+        assert_eq!(marked[hq_tools::harness_session::UNTRUSTED_TURN_ARG], true);
     }
 }

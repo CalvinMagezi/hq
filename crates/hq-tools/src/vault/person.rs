@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 use super::sync_note_index_and_cache;
+use crate::harness_session::UNTRUSTED_TURN_ARG;
 use crate::registry::HqTool;
 
 const FACTS_HEADING: &str = "Facts";
@@ -451,7 +452,11 @@ impl HqTool for PersonRecordFactTool {
     }
 
     async fn execute(&self, args: Value) -> Result<Value> {
-        let kind = parse_kind(str_arg(&args, "source_kind"))?;
+        let kind = if args.get(UNTRUSTED_TURN_ARG).and_then(Value::as_bool) == Some(true) {
+            ProvenanceKind::Inferred
+        } else {
+            parse_kind(str_arg(&args, "source_kind"))?
+        };
         let corrects = args
             .get("corrects")
             .and_then(Value::as_bool)
@@ -708,6 +713,20 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[tokio::test]
+    async fn an_untrusted_turn_records_the_fact_as_inferred_whatever_it_claims() {
+        let (_d, v) = vault();
+        let registry = PersonRegistry::new(vec![binding("1", "owner", Role::Owner)]);
+        let owner = scoped_tool(&v, registry, "1");
+        let mut args = call_args("owner");
+        args[UNTRUSTED_TURN_ARG] = json!(true);
+        args["create_person"] = json!(true);
+        owner[0].execute(args).await.unwrap();
+        let text = body(&v, "Notebooks/People/owner/profile.md");
+        assert!(text.contains("inferred"), "{text}");
+        assert!(!text.contains("user_stated"), "{text}");
     }
 
     fn strict_req<'a>() -> FactRequest<'a> {
