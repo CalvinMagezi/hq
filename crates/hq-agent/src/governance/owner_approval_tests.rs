@@ -415,3 +415,50 @@ async fn requests_for_notes_and_tasks_do_not_count_toward_the_nudge() {
     }
     assert_eq!(approval.recent_requests(), 0);
 }
+
+#[test]
+fn setting_up_helpers_asks_but_looking_at_them_does_not() {
+    for action in ["setup", "install", "login"] {
+        assert!(needs_owner(
+            "helper_setup",
+            "harness",
+            &json!({"action": action})
+        ));
+    }
+    for action in ["status", "check"] {
+        assert!(!needs_owner(
+            "helper_setup",
+            "harness",
+            &json!({"action": action})
+        ));
+    }
+    assert!(!needs_owner("helper_setup", "harness", &json!({})));
+}
+
+#[tokio::test]
+async fn one_approval_covers_a_whole_helper_setup_and_the_card_says_what_it_does() {
+    let (db, approval) = approval();
+    let args = json!({"action": "setup", "host": "laptop", "helpers": ["cursor", "codex"]});
+    assert!(approval.check("helper_setup", &args).await.is_some());
+    let id = request_id(&db, "helper_setup");
+    let body: String = db
+        .with_conn(|c| {
+            Ok(
+                c.query_row("SELECT body FROM value_items WHERE id = ?1", [&id], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    assert!(body.contains("Cursor") && body.contains("Codex"), "{body}");
+    assert!(body.contains("cursor.com/install"), "{body}");
+    assert!(
+        body.contains("will not ask again for each helper"),
+        "{body}"
+    );
+    assert!(value_items::approve_by_id(&db, &id).unwrap());
+    assert!(
+        approval.check("helper_setup", &args).await.is_none(),
+        "the one approved call runs"
+    );
+}

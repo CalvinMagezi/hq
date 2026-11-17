@@ -497,6 +497,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "137_owner_folder_grants",
         include_str!("../sql/137_owner_folder_grants.sql"),
     ),
+    (
+        "138_helper_setup",
+        include_str!("../sql/138_helper_setup.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

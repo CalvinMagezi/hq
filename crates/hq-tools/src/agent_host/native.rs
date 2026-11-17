@@ -65,6 +65,9 @@ enum Link {
 /// A test once started real agents on the developer's machine by leaving out a folder, so a
 /// test binary never talks to a real host. The `hq` binary a test runs as a subprocess
 /// (`CARGO_BIN_EXE_hq`) is not caught here.
+/// Where a setup command starts: a folder every machine has and no project lives in.
+const SETUP_CWD: &str = "/tmp";
+
 fn is_test_binary() -> bool {
     std::env::current_exe()
         .ok()
@@ -552,6 +555,24 @@ impl HostBackend for NativeBackend {
 
     fn dir_exists(&self, path: &Path) -> Option<bool> {
         self.dir().map(|_| path.is_dir())
+    }
+
+    fn run_command(&self, run: &super::backend::CommandRun) -> Result<(), AgentHostError> {
+        let env: serde_json::Map<String, Value> = run
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+            .collect();
+        // No agent kind, so the host reads no state from it; the sandbox is the one every
+        // agent on this host starts under.
+        self.call(
+            "agent.spawn",
+            json!({
+                "name": run.name, "argv": run.argv, "cwd": SETUP_CWD, "agent": null,
+                "env": env, "sandbox": self.sandbox,
+            }),
+        )
+        .map(|_| ())
     }
 
     fn installed_programs(&self, names: &[String]) -> Option<Vec<String>> {

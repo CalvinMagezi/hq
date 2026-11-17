@@ -18,6 +18,7 @@ pub mod fleet_digest;
 pub mod folder_grants;
 pub mod harness_drive_gate;
 pub mod harness_sessions_registry;
+pub mod helper_status;
 pub mod host_outages;
 pub mod inbox_prefs;
 pub mod inbox_tidy;
