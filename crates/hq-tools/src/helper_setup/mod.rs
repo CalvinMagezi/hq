@@ -110,12 +110,7 @@ pub fn only_reachable_host() -> Result<Host> {
 /// Starts `action` for `ids` (empty: every helper in the catalog) on `host` in the background and
 /// returns at once: an install and a sign-in take minutes, longer than a tool call may. The
 /// result is in `helper_status` and `helper_setup_runs`, and an inbox note says when it ends.
-pub fn start(
-    db: Arc<Database>,
-    host: Host,
-    action: &str,
-    ids: &[String],
-) -> Result<Vec<&'static str>> {
+pub fn start(db: Database, host: Host, action: &str, ids: &[String]) -> Result<Vec<&'static str>> {
     if !changes_computer(action) {
         bail!("'{action}' does not change a computer");
     }
@@ -175,6 +170,83 @@ fn announce(db: &Database, host: &str, result: Result<Vec<Result<HelperReport>>>
     if let Err(e) = hq_db::value_items::insert(db, &item) {
         tracing::warn!(error = %e, "could not leave the helper setup note");
     }
+}
+
+/// Source and key prefix of the inbox item that offers the setup. Approving it starts the setup.
+pub const OFFER_SOURCE: &str = "helper-setup-offer";
+pub const OFFER_KEY_PREFIX: &str = "helper-setup-offer:";
+
+/// The computer named by an offer item's dedup key.
+pub fn offer_host(dedup_key: &str) -> Option<&str> {
+    dedup_key
+        .strip_prefix(OFFER_KEY_PREFIX)
+        .filter(|h| !h.is_empty())
+}
+
+/// Looks at which helpers `host` has and records it, without asking any of them anything.
+pub fn refresh_installed(
+    host: &dyn crate::agent_host::HostBackend,
+    db: &Database,
+) -> Result<Vec<HelperReport>> {
+    let found = service::detect(host, &catalog::all_programs())?;
+    let mut out = Vec::new();
+    for helper in catalog::CATALOG {
+        let installed = helper.programs.iter().any(|p| found.contains(*p));
+        hq_db::helper_status::record(db, host.name(), helper.id, installed, None, None)?;
+        out.push(service::report(db, host.name(), helper)?);
+    }
+    Ok(out)
+}
+
+/// The first-run offer: when exactly one computer is connected and none of the catalog's helpers
+/// is on it, one inbox item that sets them up when approved. `None` when there is nothing to
+/// offer, the owner already has a helper, or the offer is already in the inbox (the dedup key
+/// holds it, answered or not, so a dismissed offer does not come back every half hour).
+pub fn offer(db: &Database) -> Result<Option<ValueItem>> {
+    if hq_db::helper_status::any_installed(db)? {
+        return Ok(None);
+    }
+    let host = match only_reachable_host() {
+        Ok(host) => host,
+        Err(_) => return Ok(None),
+    };
+    let reports = refresh_installed(host.as_ref(), db)?;
+    if reports.iter().any(|r| r.installed) {
+        return Ok(None);
+    }
+    let names = catalog::CATALOG
+        .iter()
+        .map(|h| h.title)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let key = format!("{OFFER_KEY_PREFIX}{}", host.name());
+    if already_offered(db, &key)? {
+        return Ok(None);
+    }
+    let item = ValueItem::new(
+        OFFER_SOURCE,
+        ValueKind::ActionNeeded,
+        format!("Set up coding helpers on {}", host.name()),
+        format!(
+            "HQ can set up {names} on {}. They are coding helpers you can start from HQ, and each can be tried with a free account. HQ installs them with each vendor's own installer and opens their sign-in pages on that computer; you only sign in. Approve to start. You will not be asked again for each one.",
+            host.name()
+        ),
+    )
+    .with_dedup_key(key)
+    .owner_only(true);
+    Ok(Some(item))
+}
+
+/// Whether an offer with this key was ever left in the inbox, answered, dismissed or expired:
+/// the owner said no once, and a half-hourly task must not ask again.
+fn already_offered(db: &Database, key: &str) -> Result<bool> {
+    db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM value_items WHERE dedup_key = ?1)",
+            [key],
+            |r| r.get(0),
+        )?)
+    })
 }
 
 pub struct HelperSetupTool {
@@ -271,7 +343,7 @@ impl HqTool for HelperSetupTool {
             }
             a if changes_computer(a) => {
                 let name = host.name().to_string();
-                let titles = start(self.db.clone(), host, a, &ids)?;
+                let titles = start((*self.db).clone(), host, a, &ids)?;
                 Ok(json!({
                     "started": true, "host": name, "helpers": titles,
                     "tell_the_owner": format!("Setting up {} on {name}. Pages to sign in will open on that computer; the owner only has to sign in on each one. This takes a few minutes. Look at `helper_setup` status to follow it.", titles.join(", ")),
@@ -279,5 +351,44 @@ impl HqTool for HelperSetupTool {
             }
             other => bail!("unknown action '{other}'"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_offer_names_its_computer_in_its_key() {
+        assert_eq!(offer_host("helper-setup-offer:laptop"), Some("laptop"));
+        assert_eq!(offer_host("helper-setup-offer:"), None);
+        assert_eq!(offer_host("owner-approval:web:t1:bash:abc"), None);
+    }
+
+    #[test]
+    fn a_dismissed_offer_is_never_made_again() {
+        let db = Database::open_memory().unwrap();
+        let key = format!("{OFFER_KEY_PREFIX}laptop");
+        assert!(!already_offered(&db, &key).unwrap());
+        let item = ValueItem::new(OFFER_SOURCE, ValueKind::ActionNeeded, "t", "b")
+            .with_dedup_key(key.clone());
+        hq_db::value_items::insert(&db, &item).unwrap();
+        hq_db::value_items::dismiss_by_id(&db, &item.id).unwrap();
+        assert!(already_offered(&db, &key).unwrap());
+    }
+
+    #[test]
+    fn the_approval_text_comes_from_the_catalog_and_only_for_changing_actions() {
+        let all = describe(&json!({"action": "setup"})).unwrap();
+        for h in catalog::CATALOG {
+            assert!(all.contains(h.title), "{all}");
+        }
+        let login = describe(&json!({"action": "login", "helpers": ["codex"]})).unwrap();
+        assert!(
+            login.contains("sign-in") && !login.contains("installers"),
+            "{login}"
+        );
+        assert!(describe(&json!({"action": "status"})).is_none());
+        assert!(describe(&json!({"action": "setup", "helpers": ["nope"]})).is_none());
     }
 }

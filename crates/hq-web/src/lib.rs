@@ -23,6 +23,7 @@ mod error;
 mod fetch_sites_api;
 pub mod github_connect_api;
 pub mod gmail_ingest;
+mod helper_setup_api;
 mod lane_quotas_api;
 mod mcp_http;
 mod note_ids;
@@ -514,6 +515,11 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/chat-folders/{thread}/{id}",
             axum::routing::delete(chat_folders_api::revoke_handler),
+        )
+        .route("/api/helper-setup", get(helper_setup_api::list_handler))
+        .route(
+            "/api/helper-setup/{host}/{action}",
+            axum::routing::post(helper_setup_api::action_handler),
         )
         .route(
             "/api/fetch-sites",

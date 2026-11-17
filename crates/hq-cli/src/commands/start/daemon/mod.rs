@@ -499,6 +499,9 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("task-stale-digest", Duration::from_secs(21600)),
         // Recurring tool failures from local telemetry, once a week; `daemon.tool_failure_digest`.
         DaemonTask::with_default_timeout("tool-failure-digest", Duration::from_secs(604800)),
+        // Offers to set up the free coding helpers on a connected computer that has none;
+        // `daemon.helper_setup_offer`. Installs nothing until the owner approves the item.
+        DaemonTask::with_default_timeout("helper-setup-offer", Duration::from_secs(1800)),
         // How HQ was used (capabilities, corrections, return), once a week; `daemon.adoption_digest`.
         DaemonTask::with_default_timeout("adoption-digest", Duration::from_secs(604800)),
         // Stale helper requests leave Needs you (restorable); `daemon.inbox_tidy`.
@@ -678,6 +681,7 @@ async fn dispatch_task(
         "task-stale-digest" => tasks_periodic::run_task_stale_digest(db, config).await,
         "tool-failure-digest" => tasks_periodic::run_tool_failure_digest(db, config).await,
         "adoption-digest" => tasks_periodic::run_adoption_digest(db, config).await,
+        "helper-setup-offer" => tasks_periodic::run_helper_setup_offer(db, config).await,
         "inbox-tidy" => tasks_periodic::run_inbox_tidy(db, config).await,
         "due-reminders" => tasks_periodic::run_due_reminders(db).await,
         "scheduled-offers" => tasks_periodic::run_scheduled_offers(db).await,

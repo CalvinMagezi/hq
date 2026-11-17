@@ -263,7 +263,7 @@ pub fn setup_one(host: &dyn HostBackend, db: &Database, helper: &Helper) -> Resu
     Ok(r)
 }
 
-fn report(db: &Database, host: &str, helper: &Helper) -> Result<HelperReport> {
+pub fn report(db: &Database, host: &str, helper: &Helper) -> Result<HelperReport> {
     let row = hq_db::helper_status::list(db)?
         .into_iter()
         .find(|s| s.host == host && s.helper == helper.id);

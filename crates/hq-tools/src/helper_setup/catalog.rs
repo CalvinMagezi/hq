@@ -43,7 +43,7 @@ pub const CATALOG: &[Helper] = &[
     Helper {
         id: "cursor",
         title: "Cursor",
-        blurb: "Coding agent from Cursor. Good for building and fixing a project end to end.",
+        blurb: "Coding helper from Cursor. Good for building and fixing a project end to end.",
         free_note: "You can sign in with a free Cursor account to try it. Cursor sets the limits and can change them.",
         programs: &["cursor-agent", "agent"],
         installs: &[Install {
@@ -59,7 +59,7 @@ pub const CATALOG: &[Helper] = &[
     Helper {
         id: "codex",
         title: "Codex",
-        blurb: "Coding agent from OpenAI. Signs in with a ChatGPT account.",
+        blurb: "Coding helper from OpenAI. Signs in with a ChatGPT account.",
         free_note: "It works with a ChatGPT account. What a free account includes is up to OpenAI and changes.",
         programs: &["codex"],
         installs: &[
@@ -82,7 +82,7 @@ pub const CATALOG: &[Helper] = &[
     Helper {
         id: "antigravity",
         title: "Antigravity",
-        blurb: "Coding agent from Google. Signs in with a Google account.",
+        blurb: "Coding helper from Google. Signs in with a Google account.",
         free_note: "You can sign in with a free Google account. Google sets the limits and can change them.",
         programs: &["agy"],
         installs: &[Install {

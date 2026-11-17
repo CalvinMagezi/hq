@@ -505,6 +505,31 @@ fn folder_to_allow(db: &hq_db::Database, val_id: &str) -> Result<(String, String
     Ok((scope.to_string(), folder.to_string_lossy().into_owned()))
 }
 
+/// The owner approving the first-run offer to set up helpers: the setup starts on the computer
+/// the offer named. Only this route, which needs the owner's sign-in, can give that yes.
+fn note_helper_offer_answer(
+    db: &hq_db::Database,
+    val_id: &str,
+    engagement: &str,
+) -> anyhow::Result<()> {
+    if engagement != ENGAGEMENT_APPROVED {
+        return Ok(());
+    }
+    let key: Option<String> = db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT dedup_key FROM value_items WHERE id = ?1",
+            [val_id],
+            |r| r.get(0),
+        )?)
+    })?;
+    let Some(host) = key.as_deref().and_then(hq_tools::helper_setup::offer_host) else {
+        return Ok(());
+    };
+    let host = hq_tools::agent_host::host(Some(host))?;
+    hq_tools::helper_setup::start(db.clone(), host, "setup", &[])?;
+    Ok(())
+}
+
 /// The owner allowing HQ Coder's first task from the Inbox. Only this route, which needs the
 /// owner's sign-in, can give that yes; no tool can.
 fn note_first_task_answer(
@@ -728,6 +753,9 @@ pub(crate) async fn notification_action_handler(
             )
         {
             warn!(id = %id, error = %e, "recording a folder allow failed");
+        }
+        if let Err(e) = note_helper_offer_answer(&state.db, val_id, engagement) {
+            warn!(id = %id, error = %e, "starting the offered helper setup failed");
         }
         if let Err(e) = note_first_task_answer(&state.db, val_id, engagement) {
             warn!(id = %id, error = %e, "recording the first coding task's yes failed");
