@@ -97,6 +97,29 @@ pub fn sink_made(id: &str, folder: &str, code: &str) -> String {
     )
 }
 
+pub fn sink_registered(id: &str) -> String {
+    format!(
+        "The sink {id} is registered. To put its originals back: hq suite restore-originals --sink {id}\n"
+    )
+}
+
+pub fn restored(r: &crate::restore::Restored) -> String {
+    let mut out = format!(
+        "{} original(s) put back, {} already in place.\n",
+        r.restored.len(),
+        r.already_there.len()
+    );
+    for p in &r.in_the_way {
+        out.push_str(&format!(
+            "  {p}: another file is there, so nothing was written\n"
+        ));
+    }
+    for (p, why) in &r.failed {
+        out.push_str(&format!("  {p}: {why}\n"));
+    }
+    out
+}
+
 pub fn offloaded(source: &str, sink: &str, saved: i64, job: &str) -> String {
     format!(
         "Done. {source} was sealed into the sink {sink} and removed from this phone; {} saved. To bring it back: hq suite undo {job}.\n",

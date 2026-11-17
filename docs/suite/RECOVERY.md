@@ -36,14 +36,25 @@ The code is the key. HQ never keeps it. **Write it down and keep it somewhere th
 phone** (a password manager, a sealed envelope, a person you trust). Without it nothing sealed into
 the sink can be opened, by you or by anyone, and there is no reset.
 
-Today a sink registered on a new machine needs its folder and code; the registration list itself
-lives in the old vault, so the folder path is yours to remember. Key shares (two of three trusted
-people restore), which would remove the single point of failure of one code, are not built.
+On a new phone or machine, after restoring the vault backup:
+
+```bash
+hq suite sink register /path/to/the/folder        # asks for the code; points the sink at this machine's path
+hq suite restore-originals --sink card            # asks for the code; puts every original back where it was
+```
+
+`restore-originals` reads the restored notes: each one whose original was sealed into the sink
+names the file's path and hash, so every original is fetched, checked against its hash and written
+back (never over a file that is already there), and the note is marked as having its original again.
+It needs no job history. Running it twice finds nothing left to do.
+
+Key shares (two of three trusted people restore), which would remove the single point of failure
+of one code, are not built.
 
 ## What is not covered yet
 
-- A drill on a wiped device, from sink to restored files, with the hashes compared. The restore
-  drill checks that stored originals open and match; it does not stand in for a real lost-phone
-  rehearsal, which the plan requires before M3 is called done.
+- A drill on a wiped phone. The whole path (shrink, offload, encrypted backup, restore into a new
+  folder, register the sink, restore the originals, hashes compared) was run with the real `hq` on
+  a laptop, including a sink whose folder had moved. The plan's exit asks for it on a wiped device.
 - A sink on another HQ over the bridge, and one in a cloud folder.
 - Sending backups to a sink.
