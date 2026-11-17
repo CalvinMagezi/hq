@@ -8,8 +8,10 @@ use std::collections::HashMap;
 
 use roxmltree::Node;
 
-use super::ir::{Block, Inline, ListItem, Parsed, Run, Table, clean_alt, is_mono_font};
-use super::package::{Package, attr, child, core_title, flag, is, parse_xml, read_rels};
+use super::ir::{Block, Inline, ListItem, Parsed, Run, Table, clean_alt, is_mono_font, marked_alt};
+use super::package::{
+    Package, attr, child, core_title, flag, is, parse_xml, read_rels, resolve_part,
+};
 use super::report::{LossKind, Losses};
 use crate::types::ConvertError;
 
@@ -18,6 +20,15 @@ const R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relations
 const MC: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
 
 pub fn read(pkg: &mut Package<'_>) -> Result<Parsed, ConvertError> {
+    read_inner(pkg, false)
+}
+
+/// Like [`read`], with each picture's part named in the output (`ConvertOptions::image_markers`).
+pub fn read_marked(pkg: &mut Package<'_>) -> Result<Parsed, ConvertError> {
+    read_inner(pkg, true)
+}
+
+fn read_inner(pkg: &mut Package<'_>, markers: bool) -> Result<Parsed, ConvertError> {
     let max = pkg.nodes_limit();
     let document = pkg.read_text("word/document.xml")?.ok_or_else(|| {
         ConvertError::InboundFailed("no word/document.xml: not a Word document".into())
@@ -43,6 +54,7 @@ pub fn read(pkg: &mut Package<'_>) -> Result<Parsed, ConvertError> {
         notes: HashMap::new(),
         cited: Vec::new(),
         losses: Losses::default(),
+        markers,
     };
     for xml in [footnotes_xml, endnotes_xml].into_iter().flatten() {
         ctx.load_notes(&xml, max);
@@ -294,6 +306,8 @@ struct Ctx {
     /// note ids in order of first citation; the position is the displayed number
     cited: Vec<String>,
     losses: Losses,
+    /// Name each picture's package part in its `Inline::Image` (see `read_marked`).
+    markers: bool,
 }
 
 #[derive(Default, Clone)]
@@ -817,10 +831,27 @@ impl Ctx {
                 .and_then(|n| n.attribute("descr").or_else(|| n.attribute("title")))
                 .unwrap_or("")
                 .to_string();
-            out.push(Inline::Image(clean_alt(&alt)));
+            let alt = clean_alt(&alt);
+            let alt = match self.embedded_part(d) {
+                Some(part) if self.markers => marked_alt(&part, &alt),
+                _ => alt,
+            };
+            out.push(Inline::Image(alt));
             self.losses.hit(LossKind::ImagesOmitted);
         } else if has("oleObj") || tag_is(d, "object") {
             self.losses.hit(LossKind::EmbeddedObjectsOmitted);
+        }
+    }
+
+    /// The package part a picture's `a:blip` points to through `r:embed`, if it is inside the file.
+    fn embedded_part(&self, d: Node<'_, '_>) -> Option<String> {
+        let blip = d
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "blip")?;
+        let id = blip.attribute((R, "embed"))?;
+        match self.rels.get(id)? {
+            (target, false) => Some(resolve_part("word", target)),
+            _ => None,
         }
     }
 
@@ -957,6 +988,41 @@ mod tests {
         let mut pkg = Package::open(bytes, &Limits::default()).unwrap();
         let parsed = read(&mut pkg).unwrap();
         super::super::ir::render(parsed.blocks)
+    }
+
+    fn md_marked(bytes: &[u8]) -> String {
+        let mut pkg = Package::open(bytes, &Limits::default()).unwrap();
+        let parsed = read_marked(&mut pkg).unwrap();
+        super::super::ir::render(parsed.blocks)
+    }
+
+    fn picture_doc() -> Vec<u8> {
+        let rels = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/><Relationship Id="rId6" Target="https://example.com/x.png" TargetMode="External"/></Relationships>"#;
+        let body = r#"<w:p><w:r><w:t>Before</w:t></w:r></w:p>
+          <w:p><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><wp:docPr id="1" name="Picture 1" descr="A site plan"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:blipFill><a:blip r:embed="rId5"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>
+          <w:p><w:r><w:t>After</w:t></w:r></w:p>
+          <w:p><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:blipFill><a:blip r:embed="rId6"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"#;
+        docx(body, &[("word/_rels/document.xml.rels", rels)])
+    }
+
+    #[test]
+    fn pictures_keep_their_old_placeholder_unless_markers_are_asked_for() {
+        let out = md(&picture_doc());
+        assert!(out.contains("*[image: A site plan]*"), "{out}");
+        assert!(!out.contains("hqmedia"), "{out}");
+    }
+
+    #[test]
+    fn marked_pictures_name_their_part_where_they_sat() {
+        let out = md_marked(&picture_doc());
+        let before = out.find("Before").unwrap();
+        let at = out
+            .find("![A site plan](hqmedia:word/media/image1.png)")
+            .unwrap_or_else(|| panic!("{out}"));
+        let after = out.find("After").unwrap();
+        assert!(before < at && at < after, "{out}");
+        // A picture held outside the file has no part to name and keeps the plain placeholder.
+        assert!(out.contains("*[image]*"), "{out}");
     }
 
     #[test]

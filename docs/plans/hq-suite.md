@@ -134,6 +134,7 @@ M0, then made a hard CI limit.
   routes (`crates/hq-web/src/suite_api.rs`, logic in `hq-suite-adapter::api`). The Android reader
   gets one bar for a note made from an office file (`ui/notes/SuiteBar.kt`): make it smaller,
   agree or not, undo. No new screen, tab or Activity (section 12 of the scope note).
+- 2026-11-17: shrink links a Word document's pictures where they sat (`ConvertOptions::image_markers`, off by default, so `hq vault import` is unchanged; `hq-suite-shrink/src/place.rs`). On three real documents 17 of 18, 1 of 4 and 34 of 35 pictures landed in the text and the rest in the closing list.
 - 2026-11-17: pictures a note links from the media store are drawn in the Android reader
   (`/api/suite/media`, `ui/chat/blocks/VaultImage.kt`; chat still blocks them), the `office_file`
   chat tool exists (`confirm` asks the owner, `docs/security/OWNER_APPROVAL.md`), and CI checks
@@ -141,15 +142,16 @@ M0, then made a hard CI limit.
   The web note page has the same bar (`components/notes/SuiteBar.tsx`).
 
 - 2026-11-17: M2 started with the Docs render and the regenerate check (`hq-suite-docs`; `hq suite docx <note>` and `hq suite check <file>`). On three real Word files (146, 43 and 194 blocks) the render reads back as the same record. A shrunk record renders back to Word with its pictures. Not yet checked in Word or Google Docs themselves.
+- 2026-11-17: M3 started with the owner's default for key recovery (a written-down recovery code). `hq-backup::object` seals one object at a time; `hq-suite-sinks` is a folder sink; `hq suite sink add|list`, `offload`, `undo` (from the sink) and `restore-drill`. The pipeline's `offload` has its own crash matrix.
 
 ## Next
 
-1. **Cold sinks (M3).** The original can only go to the vault's trash today.
+1. **More sinks (M3).** The folder sink exists (sealed per original, recovery code, restore drill). Missing: a sink chosen through Android's document picker, a paired-peer sink over the bridge, a cloud-folder sink, key shares as an alternative to one code, a lost-phone drill on a wiped device, and a button on the phone.
 2. **Web editors** (Docs, Sheets) beyond the bar (milestone M2).
 3. **Adoption beyond the neighbour.** A note an import placed under another name, or in
    `Notebooks/Imports/<month>/` for a file outside `Notebooks/`, is not adopted: the lookup is
    the note beside the file. An index lookup by `source_sha256` would close that.
 4. PNG sources that are photographs stay lossless and often do not shrink; measure and decide.
 
-Then M2 (Docs, the importer mapping that puts pictures where they sat, docx and pdf render, the
+Then M2 (Docs, the importer mapping for pptx and the other formats (docx is done), docx and pdf render, the
 regenerate check, the editor spike on WebView 111).

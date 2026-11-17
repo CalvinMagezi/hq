@@ -39,6 +39,10 @@ pub enum Op {
         key: String,
         value: Scalar,
     },
+    /// Remove one flat frontmatter key. A key that is not there is not an error.
+    RemoveMeta {
+        key: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -149,7 +153,7 @@ pub fn apply(doc: &Document, patch: &Patch) -> Result<Document, PatchError> {
     let n = doc.nodes.len();
     let mut slots: Vec<Slot> = (0..n).map(|_| Slot::default()).collect();
     let mut at_top: Vec<Vec<Node>> = Vec::new();
-    let mut meta_ops: Vec<(&str, &Scalar)> = Vec::new();
+    let mut meta_ops: Vec<(&str, Option<&Scalar>)> = Vec::new();
 
     let check = |at: &Addr| -> Result<(), PatchError> {
         let node = doc
@@ -205,7 +209,8 @@ pub fn apply(doc: &Document, patch: &Patch) -> Result<Document, PatchError> {
                     None => at_top.push(nodes),
                 }
             }
-            Op::SetMeta { key, value } => meta_ops.push((key, value)),
+            Op::SetMeta { key, value } => meta_ops.push((key, Some(value))),
+            Op::RemoveMeta { key } => meta_ops.push((key, None)),
         }
     }
 
@@ -261,7 +266,10 @@ pub fn apply(doc: &Document, patch: &Patch) -> Result<Document, PatchError> {
 
     let mut frontmatter = doc.frontmatter.clone();
     for (key, value) in meta_ops {
-        frontmatter = frontmatter::set(&frontmatter, key, value, eol)?;
+        frontmatter = match value {
+            Some(v) => frontmatter::set(&frontmatter, key, v, eol)?,
+            None => frontmatter::remove(&frontmatter, key)?,
+        };
     }
 
     let result = Document {
@@ -552,6 +560,32 @@ mod tests {
             ),
             Err(PatchError::Frontmatter(_))
         ));
+    }
+
+    #[test]
+    fn a_meta_key_can_be_removed_and_removing_an_absent_one_changes_nothing() {
+        let d = Document::parse(
+            "---\ntitle: T\nsuite_original_sink: usb\nsuite_kind: doc\n---\n# Title\n",
+        );
+        let out = run(
+            &d,
+            vec![Op::RemoveMeta {
+                key: "suite_original_sink".into(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(out, "---\ntitle: T\nsuite_kind: doc\n---\n# Title\n");
+        let again = Document::parse(&out);
+        assert_eq!(
+            run(
+                &again,
+                vec![Op::RemoveMeta {
+                    key: "suite_original_sink".into()
+                }]
+            )
+            .unwrap(),
+            out
+        );
     }
 
     #[test]

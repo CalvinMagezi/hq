@@ -13,8 +13,9 @@ use hq_suite_md::{Document, has_errors, validate};
 use hq_suite_shrink::pipeline::{Faults, NoFaults, Notes, Options, OriginalAt, Recovered, Refusal};
 use hq_suite_shrink::{ShrinkError, Shrinker};
 use hq_suite_store::cas::references_in;
-use hq_suite_store::{Cas, Journal, Step, SuitePaths, fsx};
+use hq_suite_store::{Cas, ColdError, ColdResult, ColdStore, Journal, Step, SuitePaths, fsx};
 use image::{DynamicImage, ImageFormat, RgbImage};
+use std::collections::HashMap;
 
 const SOURCE: &str = "Notebooks/Inbox/Imports/report.docx";
 const DAY: &str = "2026-11-16";
@@ -104,6 +105,47 @@ fn docx(text: &str, pics: &[(&str, Vec<u8>)]) -> Vec<u8> {
         z.write_all(TYPES).unwrap();
         z.start_file("word/document.xml", o).unwrap();
         z.write_all(body.as_bytes()).unwrap();
+        for (name, data) in pics {
+            z.start_file(format!("word/media/{name}"), o).unwrap();
+            z.write_all(data).unwrap();
+        }
+        z.finish().unwrap();
+    }
+    buf.into_inner()
+}
+
+/// A document whose pictures sit between "Before" and "After", the way Word writes them.
+fn docx_with_pictures_in_place(pics: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    let drawing = |rid: &str| {
+        format!(
+            r#"<w:p><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><wp:docPr id="1" name="p" descr="Figure {rid}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:blipFill><a:blip r:embed="{rid}"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"#
+        )
+    };
+    let figures: String = (1..=pics.len())
+        .map(|i| drawing(&format!("rId{i}")))
+        .collect();
+    let body = format!(
+        r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Before</w:t></w:r></w:p>{figures}<w:p><w:r><w:t>After</w:t></w:r></w:p></w:body></w:document>"#
+    );
+    let rels: String = pics
+        .iter()
+        .enumerate()
+        .map(|(i, (name, _))| format!(r#"<Relationship Id="rId{}" Target="media/{name}"/>"#, i + 1))
+        .collect();
+    let rels = format!(
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{rels}</Relationships>"#
+    );
+    let mut buf = Cursor::new(Vec::new());
+    {
+        let mut z = zip::ZipWriter::new(&mut buf);
+        let o = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        z.start_file("[Content_Types].xml", o).unwrap();
+        z.write_all(TYPES).unwrap();
+        z.start_file("word/document.xml", o).unwrap();
+        z.write_all(body.as_bytes()).unwrap();
+        z.start_file("word/_rels/document.xml.rels", o).unwrap();
+        z.write_all(rels.as_bytes()).unwrap();
         for (name, data) in pics {
             z.start_file(format!("word/media/{name}"), o).unwrap();
             z.write_all(data).unwrap();
@@ -586,6 +628,37 @@ fn a_retry_after_a_cancelled_attempt_reports_the_same_saving() {
     assert_eq!(retry.saved_bytes, clean.saved_bytes);
 }
 
+#[tokio::test]
+async fn pictures_are_linked_where_they_sat_and_nothing_is_called_omitted() {
+    let original = docx_with_pictures_in_place(&big_pictures());
+    let (d, paths) = vault_with(SOURCE, &original);
+    let notes = FolderNotes(paths.clone());
+    let s = shrinker(&paths, &notes, &NoFaults);
+    let preview = s.prepare(SOURCE, DAY).await.unwrap();
+    let note = std::fs::read_to_string(d.path().join(&preview.note)).unwrap();
+    let before = note.find("Before").unwrap();
+    let after = note.find("After").unwrap();
+    let links: Vec<usize> = note
+        .match_indices("](../../../_media/cas/")
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(links.len(), big_pictures().len(), "{note}");
+    assert!(links.iter().all(|i| before < *i && *i < after), "{note}");
+    assert!(
+        !note.contains("## Pictures"),
+        "every picture was placed:\n{note}"
+    );
+    assert!(!note.contains("hqmedia"), "{note}");
+    assert!(
+        !preview.loss_kinds.iter().any(|k| k == "images_omitted"),
+        "{:?}",
+        preview.loss_kinds
+    );
+    // Finishes like any other shrink: the record checks out and the original can move.
+    s.confirm(&preview.job, DAY).unwrap();
+    assert_finished(&paths, &original);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Adopting a note an import already made
 
@@ -762,3 +835,150 @@ fn a_crash_at_any_point_with_an_adopted_note_keeps_the_persons_words_and_the_ori
 
 #[allow(dead_code)]
 fn unused(_: &Path) {}
+
+// ---------------------------------------------------------------------------------------------
+// A cold sink
+
+/// A sink in memory. `lies_about_has` makes it say it holds nothing, as a sink that lost an
+/// object would; `refuses` makes every put fail.
+#[derive(Default)]
+struct MemSink {
+    objects: Mutex<HashMap<String, Vec<u8>>>,
+    lies_about_has: bool,
+    refuses: bool,
+}
+
+impl ColdStore for MemSink {
+    fn id(&self) -> &str {
+        "memory"
+    }
+    fn put(&self, sha256: &str, bytes: &[u8]) -> ColdResult<()> {
+        if self.refuses {
+            return Err(ColdError("the sink is full".into()));
+        }
+        self.objects
+            .lock()
+            .unwrap()
+            .insert(sha256.into(), bytes.to_vec());
+        Ok(())
+    }
+    fn get(&self, sha256: &str) -> ColdResult<Vec<u8>> {
+        self.objects
+            .lock()
+            .unwrap()
+            .get(sha256)
+            .cloned()
+            .ok_or_else(|| ColdError("not in the sink".into()))
+    }
+    fn has(&self, sha256: &str) -> bool {
+        !self.lies_about_has && self.objects.lock().unwrap().contains_key(sha256)
+    }
+}
+
+#[tokio::test]
+async fn an_original_is_sealed_into_a_sink_and_comes_back_byte_for_byte() {
+    let original = docx("Report", &big_pictures());
+    let (d, paths) = vault_with(SOURCE, &original);
+    let notes = FolderNotes(paths.clone());
+    let sink = MemSink::default();
+    let s = shrinker(&paths, &notes, &NoFaults);
+    let preview = s.prepare(SOURCE, DAY).await.unwrap();
+    let out = s.offload(&preview.job, &sink).unwrap();
+    assert_eq!(out.trash_path, "sink:memory");
+    assert!(
+        !d.path().join(SOURCE).exists(),
+        "the original left the phone"
+    );
+    assert!(
+        !d.path().join("_trash").exists(),
+        "nothing went to the trash"
+    );
+    let note = std::fs::read_to_string(d.path().join(&preview.note)).unwrap();
+    let doc = Document::parse(&note);
+    assert!(!has_errors(&validate(&doc)), "{note}");
+    let (meta, problems) = doc.meta();
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(
+        meta.original_state,
+        Some(hq_suite_md::OriginalState::Offloaded)
+    );
+    assert_eq!(meta.original_sink.as_deref(), Some("memory"));
+    let job = only_job(&paths);
+    assert!(s.nothing_lost_with(&job, Some(&sink)));
+    assert_eq!(s.original_at(&job), OriginalAt::Sink);
+
+    s.undo_with(&preview.job, &sink).unwrap();
+    assert_eq!(std::fs::read(d.path().join(SOURCE)).unwrap(), original);
+    let note = std::fs::read_to_string(d.path().join(&preview.note)).unwrap();
+    assert!(note.contains("suite_original_state: kept"), "{note}");
+    assert!(!note.contains("suite_original_sink"), "{note}");
+    assert!(!has_errors(&validate(&Document::parse(&note))));
+}
+
+#[tokio::test]
+async fn a_sink_that_refuses_or_forgets_never_costs_the_original() {
+    let original = docx("Report", &big_pictures());
+    for (refuses, lies) in [(true, false), (false, true)] {
+        let (d, paths) = vault_with(SOURCE, &original);
+        let notes = FolderNotes(paths.clone());
+        let sink = MemSink {
+            refuses,
+            lies_about_has: lies,
+            ..MemSink::default()
+        };
+        let s = shrinker(&paths, &notes, &NoFaults);
+        let preview = s.prepare(SOURCE, DAY).await.unwrap();
+        assert!(s.offload(&preview.job, &sink).is_err());
+        assert_eq!(
+            std::fs::read(d.path().join(SOURCE)).unwrap(),
+            original,
+            "refuses={refuses} lies={lies}"
+        );
+    }
+}
+
+#[test]
+fn a_crash_at_any_point_of_an_offload_loses_nothing_and_finishing_it_works() {
+    let original = docx("Offload crash test", &big_pictures());
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let points = {
+        let (_d, paths) = vault_with(SOURCE, &original);
+        let notes = FolderNotes(paths.clone());
+        let faults = CrashAt::never();
+        let s = shrinker(&paths, &notes, &faults);
+        let preview = rt.block_on(s.prepare(SOURCE, DAY)).unwrap();
+        let before = faults.names().len();
+        s.offload(&preview.job, &MemSink::default()).unwrap();
+        (before, faults.names().len())
+    };
+    for k in points.0..points.1 {
+        let (d, paths) = vault_with(SOURCE, &original);
+        let notes = FolderNotes(paths.clone());
+        let sink = MemSink::default();
+        let clean = shrinker(&paths, &notes, &NoFaults);
+        let preview = rt.block_on(clean.prepare(SOURCE, DAY)).unwrap();
+
+        let faults = CrashAt::at(k - points.0);
+        let s = shrinker(&paths, &notes, &faults);
+        let err = s.offload(&preview.job, &sink).unwrap_err();
+        assert!(matches!(err, ShrinkError::Crashed(_)), "point {k}: {err:?}");
+
+        let job = only_job(&paths);
+        assert!(
+            clean.nothing_lost_with(&job, Some(&sink)),
+            "offload point {k}: the original is neither at its place nor safe in the sink"
+        );
+        clean.offload(&preview.job, &sink).unwrap();
+        assert!(!d.path().join(SOURCE).exists(), "point {k}");
+        assert_eq!(only_job(&paths).step, Step::Done, "point {k}");
+        clean.undo_with(&preview.job, &sink).unwrap();
+        assert_eq!(
+            std::fs::read(d.path().join(SOURCE)).unwrap(),
+            original,
+            "point {k}"
+        );
+    }
+}

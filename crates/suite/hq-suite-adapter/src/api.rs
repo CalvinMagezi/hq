@@ -92,6 +92,13 @@ fn status_of(s: &Shrinker<'_>, path: &str, job: Option<Job>) -> FileStatus {
                 text::size(preview.saved_bytes.max(0) as u64)
             ),
         ),
+        (Step::Done, OriginalAt::Sink) => (
+            State::Shrunk,
+            format!(
+                "{name} was made smaller. {} saved; the original is sealed in your sink and comes back with hq suite undo.",
+                text::size(preview.saved_bytes.max(0) as u64)
+            ),
+        ),
         (Step::Done, _) => (
             State::Shrunk,
             format!("{name} was made smaller. The original is no longer in the trash."),

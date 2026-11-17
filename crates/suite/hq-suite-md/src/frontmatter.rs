@@ -220,6 +220,36 @@ pub fn set(raw: &str, key: &str, value: &Scalar, eol: &str) -> Result<String, Fr
     Ok(out)
 }
 
+/// Returns `raw` without the one-line `key: value`. Every other line is returned byte for byte;
+/// a key that is not there leaves `raw` as it was, and one that holds more than a single line is
+/// refused rather than half removed.
+pub fn remove(raw: &str, key: &str) -> Result<String, FrontmatterError> {
+    if !valid_key(key) {
+        return Err(FrontmatterError::BadKey(key.to_string()));
+    }
+    let prefix = format!("{key}:");
+    let mut out = String::with_capacity(raw.len());
+    let mut pos = 0;
+    let mut first = true;
+    while pos < raw.len() {
+        let end = line_end(raw, pos).unwrap_or(raw.len());
+        let line = &raw[pos..end];
+        if !first && line.starts_with(&prefix) {
+            let next = raw[end..].lines().next().unwrap_or("");
+            let value = line[prefix.len()..].trim();
+            let continued = next.starts_with([' ', '\t']) || next.starts_with("- ") || next == "-";
+            if value.is_empty() || value.starts_with(['|', '>', '[', '{']) || continued {
+                return Err(FrontmatterError::ExistingNotScalar(key.to_string()));
+            }
+        } else {
+            out.push_str(line);
+        }
+        first = false;
+        pos = end;
+    }
+    Ok(out)
+}
+
 fn replace_line(raw: &str, key: &str, new_line: &str) -> Result<String, FrontmatterError> {
     let prefix = format!("{key}:");
     let mut out = String::with_capacity(raw.len());

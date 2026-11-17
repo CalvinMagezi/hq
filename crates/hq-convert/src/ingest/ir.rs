@@ -144,6 +144,23 @@ pub fn collapse_ws(s: &str) -> String {
 }
 
 /// Alt text worth keeping: not an empty string, a file name or a generated label.
+/// Marks a picture's alt text with the package part it came from. The first character is a control
+/// character no alt text carries, so [`marked_parts`] and the renderer can tell it from words.
+pub fn marked_alt(part: &str, alt: &str) -> String {
+    format!("{MARK}{part}{MARK}{alt}")
+}
+
+const MARK: char = '\u{1}';
+
+/// `(part, alt)` of an alt text made by [`marked_alt`], when the part is safe to write as a link.
+fn unmark(alt: &str) -> Option<(&str, &str)> {
+    let rest = alt.strip_prefix(MARK)?;
+    let (part, alt) = rest.split_once(MARK)?;
+    let safe =
+        !part.is_empty() && !part.contains(|c: char| c.is_whitespace() || "()<>[]".contains(c));
+    safe.then_some((part, alt))
+}
+
 pub fn clean_alt(alt: &str) -> String {
     let a = alt.trim();
     let lower = a.to_lowercase();
@@ -433,7 +450,21 @@ fn render_inlines(inlines: &[Inline], mode: Mode) -> String {
                 if !out.is_empty() && !out.ends_with([' ', '\n']) {
                     out.push(' ');
                 }
-                if alt.trim().is_empty() {
+                if let Some((part, words)) = unmark(alt) {
+                    let _ = write!(
+                        out,
+                        "![{}](hqmedia:{part})",
+                        escape_inline(words.trim(), false)
+                    );
+                } else if alt.starts_with(MARK) {
+                    // A marked alt whose part is not safe to link reads as the plain placeholder.
+                    let words = alt.rsplit(MARK).next().unwrap_or_default().trim();
+                    if words.is_empty() {
+                        out.push_str("*[image]*");
+                    } else {
+                        let _ = write!(out, "*[image: {}]*", escape_inline(words, false));
+                    }
+                } else if alt.trim().is_empty() {
                     out.push_str("*[image]*");
                 } else {
                     let _ = write!(out, "*[image: {}]*", escape_inline(alt.trim(), false));

@@ -18,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use crate::place;
 use hq_convert::ingest::ConvertOptions;
 use hq_convert::ingest::sniff::{Kind, sniff};
 use hq_suite_ingest::{FailureKind, ImageFormat, for_each_media, read_document};
@@ -29,7 +30,9 @@ use hq_suite_md::{Document, Op, Patch, Severity, apply, has_errors, validate};
 use hq_suite_store::cas::references_in;
 use hq_suite_store::fsx::sha256_bytes;
 use hq_suite_store::journal::MediaPlan;
-use hq_suite_store::{Cas, Disposition, Job, Journal, Step, StoreError, SuitePaths, trash};
+use hq_suite_store::{
+    Cas, ColdStore, Disposition, Job, Journal, Step, StoreError, SuitePaths, trash,
+};
 use serde::Serialize;
 
 use crate::codec::{self, Encoder};
@@ -134,6 +137,9 @@ pub enum ShrinkError {
     OriginalMissing,
     #[error("note store: {0}")]
     Notes(String),
+    /// The cold sink could not store, find or return the original.
+    #[error("the sink: {0}")]
+    Sink(String),
     /// A simulated crash (tests).
     #[error("crashed at {0}")]
     Crashed(&'static str),
@@ -178,6 +184,7 @@ impl Default for Options {
             convert: ConvertOptions {
                 ocr: hq_convert::ingest::OcrMode::Off,
                 external_office: false,
+                image_markers: true,
                 ..ConvertOptions::default()
             },
             max_source_bytes: 64 * 1024 * 1024,
@@ -215,12 +222,75 @@ pub fn set_original_state(
     })
 }
 
+/// Marks a note's original as sealed in `sink`.
+pub fn set_offloaded(
+    notes: &dyn Notes,
+    note: &str,
+    sink: &str,
+    saved: i64,
+) -> Result<(), ShrinkError> {
+    patch_meta(
+        notes,
+        note,
+        vec![
+            Op::SetMeta {
+                key: KEY_ORIGINAL_STATE.into(),
+                value: Scalar::Str("offloaded".into()),
+            },
+            Op::SetMeta {
+                key: hq_suite_md::meta::KEY_ORIGINAL_SINK.into(),
+                value: Scalar::Str(sink.into()),
+            },
+            Op::SetMeta {
+                key: KEY_SAVED_BYTES.into(),
+                value: Scalar::Int(saved),
+            },
+        ],
+    )
+}
+
+/// Marks a note's original as back in its place, and forgets the sink.
+pub fn set_original_kept(notes: &dyn Notes, note: &str) -> Result<(), ShrinkError> {
+    patch_meta(
+        notes,
+        note,
+        vec![
+            Op::SetMeta {
+                key: KEY_ORIGINAL_STATE.into(),
+                value: Scalar::Str("kept".into()),
+            },
+            Op::RemoveMeta {
+                key: hq_suite_md::meta::KEY_ORIGINAL_SINK.into(),
+            },
+            Op::SetMeta {
+                key: KEY_SAVED_BYTES.into(),
+                value: Scalar::Int(0),
+            },
+        ],
+    )
+}
+
+fn patch_meta(notes: &dyn Notes, note: &str, ops: Vec<Op>) -> Result<(), ShrinkError> {
+    notes.modify(note, &|text| {
+        let patch = Patch {
+            base_revision: None,
+            ops: ops.clone(),
+        };
+        let next = apply(&Document::parse(text), &patch)
+            .map_err(|e| ShrinkError::Notes(e.to_string()))?
+            .render();
+        Ok((next != text).then_some(next))
+    })
+}
+
 /// Where the original is right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OriginalAt {
     Source,
     Trash,
+    /// Sealed in a sink the owner keeps; fetched back on undo.
+    Sink,
     Nowhere,
 }
 
@@ -301,6 +371,8 @@ fn one_line(s: &str) -> String {
 
 struct Stored1 {
     plans: Vec<MediaPlan>,
+    /// Which stored picture each package part became, for putting pictures where they sat.
+    by_part: HashMap<String, hq_suite_store::CasRef>,
     /// Bytes of objects that were not in the store before this job.
     new_bytes: u64,
     recompressed: u32,
@@ -318,14 +390,16 @@ fn store_pictures(
 ) -> Result<Stored1, ShrinkError> {
     let mut out = Stored1 {
         plans: Vec::new(),
+        by_part: HashMap::new(),
         new_bytes: 0,
         recompressed: 0,
         kept: 0,
     };
     let mut failure: Option<ShrinkError> = None;
-    let mut seen: HashMap<String, ()> = HashMap::new();
+    let mut seen: HashMap<String, hq_suite_store::CasRef> = HashMap::new();
     let scan = for_each_media(bytes, kind, limits, |m| {
-        if seen.insert(m.sha256.clone(), ()).is_some() {
+        if let Some(done) = seen.get(&m.sha256) {
+            out.by_part.insert(m.part.to_string(), done.clone());
             return ControlFlow::Continue(());
         }
         let encoder = match m.format {
@@ -350,6 +424,8 @@ fn store_pictures(
         }
         match cas.put(&chosen.0, chosen.1) {
             Ok((r, _)) => {
+                seen.insert(m.sha256.clone(), r.clone());
+                out.by_part.insert(m.part.to_string(), r.clone());
                 // A picture another job's record already links costs this one nothing. One only an
                 // earlier, unfinished attempt of this job stored does cost it, so a retry never
                 // makes the saving look larger.
@@ -435,6 +511,7 @@ impl<'a> Shrinker<'a> {
             Some(Disposition::Trash { target }) if trash::exists(&self.paths, target) => {
                 OriginalAt::Trash
             }
+            Some(Disposition::Sink { .. }) => OriginalAt::Sink,
             _ => OriginalAt::Nowhere,
         }
     }
@@ -442,9 +519,21 @@ impl<'a> Shrinker<'a> {
     /// The promise, checkable at any moment: the original is somewhere, and if it is not at its
     /// place the record is complete. Tests assert it after every simulated crash.
     pub fn nothing_lost(&self, job: &Job) -> bool {
+        self.nothing_lost_with(job, None)
+    }
+
+    /// As [`nothing_lost`](Self::nothing_lost), asking `sink` whether it holds an original that
+    /// was sealed into it.
+    pub fn nothing_lost_with(&self, job: &Job, sink: Option<&dyn ColdStore>) -> bool {
         match self.original_at(job) {
             OriginalAt::Source => true,
             OriginalAt::Trash => self.verify_record(job, false).is_ok(),
+            OriginalAt::Sink => match (&job.disposition, sink) {
+                (Some(Disposition::Sink { sha256, .. }), Some(s)) => {
+                    s.has(sha256) && self.verify_record(job, false).is_ok()
+                }
+                _ => false,
+            },
             OriginalAt::Nowhere => false,
         }
     }
@@ -544,6 +633,7 @@ impl<'a> Shrinker<'a> {
                 let name = source.rsplit('/').next().unwrap_or(source);
                 one_line(name.rsplit_once('.').map_or(name, |(s, _)| s))
             });
+        let placed = place::place(&doc.markdown, &note_rel, &pictures.by_part);
         let text = match &adoptable {
             Some((_, existing)) => {
                 self.draft_adopted(existing, &note_rel, data.len() as u64, day, &doc, &pictures)?
@@ -557,6 +647,7 @@ impl<'a> Shrinker<'a> {
                 day,
                 &doc,
                 &pictures,
+                &placed,
             )?,
         };
 
@@ -580,6 +671,7 @@ impl<'a> Shrinker<'a> {
             return Err(refuse(Refusal::NotSmaller { saved_bytes: saved }));
         }
 
+        let none_stored = pictures.plans.is_empty();
         let mut job = Job {
             version: hq_suite_store::journal::JOURNAL_VERSION,
             id: id.clone(),
@@ -596,6 +688,13 @@ impl<'a> Shrinker<'a> {
                 .loss_kinds
                 .iter()
                 .map(|k| loss_label(*k))
+                // Pictures that were all placed or listed are carried, not omitted.
+                .filter(|k| {
+                    adoptable.is_some()
+                        || *k != "images_omitted"
+                        || placed.1.unresolved > 0
+                        || none_stored
+                })
                 .collect(),
             fidelity: doc.projection.fidelity.as_str().to_string(),
             pictures_recompressed: pictures.recompressed,
@@ -714,6 +813,7 @@ impl<'a> Shrinker<'a> {
         day: &str,
         doc: &hq_suite_ingest::DocumentText,
         pictures: &Stored1,
+        placed: &(String, place::Placement),
     ) -> Result<String, ShrinkError> {
         let mut fm = String::new();
         let mut set = |k: &str, v: Scalar| -> Result<(), ShrinkError> {
@@ -738,11 +838,18 @@ impl<'a> Shrinker<'a> {
         set(KEY_ORIGINAL_STATE, Scalar::Str("kept".into()))?;
         set(KEY_ORIGINAL_BYTES, Scalar::Int(bytes as i64))?;
         set(KEY_SHRUNK_AT, Scalar::Str(day.to_string()))?;
-        let mut body = doc.markdown.trim_end().to_string();
+        let mut body = placed.0.trim_end().to_string();
         body.push('\n');
-        if !pictures.plans.is_empty() {
+        // Pictures the text had no place for (a header, a text box, a format the importer cannot
+        // locate) follow at the end.
+        let rest: Vec<_> = pictures
+            .plans
+            .iter()
+            .filter(|p| !placed.1.placed.contains(&p.cas))
+            .collect();
+        if !rest.is_empty() {
             body.push_str("\n## Pictures\n");
-            for (i, p) in pictures.plans.iter().enumerate() {
+            for (i, p) in rest.iter().enumerate() {
                 body.push('\n');
                 body.push_str(
                     &p.cas
@@ -928,6 +1035,131 @@ impl<'a> Shrinker<'a> {
         Ok(())
     }
 
+    /// Steps 6 and 7 for a sink: seal the original into `sink` and read it back, and only then
+    /// remove it from the phone. The original is at its place or in the sink, verified, whenever
+    /// it is not at its place; a crash anywhere is finished by calling this again.
+    pub fn offload(&self, job_id: &str, sink: &dyn ColdStore) -> Result<Outcome, ShrinkError> {
+        let journal = self.journal();
+        let mut job = journal.load(job_id).map_err(|_| ShrinkError::NoSuchJob)?;
+        match job.step {
+            Step::Planned | Step::NoteWritten => self.run_to_verified(&mut job)?,
+            Step::Undone | Step::Abandoned => {
+                return Err(ShrinkError::WrongStep(job.step, "start again with prepare"));
+            }
+            _ => {}
+        }
+        if job.step == Step::Verified {
+            self.verify_record(&job, true)?;
+            let path = self.paths.resolve(&job.source)?;
+            let bytes = std::fs::read(&path).map_err(|_| refuse(Refusal::Unreadable))?;
+            let sha = sha256_bytes(&bytes);
+            if sha != job.source_sha256 {
+                return Err(ShrinkError::SourceChanged);
+            }
+            sink.put(&sha, &bytes)
+                .map_err(|e| ShrinkError::Sink(e.to_string()))?;
+            self.point("sealed")?;
+            job.disposition = Some(Disposition::Sink {
+                sink: sink.id().to_string(),
+                sha256: sha,
+            });
+            job.advance(Step::Consented)?;
+            journal.save(&job)?;
+            self.point("consent_saved")?;
+        }
+        let Some(Disposition::Sink {
+            sink: named,
+            sha256,
+        }) = job.disposition.clone()
+        else {
+            return Err(ShrinkError::WrongStep(
+                job.step,
+                "no sink was chosen for this job",
+            ));
+        };
+        if named != sink.id() {
+            return Err(ShrinkError::WrongStep(
+                job.step,
+                "this job names another sink",
+            ));
+        }
+        if job.step == Step::Consented {
+            if trash::exists(&self.paths, &job.source) {
+                self.verify_record(&job, false)?;
+                if !sink.has(&sha256) {
+                    return Err(ShrinkError::NotVerified(
+                        "the sink does not hold the original".into(),
+                    ));
+                }
+                let path = self.paths.resolve(&job.source)?;
+                std::fs::remove_file(path).map_err(|e| ShrinkError::Notes(e.to_string()))?;
+            } else if !sink.has(&sha256) {
+                return Err(ShrinkError::OriginalMissing);
+            }
+            self.point("moved")?;
+            job.advance(Step::OriginalMoved)?;
+            journal.save(&job)?;
+            self.point("moved_saved")?;
+        }
+        if job.step == Step::OriginalMoved {
+            set_offloaded(self.notes, &job.note, &named, job.saved_bytes.unwrap_or(0))?;
+            self.point("meta_written")?;
+            job.advance(Step::Done)?;
+            journal.save(&job)?;
+            journal.remove_draft(&job.id);
+            journal.remove_prior(&job.id);
+            self.point("done_saved")?;
+        }
+        Ok(Outcome {
+            job: job.id.clone(),
+            saved_bytes: job.saved_bytes.unwrap_or(0),
+            trash_path: format!("sink:{named}"),
+        })
+    }
+
+    /// As [`undo`](Self::undo), fetching the original back from `sink` when that is where it went.
+    pub fn undo_with(&self, job_id: &str, sink: &dyn ColdStore) -> Result<(), ShrinkError> {
+        let journal = self.journal();
+        let mut job = journal.load(job_id).map_err(|_| ShrinkError::NoSuchJob)?;
+        let Some(Disposition::Sink {
+            sink: named,
+            sha256,
+        }) = job.disposition.clone()
+        else {
+            return self.undo(job_id);
+        };
+        if !matches!(job.step, Step::Done | Step::OriginalMoved | Step::Undone) {
+            return Err(ShrinkError::WrongStep(job.step, "there is nothing to undo"));
+        }
+        if named != sink.id() {
+            return Err(ShrinkError::WrongStep(
+                job.step,
+                "this job names another sink",
+            ));
+        }
+        if !trash::exists(&self.paths, &job.source) {
+            let bytes = sink
+                .get(&sha256)
+                .map_err(|e| ShrinkError::Sink(e.to_string()))?;
+            if sha256_bytes(&bytes) != sha256 {
+                return Err(ShrinkError::NotVerified(
+                    "the sink returned other bytes".into(),
+                ));
+            }
+            let path = self.paths.resolve(&job.source)?;
+            if !hq_suite_store::fsx::write_new(&path, &bytes)? {
+                return Err(ShrinkError::NoteConflict(job.source.clone()));
+            }
+        }
+        self.point("restored")?;
+        set_original_kept(self.notes, &job.note)?;
+        self.point("undo_note_marked")?;
+        job.advance(Step::Undone)?;
+        journal.save(&job)?;
+        self.point("undone_saved")?;
+        Ok(())
+    }
+
     /// The person said no before anything moved: the note this job wrote is removed if it is still
     /// exactly as drafted, and the job is closed. Pictures stay for the next cleanup, which
     /// removes only those no note links to.
@@ -977,6 +1209,11 @@ impl<'a> Shrinker<'a> {
                     }
                 }
                 Step::Verified => Recovered::ReadyForConsent,
+                Step::Consented | Step::OriginalMoved
+                    if matches!(job.disposition, Some(Disposition::Sink { .. })) =>
+                {
+                    Recovered::Stuck("it needs its sink: run offload for it again".into())
+                }
                 Step::Consented | Step::OriginalMoved => match self.confirm(&id, &job.day) {
                     Ok(_) => Recovered::Finished,
                     Err(e) => Recovered::Stuck(e.to_string()),

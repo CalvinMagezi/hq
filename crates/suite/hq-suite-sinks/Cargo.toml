@@ -1,0 +1,19 @@
+[package]
+name = "hq-suite-sinks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cold storage for the HQ Suite: originals sealed one at a time into a folder the owner keeps"
+
+# Pure file logic. Where a sink lives and what the owner types come in from the adapter
+# (crates/suite/CLAUDE.md).
+[dependencies]
+hex = { workspace = true }
+hq-backup = { workspace = true }
+hq-suite-store = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

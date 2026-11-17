@@ -79,6 +79,10 @@ pub struct ConvertOptions {
     pub ocr: OcrMode,
     /// May an installed LibreOffice open legacy `.doc` and `.ppt` files.
     pub external_office: bool,
+    /// Write a picture's place in a Word document as `![alt](hqmedia:word/media/imageN.png)` so a
+    /// caller that stores the pictures can link each one where it sat. Off by default: the usual
+    /// output is `*[image: alt]*`, with the picture left out.
+    pub image_markers: bool,
 }
 
 impl Default for ConvertOptions {
@@ -89,6 +93,7 @@ impl Default for ConvertOptions {
             max_output_chars: 2_000_000,
             ocr: OcrMode::Auto,
             external_office: true,
+            image_markers: false,
         }
     }
 }
@@ -167,7 +172,12 @@ pub async fn convert_bytes(
     let ext = ext.as_str();
     let (markdown, title, engine) = match sniffed.kind {
         Kind::Docx => {
-            let parsed = native(bytes.clone(), opts, docx::read).await?;
+            let reader: Reader = if opts.image_markers {
+                docx::read_marked
+            } else {
+                docx::read
+            };
+            let parsed = native(bytes.clone(), opts, reader).await?;
             finish(parsed, &mut losses, "native:docx".into())
         }
         Kind::Pptx => {

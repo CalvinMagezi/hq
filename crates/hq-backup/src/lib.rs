@@ -11,6 +11,7 @@ mod crypto;
 mod error;
 mod fsutil;
 mod key;
+pub mod object;
 mod retention;
 mod snapshot;
 pub mod status;
