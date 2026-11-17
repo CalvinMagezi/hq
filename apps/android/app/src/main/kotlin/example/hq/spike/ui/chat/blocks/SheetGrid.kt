@@ -29,6 +29,7 @@ import example.hq.spike.R
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.SheetCell
 import example.hq.spike.data.SheetView
+import example.hq.spike.data.TileView
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 
@@ -38,6 +39,7 @@ val LocalNotePath = compositionLocalOf<String?> { null }
 /** What a fixed screen (`--es fixture n-suite-sheet`) draws instead of asking hq. */
 object SheetFixture {
     var view: SheetView? = null
+    var tile: TileView? = null
 }
 
 private val CellMinWidth = 72.dp
@@ -105,5 +107,24 @@ private fun GridCell(cell: SheetCell, header: Boolean, modifier: Modifier) {
             color = if (cell.error) Mts.Amber else Mts.Ink,
             maxLines = 2, overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+/** A `tile` block: a label over one big number, asked of hq like a sheet. Draws nothing when the number is not available. */
+@Composable
+fun TileBlockView(block: Block.Tile) {
+    val path = LocalNotePath.current
+    val fixed = SheetFixture.tile
+    if (path == null && fixed == null) return
+    val client = HqServices.get(LocalContext.current).client
+    val loaded by produceState<TileView?>(fixed, path, block.index) {
+        if (fixed == null && path != null) value = runCatching { client.suiteTile(path, block.index) }.getOrNull()
+    }
+    val tile = loaded ?: return
+    BlockFrame {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp).semantics { contentDescription = "${tile.label} ${tile.text}" }) {
+            Text(tile.label, style = HqType.BodySm, color = Mts.InkMuted)
+            Text(tile.text, style = HqType.H2, color = Mts.Ink)
+        }
     }
 }

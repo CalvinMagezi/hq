@@ -189,8 +189,9 @@ To add a case, add a `Case::new(name, tool, args, expected)` row to `cases()` an
 expected outcome from the rules above, not from what the code does today. A case that shows an
 action which should be denied or asked running unasked is not fixed in the suite: add a
 `known_gap_*` test with `#[ignore = "known gap: ..."]` that asserts the outcome governance
-should give, and track the fix separately. Current gap: `vault_write_note` runs unasked after untrusted reads (decision pending, task
-PERSONAL-INBOX-239). `harness_session_publish` asks after untrusted reads and is refused where
+should give, and track the fix separately. Decided gap (owner, task PERSONAL-INBOX-239): `vault_write_note` runs unasked after untrusted reads, so a flow that drives
+itself is not slowed by approvals; a person fact recorded after untrusted reads is always stored as `inferred`,
+whatever source the model claimed (`vault_person_record_fact`). `harness_session_publish` asks after untrusted reads and is refused where
 nobody can be asked.
 
 ## Limits

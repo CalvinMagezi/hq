@@ -134,7 +134,7 @@ fn errors_travel_and_iferror_catches_them() {
         ("A6", "=SQRT(-1)"),
         ("A7", "=SUM(A1:A2)"),
         ("A8", "=1+"),
-        ("A9", "=SUM(B1:ZZZ99999)"),
+        ("A9", "=SUM(B1:XFD99999)"),
     ]);
     assert_eq!(at(&s, "A1"), Value::Err(CalcError::Div0));
     assert_eq!(at(&s, "A2"), Value::Err(CalcError::Div0));
@@ -259,7 +259,7 @@ fn every_listed_function_exists_and_an_unlisted_one_does_not() {
         );
     }
     assert_eq!(
-        at(&sheet(&[("A1", "=XLOOKUP(1,2,3)")]), "A1"),
+        at(&sheet(&[("A1", "=NOSUCHFUNCTION(1,2,3)")]), "A1"),
         Value::Err(CalcError::Name)
     );
 }
@@ -298,4 +298,289 @@ fn lookups_payments_and_dates_agree_with_a_spreadsheet() {
     assert_eq!(at(&s, "E2"), n(44620.0));
     assert_eq!(at(&s, "E3"), n(44530.0));
     assert_eq!(at(&s, "E4"), n(44620.0));
+}
+
+#[test]
+fn a_loaded_value_keeps_its_type() {
+    let mut s = Sheet::new();
+    s.set_value(0, 0, Value::Text("123".into()));
+    s.set_value(1, 0, Value::Err(CalcError::Div0));
+    s.set(2, 0, "=ISTEXT(A1)");
+    s.set(3, 0, "=ISERROR(B1)");
+    s.set(4, 0, "=A1+1");
+    assert_eq!(s.get(2, 0), Value::Bool(true));
+    assert_eq!(s.get(3, 0), Value::Bool(true));
+    assert_eq!(
+        s.get(4, 0),
+        n(124.0),
+        "arithmetic still reads number-like text as a number"
+    );
+}
+
+#[test]
+fn an_error_handler_does_not_hide_what_the_engine_cannot_calculate() {
+    let s = sheet(&[
+        ("A1", "=NOSUCHFUNCTION(1,2,3)"),
+        ("B1", "=IFERROR(A1,0)"),
+        ("B2", "=ISERROR(A1)"),
+        ("B3", "=IFERROR(1/0,7)"),
+        ("B4", "=ISERROR(1/0)"),
+    ]);
+    assert_eq!(at(&s, "B1"), Value::Err(CalcError::Name));
+    assert_eq!(at(&s, "B2"), Value::Err(CalcError::Name));
+    assert_eq!(at(&s, "B3"), n(7.0));
+    assert_eq!(at(&s, "B4"), Value::Bool(true));
+}
+
+#[test]
+fn edate_reproduces_the_1900_quirks() {
+    let s = sheet(&[
+        ("A1", "=EDATE(0,0)"),
+        ("A2", "=EDATE(0,60)"),
+        ("A3", "=EDATE(0,-1)"),
+        ("A4", "=EDATE(31,1)"),
+        ("A5", "=EDATE(61,-1)"),
+    ]);
+    assert_eq!(at(&s, "A1"), n(0.0));
+    assert_eq!(at(&s, "A2"), n(1827.0));
+    assert_eq!(at(&s, "A3"), Value::Err(CalcError::Num));
+    assert_eq!(
+        at(&s, "A4"),
+        n(59.0),
+        "31 Jan 1900 plus a month is 28 Feb 1900, serial 59"
+    );
+    assert_eq!(
+        at(&s, "A5"),
+        n(32.0),
+        "1 Mar 1900 minus a month is 1 Feb 1900"
+    );
+}
+
+fn book() -> Workbook {
+    let mut b = Workbook::new();
+    let stock = b.add_sheet("Stock").unwrap();
+    let prices = b.add_sheet("Price list").unwrap();
+    b.set(stock, 0, 0, "40");
+    b.set(stock, 1, 0, "='Price list'!A1*A1");
+    b.set(stock, 2, 0, "=SUM(price list!A1:A2)");
+    b.set(stock, 3, 0, "=SUM('PRICE LIST'!A1:A2)+Stock!A1");
+    b.set(prices, 0, 0, "4200");
+    b.set(prices, 0, 1, "=Stock!A1");
+    b.set(prices, 1, 0, "=Nowhere!A1");
+    b.set(prices, 2, 0, "=A1+B2");
+    b
+}
+
+#[test]
+fn a_formula_reads_another_sheet_by_name() {
+    let b = book();
+    assert_eq!(b.get(0, 1, 0), n(168_000.0));
+    assert_eq!(b.get(0, 3, 0), n(4200.0 + 40.0 + 40.0));
+    assert_eq!(b.get(1, 0, 1), n(40.0), "the other sheet reads back");
+}
+
+#[test]
+fn a_sheet_that_does_not_exist_cannot_be_calculated_and_an_unquoted_space_does_not_parse() {
+    let b = book();
+    assert_eq!(b.get(1, 1, 0), Value::Err(CalcError::Name));
+    assert_eq!(b.get(0, 2, 0), Value::Err(CalcError::Name));
+}
+
+#[test]
+fn a_cell_names_its_own_sheet_unless_told_otherwise() {
+    let b = book();
+    assert_eq!(
+        b.get(1, 2, 0),
+        n(4200.0),
+        "A1 on Price list is 4200, B2 is empty"
+    );
+}
+
+#[test]
+fn sheets_that_read_each_other_in_a_loop_are_circular_not_endless() {
+    let mut b = Workbook::new();
+    let (a, c) = (b.add_sheet("A").unwrap(), b.add_sheet("C").unwrap());
+    b.set(a, 0, 0, "=C!A1+1");
+    b.set(c, 0, 0, "=A!A1+1");
+    assert_eq!(b.get(a, 0, 0), Value::Err(CalcError::Circular));
+    assert_eq!(b.add_sheet("a"), Some(0), "names are compared without case");
+    assert!(
+        !b.set(9, 0, 0, "1"),
+        "a sheet that was not added takes nothing"
+    );
+}
+
+#[test]
+fn a_column_past_xfd_is_not_a_cell() {
+    let s = sheet(&[("A1", "=SUM(B1:ZZZ9)"), ("A2", "=ZZZ1")]);
+    assert_eq!(at(&s, "A1"), Value::Err(CalcError::Name));
+    assert_eq!(at(&s, "A2"), Value::Err(CalcError::Name));
+}
+
+#[test]
+fn every_function_the_evaluator_handles_is_in_the_public_list() {
+    let source = include_str!("eval.rs");
+    let body = &source[source.find("fn call(name: &str").expect("call exists")..];
+    for line in body
+        .lines()
+        .filter(|l| l.starts_with("        \"") && l.contains("=>"))
+    {
+        let arm = line.split("=>").next().unwrap_or_default();
+        let names = arm.split('|').map(|n| n.trim().trim_matches('"'));
+        // `+` is the unary plus, an operator written as a call, not a function a person types.
+        for name in names.filter(|n| n.chars().all(|c| c.is_ascii_uppercase())) {
+            assert!(
+                FUNCTIONS.contains(&name),
+                "{name} is handled but missing from FUNCTIONS, so reports would call it unsupported"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_difference_within_rounding_noise_of_zero_is_zero_and_text_dates_count_as_dates() {
+    let s = sheet(&[
+        ("A1", "0.1"),
+        ("A2", "=A1*3"),
+        ("A3", "=A2-0.3"),
+        ("B1", "=\"2023-06-01\"+1"),
+        ("B2", "=\"2023-6-1\"+1"),
+        ("B3", "=DATE_NOT_A_THING"),
+    ]);
+    assert_eq!(at(&s, "A3"), n(0.0));
+    assert_eq!(at(&s, "B1"), n(45079.0));
+    assert_eq!(
+        at(&s, "B2"),
+        Value::Err(CalcError::Value),
+        "only the ISO form is read as a date"
+    );
+}
+
+#[test]
+fn counting_searching_and_text_functions_agree_with_a_spreadsheet() {
+    let s = sheet(&[
+        ("A1", "apple"),
+        ("A2", "Apple"),
+        ("A3", "pear"),
+        ("A4", "5"),
+        ("A5", "12"),
+        ("B1", "1"),
+        ("B2", "2"),
+        ("B3", "3"),
+        ("B4", "4"),
+        ("B5", "5"),
+        ("C1", "=COUNTIF(A1:A5,\"apple\")"),
+        ("C2", "=COUNTIF(A1:A5,\">6\")"),
+        ("C3", "=COUNTIF(A1:A5,\"<>pear\")"),
+        ("C4", "=SUMIF(A1:A5,\"apple\",B1:B5)"),
+        ("C5", "=SUMIF(A4:A5,\">=5\")"),
+        ("D1", "=SEARCH(\"P\",\"apple\")"),
+        ("D2", "=FIND(\"P\",\"apple\")"),
+        ("D3", "=SUBSTITUTE(\"a-b-c\",\"-\",\"+\")"),
+        ("D4", "=SUBSTITUTE(\"a-b-c\",\"-\",\"+\",2)"),
+        ("D5", "=N(TRUE)+N(\"x\")+N(3)"),
+        ("E1", "=XLOOKUP(\"pear\",A1:A5,B1:B5)"),
+        ("E2", "=XLOOKUP(\"kiwi\",A1:A5,B1:B5,\"none\")"),
+        ("E3", "=XLOOKUP(\"kiwi\",A1:A5,B1:B5)"),
+        ("F1", "=TEXT(1234567.891,\"#,##0\")"),
+        ("F2", "=TEXT(0.256,\"0.0%\")"),
+        ("F3", "=TEXT(-5.5,\"0.00\")"),
+        ("F4", "=TEXT(44592,\"yyyy-mm-dd\")"),
+    ]);
+    assert_eq!(at(&s, "C1"), n(2.0), "case does not matter");
+    assert_eq!(at(&s, "C2"), n(1.0));
+    assert_eq!(at(&s, "C3"), n(4.0));
+    assert_eq!(at(&s, "C4"), n(3.0));
+    assert_eq!(at(&s, "C5"), n(17.0));
+    assert_eq!(at(&s, "D1"), n(2.0));
+    assert_eq!(at(&s, "D2"), Value::Err(CalcError::Value));
+    assert_eq!(at(&s, "D3"), Value::Text("a+b+c".into()));
+    assert_eq!(at(&s, "D4"), Value::Text("a-b+c".into()));
+    assert_eq!(at(&s, "D5"), n(4.0));
+    assert_eq!(at(&s, "E1"), n(3.0));
+    assert_eq!(at(&s, "E2"), Value::Text("none".into()));
+    assert_eq!(at(&s, "E3"), Value::Err(CalcError::Na));
+    assert_eq!(at(&s, "F1"), Value::Text("1,234,568".into()));
+    assert_eq!(at(&s, "F2"), Value::Text("25.6%".into()));
+    assert_eq!(at(&s, "F3"), Value::Text("-5.50".into()));
+    assert_eq!(
+        at(&s, "F4"),
+        Value::Err(CalcError::Name),
+        "a date format is not reproduced, so it is not guessed"
+    );
+}
+
+#[test]
+fn wildcards_and_the_small_math_and_text_functions_agree_with_a_spreadsheet() {
+    let s = sheet(&[
+        ("A1", "apple pie"),
+        ("A2", "pear"),
+        ("A3", "applesauce"),
+        ("A4", ""),
+        ("A5", "x"),
+        ("B1", "=COUNTIF(A1:A5,\"apple*\")"),
+        ("B2", "=COUNTIF(A1:A5,\"?ear\")"),
+        ("B3", "=COUNTIF(A1:A5,\"<>apple*\")"),
+        ("C1", "=POWER(2,10)"),
+        ("C2", "=QUOTIENT(7,2)"),
+        ("C3", "=QUOTIENT(-7,2)"),
+        ("C4", "=QUOTIENT(1,0)"),
+        ("C5", "=CHAR(65)"),
+        ("D1", "=ROWS(A1:B4)"),
+        ("D2", "=TEXTJOIN(\", \",TRUE,A1:A5)"),
+        ("D3", "=TEXTJOIN(\"-\",FALSE,A4:A5)"),
+    ]);
+    assert_eq!(at(&s, "B1"), n(2.0));
+    assert_eq!(at(&s, "B2"), n(1.0));
+    assert_eq!(at(&s, "B3"), n(3.0));
+    assert_eq!(at(&s, "C1"), n(1024.0));
+    assert_eq!(at(&s, "C2"), n(3.0));
+    assert_eq!(at(&s, "C3"), n(-3.0));
+    assert_eq!(at(&s, "C4"), Value::Err(CalcError::Div0));
+    assert_eq!(at(&s, "C5"), Value::Text("A".into()));
+    assert_eq!(at(&s, "D1"), n(4.0));
+    assert_eq!(
+        at(&s, "D2"),
+        Value::Text("apple pie, pear, applesauce, x".into())
+    );
+    assert_eq!(at(&s, "D3"), Value::Text("-x".into()));
+}
+
+#[test]
+fn let_binds_names_in_order_and_an_unbound_name_is_not_calculated() {
+    let s = sheet(&[
+        ("A1", "10"),
+        ("B1", "=LET(x,A1,y,x*2,y+x)"),
+        ("B2", "=LET(_xlpm.a,3,_xlpm.a*_xlpm.a)"),
+        ("B3", "=LET(x,1,x+unknown)"),
+        ("B4", "=LET(x,1)"),
+        ("B5", "=LET(x,A1,x,x+1,x)"),
+        ("B6", "=SUM(LET(x,A1,x),5)"),
+    ]);
+    assert_eq!(at(&s, "B1"), n(30.0));
+    assert_eq!(at(&s, "B2"), n(9.0));
+    assert_eq!(at(&s, "B3"), Value::Err(CalcError::Name));
+    assert_eq!(at(&s, "B4"), Value::Err(CalcError::Value));
+    assert_eq!(
+        at(&s, "B5"),
+        n(11.0),
+        "a name bound again takes its new value from there on"
+    );
+    assert_eq!(at(&s, "B6"), n(15.0));
+}
+
+#[test]
+fn names_that_build_on_names_stop_at_a_limit() {
+    let mut f = String::from("=LET(a,1");
+    let mut prev = "a".to_string();
+    for i in 0..40 {
+        let name = format!("v{i}");
+        f.push_str(&format!(",{name},{prev}+{prev}"));
+        prev = name;
+    }
+    f.push_str(&format!(",{prev})"));
+    assert_eq!(
+        at(&sheet(&[("A1", &f)]), "A1"),
+        Value::Err(CalcError::Value)
+    );
 }

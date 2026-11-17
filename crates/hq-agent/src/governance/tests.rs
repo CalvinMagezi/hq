@@ -902,3 +902,177 @@ fn a_path_that_does_not_exist_yet_is_checked_where_it_really_lands() {
     assert!(tool.is_path_allowed(root.join("missing/ok.txt").to_str().unwrap()));
     assert!(tool.is_path_allowed(root.join("a/../b/ok.txt").to_str().unwrap()));
 }
+
+// ── Folder allow ──────────────────────────────────────────────────────────
+
+/// Echoes the arguments it was run with, so a test sees what governance changed.
+struct EchoArgs(&'static str);
+
+#[async_trait]
+impl AgentTool for EchoArgs {
+    fn name(&self) -> &str {
+        self.0
+    }
+    fn description(&self) -> &str {
+        "echo"
+    }
+    fn parameters(&self) -> Value {
+        Value::Object(Default::default())
+    }
+    async fn execute(&self, _id: &str, args: Value) -> Result<ToolResult> {
+        Ok(crate::coding::text_result(args.to_string()))
+    }
+}
+
+/// A chat guardian over a project folder the owner has (or has not) allowed.
+struct FolderChat {
+    _dir: tempfile::TempDir,
+    root: PathBuf,
+    db: Arc<hq_db::Database>,
+    guardian: ToolGuardian,
+}
+
+fn folder_chat(allow: bool) -> FolderChat {
+    let dir = tempfile::Builder::new()
+        .prefix("hq-folder-allow")
+        .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+        .unwrap();
+    let root = dir.path().canonicalize().unwrap().join("app");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let db = Arc::new(hq_db::Database::open_memory().unwrap());
+    if allow {
+        hq_db::owner_folder_grants::grant(
+            &db,
+            "web:t1",
+            &root.to_string_lossy(),
+            hq_db::owner_folder_grants::DEFAULT_TTL_SECS,
+        )
+        .unwrap();
+    }
+    let mut guardian = ToolGuardian::new(
+        vec![dir.path().canonicalize().unwrap()],
+        SecurityProfile::Guarded,
+        PermissionMode::Default,
+    );
+    guardian.set_owner_approval(Some(OwnerApproval::new(db.clone(), "web:t1")));
+    FolderChat {
+        _dir: dir,
+        root,
+        db,
+        guardian,
+    }
+}
+
+async fn text_of(tool: &dyn AgentTool, args: Value) -> String {
+    tool.execute("1", args).await.unwrap().content[0]
+        .text
+        .clone()
+}
+
+#[tokio::test]
+async fn an_allowed_folder_lets_this_chats_edits_inside_it_run_without_asking() {
+    let chat = folder_chat(true);
+    let write = chat.guardian.govern(Box::new(EchoArgs("write_file")));
+    let inside = serde_json::json!({"file_path": chat.root.join("src/a.rs"), "content": "x"});
+    assert!(text_of(write.as_ref(), inside).await.contains("a.rs"));
+
+    let outside = serde_json::json!({
+        "file_path": chat.root.parent().unwrap().join("other.rs"), "content": "x"});
+    assert!(
+        text_of(write.as_ref(), outside)
+            .await
+            .contains("Waiting for the owner"),
+        "a path outside the folder still asks"
+    );
+    let uses = hq_db::owner_folder_grants::list(&chat.db, "web:t1").unwrap()[0].uses;
+    assert_eq!(uses, 1);
+}
+
+#[tokio::test]
+async fn without_a_folder_allow_the_same_edit_asks() {
+    let chat = folder_chat(false);
+    let write = chat.guardian.govern(Box::new(EchoArgs("write_file")));
+    let inside = serde_json::json!({"file_path": chat.root.join("src/a.rs"), "content": "x"});
+    assert!(
+        text_of(write.as_ref(), inside)
+            .await
+            .contains("Waiting for the owner")
+    );
+}
+
+#[tokio::test]
+async fn a_folder_allowed_in_one_chat_does_not_cover_another_chat() {
+    let chat = folder_chat(true);
+    let mut other = ToolGuardian::new(
+        vec![chat.root.parent().unwrap().to_path_buf()],
+        SecurityProfile::Guarded,
+        PermissionMode::Default,
+    );
+    other.set_owner_approval(Some(OwnerApproval::new(chat.db.clone(), "web:t2")));
+    let write = other.govern(Box::new(EchoArgs("write_file")));
+    let inside = serde_json::json!({"file_path": chat.root.join("src/a.rs"), "content": "x"});
+    assert!(
+        text_of(write.as_ref(), inside)
+            .await
+            .contains("Waiting for the owner")
+    );
+}
+
+#[tokio::test]
+async fn a_revoked_or_lapsed_folder_allow_asks_again() {
+    let chat = folder_chat(true);
+    let id = hq_db::owner_folder_grants::list(&chat.db, "web:t1").unwrap()[0].id;
+    assert!(hq_db::owner_folder_grants::revoke(&chat.db, "web:t1", id).unwrap());
+    let write = chat.guardian.govern(Box::new(EchoArgs("write_file")));
+    let inside = serde_json::json!({"file_path": chat.root.join("src/a.rs"), "content": "x"});
+    assert!(
+        text_of(write.as_ref(), inside)
+            .await
+            .contains("Waiting for the owner")
+    );
+}
+
+#[tokio::test]
+async fn a_session_that_read_outside_text_gets_no_folder_allow() {
+    let chat = folder_chat(true);
+    chat.guardian.taint().mark("web_fetch");
+    let write = chat.guardian.govern(Box::new(EchoArgs("write_file")));
+    let inside = serde_json::json!({"file_path": chat.root.join("src/a.rs"), "content": "x"});
+    assert!(
+        text_of(write.as_ref(), inside)
+            .await
+            .contains("Waiting for the owner"),
+        "a tainted session asks even inside an allowed folder"
+    );
+}
+
+#[tokio::test]
+async fn a_covered_shell_command_runs_confined_to_the_folder_and_asks_where_nothing_can_confine_it()
+{
+    let chat = folder_chat(true);
+    let bash = chat.guardian.govern(Box::new(EchoArgs("bash")));
+    // The model cannot confine, or unconfine, a command itself.
+    let args = serde_json::json!({"command": "make", "_hq_confine_roots": ["/"]});
+    let out = text_of(bash.as_ref(), args).await;
+    if crate::bash_sandbox::available_backend_for(false).is_some() {
+        let ran: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            ran["_hq_confine_roots"],
+            serde_json::json!([chat.root.to_string_lossy()])
+        );
+    } else {
+        assert!(out.contains("Waiting for the owner"), "{out}");
+    }
+}
+
+#[tokio::test]
+async fn a_model_sent_confine_key_is_dropped_when_nothing_is_allowed() {
+    let chat = folder_chat(false);
+    let bash = chat.guardian.govern(Box::new(EchoArgs("bash")));
+    let args = serde_json::json!({"command": "make", "_hq_confine_roots": ["/"]});
+    assert!(
+        text_of(bash.as_ref(), args)
+            .await
+            .contains("Waiting for the owner")
+    );
+}

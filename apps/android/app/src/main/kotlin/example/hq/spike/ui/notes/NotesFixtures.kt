@@ -51,7 +51,8 @@ fun notesFixture(name: String?): NotesUi? {
             ),
             0, 0, 4, 4, "Stock: 4 rows, 4 columns",
         )
-        val body = "# Stock\n\n```sheet name=\"Stock\" types=\"text,int,ugx,ugx\"\n| item | qty | price | total |\n|---|---|---|---|\n| Sugar | 40 | 4200 | =B2*C2 |\n```\n\nPrices as of this week."
+        example.hq.spike.ui.chat.blocks.SheetFixture.tile = example.hq.spike.data.TileView("Stock value", "UGX 213,000")
+        val body = "# Stock\n\n```tile from=\"[[Stock]]!D2:D3\" fn=sum label=\"Stock value\" format=ugx\n```\n\n```sheet name=\"Stock\" types=\"text,int,ugx,ugx\"\n| item | qty | price | total |\n|---|---|---|---|\n| Sugar | 40 | 4200 | =B2*C2 |\n```\n\nPrices as of this week."
         val sheet = NoteSheet("Notebooks/Stock.md", "Stock", "Notebooks", body, false, null)
         return home.copy(stack = listOf(NotesRoute.Reader(sheet.path)), reader = ReaderPhase.Ready(sheet, "edited just now"))
     }

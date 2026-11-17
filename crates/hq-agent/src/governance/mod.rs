@@ -31,6 +31,7 @@ use crate::tools::{AgentTool, ToolRegistry};
 #[cfg(test)]
 mod bypass_corpus_tests;
 mod egress;
+pub mod folder_scope;
 mod governed_tool;
 mod injection;
 mod owner_approval;
@@ -41,7 +42,10 @@ mod tainted_calls;
 mod trackers;
 
 use governed_tool::GovernedTool;
-pub use owner_approval::{OwnerApproval, approval_scope, needs_owner, owner_approval_prefix};
+pub use owner_approval::{
+    FolderCover, OwnerApproval, STREAK_NUDGE_AT, STREAK_TOOLS, STREAK_WINDOW_SECS, approval_scope,
+    needs_owner, owner_approval_prefix,
+};
 pub use paths::system_temp_paths;
 use paths::{expand_with_canonical_forms, sensitive_denied_paths};
 pub use secrets::{SecretTier, always_denied_roots, classify_path};

@@ -11,12 +11,15 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use calamine::{Data, Reader, open_workbook_auto};
-use hq_suite_calc::{CalcError, Sheet, Value};
+use hq_suite_calc::{CalcError, Value, Workbook};
 
 /// The largest workbook the check reads.
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
 /// Numbers agree when they differ by no more than this share of their size.
 const RELATIVE_TOLERANCE: f64 = 1e-9;
+/// A result this close to the saved one is the same number: chains of money arithmetic differ from
+/// Excel's by floating-point noise (a balance of 0.0000000016 against 0).
+const ABSOLUTE_TOLERANCE: f64 = 1e-6;
 const TOP_UNSUPPORTED: usize = 12;
 
 #[derive(Debug, Default)]
@@ -29,6 +32,8 @@ pub struct CalcReport {
     pub unsupported: usize,
     /// How many unsupported formulas named each missing function (or `syntax`).
     pub missing: BTreeMap<String, usize>,
+    /// Wrong answers by the kind of value each side gave and the formula's outermost function.
+    pub wrong: BTreeMap<String, usize>,
 }
 
 fn from_data(d: &Data) -> Value {
@@ -40,7 +45,14 @@ fn from_data(d: &Data) -> Value {
         Data::String(s) => Value::Text(s.clone()),
         Data::DateTime(dt) => Value::Num(dt.as_f64()),
         Data::DateTimeIso(s) | Data::DurationIso(s) => Value::Text(s.clone()),
-        Data::Error(_) => Value::Err(CalcError::Value),
+        Data::Error(e) => Value::Err(match e {
+            calamine::CellErrorType::Div0 => CalcError::Div0,
+            calamine::CellErrorType::NA => CalcError::Na,
+            calamine::CellErrorType::Name => CalcError::Name,
+            calamine::CellErrorType::Num => CalcError::Num,
+            calamine::CellErrorType::Ref => CalcError::Ref,
+            _ => CalcError::Value,
+        }),
     }
 }
 
@@ -50,7 +62,8 @@ fn agrees(ours: &Value, theirs: &Data) -> bool {
             let Value::Num(b) = from_data(theirs) else {
                 return false;
             };
-            (a - b).abs() <= RELATIVE_TOLERANCE * a.abs().max(b.abs()).max(1.0)
+            let diff = (a - b).abs();
+            diff <= ABSOLUTE_TOLERANCE || diff <= RELATIVE_TOLERANCE * a.abs().max(b.abs())
         }
         (Value::Text(a), Data::String(b)) => a == b,
         (Value::Bool(a), Data::Bool(b)) => a == b,
@@ -104,43 +117,45 @@ pub fn check(file: &Path) -> Result<CalcReport> {
     let mut book =
         open_workbook_auto(file).context("that is not a workbook this build can read")?;
     let mut report = CalcReport::default();
+    // Every sheet is added before any formula is set, so a formula can name any of them.
+    let mut wb = Workbook::new();
+    let mut loaded = Vec::new();
     for name in book.sheet_names() {
         let (Ok(values), Ok(formulas)) =
             (book.worksheet_range(&name), book.worksheet_formula(&name))
         else {
             continue;
         };
+        let Some(id) = wb.add_sheet(&name) else {
+            continue;
+        };
         report.sheets += 1;
-        let mut sheet = Sheet::new();
+        loaded.push((id, values, formulas));
+    }
+    let mut theirs: Vec<(usize, u32, u32, String, Data)> = Vec::new();
+    for (id, values, formulas) in &loaded {
         let (v0, f0) = (
             values.start().unwrap_or((0, 0)),
             formulas.start().unwrap_or((0, 0)),
         );
         for (r, c, d) in values.cells() {
-            sheet.set(
-                c as u32 + v0.1,
-                r as u32 + v0.0,
-                &match from_data(d) {
-                    Value::Empty => String::new(),
-                    Value::Text(t) => t,
-                    other => other.to_string(),
-                },
-            );
+            wb.set_value(*id, c as u32 + v0.1, r as u32 + v0.0, from_data(d));
         }
-        let mut theirs: Vec<(u32, u32, String, Data)> = Vec::new();
         for (r, c, f) in formulas.cells() {
             if f.is_empty() {
                 continue;
             }
             let (col, row) = (c as u32 + f0.1, r as u32 + f0.0);
-            sheet.set(col, row, &format!("={f}"));
+            wb.set(*id, col, row, &format!("={f}"));
             // `get_value` takes the position in the sheet, not in the range.
             let saved = values.get_value((row, col)).cloned().unwrap_or(Data::Empty);
-            theirs.push((col, row, f.clone(), saved));
+            theirs.push((*id, col, row, f.clone(), saved));
         }
-        for (col, row, formula, saved) in theirs {
+    }
+    {
+        for (id, col, row, formula, saved) in theirs {
             report.formulas += 1;
-            let ours = sheet.get(col, row);
+            let ours = wb.get(id, col, row);
             if let Value::Err(CalcError::Name) = ours {
                 report.unsupported += 1;
                 let names: Vec<String> = functions_in(&formula)
@@ -165,10 +180,40 @@ pub fn check(file: &Path) -> Result<CalcReport> {
                 report.matched += 1;
             } else {
                 report.mismatched += 1;
+                let head = functions_in(&formula)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| "none".into());
+                let key = format!(
+                    "{head}: ours {}, Excel {}",
+                    kind_of(&ours),
+                    data_kind(&saved)
+                );
+                *report.wrong.entry(key).or_default() += 1;
             }
         }
     }
     Ok(report)
+}
+
+fn kind_of(v: &Value) -> &'static str {
+    match v {
+        Value::Num(_) => "number",
+        Value::Text(_) => "text",
+        Value::Bool(_) => "true/false",
+        Value::Empty => "empty",
+        Value::Err(_) => "error",
+    }
+}
+
+fn data_kind(d: &Data) -> &'static str {
+    match d {
+        Data::Int(_) | Data::Float(_) | Data::DateTime(_) => "number",
+        Data::String(_) | Data::DateTimeIso(_) | Data::DurationIso(_) => "text",
+        Data::Bool(_) => "true/false",
+        Data::Empty => "empty",
+        Data::Error(_) => "error",
+    }
 }
 
 pub fn report_text(r: &CalcReport) -> String {
@@ -192,6 +237,14 @@ pub fn report_text(r: &CalcReport) -> String {
         out.push_str("Missing most often:\n");
         for (name, n) in missing.into_iter().take(TOP_UNSUPPORTED) {
             out.push_str(&format!("  {name}: {n}\n"));
+        }
+    }
+    let mut wrong: Vec<_> = r.wrong.iter().collect();
+    wrong.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    if !wrong.is_empty() {
+        out.push_str("Wrong answers, by leading function:\n");
+        for (kind, n) in wrong.into_iter().take(TOP_UNSUPPORTED) {
+            out.push_str(&format!("  {kind}: {n}\n"));
         }
     }
     out

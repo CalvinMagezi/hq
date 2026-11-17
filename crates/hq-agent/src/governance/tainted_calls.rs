@@ -38,6 +38,12 @@ pub(super) fn drive_after_untrusted_reads() -> bool {
 /// deleting or sending on the phone is not something the owner can undo from their notes, so a
 /// device tool of that risk class always asks.
 pub(super) fn always_ask_reason(tool: &str, args: &Value) -> Option<String> {
+    // Installing software and opening sign-ins is never silent, in any mode but bypass: one yes
+    // covers the whole batch, but it is always the owner's.
+    if tool == hq_tools::helper_setup::TOOL {
+        return hq_tools::helper_setup::describe(args)
+            .map(|_| "would install coding helpers and open their sign-in on a computer".into());
+    }
     hq_tools::device_actions::always_ask_reason(tool, args)
 }
 

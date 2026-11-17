@@ -9,6 +9,7 @@ pub fn for_call(tool: &str, args: &Value) -> Option<String> {
     match tool {
         #[cfg(unix)]
         "host_add" => crate::agent_host::pairing::describe_add(args),
+        crate::helper_setup::TOOL => crate::helper_setup::describe(args),
         _ => crate::device_actions::always_ask_reason(tool, args)
             .map(|d| format!("If approved, it {d}.")),
     }

@@ -28,6 +28,11 @@ export interface ApprovalQuote {
   thread_id?: string | null
   /** The whole site a fetch request can be allowed for. */
   site?: string | null
+  /** The folder this call works in, which the chat can be allowed to work in without asking. */
+  folder?: string | null
+  /** Approvals for commands and edits this chat raised lately, and when the card starts offering a way out. */
+  recent_requests?: number
+  nudge_at?: number
 }
 
 /** A blocked agent's dialog as the server read it (`metadata.dialog`). */

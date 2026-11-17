@@ -38,8 +38,16 @@ impl BashTool {
 
     /// The process to spawn for `command`, or the refusal text when the
     /// configured sandbox is required but missing.
-    fn build_process(&self, command: &str) -> std::result::Result<tokio::process::Command, String> {
-        let mut process = match plan_launch(&self.settings, command) {
+    fn build_process(
+        &self,
+        command: &str,
+        confined_to: Option<Vec<std::path::PathBuf>>,
+    ) -> std::result::Result<tokio::process::Command, String> {
+        let launch = match confined_to {
+            Some(roots) => plan_launch(&self.settings.confined_to(roots), command),
+            None => plan_launch(&self.settings, command),
+        };
+        let mut process = match launch {
             Launch::Refused(reason) => return Err(reason),
             Launch::Direct => {
                 let mut p = tokio::process::Command::new("bash");
@@ -132,7 +140,7 @@ impl AgentTool for BashTool {
             return Ok(text_result(format!("Command rejected: {}", e)));
         }
 
-        let mut process = match self.build_process(command) {
+        let mut process = match self.build_process(command, confined_roots(&args)) {
             Ok(p) => p,
             Err(reason) => {
                 warn!(command = %hq_core::redact::loggable_command(command), "bash command refused: sandbox required but unavailable");
@@ -152,6 +160,18 @@ impl AgentTool for BashTool {
             ))),
         }
     }
+}
+
+/// The folders the runtime confined this command to (a folder allow), if it did. Only ever
+/// narrows what the shell may write, so there is nothing to gain by sending one.
+fn confined_roots(args: &Value) -> Option<Vec<std::path::PathBuf>> {
+    let roots: Vec<std::path::PathBuf> = args
+        .get(crate::governance::folder_scope::CONFINE_ARG)?
+        .as_array()?
+        .iter()
+        .filter_map(|v| v.as_str().map(std::path::PathBuf::from))
+        .collect();
+    (!roots.is_empty()).then_some(roots)
 }
 
 /// Merge stdout, stderr and a non-zero exit code into one tool result.

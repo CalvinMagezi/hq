@@ -48,6 +48,25 @@ pub const FUNCTIONS: &[&str] = &[
     "UPPER",
     "LOWER",
     "TRIM",
+    "ROW",
+    "INDEX",
+    "VLOOKUP",
+    "PMT",
+    "EDATE",
+    "COUNTIF",
+    "SUMIF",
+    "SEARCH",
+    "FIND",
+    "SUBSTITUTE",
+    "N",
+    "XLOOKUP",
+    "TEXT",
+    "POWER",
+    "QUOTIENT",
+    "CHAR",
+    "ROWS",
+    "TEXTJOIN",
+    "LET",
 ];
 
 type R = Result<Value, CalcError>;
@@ -81,6 +100,8 @@ fn run(e: &Expr, ctx: &mut dyn Cells) -> R {
             Ok(Value::Bool(compare(*op, &a, &b)))
         }
         Expr::Call(name, args) => call(name, args, ctx),
+        // A name nothing bound: a defined name in the workbook, which this engine does not know.
+        Expr::Var(_) => Err(CalcError::Name),
     }
 }
 
@@ -91,13 +112,44 @@ pub(crate) fn num(v: &Value) -> Result<f64, CalcError> {
         Value::Empty => Ok(0.0),
         Value::Num(n) => Ok(*n),
         Value::Bool(b) => Ok(f64::from(u8::from(*b))),
-        Value::Text(t) => t.trim().parse::<f64>().map_err(|_| CalcError::Value),
+        Value::Text(t) => t
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .or_else(|| iso_date_serial(t))
+            .ok_or(CalcError::Value),
         Value::Err(e) => Err(*e),
     }
 }
 
+/// `2023-06-01` as a spreadsheet date, which Excel also reads from text in arithmetic.
+fn iso_date_serial(text: &str) -> Option<f64> {
+    let mut parts = text.trim().splitn(3, '-');
+    let (y, m, d) = (parts.next()?, parts.next()?, parts.next()?);
+    let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
+    if !(digits(y, 4) && digits(m, 2) && digits(d, 2)) {
+        return None;
+    }
+    let (y, m, d): (i64, i64, i64) = (y.parse().ok()?, m.parse().ok()?, d.parse().ok()?);
+    if !(1900..=9999).contains(&y) || !(1..=12).contains(&m) || d < 1 || d > days_in_month(y, m) {
+        return None;
+    }
+    Some(spreadsheet_serial(days_from_civil(y, m, d)) as f64)
+}
+
 fn text_of(v: &Value) -> String {
     v.to_string()
+}
+
+/// Excel shows a sum or difference that lands within rounding noise of zero as exactly 0, so
+/// `=A1-B1` over two equal-looking numbers is 0 rather than 1.6E-9.
+fn snap_to_zero(result: f64, x: f64, y: f64) -> f64 {
+    const NOISE: f64 = 1e-15;
+    if result.abs() < x.abs().max(y.abs()) * NOISE {
+        0.0
+    } else {
+        result
+    }
 }
 
 fn binary(op: char, a: &Value, b: &Value) -> R {
@@ -106,8 +158,8 @@ fn binary(op: char, a: &Value, b: &Value) -> R {
     }
     let (x, y) = (num(a)?, num(b)?);
     let out = match op {
-        '+' => x + y,
-        '-' => x - y,
+        '+' => snap_to_zero(x + y, x, y),
+        '-' => snap_to_zero(x - y, x, y),
         '*' => x * y,
         '/' => {
             if y == 0.0 {
@@ -310,6 +362,8 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
             arity(args, 2, 2)?;
             match run(&args[0], ctx) {
                 Ok(v) => Ok(v),
+                // `#NAME?` means this engine cannot calculate it, not that the sheet has an error to hide.
+                Err(CalcError::Name) => Err(CalcError::Name),
                 Err(_) => run(&args[1], ctx),
             }
         }
@@ -386,6 +440,9 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
                 Expr::Ref(r) => ctx.cell(*r),
                 other => run(other, ctx).unwrap_or_else(Value::Err),
             };
+            if v == Value::Err(CalcError::Name) {
+                return Err(CalcError::Name);
+            }
             Ok(Value::Bool(matches!(
                 (name, &v),
                 ("ISNUMBER", Value::Num(_))
@@ -463,6 +520,145 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
             let serial = num(&run(&args[0], ctx)?)?.trunc();
             let months = num(&run(&args[1], ctx)?)?.trunc() as i64;
             Ok(Value::Num(add_months(serial as i64, months)? as f64))
+        }
+        "LET" => let_call(args, ctx),
+        "POWER" | "QUOTIENT" => {
+            arity(args, 2, 2)?;
+            let (x, y) = (num(&run(&args[0], ctx)?)?, num(&run(&args[1], ctx)?)?);
+            let out = if name == "POWER" {
+                x.powf(y)
+            } else if y == 0.0 {
+                return Err(CalcError::Div0);
+            } else {
+                (x / y).trunc()
+            };
+            if out.is_finite() {
+                Ok(Value::Num(out))
+            } else {
+                Err(CalcError::Num)
+            }
+        }
+        "CHAR" => {
+            arity(args, 1, 1)?;
+            let code = num(&run(&args[0], ctx)?)?.trunc();
+            if !(1.0..=255.0).contains(&code) {
+                return Err(CalcError::Value);
+            }
+            Ok(Value::Text(char::from(code as u8).to_string()))
+        }
+        "ROWS" => match args {
+            [Expr::Range(a, b)] => Ok(Value::Num(f64::from(a.row.abs_diff(b.row)) + 1.0)),
+            [Expr::Ref(_)] => Ok(Value::Num(1.0)),
+            _ => Err(CalcError::Value),
+        },
+        "TEXTJOIN" => {
+            arity(args, 3, 255)?;
+            let delimiter = text_of(&run(&args[0], ctx)?);
+            let skip_empty = match run(&args[1], ctx)? {
+                Value::Bool(b) => b,
+                v => num(&v)? != 0.0,
+            };
+            let mut parts = Vec::new();
+            for a in &args[2..] {
+                for v in range_list(a, ctx)? {
+                    if let Value::Err(e) = v {
+                        return Err(e);
+                    }
+                    let t = text_of(&v);
+                    if !(skip_empty && t.is_empty()) {
+                        parts.push(t);
+                    }
+                }
+            }
+            Ok(Value::Text(parts.join(&delimiter)))
+        }
+        "COUNTIF" | "SUMIF" => count_or_sum_if(name, args, ctx),
+        "SEARCH" | "FIND" => {
+            arity(args, 2, 3)?;
+            let find = text_of(&run(&args[0], ctx)?);
+            let within = text_of(&run(&args[1], ctx)?);
+            let start = if args.len() == 3 {
+                num(&run(&args[2], ctx)?)?
+            } else {
+                1.0
+            };
+            if start < 1.0 {
+                return Err(CalcError::Value);
+            }
+            let (hay, needle): (Vec<char>, Vec<char>) = if name == "SEARCH" {
+                (
+                    within.to_lowercase().chars().collect(),
+                    find.to_lowercase().chars().collect(),
+                )
+            } else {
+                (within.chars().collect(), find.chars().collect())
+            };
+            let from = start as usize - 1;
+            if from > hay.len() {
+                return Err(CalcError::Value);
+            }
+            let at = (from..=hay.len().saturating_sub(needle.len()))
+                .find(|&i| hay[i..].starts_with(&needle));
+            at.map(|i| Value::Num(i as f64 + 1.0))
+                .ok_or(CalcError::Value)
+        }
+        "SUBSTITUTE" => {
+            arity(args, 3, 4)?;
+            let text = text_of(&run(&args[0], ctx)?);
+            let (old, new) = (text_of(&run(&args[1], ctx)?), text_of(&run(&args[2], ctx)?));
+            if old.is_empty() {
+                return Ok(Value::Text(text));
+            }
+            if args.len() == 3 {
+                return Ok(Value::Text(text.replace(&old, &new)));
+            }
+            let which = num(&run(&args[3], ctx)?)?;
+            if which < 1.0 {
+                return Err(CalcError::Value);
+            }
+            let mut out = String::new();
+            let (mut seen, mut rest) = (0usize, text.as_str());
+            while let Some(i) = rest.find(&old) {
+                seen += 1;
+                out.push_str(&rest[..i]);
+                out.push_str(if seen == which as usize { &new } else { &old });
+                rest = &rest[i + old.len()..];
+            }
+            out.push_str(rest);
+            Ok(Value::Text(out))
+        }
+        "N" => {
+            arity(args, 1, 1)?;
+            Ok(Value::Num(match run(&args[0], ctx)? {
+                Value::Num(n) => n,
+                Value::Bool(b) => f64::from(u8::from(b)),
+                _ => 0.0,
+            }))
+        }
+        "XLOOKUP" => {
+            arity(args, 3, 4)?;
+            let key = run(&args[0], ctx)?;
+            let (look, ret) = (range_list(&args[1], ctx)?, range_list(&args[2], ctx)?);
+            match look
+                .iter()
+                .position(|v| order(v, &key) == Ordering::Equal && rank(v) == rank(&key))
+            {
+                Some(i) => ret.get(i).cloned().ok_or(CalcError::Ref),
+                None if args.len() == 4 => run(&args[3], ctx),
+                None => Err(CalcError::Na),
+            }
+        }
+        "TEXT" => {
+            arity(args, 2, 2)?;
+            let value = run(&args[0], ctx)?;
+            let Value::Text(format) = run(&args[1], ctx)? else {
+                return Err(CalcError::Value);
+            };
+            // Only number formats are reproduced; a date or free-form format stays "cannot calculate".
+            let Some(shown) = format_text(num(&value)?, &format) else {
+                return Err(CalcError::Name);
+            };
+            Ok(Value::Text(shown))
         }
         "ABS" => one(args, ctx, f64::abs),
         "INT" => one(args, ctx, f64::floor),
@@ -575,16 +771,51 @@ fn table_lookup(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
     t[i].get(col as usize - 1).cloned().ok_or(CalcError::Ref)
 }
 
-/// Days since 1899-12-30 (a spreadsheet date) moved by whole months, keeping the day or the month's last day.
+/// A spreadsheet date moved by whole months, keeping the day or the month's last day. Excel counts
+/// 1900 as a leap year, so serials before 1 March 1900 sit one day off the rest, and serial 0 is
+/// the day "0 January 1900"; both are reproduced here so a date column written by Excel agrees.
+/// Days since 1970 as a spreadsheet serial, with Excel's missing 29 February 1900.
+fn spreadsheet_serial(days_since_1970: i64) -> i64 {
+    const SHIFT: i64 = 25569;
+    const FIRST_MARCH_1900: i64 = 61;
+    let serial = days_since_1970 + SHIFT;
+    if serial >= FIRST_MARCH_1900 {
+        serial
+    } else {
+        serial - 1
+    }
+}
+
 fn add_months(serial: i64, months: i64) -> Result<i64, CalcError> {
-    const EPOCH_SHIFT: i64 = 25569;
-    let (y, m, d) = civil_from_days(serial - EPOCH_SHIFT);
+    const SHIFT: i64 = 25569;
+    const FIRST_MARCH_1900: i64 = 61;
+    let to_serial = |days: i64| {
+        if days + SHIFT >= FIRST_MARCH_1900 {
+            days + SHIFT
+        } else {
+            days + SHIFT - 1
+        }
+    };
+    let (y, m, d) = if serial == 0 {
+        (1900, 1, 0)
+    } else if serial < FIRST_MARCH_1900 {
+        civil_from_days(serial - SHIFT + 1)
+    } else {
+        civil_from_days(serial - SHIFT)
+    };
     let total = y * 12 + (m - 1) + months;
     let (ny, nm) = (total.div_euclid(12), total.rem_euclid(12) + 1);
     if !(1900..=9999).contains(&ny) {
         return Err(CalcError::Num);
     }
-    Ok(days_from_civil(ny, nm, d.min(days_in_month(ny, nm))) + EPOCH_SHIFT)
+    if d == 0 {
+        return Ok(to_serial(days_from_civil(ny, nm, 1)) - 1);
+    }
+    Ok(to_serial(days_from_civil(
+        ny,
+        nm,
+        d.min(days_in_month(ny, nm)),
+    )))
 }
 
 fn days_in_month(y: i64, m: i64) -> i64 {
@@ -615,4 +846,190 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     (yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
+/// The cells of a range, or the one value of a single argument, in reading order.
+fn range_list(e: &Expr, ctx: &mut dyn Cells) -> Result<Vec<Value>, CalcError> {
+    match e {
+        Expr::Range(a, b) => range_values(*a, *b, ctx),
+        other => Ok(vec![run(other, ctx)?]),
+    }
+}
+
+/// A `COUNTIF` or `SUMIF` test: `5`, `"text"`, `">5"`, `"<=3"`, `"<>x"`.
+fn criterion_matches(cell: &Value, criterion: &Value) -> bool {
+    let Value::Text(c) = criterion else {
+        return order(cell, criterion) == Ordering::Equal && rank(cell) == rank(criterion);
+    };
+    let (op, rest) = ["<>", "<=", ">=", "<", ">", "="]
+        .iter()
+        .find_map(|op| c.strip_prefix(op).map(|r| (*op, r)))
+        .unwrap_or(("=", c.as_str()));
+    if (op == "=" || op == "<>") && (rest.contains('*') || rest.contains('?')) {
+        let hit = matches!(cell, Value::Text(t) if wildcard_match(&rest.to_lowercase(), &t.to_lowercase()));
+        return if op == "=" { hit } else { !hit };
+    }
+    let wanted = match rest.trim().parse::<f64>() {
+        Ok(n) => Value::Num(n),
+        Err(_) => Value::Text(rest.to_string()),
+    };
+    // A comparison only holds between values of the same kind, as in a spreadsheet.
+    let same_kind = rank(cell) == rank(&wanted) && !matches!(cell, Value::Empty);
+    let ord = order(cell, &wanted);
+    match op {
+        "<>" => !(same_kind && ord == Ordering::Equal),
+        "=" => same_kind && ord == Ordering::Equal,
+        "<" => same_kind && ord == Ordering::Less,
+        ">" => same_kind && ord == Ordering::Greater,
+        "<=" => same_kind && ord != Ordering::Greater,
+        _ => same_kind && ord != Ordering::Less,
+    }
+}
+
+fn count_or_sum_if(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
+    let counting = name == "COUNTIF";
+    arity(args, 2, if counting { 2 } else { 3 })?;
+    let tested = range_list(&args[0], ctx)?;
+    let criterion = run(&args[1], ctx)?;
+    let summed = if !counting && args.len() == 3 {
+        Some(range_list(&args[2], ctx)?)
+    } else {
+        None
+    };
+    let mut total = 0.0;
+    for (i, cell) in tested.iter().enumerate() {
+        if !criterion_matches(cell, &criterion) {
+            continue;
+        }
+        if counting {
+            total += 1.0;
+        } else if let Value::Num(n) = summed
+            .as_ref()
+            .map_or(Some(cell), |s| s.get(i))
+            .unwrap_or(&Value::Empty)
+        {
+            total += n;
+        }
+    }
+    Ok(Value::Num(total))
+}
+
+/// `0`, `0.00`, `#,##0`, `#,##0.00`, `0%`, `0.0%`: the formats a sheet of money and counts uses.
+fn format_text(n: f64, format: &str) -> Option<String> {
+    let percent = format.ends_with('%');
+    let body = format.trim_end_matches('%');
+    let (int_part, frac_part) = body.split_once('.').map_or((body, ""), |(a, b)| (a, b));
+    let valid = |s: &str, allowed: &[char]| s.chars().all(|c| allowed.contains(&c));
+    if body.is_empty() || !valid(int_part, &['0', '#', ',']) || !valid(frac_part, &['0', '#']) {
+        return None;
+    }
+    let grouping = int_part.contains(',');
+    let decimals = frac_part.len();
+    let scaled = if percent { n * 100.0 } else { n };
+    let rounded = round_to(scaled, decimals as f64);
+    let fixed = format!("{:.*}", decimals, rounded.abs());
+    let (whole, frac) = fixed
+        .split_once('.')
+        .map_or((fixed.as_str(), ""), |(a, b)| (a, b));
+    let whole = if grouping {
+        let digits: Vec<char> = whole.chars().collect();
+        let mut out = String::new();
+        for (i, c) in digits.iter().enumerate() {
+            if i > 0 && (digits.len() - i).is_multiple_of(3) {
+                out.push(',');
+            }
+            out.push(*c);
+        }
+        out
+    } else {
+        whole.to_string()
+    };
+    let sign = if rounded < 0.0 { "-" } else { "" };
+    let dot = if decimals > 0 { "." } else { "" };
+    Some(format!(
+        "{sign}{whole}{dot}{frac}{}",
+        if percent { "%" } else { "" }
+    ))
+}
+
+/// `*` is any run of characters and `?` any one, as in a `COUNTIF` criterion.
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    fn go(p: &[char], t: &[char]) -> bool {
+        match p.split_first() {
+            None => t.is_empty(),
+            Some(('*', rest)) => (0..=t.len()).any(|i| go(rest, &t[i..])),
+            Some(('?', rest)) => !t.is_empty() && go(rest, &t[1..]),
+            Some((c, rest)) => t.first() == Some(c) && go(rest, &t[1..]),
+        }
+    }
+    let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), text.chars().collect());
+    go(&p, &t)
+}
+
+/// Most nodes a `LET` may expand to, so names that build on names cannot grow without limit.
+const MAX_LET_NODES: usize = 20_000;
+
+fn size(e: &Expr) -> usize {
+    1 + match e {
+        Expr::Neg(x) | Expr::Percent(x) => size(x),
+        Expr::Binary(_, a, b) | Expr::Compare(_, a, b) => size(a) + size(b),
+        Expr::Call(_, args) => args.iter().map(size).sum(),
+        _ => 0,
+    }
+}
+
+/// `e` with every use of the name `name` replaced by `with`.
+fn substitute(e: &Expr, name: &str, with: &Expr) -> Expr {
+    let sub = |x: &Expr| Box::new(substitute(x, name, with));
+    match e {
+        Expr::Var(v) if v.eq_ignore_ascii_case(name) => with.clone(),
+        Expr::Neg(x) => Expr::Neg(sub(x)),
+        Expr::Percent(x) => Expr::Percent(sub(x)),
+        Expr::Binary(op, a, b) => Expr::Binary(*op, sub(a), sub(b)),
+        Expr::Compare(op, a, b) => Expr::Compare(*op, sub(a), sub(b)),
+        Expr::Call(f, args) => Expr::Call(
+            f.clone(),
+            args.iter().map(|a| substitute(a, name, with)).collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// `LET(a, 1, b, a+1, b*2)`: each name stands for its value in what follows. Calculations here
+/// are pure, so putting the value expression where the name is gives the same answer.
+fn let_call(args: &[Expr], ctx: &mut dyn Cells) -> R {
+    if args.len() < 3 || args.len().is_multiple_of(2) {
+        return Err(CalcError::Value);
+    }
+    let (pairs, body) = args.split_at(args.len() - 1);
+    let mut rest: Vec<Expr> = pairs.to_vec();
+    rest.push(body[0].clone());
+    let mut i = 0;
+    while i + 1 < rest.len() - 1 {
+        let Expr::Var(name) = &rest[i] else {
+            return Err(CalcError::Value);
+        };
+        let (name, value) = (name.clone(), rest[i + 1].clone());
+        let mut j = i + 2;
+        while j < rest.len() {
+            let is_name_slot = j < rest.len() - 1 && (j - i) % 2 == 0;
+            if is_name_slot {
+                // A name bound again hides this one from there on, but its own value is still
+                // worked out with this one in scope.
+                let rebinds = matches!(&rest[j], Expr::Var(n) if n.eq_ignore_ascii_case(&name));
+                if rebinds {
+                    rest[j + 1] = substitute(&rest[j + 1], &name, &value);
+                    break;
+                }
+            } else {
+                rest[j] = substitute(&rest[j], &name, &value);
+                if size(&rest[j]) > MAX_LET_NODES {
+                    return Err(CalcError::Value);
+                }
+            }
+            j += 1;
+        }
+        i += 2;
+    }
+    run(&rest[rest.len() - 1], ctx)
 }

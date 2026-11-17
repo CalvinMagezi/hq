@@ -3,7 +3,10 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::eval::{Cells, eval};
-use crate::parse::{CellRef, Expr, cell_ref, parse_failure, parse_formula};
+use crate::parse::{
+    CellRef, Expr, MAX_COLUMNS, RefContext, cell_ref, parse_failure, parse_formula,
+    parse_formula_in,
+};
 use crate::value::{CalcError, Value};
 
 /// Most cells one sheet may hold, so a hostile file cannot ask for unbounded memory.
@@ -72,6 +75,16 @@ impl Sheet {
             None => Cell::Literal(literal(input)),
         };
         self.cells.insert((col, row), cell);
+        true
+    }
+
+    /// Puts a value that is already typed, as loaded from a file: text that looks like a number
+    /// stays text, an error stays an error. Returns false if the sheet is full.
+    pub fn set_value(&mut self, col: u32, row: u32, value: Value) -> bool {
+        if self.cells.len() >= MAX_CELLS && !self.cells.contains_key(&(col, row)) {
+            return false;
+        }
+        self.cells.insert((col, row), Cell::Literal(value));
         true
     }
 
@@ -157,7 +170,7 @@ impl<'a> Run<'a> {
                 self.depends_on(y, out);
             }
             Expr::Call(_, args) => args.iter().for_each(|a| self.depends_on(a, out)),
-            Expr::Num(_) | Expr::Text(_) | Expr::Bool(_) => {}
+            Expr::Num(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Var(_) => {}
         }
     }
 
@@ -224,5 +237,88 @@ impl Cells for Run<'_> {
             self.work(key);
         }
         self.done.get(&key).cloned().unwrap_or(Value::Empty)
+    }
+}
+
+/// Most sheets one workbook may hold.
+const MAX_SHEETS: usize = 256;
+
+/// Several sheets that may read each other: `=Stock!B2*2` or `='Price list'!A1:A9`.
+///
+/// The sheets sit side by side in one grid, each at its own column offset, so the evaluator,
+/// the cycle check and the work stack that already handle one sheet handle all of them.
+#[derive(Debug, Clone, Default)]
+pub struct Workbook {
+    grid: Sheet,
+    names: Vec<String>,
+}
+
+impl Workbook {
+    pub fn new() -> Self {
+        Workbook::default()
+    }
+
+    /// Adds a sheet and returns its number, or the existing number if the name is taken (names
+    /// are compared without regard to case, as in a spreadsheet). `None` once the book is full.
+    /// Every sheet must be added before formulas are set, so a formula can name any of them.
+    pub fn add_sheet(&mut self, name: &str) -> Option<usize> {
+        let lower = name.to_lowercase();
+        if let Some(i) = self.names.iter().position(|n| *n == lower) {
+            return Some(i);
+        }
+        if self.names.len() >= MAX_SHEETS {
+            return None;
+        }
+        self.names.push(lower);
+        Some(self.names.len() - 1)
+    }
+
+    fn offset(sheet: usize) -> u32 {
+        sheet as u32 * MAX_COLUMNS
+    }
+
+    fn context(&self, sheet: usize) -> RefContext {
+        RefContext {
+            base: Self::offset(sheet),
+            sheets: self
+                .names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (n.clone(), Self::offset(i)))
+                .collect(),
+        }
+    }
+
+    /// Puts what a person typed at (`col`, `row`) of sheet number `sheet`, both zero-based.
+    pub fn set(&mut self, sheet: usize, col: u32, row: u32, input: &str) -> bool {
+        if sheet >= self.names.len() || col >= MAX_COLUMNS {
+            return false;
+        }
+        let at = (col + Self::offset(sheet), row);
+        if self.grid.cells.len() >= MAX_CELLS && !self.grid.cells.contains_key(&at) {
+            return false;
+        }
+        let cell = match input.trim_start().strip_prefix('=') {
+            Some(f) => Cell::Formula(parse_formula_in(f, &self.context(sheet)).map_err(|_| ())),
+            None => Cell::Literal(literal(input)),
+        };
+        self.grid.cells.insert(at, cell);
+        true
+    }
+
+    /// Puts a value that is already typed, as loaded from a file.
+    pub fn set_value(&mut self, sheet: usize, col: u32, row: u32, value: Value) -> bool {
+        if sheet >= self.names.len() || col >= MAX_COLUMNS {
+            return false;
+        }
+        self.grid.set_value(col + Self::offset(sheet), row, value)
+    }
+
+    /// The value of one cell, calculated.
+    pub fn get(&self, sheet: usize, col: u32, row: u32) -> Value {
+        if sheet >= self.names.len() || col >= MAX_COLUMNS {
+            return Value::Empty;
+        }
+        self.grid.get(col + Self::offset(sheet), row)
     }
 }

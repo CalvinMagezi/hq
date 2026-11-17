@@ -31,6 +31,7 @@ pub(crate) fn routes() -> Router<Arc<WsState>> {
         .route("/api/suite/storage", get(storage_handler))
         .route("/api/suite/media", get(media_handler))
         .route("/api/suite/sheet", get(sheet_handler))
+        .route("/api/suite/tile", get(tile_handler))
 }
 
 #[derive(Deserialize)]
@@ -161,6 +162,17 @@ pub(crate) async fn sheet_handler(
         )
     })
     .await?;
+    Ok(Json(view))
+}
+
+pub(crate) async fn tile_handler(
+    State(state): State<Arc<WsState>>,
+    Query(q): Query<SheetQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let view =
+        blocking(move || hq_suite_adapter::sheets::tile(&vault, &q.path, q.index.unwrap_or(0)))
+            .await?;
     Ok(Json(view))
 }
 

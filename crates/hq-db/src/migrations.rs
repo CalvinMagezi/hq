@@ -494,8 +494,16 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ),
     ("136_task_shelf", include_str!("../sql/136_task_shelf.sql")),
     (
-        "137_owner_prefs",
-        include_str!("../sql/137_owner_prefs.sql"),
+        "137_owner_folder_grants",
+        include_str!("../sql/137_owner_folder_grants.sql"),
+    ),
+    (
+        "138_helper_setup",
+        include_str!("../sql/138_helper_setup.sql"),
+    ),
+    (
+        "139_owner_prefs",
+        include_str!("../sql/139_owner_prefs.sql"),
     ),
 ];
 

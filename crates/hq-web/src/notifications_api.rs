@@ -68,12 +68,20 @@ fn approval_from_row(row: &rusqlite::Row) -> rusqlite::Result<Option<serde_json:
     let verb = hq_core::losing::tool_verb(&tool, &args);
     let site = hq_agent::governance::fetch_site(&tool, &args);
     let consequence = hq_core::losing::consequence(&tool, &args, site.as_deref());
-    let thread_id = row
-        .get::<_, Option<String>>(18)?
+    let dedup_key = row.get::<_, Option<String>>(18)?;
+    let thread_id = dedup_key
         .as_deref()
         .and_then(web_chat_of)
         .map(str::to_string);
+    let scope = dedup_key
+        .as_deref()
+        .and_then(hq_agent::governance::approval_scope)
+        .map(str::to_string);
+    let folder = hq_agent::governance::folder_scope::candidate_folder(&tool, &args, None)
+        .map(|p| p.to_string_lossy().into_owned());
     Ok(Some(serde_json::json!({
+        "scope": scope,
+        "folder": folder,
         "tool": tool,
         "args": args,
         "loses": verb.is_some(),
@@ -326,9 +334,38 @@ pub(crate) fn scan_value_items(
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(items
             .into_iter()
-            .map(|item| with_site_approvals(conn, item))
+            .map(|item| with_folder_nudge(conn, with_site_approvals(conn, item)))
             .collect())
     })
+}
+
+/// Adds `recent_requests` to an approval item a folder allow could cover: how many approvals for
+/// commands and edits its chat has raised lately, so the card can offer the folder allow or a
+/// helper from the third one on. A read that fails leaves the item without the field.
+fn with_folder_nudge(conn: &rusqlite::Connection, mut item: NotificationItem) -> NotificationItem {
+    let Some(approval) = item.metadata.approval.as_mut() else {
+        return item;
+    };
+    let (Some(scope), Some(tool)) = (
+        approval["scope"].as_str().map(str::to_string),
+        approval["tool"].as_str().map(str::to_string),
+    ) else {
+        return item;
+    };
+    if !hq_agent::governance::STREAK_TOOLS.contains(&tool.as_str()) {
+        return item;
+    }
+    let prefix = hq_agent::governance::owner_approval_prefix(&scope);
+    if let Ok(n) = hq_db::owner_folder_grants::recent_requests_in(
+        conn,
+        &prefix,
+        hq_agent::governance::STREAK_TOOLS,
+        hq_agent::governance::STREAK_WINDOW_SECS,
+    ) {
+        approval["recent_requests"] = n.into();
+        approval["nudge_at"] = hq_agent::governance::STREAK_NUDGE_AT.into();
+    }
+    item
 }
 
 /// Adds `site_approvals` to an approval item that names a site: how many times the owner
@@ -409,6 +446,8 @@ fn restorable_expired_count(db: &hq_db::Database) -> Result<usize, anyhow::Error
 }
 
 const ALLOW_SITE_ACTION: &str = "approve_site";
+/// Allow this call and the folder it works in, for this chat (eight hours).
+const ALLOW_FOLDER_ACTION: &str = "approve_folder";
 /// The action on a Later offer's inbox item that brings the offer back to its chat.
 const OPEN_ACTION: &str = "open";
 /// What the apps write on that action's button.
@@ -452,6 +491,45 @@ fn note_site_answer(
     Ok(())
 }
 
+/// The chat and canonical folder an "allow this folder" answer to request `val_id` would allow,
+/// or the reason it cannot.
+fn folder_to_allow(db: &hq_db::Database, val_id: &str) -> Result<(String, String), String> {
+    use hq_agent::governance::{approval_scope, folder_scope};
+    let (tool, args, key) = hq_db::owner_approvals::call_of(db, val_id)
+        .map_err(|_| "the request could not be read".to_string())?
+        .ok_or_else(|| "that request is not an approval".to_string())?;
+    let scope =
+        approval_scope(&key).ok_or_else(|| "that request does not belong to a chat".to_string())?;
+    let folder = folder_scope::candidate_folder(&tool, &args, None)
+        .ok_or_else(|| "this call does not name a folder that can be allowed".to_string())?;
+    Ok((scope.to_string(), folder.to_string_lossy().into_owned()))
+}
+
+/// The owner approving the first-run offer to set up helpers: the setup starts on the computer
+/// the offer named. Only this route, which needs the owner's sign-in, can give that yes.
+fn note_helper_offer_answer(
+    db: &hq_db::Database,
+    val_id: &str,
+    engagement: &str,
+) -> anyhow::Result<()> {
+    if engagement != ENGAGEMENT_APPROVED {
+        return Ok(());
+    }
+    let key: Option<String> = db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT dedup_key FROM value_items WHERE id = ?1",
+            [val_id],
+            |r| r.get(0),
+        )?)
+    })?;
+    let Some(host) = key.as_deref().and_then(hq_tools::helper_setup::offer_host) else {
+        return Ok(());
+    };
+    let host = hq_tools::agent_host::host(Some(host))?;
+    hq_tools::helper_setup::start(db.clone(), host, "setup", &[])?;
+    Ok(())
+}
+
 /// The owner allowing HQ Coder's first task from the Inbox. Only this route, which needs the
 /// owner's sign-in, can give that yes; no tool can.
 fn note_first_task_answer(
@@ -480,7 +558,9 @@ fn note_first_task_answer(
 /// Maps a client action to the value item's engagement.
 pub(crate) fn action_outcome(action: &str) -> Option<&'static str> {
     match action {
-        "approve" | "engage" | OPEN_ACTION | ALLOW_SITE_ACTION => Some("approved"),
+        "approve" | "engage" | OPEN_ACTION | ALLOW_SITE_ACTION | ALLOW_FOLDER_ACTION => {
+            Some("approved")
+        }
         "dismiss" | "reject" => Some("dismissed"),
         _ => None,
     }
@@ -494,7 +574,10 @@ fn refuse_unanswered_dialog(
     val_id: &str,
     action: &str,
 ) -> Result<(), ApiError> {
-    if !matches!(action, "approve" | "engage" | "reject" | ALLOW_SITE_ACTION) {
+    if !matches!(
+        action,
+        "approve" | "engage" | "reject" | ALLOW_SITE_ACTION | ALLOW_FOLDER_ACTION
+    ) {
         return Ok(());
     }
     let open = hq_db::dialog_alerts::get(db, val_id)
@@ -659,6 +742,16 @@ pub(crate) async fn notification_action_handler(
     {
         return ApiError::bad_request("open is only for an offer you set aside").into_response();
     }
+    // The folder is read from the call itself, never from the request, and checked before the
+    // answer is recorded, so a request that names no folder is refused instead of half-answered.
+    let folder_grant = if body.action == ALLOW_FOLDER_ACTION {
+        match folder_to_allow(&state.db, val_id) {
+            Ok(grant) => Some(grant),
+            Err(refusal) => return ApiError::bad_request(refusal).into_response(),
+        }
+    } else {
+        None
+    };
     use hq_db::value_items::Answered;
     let answer = record_action(&state.db, val_id, engagement);
     // A repeat of an answer already given must not count as another approval.
@@ -678,6 +771,19 @@ pub(crate) async fn notification_action_handler(
         let whole_site = body.action == ALLOW_SITE_ACTION;
         if let Err(e) = note_site_answer(&state.db, val_id, engagement, whole_site) {
             warn!(id = %id, error = %e, "recording a site's approval failed");
+        }
+        if let Some((scope, root)) = &folder_grant
+            && let Err(e) = hq_db::owner_folder_grants::grant(
+                &state.db,
+                scope,
+                root,
+                hq_db::owner_folder_grants::DEFAULT_TTL_SECS,
+            )
+        {
+            warn!(id = %id, error = %e, "recording a folder allow failed");
+        }
+        if let Err(e) = note_helper_offer_answer(&state.db, val_id, engagement) {
+            warn!(id = %id, error = %e, "starting the offered helper setup failed");
         }
         if let Err(e) = note_first_task_answer(&state.db, val_id, engagement) {
             warn!(id = %id, error = %e, "recording the first coding task's yes failed");
@@ -1351,6 +1457,108 @@ mod tests {
         record_action(&db, &third, ENGAGEMENT_APPROVED).unwrap();
         note_site_answer(&db, &third, ENGAGEMENT_APPROVED, false).unwrap();
         assert!(!still_waiting(&db, &waiting));
+    }
+
+    /// An owner-approval request of web chat `thread`, as the runtime raises it.
+    fn chat_request(
+        db: &hq_db::Database,
+        thread: &str,
+        tool: &str,
+        args: serde_json::Value,
+    ) -> String {
+        let digest = hq_core::approval_key::args_digest(&args);
+        let item = hq_core::types::ValueItem::new(
+            "owner-approval",
+            hq_core::types::ValueKind::ActionNeeded,
+            format!("HQ wants to run {tool}"),
+            "Approve to let it run once.",
+        )
+        .with_dedup_key(format!("owner-approval:web:{thread}:{tool}:{digest}"))
+        .owner_only(true);
+        hq_db::owner_approvals::record(db, &item.id, tool, &args).unwrap();
+        hq_db::value_items::insert(db, &item).unwrap();
+        item.id
+    }
+
+    fn project_folder() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::Builder::new()
+            .prefix("hq-folder-api")
+            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+            .unwrap();
+        let root = dir.path().canonicalize().unwrap().join("app");
+        std::fs::create_dir_all(&root).unwrap();
+        (dir, root)
+    }
+
+    #[test]
+    fn a_command_request_offers_the_folder_it_changes_into() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let (_dir, root) = project_folder();
+        let id = chat_request(
+            &db,
+            "t1",
+            "bash",
+            serde_json::json!({"command": format!("cd {} && make", root.display())}),
+        );
+        chat_request(&db, "t1", "bash", serde_json::json!({"command": "ls"}));
+        let items = scan_value_items(&db, Some("pending")).unwrap();
+        let with_folder = items.iter().find(|i| i.id == format!("val_{id}")).unwrap();
+        let approval = with_folder.metadata.approval.clone().unwrap();
+        assert_eq!(approval["folder"], root.to_string_lossy().as_ref());
+        assert_eq!(approval["scope"], "web:t1");
+        let bare = items.iter().find(|i| i.id != format!("val_{id}")).unwrap();
+        assert!(bare.metadata.approval.as_ref().unwrap()["folder"].is_null());
+    }
+
+    #[test]
+    fn the_card_counts_the_chats_recent_requests_for_the_nudge() {
+        let db = hq_db::Database::open_memory().unwrap();
+        for n in 1..=3 {
+            chat_request(
+                &db,
+                "t1",
+                "bash",
+                serde_json::json!({"command": format!("make {n}")}),
+            );
+        }
+        chat_request(&db, "t2", "bash", serde_json::json!({"command": "make"}));
+        let items = scan_value_items(&db, Some("pending")).unwrap();
+        let counts: Vec<i64> = items
+            .iter()
+            .map(|i| {
+                i.metadata.approval.as_ref().unwrap()["recent_requests"]
+                    .as_i64()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(counts.iter().filter(|n| **n == 3).count(), 3);
+        assert_eq!(counts.iter().filter(|n| **n == 1).count(), 1);
+    }
+
+    #[test]
+    fn allowing_a_folder_reads_it_from_the_call_and_refuses_a_call_with_no_folder() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let (_dir, root) = project_folder();
+        let named = chat_request(
+            &db,
+            "t1",
+            "bash",
+            serde_json::json!({"command": format!("cd {} && make", root.display())}),
+        );
+        let (scope, folder) = folder_to_allow(&db, &named).unwrap();
+        assert_eq!(scope, "web:t1");
+        assert_eq!(folder, root.to_string_lossy());
+        let bare = chat_request(&db, "t1", "bash", serde_json::json!({"command": "ls"}));
+        assert!(folder_to_allow(&db, &bare).is_err());
+        assert!(folder_to_allow(&db, "no-such-item").is_err());
+        // A folder that covers too much is never offered, whatever the command says.
+        let high = chat_request(
+            &db,
+            "t1",
+            "bash",
+            serde_json::json!({"command": "cd /usr && ls"}),
+        );
+        assert!(folder_to_allow(&db, &high).is_err());
     }
 
     fn site_approvals_of(db: &hq_db::Database, id: &str) -> Option<i64> {

@@ -112,3 +112,10 @@
   example: Send a helper to fix the failing test
   tools: [harness_session_spawn]
   needs: [model, helpers]
+
+- id: helper_setup
+  group: work
+  says: Set up free coding helpers
+  example: Set up free coding helpers on my laptop
+  tools: [helper_setup]
+  needs: [model, helpers]

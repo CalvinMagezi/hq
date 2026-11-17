@@ -379,3 +379,86 @@ fn moving_an_office_original_asks_and_the_other_office_actions_do_not() {
         "a call with no action asks"
     );
 }
+
+#[tokio::test]
+async fn from_the_third_request_in_a_row_the_model_is_told_about_folders_and_helpers() {
+    let (_db, approval) = approval();
+    let mut texts = Vec::new();
+    for n in 1..=3 {
+        let args = json!({"command": format!("make step{n}")});
+        texts.push(approval.check("bash", &args).await.unwrap());
+    }
+    assert!(!texts[0].contains("helper"), "{}", texts[0]);
+    assert!(!texts[1].contains("helper"), "{}", texts[1]);
+    assert!(texts[2].contains("allow this folder"), "{}", texts[2]);
+    assert!(texts[2].contains("harness_session_spawn"), "{}", texts[2]);
+    assert_eq!(approval.recent_requests(), 3);
+}
+
+#[tokio::test]
+async fn asking_again_about_the_same_call_does_not_count_as_another_request() {
+    let (_db, approval) = approval();
+    let args = json!({"command": "make"});
+    for _ in 0..4 {
+        approval.check("bash", &args).await;
+    }
+    assert_eq!(approval.recent_requests(), 1);
+}
+
+#[tokio::test]
+async fn requests_for_notes_and_tasks_do_not_count_toward_the_nudge() {
+    let (_db, approval) = approval();
+    for n in 1..=3 {
+        approval
+            .check("task_delete", &json!({"id": format!("t-{n}")}))
+            .await;
+    }
+    assert_eq!(approval.recent_requests(), 0);
+}
+
+#[test]
+fn setting_up_helpers_asks_but_looking_at_them_does_not() {
+    for action in ["setup", "install", "login"] {
+        assert!(needs_owner(
+            "helper_setup",
+            "harness",
+            &json!({"action": action})
+        ));
+    }
+    for action in ["status", "check"] {
+        assert!(!needs_owner(
+            "helper_setup",
+            "harness",
+            &json!({"action": action})
+        ));
+    }
+    assert!(!needs_owner("helper_setup", "harness", &json!({})));
+}
+
+#[tokio::test]
+async fn one_approval_covers_a_whole_helper_setup_and_the_card_says_what_it_does() {
+    let (db, approval) = approval();
+    let args = json!({"action": "setup", "host": "laptop", "helpers": ["cursor", "codex"]});
+    assert!(approval.check("helper_setup", &args).await.is_some());
+    let id = request_id(&db, "helper_setup");
+    let body: String = db
+        .with_conn(|c| {
+            Ok(
+                c.query_row("SELECT body FROM value_items WHERE id = ?1", [&id], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    assert!(body.contains("Cursor") && body.contains("Codex"), "{body}");
+    assert!(body.contains("cursor.com/install"), "{body}");
+    assert!(
+        body.contains("will not ask again for each helper"),
+        "{body}"
+    );
+    assert!(value_items::approve_by_id(&db, &id).unwrap());
+    assert!(
+        approval.check("helper_setup", &args).await.is_none(),
+        "the one approved call runs"
+    );
+}
