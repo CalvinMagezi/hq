@@ -349,7 +349,7 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
             }))
         }
         "IFS" => {
-            if args.len() < 2 || args.len() % 2 != 0 {
+            if args.len() < 2 || !args.len().is_multiple_of(2) {
                 return Err(CalcError::Value);
             }
             for pair in args.chunks(2) {
@@ -386,13 +386,13 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
                 Expr::Ref(r) => ctx.cell(*r),
                 other => run(other, ctx).unwrap_or_else(Value::Err),
             };
-            Ok(Value::Bool(match (name, &v) {
-                ("ISNUMBER", Value::Num(_)) => true,
-                ("ISTEXT", Value::Text(_)) => true,
-                ("ISBLANK", Value::Empty) => true,
-                ("ISERROR", Value::Err(_)) => true,
-                _ => false,
-            }))
+            Ok(Value::Bool(matches!(
+                (name, &v),
+                ("ISNUMBER", Value::Num(_))
+                    | ("ISTEXT", Value::Text(_))
+                    | ("ISBLANK", Value::Empty)
+                    | ("ISERROR", Value::Err(_))
+            )))
         }
         "ROUNDUP" | "ROUNDDOWN" => {
             arity(args, 2, 2)?;
