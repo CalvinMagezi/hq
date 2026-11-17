@@ -259,7 +259,43 @@ fn every_listed_function_exists_and_an_unlisted_one_does_not() {
         );
     }
     assert_eq!(
-        at(&sheet(&[("A1", "=VLOOKUP(1,2,3)")]), "A1"),
+        at(&sheet(&[("A1", "=XLOOKUP(1,2,3)")]), "A1"),
         Value::Err(CalcError::Name)
     );
+}
+
+#[test]
+fn lookups_payments_and_dates_agree_with_a_spreadsheet() {
+    let s = sheet(&[
+        ("A1", "a"),
+        ("B1", "10"),
+        ("A2", "b"),
+        ("B2", "20"),
+        ("A3", "c"),
+        ("B3", "30"),
+        ("D1", "=VLOOKUP(\"b\",A1:B3,2,FALSE)"),
+        ("D2", "=VLOOKUP(\"z\",A1:B3,2,FALSE)"),
+        ("D3", "=INDEX(A1:B3,3,2)"),
+        ("D4", "=INDEX(A1:B3,4,1)"),
+        ("D5", "=ROW(B7)"),
+        ("D6", "=PMT(0.01,12,-1000)"),
+        ("D7", "=PMT(0,10,-1000)"),
+        ("E1", "44592"),
+        ("E2", "=EDATE(E1,1)"),
+        ("E3", "=EDATE(E1,-2)"),
+        ("E4", "=EDATE(44561,2)"),
+    ]);
+    assert_eq!(at(&s, "D1"), n(20.0));
+    assert_eq!(at(&s, "D2"), Value::Err(CalcError::Na));
+    assert_eq!(at(&s, "D3"), n(30.0));
+    assert_eq!(at(&s, "D4"), Value::Err(CalcError::Ref));
+    assert_eq!(at(&s, "D5"), n(7.0));
+    match at(&s, "D6") {
+        Value::Num(x) => assert!((x - 88.8488).abs() < 1e-3, "{x}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(at(&s, "D7"), n(100.0));
+    assert_eq!(at(&s, "E2"), n(44620.0));
+    assert_eq!(at(&s, "E3"), n(44530.0));
+    assert_eq!(at(&s, "E4"), n(44620.0));
 }

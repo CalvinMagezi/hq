@@ -434,6 +434,36 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
                 _ => t.split_whitespace().collect::<Vec<_>>().join(" "),
             }))
         }
+        "ROW" => match args {
+            [Expr::Ref(r)] | [Expr::Range(r, _)] => Ok(Value::Num(f64::from(r.row) + 1.0)),
+            _ => Err(CalcError::Value),
+        },
+        "INDEX" | "VLOOKUP" => table_lookup(name, args, ctx),
+        "PMT" => {
+            arity(args, 3, 5)?;
+            let mut v = Vec::new();
+            for a in args {
+                v.push(num(&run(a, ctx)?)?);
+            }
+            let (rate, nper, pv) = (v[0], v[1], v[2]);
+            let fv = v.get(3).copied().unwrap_or(0.0);
+            let due = v.get(4).copied().unwrap_or(0.0) != 0.0;
+            if nper == 0.0 {
+                return Err(CalcError::Value);
+            }
+            if rate == 0.0 {
+                return Ok(Value::Num(-(pv + fv) / nper));
+            }
+            let g = (1.0 + rate).powf(nper);
+            let pay = -(rate * (pv * g + fv)) / ((g - 1.0) * if due { 1.0 + rate } else { 1.0 });
+            Ok(Value::Num(pay))
+        }
+        "EDATE" => {
+            arity(args, 2, 2)?;
+            let serial = num(&run(&args[0], ctx)?)?.trunc();
+            let months = num(&run(&args[1], ctx)?)?.trunc() as i64;
+            Ok(Value::Num(add_months(serial as i64, months)? as f64))
+        }
         "ABS" => one(args, ctx, f64::abs),
         "INT" => one(args, ctx, f64::floor),
         "SQRT" => {
@@ -478,4 +508,111 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
 fn one(args: &[Expr], ctx: &mut dyn Cells, f: fn(f64) -> f64) -> R {
     arity(args, 1, 1)?;
     Ok(Value::Num(f(num(&run(&args[0], ctx)?)?)))
+}
+
+/// The values of a range as rows, for the functions that look inside a table.
+fn table(e: &Expr, ctx: &mut dyn Cells) -> Result<Vec<Vec<Value>>, CalcError> {
+    let Expr::Range(a, b) = e else {
+        return Err(CalcError::Value);
+    };
+    let (c0, c1) = (a.col.min(b.col), a.col.max(b.col));
+    let (r0, r1) = (a.row.min(b.row), a.row.max(b.row));
+    Ok((r0..=r1)
+        .map(|r| {
+            (c0..=c1)
+                .map(|c| ctx.cell(CellRef { col: c, row: r }))
+                .collect()
+        })
+        .collect())
+}
+
+fn table_lookup(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
+    if name == "INDEX" {
+        arity(args, 2, 3)?;
+        let t = table(&args[0], ctx)?;
+        let r = num(&run(&args[1], ctx)?)?;
+        let c = if args.len() == 3 {
+            num(&run(&args[2], ctx)?)?
+        } else {
+            1.0
+        };
+        if r < 1.0 || c < 1.0 {
+            return Err(CalcError::Ref);
+        }
+        let cell = t
+            .get(r as usize - 1)
+            .and_then(|row| row.get(c as usize - 1));
+        return cell.cloned().ok_or(CalcError::Ref);
+    }
+    arity(args, 3, 4)?;
+    let key = run(&args[0], ctx)?;
+    let t = table(&args[1], ctx)?;
+    let col = num(&run(&args[2], ctx)?)?;
+    if col < 1.0 {
+        return Err(CalcError::Value);
+    }
+    let approx = match args.get(3) {
+        Some(a) => match run(a, ctx)? {
+            Value::Bool(b) => b,
+            v => num(&v)? != 0.0,
+        },
+        None => true,
+    };
+    let mut hit = None;
+    for (i, row) in t.iter().enumerate() {
+        match order(&row[0], &key) {
+            Ordering::Equal => {
+                hit = Some(i);
+                if !approx {
+                    break;
+                }
+            }
+            Ordering::Less if approx && rank(&row[0]) == rank(&key) => hit = Some(i),
+            _ => {}
+        }
+    }
+    let i = hit.ok_or(CalcError::Na)?;
+    t[i].get(col as usize - 1).cloned().ok_or(CalcError::Ref)
+}
+
+/// Days since 1899-12-30 (a spreadsheet date) moved by whole months, keeping the day or the month's last day.
+fn add_months(serial: i64, months: i64) -> Result<i64, CalcError> {
+    const EPOCH_SHIFT: i64 = 25569;
+    let (y, m, d) = civil_from_days(serial - EPOCH_SHIFT);
+    let total = y * 12 + (m - 1) + months;
+    let (ny, nm) = (total.div_euclid(12), total.rem_euclid(12) + 1);
+    if !(1900..=9999).contains(&ny) {
+        return Err(CalcError::Num);
+    }
+    Ok(days_from_civil(ny, nm, d.min(days_in_month(ny, nm))) + EPOCH_SHIFT)
+}
+
+fn days_in_month(y: i64, m: i64) -> i64 {
+    match m {
+        2 if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + i64::from(m <= 2), m, d)
 }
