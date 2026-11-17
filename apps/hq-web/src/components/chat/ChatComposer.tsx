@@ -5,6 +5,8 @@ import { SlashCommandPalette, SLASH_COMMANDS, matchingSlashCommands, isSlashInpu
 import { enterSendsMessage, readEnterSends, writeEnterSends } from '~/lib/enterRule'
 import { tooBig } from '~/lib/chatUploads'
 import { ComposerAttachments, type PendingAttachment } from './AttachmentChips'
+import { TriggerMenu, useTriggerItems, type TriggerItem } from './TriggerMenu'
+import { insertReference, referenceBefore, triggerAt } from '~/lib/triggers'
 
 // The box grows with its text up to this height, then scrolls.
 const MAX_INPUT_HEIGHT_PX = 200
@@ -41,6 +43,23 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [enterSends, setEnterSends] = useState<boolean | null>(() => (typeof window === 'undefined' ? null : readEnterSends()))
   useImperativeHandle(ref, () => textareaRef.current as HTMLTextAreaElement)
+  // "@" and "#" open a short list of things to point at; the caret says which word is being typed.
+  const [caret, setCaret] = useState(0)
+  const [chosen, setChosen] = useState(0)
+  const [dismissed, setDismissed] = useState<string | null>(null)
+  const found = isSlashInput(value) ? null : triggerAt(value, caret)
+  const trigger = found && dismissed !== `${found.start}:${found.char}` ? found : null
+  const triggerItems = useTriggerItems(trigger)
+  const menuOpen = trigger !== null
+  const at = Math.min(chosen, Math.max(triggerItems.length - 1, 0))
+
+  const pickItem = (item: TriggerItem) => {
+    if (!trigger) return
+    const out = insertReference(value, trigger, caret, item.reference)
+    onChange(out.text)
+    setCaret(out.caret)
+    requestAnimationFrame(() => textareaRef.current?.setSelectionRange(out.caret, out.caret))
+  }
 
   useLayoutEffect(() => {
     const el = textareaRef.current
@@ -67,6 +86,37 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (menuOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (triggerItems.length > 0) {
+          e.preventDefault()
+          setChosen((i) => (e.key === 'ArrowDown' ? (i + 1) % triggerItems.length : (i - 1 + triggerItems.length) % triggerItems.length))
+        }
+        return
+      }
+      if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey && !e.nativeEvent.isComposing && triggerItems[at]) {
+        e.preventDefault()
+        pickItem(triggerItems[at])
+        return
+      }
+      if (e.key === 'Escape' && trigger) {
+        e.preventDefault()
+        setDismissed(`${trigger.start}:${trigger.char}`)
+        return
+      }
+    }
+    // One Backspace takes a whole reference this box wrote, not a letter at a time.
+    if (e.key === 'Backspace' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const el = e.currentTarget
+      const span = el.selectionStart === el.selectionEnd ? referenceBefore(value, el.selectionStart) : null
+      if (span) {
+        e.preventDefault()
+        onChange(value.slice(0, span[0]) + value.slice(span[1]))
+        setCaret(span[0])
+        requestAnimationFrame(() => textareaRef.current?.setSelectionRange(span[0], span[0]))
+        return
+      }
+    }
     if (e.key === 'Escape' && running) {
       onStop()
       return
@@ -103,6 +153,7 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
   return (
     <div className="hq-comp">
       {isSlashInput(value) && <SlashCommandPalette input={value} onSelect={pickCommand} />}
+      {menuOpen && trigger && <TriggerMenu items={triggerItems} active={at} query={trigger.query} onPick={pickItem} />}
 
       {!connected && !canQueue && (
         <p role="status" className="a-cap a-warn-t hq-comp-note">
@@ -141,7 +192,16 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
             id="hq-composer"
             ref={textareaRef}
             value={value}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={(e) => {
+              onChange(e.target.value)
+              setCaret(e.target.selectionStart)
+              setChosen(0)
+            }}
+            onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
+            onClick={(e) => setCaret(e.currentTarget.selectionStart)}
+            aria-haspopup="listbox"
+            aria-expanded={menuOpen}
+            aria-activedescendant={menuOpen && triggerItems.length > 0 ? `hq-trig-${at}` : undefined}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             placeholder={t('chat_message_hq')}

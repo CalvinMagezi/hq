@@ -26,6 +26,9 @@ export const LITE_SCOPES: SearchScope[] = ['all', 'notes', 'tasks']
 
 const normalize = (s: string) => s.toLowerCase()
 
+/** Every word typed is somewhere in the text. */
+export const matchWords = (q: string, ...fields: (string | null | undefined)[]): boolean => matches(q, ...fields)
+
 function matches(q: string, ...fields: (string | null | undefined)[]): boolean {
   const words = normalize(q).split(/\s+/).filter(Boolean)
   if (words.length === 0) return false

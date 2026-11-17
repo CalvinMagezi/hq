@@ -99,3 +99,13 @@ dialog.hq-sheet.hq-chats-sheet{top:120px;max-height:none}
 .hq-ctx-detail-head b{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hq-ctx-facts{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0;padding:0 16px}
 .hq-result .an-bar{flex-wrap:wrap;overflow:visible;padding:0}
+
+/* The list above the box for @ and #. */
+.hq-trig{position:absolute;left:16px;right:16px;bottom:100%;margin-bottom:8px;max-width:760px;margin-inline:auto;max-height:320px;overflow-y:auto;z-index:50;padding:4px 0 8px;border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface-100)}
+.hq-trig-grp{padding:12px 16px 4px}
+.hq-trig-row{display:flex;align-items:center;gap:12px;min-height:48px;padding:6px 16px;cursor:pointer;color:var(--ink)}
+.hq-trig-row:hover,.hq-trig-row[aria-selected="true"]{background:var(--surface-200)}
+.hq-trig-main{display:flex;flex-direction:column;min-width:0}
+.hq-trig-main b,.hq-trig-main span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hq-trig-none{padding:12px 16px;margin:0}
+.hq-trig-keys{padding:8px 16px 0;margin:0}

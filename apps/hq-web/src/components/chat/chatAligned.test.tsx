@@ -88,3 +88,50 @@ describe('Chat on the panes', () => {
     expect(read('StartScreen.tsx')).toContain('className="a-mark"')
   })
 })
+
+describe('A reply reads result first', () => {
+  const steps = [
+    { toolCallId: 'a', toolName: 'vault_read', status: 'done' as const, startedAt: 0, progressMessages: [], inputArgs: { path: 'Notebooks/Shop/Stock rules.md' } },
+    { toolCallId: 'b', toolName: 'vault_write_note', status: 'done' as const, startedAt: 0, progressMessages: [], inputArgs: { path: 'Notebooks/Daily/Steps.md' } },
+  ]
+  const html = (live: boolean) =>
+    renderToStaticMarkup(createElement(ChatBubble, { live, startedAt: 1, message: { id: 'm', role: 'assistant', content: 'I wrote the steps down.', timestamp: 0, toolSteps: steps } }))
+
+  test('a saved reply shows its words, then the fold, the made card and the source chips', () => {
+    const out = html(false)
+    const at = (s: string) => out.indexOf(s)
+    // The words render through the markdown viewer, so its box marks where they are.
+    expect(at('markdown-viewer')).toBeGreaterThan(-1)
+    expect(at('What I did · 2 steps')).toBeGreaterThan(at('markdown-viewer'))
+    expect(at('hq-made')).toBeGreaterThan(at('What I did'))
+    expect(at('hq-sources')).toBeGreaterThan(at('hq-made'))
+    expect(out).toContain('Note · saved to Vault › Daily')
+    expect(out).toContain('Stock rules')
+  })
+  test('a streaming reply shows one live line above its words and none of the saved extras', () => {
+    const out = html(true)
+    expect(out.match(/class="hq-live"/g)).toHaveLength(1)
+    expect(out.indexOf('hq-live')).toBeLessThan(out.indexOf('markdown-viewer'))
+    for (const gone of ['What I did', 'hq-made', 'hq-sources']) expect(out).not.toContain(gone)
+  })
+  test('the offer is not in the bubble: it has the one slot above the box', () => {
+    expect(read('ChatBubble.tsx')).not.toContain('OfferLine')
+    expect(read('ChatView.tsx')).toMatch(/<ChatApprovals[\s\S]*?otherwise=\{slotOffer\}/)
+    expect(read('ChatView.tsx')).toContain('!liveTurn && messages.length > 0')
+  })
+})
+
+describe('the composer', () => {
+  test('keeps the Enter rule in a line of hints, with the choice one click away', () => {
+    const comp = read('ChatComposer.tsx')
+    expect(comp).toContain("'chat_hint_sends'")
+    expect(comp).toContain("t('chat_hint_change')")
+    expect(comp).not.toContain('type="checkbox"')
+  })
+  test('hears @ and # and takes a whole reference back with one Backspace', () => {
+    const comp = read('ChatComposer.tsx')
+    expect(comp).toContain('triggerAt(value, caret)')
+    expect(comp).toContain('referenceBefore(value')
+    expect(comp).toContain('<TriggerMenu')
+  })
+})

@@ -1,6 +1,6 @@
 # Web restructure: build plan
 
-Status: slices 1 and 2 built (Vault navigation), Chat's grammar and the work pane built. Move and rename wait on the server. The rest are proposals.
+Status: slices 1 and 2 built (Vault navigation), Chat's grammar, the work pane, the palette and the trigger menu built. Move and rename wait on the server. The rest are proposals.
 
 The design is the "Restructure" page of the owner's HQ Web & Desktop design canvas (private). This file
 is the build order and the decisions that came out of it, so a session can continue without the canvas.
@@ -105,13 +105,36 @@ deleted; the tree is the one component above.
   markdown, which hqmd allows), follow-up chips in the slot (no source for them yet), "Not sent / Try
   again" wording and the auto-title.
 
+## The palette and the trigger menu (built)
+
+- The palette is the Search overlay grown, not a new component (`SearchOverlay.tsx`, `lib/palette.ts`).
+  Ctrl or Cmd K opens it. Groups in a fixed order: Vault (folders match too, by any words of their path),
+  Tasks, Chats, Helpers, then Do. With nothing typed it shows Recent and the Do actions with their keys
+  (New note, New chat, Work pane in a chat, and Go to the Vault, Chat, Inbox, Settings); no row is chosen
+  until an arrow key or the pointer moves, so Enter does nothing by surprise.
+- The field never ends on "no results": when something is typed, "Ask HQ about ..." is the last row. It
+  opens a new chat with the words in the box, ready to send (one more Enter than the board draws, because
+  sending needs the chat's socket). `compose=1` now really opens the start screen; before, it landed in
+  whichever chat was last open, which also made a note's Ask HQ misplace its text.
+- A read-only preview sits beside the results from 1100 px: kind, place and first lines. A note's lines
+  are fetched only for the row that stays highlighted for 250 ms, and not at all when the browser asks to
+  save data. Shift Enter shows a note in the open chat's work pane; Ctrl Enter asks HQ at once.
+- New chat has the key Ctrl Shift O. Every key the Do rows show is one the app handles.
+- Differences from the board: Tab stays with the scope chips so they can be reached by keyboard (Ask is
+  Ctrl Enter and a row); Alt 1 to 3 and the "Ctrl /" key list are not built, since the board says they
+  need checking against browser and desktop-app shortcuts. The quick-note overlay is still there and the
+  New note action opens it; there is no global chat overlay left to remove.
+- The message box hears `@` and `#` (`lib/triggers.ts`, `TriggerMenu.tsx`). `@` offers notes (pinned notes
+  until something is typed, then search), tasks and helpers; `#` offers folders. A pick puts a backticked
+  reference in the text, the form Ask HQ already uses, and one Backspace removes a whole reference. Not
+  built: files and tags (the web has no index of either), and the Settings choice of what `@` offers.
+
 ## Next slices, in order
 
 1. The Sheet, Slides and Dashboard viewers in the pane, as the suite milestones land.
-2. The palette, then the trigger menu (`@`, `/`, `#`) in the composer.
-3. Inbox: the split view, the helper fold and the digest row, Waiting for later.
-4. Settings: the six groups and search, the Chat page, the Work page.
-5. HQ Hub window: menu bar, Dock badge, the three-state control window.
+2. Inbox: the split view, the helper fold and the digest row, Waiting for later.
+3. Settings: the six groups and search, the Chat page, the Work page.
+4. HQ Hub window: menu bar, Dock badge, the three-state control window.
 
 ## Open questions that block parts of the above
 

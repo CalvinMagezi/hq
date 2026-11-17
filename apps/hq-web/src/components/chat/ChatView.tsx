@@ -40,6 +40,8 @@ import { readAutoOpened, shouldAutoOpen, writeAutoOpened } from '~/lib/workPane'
 const FOCUS_DELAY_MS = 50
 // A reply alert links here with the chat to open.
 const THREAD_PARAM = 'thread'
+// "Ask HQ", "New chat" and a note's Ask HQ link here to start a new chat.
+const COMPOSE_PARAM = 'compose'
 // From here the details pane is docked and always shown.
 const DOCKED_QUERY = '(min-width: 1400px)'
 
@@ -97,6 +99,15 @@ export function ChatView({ active, threadId }: Props) {
   useEffect(() => {
     if (!active) return
     const linked = threadId ?? new URLSearchParams(window.location.search).get(THREAD_PARAM)
+    // "Ask HQ" and "New chat" link here with compose=1: the start screen, where their words wait in the box.
+    // The router writes its search values as JSON, so the 1 may come quoted.
+    const compose = !linked && new URLSearchParams(window.location.search).get(COMPOSE_PARAM)?.replace(/"/g, '') === '1'
+    if (compose) {
+      setActiveThread(null)
+      const url = new URL(window.location.href)
+      url.searchParams.delete(COMPOSE_PARAM)
+      window.history.replaceState(null, '', url.toString())
+    }
     if (linked) setActiveThread(linked)
     if (linked && !threadId) {
       const url = new URL(window.location.href)
