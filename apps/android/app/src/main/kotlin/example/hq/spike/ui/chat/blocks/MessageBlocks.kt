@@ -13,6 +13,12 @@ sealed interface Block {
     data class ChartBlock(val result: ChartParse, val source: String, val closed: Boolean) : Block
     data class Table(val headers: List<String>, val aligns: List<Align>, val rows: List<List<String>>) : Block
     data class Image(val alt: String, val src: String = "") : Block
+
+    /** A `sheet` fence: [index] is its place among the sheets of the text, which is how hq finds it again. */
+    /** A `tile` fence: one number from a sheet range, found again by its place among the tiles. */
+    data class Tile(val info: String, val index: Int) : Block
+
+    data class Sheet(val info: String, val source: String, val closed: Boolean, val index: Int) : Block
 }
 
 /**
@@ -24,12 +30,13 @@ fun parseBlocks(text: String, streaming: Boolean = false): List<Block> {
     val lines = text.lines()
     val out = mutableListOf<Block>()
     var i = 0
+    val sheets = intArrayOf(0, 0)
     while (i < lines.size) {
         val line = lines[i]
         val fence = FENCE.matchEntire(line)
         when {
             line.isBlank() -> i++
-            fence != null -> i = fenced(lines, i, fence.groupValues[1], out, streaming)
+            fence != null -> i = fenced(lines, i, fence.groupValues[1], fence.groupValues[2], out, streaming, sheets)
             HEADING.matches(line) -> { val m = HEADING.matchEntire(line)!!; out += Block.Heading(m.groupValues[1].length, m.groupValues[2].trim()); i++ }
             HRULE.matches(line) -> i++
             IMAGE.matches(line) -> { IMAGE.matchEntire(line)!!.groupValues.let { out += Block.Image(it[1], it[2].trim()) }; i++ }
@@ -43,7 +50,7 @@ fun parseBlocks(text: String, streaming: Boolean = false): List<Block> {
     return out
 }
 
-private val FENCE = Regex("^\\s*```\\s*([\\w+-]*)\\s*$")
+private val FENCE = Regex("^\\s*```\\s*([\\w+-]*)(?:\\s+(.*?))?\\s*$")
 private val CLOSING_FENCE = Regex("^\\s*```\\s*$")
 private val HEADING = Regex("^(#{1,6})\\s+(.*)$")
 private val HRULE = Regex("^\\s*([-*_])(\\s*\\1){2,}\\s*$")
@@ -54,7 +61,7 @@ private val CHECK = Regex("^\\s*[-*+]\\s+\\[( |x|X)]\\s+.*$")
 private val BULLET = Regex("^\\s*[-*+]\\s+.*$")
 private val ORDERED = Regex("^\\s*\\d+[.)]\\s+.*$")
 
-private fun fenced(lines: List<String>, start: Int, lang: String, out: MutableList<Block>, streaming: Boolean): Int {
+private fun fenced(lines: List<String>, start: Int, lang: String, info: String, out: MutableList<Block>, streaming: Boolean, sheets: IntArray): Int {
     var j = start + 1
     val body = mutableListOf<String>()
     while (j < lines.size && !CLOSING_FENCE.matches(lines[j])) { body += lines[j]; j++ }
@@ -63,6 +70,8 @@ private fun fenced(lines: List<String>, start: Int, lang: String, out: MutableLi
     val text = body.joinToString("\n")
     out += when (lang.lowercase()) {
         "chart" -> Block.ChartBlock(if (closed) Charts.parse(text) else ChartParse.Bad("still arriving"), text, closed)
+        "sheet" -> Block.Sheet(info, text, closed, sheets[0]++)
+        "tile" -> Block.Tile(info, sheets[1]++)
         "mermaid" -> Charts.parseMermaidPie(text).let { if (it is ChartParse.Ok) Block.ChartBlock(it, text, closed) else Block.Code(lang, text, closed) }
         else -> Block.Code(lang, text, closed)
     }

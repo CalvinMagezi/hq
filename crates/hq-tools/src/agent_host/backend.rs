@@ -1,7 +1,7 @@
 use super::{
     AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, GitHead, LaunchRequest, Launched,
-    LogsSince, PendingRead, PromptOutcome, PublishAsk, PublishOutcome, WorktreeBase, WorktreeInfo,
-    WorktreeRemoved, WorktreeStatus,
+    LogsSince, MergeAsk, MergeOutcome, PendingRead, PromptOutcome, PublishAsk, PublishOutcome,
+    WorktreeBase, WorktreeInfo, WorktreeRemoved, WorktreeStatus,
 };
 use hq_core::quota::LaneQuota;
 use serde::Serialize;
@@ -180,6 +180,15 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
         Err(AgentHostError::Api {
             code: "unsupported".into(),
             message: format!("host '{}' cannot publish branches", self.name()),
+        })
+    }
+
+    /// Reads a pull request through the host's own login, and merges it (squash) when
+    /// `approved_sha` is set and is still the head. Only the built-in host can.
+    fn pr_merge(&self, _ask: &MergeAsk) -> Result<MergeOutcome, AgentHostError> {
+        Err(AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' cannot merge pull requests", self.name()),
         })
     }
 
@@ -456,6 +465,9 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     }
     fn worktree_publish(&self, ask: &PublishAsk) -> Result<PublishOutcome, AgentHostError> {
         (**self).worktree_publish(ask)
+    }
+    fn pr_merge(&self, ask: &MergeAsk) -> Result<MergeOutcome, AgentHostError> {
+        (**self).pr_merge(ask)
     }
     fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
         (**self).head(target)

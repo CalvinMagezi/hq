@@ -1431,6 +1431,7 @@ pub fn create_harness_session_tools(
         }),
         Box::new(HarnessSessionStopTool { db: db.clone() }),
         Box::new(super::publish::HarnessSessionPublishTool { db: db.clone() }),
+        Box::new(super::merge::HarnessSessionRequestMergeTool { db: db.clone() }),
         Box::new(HarnessSessionLinkTool {
             db: db.clone(),
             chat: chat.clone(),

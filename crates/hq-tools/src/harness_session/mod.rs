@@ -25,6 +25,7 @@ pub mod fleet;
 mod folder_request;
 pub mod handoff;
 mod launch;
+pub mod merge;
 pub mod mission;
 mod origin;
 pub mod policy;

@@ -41,3 +41,7 @@ number here comes with the command that reproduces it.
 
 The editor, the grid on the phone, number formats (UGX), the sidecar for large sheets and
 references between sheets. This is the engine and its measurement, milestone M4's first step.
+
+## On the phone
+
+A `sheet` block in a note draws as a grid and a `tile` block as a labelled number, both computed by hq (`GET /api/suite/sheet`, `GET /api/suite/tile`). A tile reads a sheet in its own note for now: `from="[[Note]]!D2:D40"` with `fn` of `sum`, `count`, `avg`, `min`, `max` or `median`, and `format` such as `ugx`.

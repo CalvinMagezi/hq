@@ -70,4 +70,26 @@ class MessageBlocksTest {
         assertEquals("Mobile-First-Roadmap" to "Roadmap", NoteRefs.wikilink("Mobile-First-Roadmap|Roadmap"))
         assertEquals("Projects › Agent-HQ", NoteRefs.folderTrail("Notebooks/Projects/Agent-HQ/Plan.md"))
     }
+
+    @Test
+    fun a_sheet_fence_with_an_info_string_is_one_sheet_block_numbered_in_order() {
+        val md = "Intro\n\n```sheet name=\"Stock\" types=\"text,int\"\n| a | b |\n|---|---|\n| 1 | =A2 |\n```\n\nand\n\n```sheet\n| x |\n```\n\n```kotlin extra\nval x = 1\n```\n"
+        val b = parseBlocks(md)
+        val sheets = b.filterIsInstance<Block.Sheet>()
+        assertEquals(2, sheets.size)
+        assertEquals(0, sheets[0].index)
+        assertEquals(1, sheets[1].index)
+        assertEquals("name=\"Stock\" types=\"text,int\"", sheets[0].info)
+        assertEquals("| a | b |\n|---|---|\n| 1 | =A2 |", sheets[0].source)
+        assertEquals("", sheets[1].info)
+        assertEquals(Block.Code("kotlin", "val x = 1", true), b.last())
+    }
+
+    @Test
+    fun a_tile_fence_is_a_tile_block_numbered_apart_from_the_sheets() {
+        val b = parseBlocks("```tile from=\"A1:A3\" fn=sum\n```\n\n```sheet\n| a |\n```\n\n```tile from=\"B1\" fn=max\n```\n")
+        val tiles = b.filterIsInstance<Block.Tile>()
+        assertEquals(listOf(0, 1), tiles.map { it.index })
+        assertEquals(0, b.filterIsInstance<Block.Sheet>().single().index)
+    }
 }

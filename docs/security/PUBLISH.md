@@ -36,7 +36,8 @@ Everything below runs on the host, outside any sandbox, with the pinned git conf
 
 ## What HQ never does
 
-- Merge, approve, or enable auto-merge.
+- Merge, approve, or enable auto-merge on its own say. A merge happens only through
+  `harness_session_request_merge` and the owner's yes for one commit (below).
 - Force-push, delete a ref, or push a tag. The refspec is `HEAD:refs/heads/<branch>` and a
   diverged remote branch is a failed push, not an overwrite.
 - Touch the default or a protected branch, or publish workflow, hook or git control files.
@@ -56,3 +57,29 @@ nothing a helper or an MCP caller can reach signs an approval. An approval lasts
 There is no model review of the diff: the checks are mechanical, so a harmful change that is
 not a credential and not a protected path is reviewed by the people reviewing the pull request.
 Logged in `TECHDEBT.md`.
+
+## Merging a green pull request (`harness_session_request_merge`)
+
+Off by default. `agent_host.publish.merge.enabled: true` turns it on; `merge.repos` lists the
+repositories (empty means `publish.repos`) and `never_merge` lists repositories HQ refuses with
+the reason "open pull requests and never merge" (a client repository whose rule that is). The
+tool takes one argument, `pr` (an address or `<owner>/<repo>#<n>`). It never merges by itself.
+
+1. HQ refuses a repository that is off the list or on `never_merge`, with no host call.
+2. The host reads the pull request with its own `gh` (`pr.merge` without an approved commit) and
+   refuses unless it is open, not a draft, from a branch of the repository itself, targeting the
+   default branch, not from a protected branch, mergeable, free of merge commits, and every check
+   reported passed (none pending, none failed; no checks at all is a refusal).
+3. HQ files one inbox item naming the repository, title, number, head commit and the passing
+   checks. The approval is signed, spent by exactly one merge, and bound by `args_digest` over
+   `{repo, pr, head_sha}`, so a new commit is a different request and asks again. It lasts 24
+   hours; a dismissal is a no for that commit only.
+4. The helper gets `waiting_for_owner` and calls again after the owner answers. Only then does
+   the host re-read the pull request, require the head to equal the approved commit and the
+   checks to still be green, and run `gh pr merge --squash --delete-branch --match-head-commit
+   <sha>`, once. GitHub itself refuses the merge if a commit landed in between.
+5. HQ comments on the session's task and records a `merge` event.
+
+Never: force, `--admin`, auto-merge, a repository outside the list, a fork, the default branch
+as head. The helper's arguments carry no approval, commit or session; identity comes from the
+gateway's attested session, and nothing a helper or an MCP caller can reach signs an approval.
