@@ -83,6 +83,50 @@ pub fn undone(source: &str) -> String {
     format!("{source} is back where it was.\n")
 }
 
+pub fn ask_recovery_code() -> &'static str {
+    "Recovery code for this sink: "
+}
+
+pub fn no_sinks() -> &'static str {
+    "No sinks yet. Make one with: hq suite sink add <name> <folder>\n"
+}
+
+pub fn sink_made(id: &str, folder: &str, code: &str) -> String {
+    format!(
+        "The sink {id} is ready in {folder}.\n\nYour recovery code is:\n\n    {code}\n\nWrite it down and keep it somewhere safe that is not this phone. It is shown only now. HQ does not keep it, and without it nothing sealed into this sink can be opened, by you or by anyone.\n"
+    )
+}
+
+pub fn offloaded(source: &str, sink: &str, saved: i64, job: &str) -> String {
+    format!(
+        "Done. {source} was sealed into the sink {sink} and removed from this phone; {} saved. To bring it back: hq suite undo {job}.\n",
+        size(saved.max(0) as u64)
+    )
+}
+
+pub fn drill(d: &hq_suite_sinks::Drill) -> String {
+    if d.checked == 0 {
+        return "The sink holds nothing yet, so there was nothing to check.\n".into();
+    }
+    if d.failed.is_empty() {
+        format!(
+            "Checked {} stored original(s): every one opened and matched.\n",
+            d.checked
+        )
+    } else {
+        format!(
+            "Checked {} stored original(s): {} could not be restored ({}). Keep the originals you still have.\n",
+            d.checked,
+            d.failed.len(),
+            d.failed
+                .iter()
+                .map(|h| &h[..12])
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
 pub fn abandoned() -> &'static str {
     "Left as it was. The new note was removed and the original was not touched.\n"
 }
@@ -93,6 +137,7 @@ pub fn step_words(step: Step, at: OriginalAt) -> &'static str {
         (Step::Verified, _) => "waiting for your answer",
         (Step::Consented | Step::OriginalMoved, _) => "finishing",
         (Step::Done, OriginalAt::Trash) => "done; original in the trash",
+        (Step::Done, OriginalAt::Sink) => "done; original sealed in a sink",
         (Step::Done, _) => "done",
         (Step::Undone, _) => "undone",
         (Step::Abandoned, _) => "left as it was",

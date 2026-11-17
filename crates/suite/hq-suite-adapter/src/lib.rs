@@ -10,4 +10,5 @@ pub mod api;
 pub mod governor;
 pub mod measure;
 pub mod shrink;
+pub mod sinks;
 pub mod text;
