@@ -44,6 +44,7 @@ fn unsandboxed(passthrough: &[&str]) -> BashSettings {
         writable_paths: Vec::new(),
         read_only: false,
         vault: None,
+        confined_to: None,
     }
 }
 
@@ -281,6 +282,7 @@ async fn required_sandbox_runs_real_commands_with_spaced_paths() {
         writable_paths: vec![spaced.clone()],
         read_only: false,
         vault: None,
+        confined_to: None,
     };
     let target = spaced.join("note.txt");
     let command = format!("echo hi > '{0}' && cat '{0}'", target.display());
@@ -913,4 +915,31 @@ async fn bwrap_keeps_a_command_off_the_vaults_database_and_loaded_folders() {
         !out.contains("wrote_system") && !out.contains("wrote_commands"),
         "{out}"
     );
+}
+
+#[test]
+fn a_confined_command_may_write_only_its_folders_and_scratch_space() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let settings = unsandboxed(&[]).confined_to(vec![root.clone()]);
+    assert_eq!(settings.sandbox, BashSandboxMode::Required);
+    let ctx = SandboxContext::for_process(&settings);
+    assert_eq!(ctx.cwd, root);
+    assert!(!ctx.writable.contains(&dirs::home_dir().unwrap_or_default()));
+    let args = strings(&bwrap_args(&ctx, "ls"));
+    assert!(
+        args.windows(3).any(|w| {
+            w == ["--bind", &root.to_string_lossy(), &root.to_string_lossy()].map(String::from)
+        }),
+        "{args:?}"
+    );
+}
+
+#[test]
+fn a_confined_command_is_refused_without_a_sandbox_even_when_the_session_runs_unsandboxed() {
+    let settings = unsandboxed(&[]).confined_to(vec![PathBuf::from("/work/app")]);
+    assert!(matches!(
+        plan_launch_with(&settings, "ls", None),
+        Launch::Refused(_)
+    ));
 }

@@ -493,6 +493,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../sql/135_trusted_domains.sql"),
     ),
     ("136_task_shelf", include_str!("../sql/136_task_shelf.sql")),
+    (
+        "137_owner_folder_grants",
+        include_str!("../sql/137_owner_folder_grants.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

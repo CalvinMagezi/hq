@@ -379,3 +379,39 @@ fn moving_an_office_original_asks_and_the_other_office_actions_do_not() {
         "a call with no action asks"
     );
 }
+
+#[tokio::test]
+async fn from_the_third_request_in_a_row_the_model_is_told_about_folders_and_helpers() {
+    let (_db, approval) = approval();
+    let mut texts = Vec::new();
+    for n in 1..=3 {
+        let args = json!({"command": format!("make step{n}")});
+        texts.push(approval.check("bash", &args).await.unwrap());
+    }
+    assert!(!texts[0].contains("helper"), "{}", texts[0]);
+    assert!(!texts[1].contains("helper"), "{}", texts[1]);
+    assert!(texts[2].contains("allow this folder"), "{}", texts[2]);
+    assert!(texts[2].contains("harness_session_spawn"), "{}", texts[2]);
+    assert_eq!(approval.recent_requests(), 3);
+}
+
+#[tokio::test]
+async fn asking_again_about_the_same_call_does_not_count_as_another_request() {
+    let (_db, approval) = approval();
+    let args = json!({"command": "make"});
+    for _ in 0..4 {
+        approval.check("bash", &args).await;
+    }
+    assert_eq!(approval.recent_requests(), 1);
+}
+
+#[tokio::test]
+async fn requests_for_notes_and_tasks_do_not_count_toward_the_nudge() {
+    let (_db, approval) = approval();
+    for n in 1..=3 {
+        approval
+            .check("task_delete", &json!({"id": format!("t-{n}")}))
+            .await;
+    }
+    assert_eq!(approval.recent_requests(), 0);
+}

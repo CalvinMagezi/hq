@@ -1,6 +1,7 @@
 //! Owner approval for one tool call in `PermissionMode::Default`: the call waits until the
 //! owner approves exactly this tool with exactly these arguments in their inbox.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -104,6 +105,28 @@ pub fn needs_owner(tool: &str, category: &str, args: &Value) -> bool {
     OWNER_CONFIRM_TOOLS.contains(&tool)
 }
 
+/// How a folder allow covers one call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FolderCover {
+    /// An edit whose every path is inside this allowed folder.
+    File(PathBuf),
+    /// A shell command, run with its sandbox confined to these folders.
+    Bash(Vec<PathBuf>),
+}
+
+/// The tools whose approvals count toward the nudge: the ones a folder allow or a helper spares.
+const STREAK_TOOLS: &[&str] = &[
+    "bash",
+    "write_file",
+    "edit_file",
+    "rollback_file",
+    "file_edit_batch",
+];
+/// Requests in a row, within [`STREAK_WINDOW_SECS`], after which the owner is offered a way out
+/// of approving one call at a time: this folder for this chat, or a helper.
+pub const STREAK_NUDGE_AT: usize = 3;
+const STREAK_WINDOW_SECS: i64 = 30 * 60;
+
 /// Where a session asks the owner. Set only on sessions the owner drives from a chat; every
 /// other session (sub-agents of unattended work, daemon tasks, watches) has none and never asks.
 pub struct OwnerApproval {
@@ -135,6 +158,64 @@ impl OwnerApproval {
                 tracing::warn!(%e, "owner approval: reading allowed sites failed");
                 false
             })
+    }
+
+    /// The folders the owner allowed for this chat that still exist and may still be named.
+    pub fn folder_roots(&self) -> Vec<PathBuf> {
+        let roots =
+            hq_db::owner_folder_grants::live_roots(&self.db, &self.scope).unwrap_or_default();
+        roots
+            .into_iter()
+            .filter_map(|r| super::folder_scope::grantable(std::path::Path::new(&r), None).ok())
+            .collect()
+    }
+
+    /// Whether the owner's folder allow for this chat covers `tool` with `args`. A shell command
+    /// is covered only where a sandbox exists to confine it; otherwise it asks as usual. A store
+    /// that cannot be read covers nothing.
+    pub fn folder_cover(&self, tool: &str, args: &Value) -> Option<FolderCover> {
+        if !super::folder_scope::is_coverable(tool) {
+            return None;
+        }
+        let roots = self.folder_roots();
+        if roots.is_empty() {
+            return None;
+        }
+        if tool == super::folder_scope::BASH_TOOL {
+            // Probed without the network flag: if that works, so does the one with it.
+            return crate::bash_sandbox::available_backend_for(false)
+                .is_some()
+                .then_some(FolderCover::Bash(roots));
+        }
+        super::folder_scope::file_call_root(tool, args, &roots).map(FolderCover::File)
+    }
+
+    /// Counts a call a folder allow let through, for the chat's list of folders.
+    pub fn note_folder_use(&self, cover: &FolderCover) {
+        let roots: &[PathBuf] = match cover {
+            FolderCover::File(root) => std::slice::from_ref(root),
+            FolderCover::Bash(roots) => roots,
+        };
+        for root in roots {
+            if let Err(e) = hq_db::owner_folder_grants::record_use(
+                &self.db,
+                &self.scope,
+                &root.to_string_lossy(),
+            ) {
+                tracing::warn!(%e, "owner approval: counting a folder allow use failed");
+            }
+        }
+    }
+
+    /// How many approval requests for commands and edits this chat has raised lately.
+    pub fn recent_requests(&self) -> usize {
+        hq_db::owner_folder_grants::recent_requests(
+            &self.db,
+            &self.prefix(),
+            STREAK_TOOLS,
+            STREAK_WINDOW_SECS,
+        )
+        .unwrap_or(0)
     }
 
     /// Whether `args` send to a session this chat itself drives: there the driver is the
@@ -298,12 +379,28 @@ impl OwnerApproval {
                 Gate::Ask | Gate::Wait => {}
             }
         }
-        Some(format!(
+        let mut text = format!(
             "Waiting for the owner to approve this {tool} call (sent to their HQ inbox). Tell them \
              what you want to run and why. Once they say it is approved, make exactly the same \
              call again; any change to the arguments needs a new approval."
-        ))
+        );
+        let requests = self.recent_requests();
+        if requests >= STREAK_NUDGE_AT && STREAK_TOOLS.contains(&tool) {
+            text.push_str(&streak_hint(requests));
+        }
+        Some(text)
     }
+}
+
+/// What the model is told once a chat has needed several approvals in a row.
+fn streak_hint(requests: usize) -> String {
+    format!(
+        "\n\nThis chat has needed {requests} approvals for commands and edits lately. Say so to \
+         the owner and offer two ways out: they can allow this folder for the chat from the \
+         approval card (commands and edits there then run without asking, for eight hours), or you \
+         can hand the job to a helper with harness_session_spawn, which works without one approval \
+         per command. For a job with many steps, offer the helper before the next call."
+    )
 }
 
 enum Gate {

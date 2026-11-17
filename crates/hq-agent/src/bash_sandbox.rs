@@ -80,6 +80,9 @@ pub struct BashSettings {
     pub read_only: bool,
     /// The session's vault: its `_data` is hidden and the folders HQ loads are read-only.
     pub vault: Option<PathBuf>,
+    /// A folder allow for this one command: the shell may write only here (and to scratch space),
+    /// not to HOME, and always runs sandboxed whatever `sandbox` says. See [`Self::confined_to`].
+    pub confined_to: Option<Vec<PathBuf>>,
 }
 
 impl Default for BashSettings {
@@ -97,6 +100,18 @@ impl BashSettings {
             writable_paths,
             read_only: false,
             vault: None,
+            confined_to: None,
+        }
+    }
+
+    /// These settings for one command the owner allowed inside `roots` (a folder allow): the
+    /// sandbox is required, the first folder is the working directory, and nothing but the folders
+    /// and scratch space is writable. Narrower than the session's own settings in every respect.
+    pub fn confined_to(&self, roots: Vec<PathBuf>) -> Self {
+        Self {
+            sandbox: BashSandboxMode::Required,
+            confined_to: Some(roots),
+            ..self.clone()
         }
     }
 
@@ -144,9 +159,14 @@ impl SandboxContext {
     /// files are masked.
     pub fn for_process(settings: &BashSettings) -> Self {
         let home = dirs::home_dir();
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+        let mut cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
         let mut writable: Vec<PathBuf> = Vec::new();
-        if !settings.read_only {
+        if let Some(roots) = &settings.confined_to {
+            writable.extend(roots.iter().cloned());
+            if let Some(first) = roots.first() {
+                cwd = first.clone();
+            }
+        } else if !settings.read_only {
             writable.extend(home.iter().cloned());
             writable.push(cwd.clone());
             writable.extend(settings.writable_paths.iter().cloned());
