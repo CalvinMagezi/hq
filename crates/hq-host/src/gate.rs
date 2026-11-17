@@ -19,7 +19,7 @@ pub const GATE_DENIED_EXIT: i32 = 64;
 /// not end the host), and so is `agent.report`, which belongs to the agent's own
 /// hooks on the machine where it runs. `host.lockdown` is in so HQ can stop a
 /// machine's agents from anywhere; unlocking has no method at all.
-const ALLOWED: [&str; 33] = [
+const ALLOWED: [&str; 34] = [
     "host.status",
     "host.programs",
     "host.lockdown",
@@ -31,6 +31,7 @@ const ALLOWED: [&str; 33] = [
     "worktree.remove",
     "worktree.status",
     "worktree.publish",
+    "pr.merge",
     "events.poll",
     "agent.spawn",
     "agent.list",
@@ -136,6 +137,7 @@ mod tests {
             "worktree.remove",
             "worktree.status",
             "worktree.publish",
+            "pr.merge",
         ] {
             assert!(
                 parse_request(&request(method, r#"{"name":"a"}"#)).is_ok(),

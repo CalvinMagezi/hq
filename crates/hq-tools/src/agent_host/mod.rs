@@ -326,6 +326,29 @@ pub struct PublishOutcome {
     pub existing: bool,
 }
 
+/// A pull request the host reads, or merges when `approved_sha` is set and still the head.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MergeAsk {
+    pub repo: String,
+    pub number: u64,
+    /// The commit the owner approved. `None` only reads the pull request and merges nothing.
+    pub approved_sha: Option<String>,
+}
+
+/// What the host found on the pull request, and whether it merged it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct MergeOutcome {
+    pub repo: String,
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub head_sha: String,
+    pub base: String,
+    pub head_ref: String,
+    pub checks: Vec<String>,
+    pub merged: bool,
+}
+
 /// The commit an agent's folder is at.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct GitHead {
