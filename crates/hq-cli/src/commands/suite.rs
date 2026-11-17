@@ -94,6 +94,8 @@ pub enum SuiteCommand {
         #[arg(long, value_name = "FILE")]
         out: Option<PathBuf>,
     },
+    /// How often the formula engine gives the answer a workbook has saved (counts only, shareable)
+    CalcCheck { file: PathBuf },
     /// Check that a Word file survives the suite: read it, render it, read the render, compare
     Check { file: PathBuf },
     /// What the suite holds, in words; with --tidy also removes what nothing needs
@@ -158,6 +160,11 @@ pub async fn run(config: &HqConfig, command: SuiteCommand) -> Result<()> {
         SuiteCommand::Docx { note, out } => {
             let target = hq_suite_adapter::docs::render(vault, &note, out.as_deref())?;
             println!("Wrote {}", target.display());
+            Ok(())
+        }
+        SuiteCommand::CalcCheck { file } => {
+            let r = hq_suite_adapter::calc::check(&file)?;
+            print!("{}", hq_suite_adapter::calc::report_text(&r));
             Ok(())
         }
         SuiteCommand::Check { file } => {

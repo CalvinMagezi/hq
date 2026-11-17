@@ -7,6 +7,7 @@
 //! lifted out; `tests/boundary.rs` keeps it that way.
 
 pub mod api;
+pub mod calc;
 pub mod docs;
 pub mod governor;
 pub mod measure;

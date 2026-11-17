@@ -3830,7 +3830,9 @@ name = "hq-suite-adapter"
 version = "0.9.1"
 dependencies = [
  "anyhow",
+ "calamine",
  "chrono",
+ "hq-suite-calc",
  "hq-suite-docs",
  "hq-suite-governor",
  "hq-suite-md",
@@ -3843,6 +3845,13 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml 0.8.2",
+]
+
+[[package]]
+name = "hq-suite-calc"
+version = "0.9.1"
+dependencies = [
+ "thiserror 2.0.18",
 ]
 
 [[package]]

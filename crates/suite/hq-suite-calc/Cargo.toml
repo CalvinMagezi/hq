@@ -1,0 +1,10 @@
+[package]
+name = "hq-suite-calc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HQ Suite Sheets: a small spreadsheet formula engine over plain cells"
+
+# Pure computation: no files, no clock, no network (crates/suite/CLAUDE.md).
+[dependencies]
+thiserror = { workspace = true }

@@ -13,6 +13,8 @@ chrono = { workspace = true }
 hq-vault = { workspace = true }
 hq-suite-store = { workspace = true }
 hq-suite-shrink = { workspace = true }
+calamine = { version = "0.38", features = ["chrono"] }
+hq-suite-calc = { workspace = true }
 hq-suite-docs = { workspace = true }
 hq-suite-governor = { workspace = true }
 hq-suite-md = { workspace = true }
