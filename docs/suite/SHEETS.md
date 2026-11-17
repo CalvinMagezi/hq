@@ -5,7 +5,7 @@ precedence (`-2^2` is 4, `50%` is 0.5), errors that travel through a calculation
 as `#CIRC!` instead of looping, and a work stack so a chain of thousands of dependent formulas
 cannot overflow. Functions: `SUM PRODUCT AVERAGE MIN MAX COUNT COUNTA IF IFS IFERROR SWITCH AND OR
 NOT ABS INT SQRT ROUND ROUNDUP ROUNDDOWN MOD LEN CONCATENATE CONCAT ISNUMBER ISTEXT ISBLANK ISERROR
-LEFT RIGHT UPPER LOWER TRIM`. Anything else is `#NAME?`; it is never guessed.
+LEFT RIGHT UPPER LOWER TRIM ROW INDEX VLOOKUP PMT EDATE`. Anything else is `#NAME?`; it is never guessed.
 
 ## How good it is: measured, not assumed
 
@@ -25,6 +25,8 @@ First run, 57 workbooks of the owner's own (334 sheets, 86,082 formulas):
 | Gave Excel's saved answer | 58,626 | 68.1% |
 | Gave another answer | 303 | 0.4% |
 | Could not be calculated | 27,153 | 31.5% |
+
+Adding `INDEX ROW VLOOKUP PMT EDATE` moved the same 57 workbooks to 72.6% matching (62,468 of 86,082), with 447 giving another answer (those are formulas the engine now tries, so they were not counted before) and 23,167 still not calculated.
 
 The 0.4% that give another answer are the ones to fix first. Of the 31.5% that could not be
 calculated, about 11,000 read a cell that is itself one of these, and about 7,800 use syntax the
