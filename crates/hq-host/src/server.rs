@@ -576,6 +576,18 @@ impl Conn {
                     .map_err(|e| body(e.code(), e.message()))?;
                 Ok(json!(report))
             }
+            "pr.merge" => {
+                let p: PrMergeParams = parse(&params)?;
+                let root = self.workspace_root()?;
+                let req = crate::merge::Request {
+                    repo: &p.repo,
+                    number: p.number,
+                    approved_sha: p.approved_sha.as_deref(),
+                };
+                let report =
+                    crate::merge::merge(&root, &req).map_err(|e| body(e.code(), e.message()))?;
+                Ok(json!(report))
+            }
             "worktree.remove" => {
                 let p: WorktreeRemoveParams = parse(&params)?;
                 let root = self.workspace_root()?;
@@ -929,6 +941,15 @@ struct WorktreePublishParams {
     check_only: bool,
     max_files: usize,
     max_bytes: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrMergeParams {
+    repo: String,
+    number: u64,
+    /// The commit the owner approved. Without it the host only reports readiness.
+    approved_sha: Option<String>,
 }
 
 #[derive(Deserialize)]

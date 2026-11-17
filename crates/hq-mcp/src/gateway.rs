@@ -145,6 +145,7 @@ pub const SESSION_ALLOWLIST: &[&str] = &[
     "agent_delegate",
     "team_roster",
     "harness_session_publish",
+    "harness_session_request_merge",
     // Scoped reads: each resolves the proven session to its task's folders and nothing wider.
     "context_orient",
     "context_search",
@@ -1653,5 +1654,6 @@ mod tests {
         }
         assert!(SESSION_ALLOWLIST.contains(&"task_comment_add"));
         assert!(SESSION_ALLOWLIST.contains(&"context_read"));
+        assert!(SESSION_ALLOWLIST.contains(&"harness_session_request_merge"));
     }
 }

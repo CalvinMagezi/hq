@@ -233,6 +233,25 @@ pub struct PublishConfig {
     /// Publishes one session may make per day. Clamped to 1..=CEILING_PUBLISH_PER_DAY.
     #[serde(default = "default_publish_per_day")]
     pub max_per_session_per_day: u32,
+    /// Whether HQ may merge a helper's green pull request, after the owner says yes.
+    #[serde(default)]
+    pub merge: MergeConfig,
+    /// `<owner>/<repo>` names HQ never merges for, whatever `merge.repos` says. A client
+    /// repository whose rule is to open pull requests and never merge belongs here.
+    #[serde(default)]
+    pub never_merge: Vec<String>,
+}
+
+/// `agent_host.publish.merge`: `harness_session_request_merge`. HQ never merges on its own: it
+/// asks the owner about one pull request at one commit and merges only on a yes. Off by default,
+/// so a stranger's install never merges.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MergeConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// `<owner>/<repo>` names HQ may merge in. Empty means `publish.repos`.
+    #[serde(default)]
+    pub repos: Vec<String>,
 }
 
 pub const CEILING_PUBLISH_FILES: u32 = 500;
@@ -260,6 +279,8 @@ impl Default for PublishConfig {
             max_files: default_publish_max_files(),
             max_bytes: default_publish_max_bytes(),
             max_per_session_per_day: default_publish_per_day(),
+            merge: MergeConfig::default(),
+            never_merge: Vec::new(),
         }
     }
 }
@@ -278,6 +299,21 @@ impl PublishConfig {
     /// Whether `repo` (`owner/name`, any case) is on the allowlist.
     pub fn lists(&self, repo: &str) -> bool {
         self.repos.iter().any(|r| r.eq_ignore_ascii_case(repo))
+    }
+    /// Whether `repo` may never be merged by HQ.
+    pub fn never_merges(&self, repo: &str) -> bool {
+        self.never_merge
+            .iter()
+            .any(|r| r.eq_ignore_ascii_case(repo))
+    }
+    /// Whether HQ may ask to merge in `repo`: `merge.repos`, or `repos` when that is empty.
+    pub fn merge_lists(&self, repo: &str) -> bool {
+        let list = if self.merge.repos.is_empty() {
+            &self.repos
+        } else {
+            &self.merge.repos
+        };
+        list.iter().any(|r| r.eq_ignore_ascii_case(repo))
     }
 }
 
@@ -850,6 +886,23 @@ impl Default for AgentHostConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merging_is_off_by_default_and_falls_back_to_the_publish_repos() {
+        let cfg: AgentHostConfig = serde_yaml::from_str("{}").unwrap();
+        assert!(!cfg.publish.merge.enabled);
+        let on: PublishConfig = serde_yaml::from_str(
+            "repos: [Acme/Widgets]\nnever_merge: [acme/client]\nmerge: {enabled: true}",
+        )
+        .unwrap();
+        assert!(on.merge_lists("acme/widgets") && !on.merge_lists("acme/other"));
+        assert!(on.never_merges("ACME/client"));
+        let own: PublishConfig = serde_yaml::from_str(
+            "repos: [acme/widgets]\nmerge: {enabled: true, repos: [acme/api]}",
+        )
+        .unwrap();
+        assert!(own.merge_lists("acme/api") && !own.merge_lists("acme/widgets"));
+    }
 
     #[test]
     fn empty_config_runs_everything_on_this_machines_built_in_host() {

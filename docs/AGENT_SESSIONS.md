@@ -961,6 +961,10 @@ lasts 30 days and covers every helper for that repository. On success HQ adds a 
 pull request address to the session's task and records a `publish` event; the day limit counts
 those events. Security notes: `docs/security/PUBLISH.md`.
 
+After the pull request is open, `harness_session_request_merge` asks the owner to merge it when
+every check is green; it is off by default (`agent_host.publish.merge.enabled`) and never merges
+without the owner's yes. See "Merging a green pull request" in `docs/security/PUBLISH.md`.
+
 ## General-purpose agents
 
 Setting one up, everyday use and removal are in [PERSONAL_AGENTS.md](PERSONAL_AGENTS.md).

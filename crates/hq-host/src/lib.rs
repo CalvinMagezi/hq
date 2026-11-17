@@ -43,6 +43,8 @@ mod keys;
 #[cfg(unix)]
 mod lockdown;
 #[cfg(unix)]
+mod merge;
+#[cfg(unix)]
 mod pane;
 #[cfg(unix)]
 mod programs;
@@ -111,6 +113,8 @@ pub use lockdown::{
     Lockdown, clear as clear_lockdown, engage as engage_lockdown, lockdown_path,
     read as read_lockdown,
 };
+#[cfg(unix)]
+pub use merge::{Report as MergeReport, Request as MergeRequest, merge as merge_pull_request};
 #[cfg(unix)]
 pub use proto::{MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};
 #[cfg(unix)]
