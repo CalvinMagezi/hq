@@ -1069,13 +1069,42 @@ impl ChatTurn {
         drop(guard);
         // After the slot is gone, so a wake the driver skipped for this turn finds the chat free.
         crate::session_driver::turn_ended();
+        // A new chat's first reply is done: HQ names it, unless the owner turned that off or an ask is running.
+        if failure.is_none() && self.ask.is_none() && !content.is_empty() {
+            self.name_chat_later(t);
+        }
+    }
+
+    /// Writes a short title for a chat after its first reply, in the background, and tells every tab.
+    fn name_chat_later(&self, thread_id: &str) {
+        let Some((question, answer)) =
+            crate::auto_title::candidate(&self.db, thread_id, thread_title)
+        else {
+            return;
+        };
+        let (db, tx, tid) = (self.db.clone(), self.tx.clone(), thread_id.to_string());
+        tokio::spawn(async move {
+            let named = crate::auto_title::name_chat(
+                &db,
+                &tid,
+                &question,
+                &answer,
+                crate::auto_title::ask_model,
+            )
+            .await;
+            if let Some(title) = named {
+                let _ = tx.send(
+                    json!({"type": "thread_title", "thread_id": tid, "title": title}).to_string(),
+                );
+            }
+        });
     }
 }
 
 const THREAD_TITLE_CHARS: usize = 60;
 
 /// First line of a message, cut to a sidebar-sized title on a char boundary.
-fn thread_title(message: &str) -> String {
+pub(crate) fn thread_title(message: &str) -> String {
     let line = message
         .lines()
         .map(str::trim)

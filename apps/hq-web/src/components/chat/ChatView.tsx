@@ -32,6 +32,7 @@ import { useThreadSessions } from './useThreadSessions'
 import { SessionsPanel, DrivingStrip } from './SessionsPanel'
 import { ChatApprovals } from './ChatApprovals'
 import { OfferLine } from './OfferLine'
+import { ChatTitle } from './ChatTitle'
 import { WorkPane } from './WorkPane'
 import { useWorkPane, usePane } from '~/store/workPaneStore'
 import { madeNotes, type MadeNote, type ReplySource } from '~/lib/replySources'
@@ -359,6 +360,18 @@ export function ChatView({ active, threadId }: Props) {
     })
   }
 
+  /** The person names the chat. It shows at once; if HQ refuses, the old name comes back. */
+  const renameChat = (next: string) => {
+    if (!activeThreadId) return
+    const id = activeThreadId
+    const before = threads.find((x) => x.threadId === id)?.title
+    useThreadStore.getState().updateThread(id, { title: next })
+    threadApi.renameThread(id, next).catch(() => {
+      if (before !== undefined) useThreadStore.getState().updateThread(id, { title: before })
+      toastAlert(t('chat_rename_failed'))
+    })
+  }
+
   const openMade = (note: MadeNote) => {
     // "Never" in Settings: a card opens the note as a page in the Vault.
     if (readPaneMode() === 'never') void navigate({ to: '/notes/$', params: { _splat: note.path } })
@@ -461,7 +474,7 @@ export function ChatView({ active, threadId }: Props) {
         <button type="button" className="a-ib a-back" aria-label={t('chat_chats')} onClick={() => setListOpen(true)}>
           <ChevronLeft className="a-ic" aria-hidden="true" />
         </button>
-        <h2 className="a-h3">{title}</h2>
+        <ChatTitle title={title} onRename={activeThreadId ? renameChat : undefined} />
         <button
           type="button"
           className="a-ib sm"

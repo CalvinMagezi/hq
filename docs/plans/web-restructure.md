@@ -111,7 +111,7 @@ deleted; the tree is the one component above.
 - Not built: Export in the pane's bar (it stays on the full page), the Sheet, Slides and Dashboard
   viewers (the hqmd reader and the suite milestones decide them; the Result tab shows any note as
   markdown, which hqmd allows), follow-up chips in the slot (no source for them yet), "Not sent / Try
-  again" wording and the auto-title.
+  again" wording.
 
 ## The palette and the trigger menu (built)
 
@@ -159,8 +159,18 @@ Inbox (`routes/inbox.tsx`, `components/notifications/`, `lib/inboxView.ts`):
   Done lists them under "No longer waiting" with Restore and Restore all, for 30 days. The server side is
   `POST /api/notifications/restore-cleared`, which puts back only unanswered agent-dialog notices (a decision
   never comes back that way, as before).
+- Owner choices kept by HQ (`hq_db::owner_prefs`, table `owner_prefs`, `GET` and `PUT /api/prefs`): a short list
+  of keys, each with its own allowed values, so the web can change what HQ does without editing the config file.
+  `helpers.ask_level` (`nothing`, `loses_work`, `everything`) overrides `inbox.fleet.helper_policy` in the session
+  supervisor, so the Safety page's "Helpers ask me for" and the phone's setting are one rule; it applies to new
+  requests, and requests already waiting stay. `chat.auto_title` (on unless turned off) lets HQ name a chat after
+  its first reply (`crates/hq-web/src/auto_title.rs`): once, only while the chat still has the title cut from
+  its first message (a name the owner gave is never replaced), from the question and the start of the answer,
+  with the "fast" model and no tools, cleaned to two to six plain words. A chat's title is pressed to rename it
+  (`POST /api/threads/{id}/rename`). The phone still shows its helper-policy row read-only; it can use
+  `/api/prefs` when it is ready.
 - Not built: the reason line on each item (no field carries it), "Waiting for later" for offers (the server holds
-  those), U to mark unread (no route), and the "Helpers ask me for" setting (see Safety below).
+  those), U to mark unread (no route), (the "Helpers ask me for" setting is built, see below).
 
 Settings (`lib/settingsGroups.ts`, `components/settings/`):
 - The six groups in the phone's order: Work, AI and money, Chats and devices, This browser, Safety, Your
@@ -170,9 +180,7 @@ Settings (`lib/settingsGroups.ts`, `components/settings/`):
 - The Chat page (`/settings/chat`): Enter sends, the work pane choice (automatic, card only, never;
   `lib/paneMode.ts`, honoured by the chat), and every key the app answers, by place. Ctrl or Cmd and `/`
   opens it. The composer's own "Change" link and this switch write the same setting.
-- Not built: the Work page between the row and Tasks (the rows link straight to Tasks and Helpers),
-  "Let HQ name chats" (no auto-title), and "Helpers ask me for" (it needs a server setting; the board marks
-  it "Needs build" and the web has no route for it).
+- Not built: the Work page between the row and Tasks (the rows link straight to Tasks and Helpers).
 
 HQ Hub (`crates/hq-desktop/src/menu.rs`):
 - The title already follows the phone ("HQ" or "HQ · HQ on your phone", `window::main_title`).

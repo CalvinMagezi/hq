@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { t, type StringKey } from '~/strings'
 import { readEnterSends, writeEnterSends } from '~/lib/enterRule'
 import { PANE_MODES, readPaneMode, writePaneMode, type PaneMode } from '~/lib/paneMode'
+import { usePrefs } from '~/lib/prefsApi'
 
 const PANE_TEXT: Record<PaneMode, { title: StringKey; line: StringKey }> = {
   auto: { title: 'chat_set_pane_auto_title', line: 'chat_set_pane_auto_line' },
@@ -58,6 +59,8 @@ const KEYS: { place: StringKey; rows: { what: StringKey; keys: string }[] }[] = 
 export function ChatSettings() {
   const [enter, setEnter] = useState<boolean>(() => readEnterSends() ?? !window.matchMedia(COARSE).matches)
   const [pane, setPane] = useState<PaneMode>(() => readPaneMode())
+  const { prefs, failed, set } = usePrefs()
+  const titles = prefs?.['chat.auto_title']
   return (
     <div className="st-chat">
       <p className="a-muted a-body-sm">{t('chat_set_saved')}</p>
@@ -106,6 +109,31 @@ export function ChatSettings() {
           </button>
         ))}
       </div>
+
+      <h3 className="a-grp">{t('chat_set_titles_title')}</h3>
+      <div className="a-set">
+        <div className="a-li">
+          <div className="a-li-main">
+            <b id="st-titles-label">{t('chat_set_titles_item')}</b>
+            <span>{t('chat_set_titles_line')}</span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            className="a-sw"
+            aria-checked={titles === true}
+            aria-labelledby="st-titles-label"
+            disabled={titles === undefined}
+            onClick={() => set({ key: 'chat.auto_title', value: !titles })}
+          />
+        </div>
+      </div>
+      <p className="a-muted a-body-sm">{t('chat_set_titles_shared')}</p>
+      {failed && (
+        <p role="alert" className="a-body-sm a-warn-t">
+          {t('prefs_failed')}
+        </p>
+      )}
 
       <h3 className="a-grp">{t('chat_set_keys_title')}</h3>
       <p className="a-muted a-body-sm">{t('chat_set_keys_line')}</p>

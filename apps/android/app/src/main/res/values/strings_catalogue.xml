@@ -926,6 +926,13 @@
     <string name="chat_set_pane_card_line">You open the pane when you want it.</string>
     <string name="chat_set_pane_never_title">Never</string>
     <string name="chat_set_pane_never_line">A card opens the result as a page in the Vault.</string>
+    <string name="chat_set_titles_title">Chat titles</string>
+    <string name="chat_set_titles_item">Let HQ name chats</string>
+    <string name="chat_set_titles_line">HQ writes a short title after a chat\'s first reply. Click a chat\'s title to rename it.</string>
+    <string name="chat_set_titles_shared">This one applies to HQ itself, on every device.</string>
+    <string name="chat_rename_label">Chat name</string>
+    <string name="chat_rename_failed">Could not rename the chat. Try again.</string>
+    <string name="prefs_failed">Could not save that choice. Try again.</string>
     <string name="chat_set_keys_title">Keyboard shortcuts</string>
     <string name="chat_set_keys_line">Every key, by place. Also Ctrl /</string>
     <string name="chat_keys_anywhere">Anywhere</string>

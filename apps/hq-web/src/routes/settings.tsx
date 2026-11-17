@@ -1,6 +1,7 @@
 import { Link, Outlet, createFileRoute, useLocation, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { TrustedSites } from '~/components/settings/TrustedSites'
+import { HelpersAsk } from '~/components/settings/HelpersAsk'
 import { useEffect, useState } from 'react'
 import { ChevronLeft } from 'lucide-react'
 import { fetchSettings, type HqSettings } from '~/lib/settingsApi'
@@ -197,6 +198,7 @@ export function SafetyPage() {
   return (
     <>
       <SafetyView s={s} tab={tab} onTab={setTab} />
+      {tab === 'safety' && <HelpersAsk />}
       {tab === 'safety' && <TrustedSites />}
     </>
   )

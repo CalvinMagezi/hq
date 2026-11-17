@@ -20,6 +20,17 @@ impl FleetQuiet {
         }
     }
 
+    /// The owner's own choice of which helper requests reach them, when they made one. Anything else keeps the config's.
+    pub(super) fn with_owner_choice(mut self, choice: Option<&str>) -> Self {
+        self.policy = match choice {
+            Some("nothing") => HelperPolicy::Nothing,
+            Some("loses_work") => HelperPolicy::LosesWork,
+            Some("everything") => HelperPolicy::Everything,
+            _ => self.policy,
+        };
+        self
+    }
+
     /// Today's behaviour: every prompt and every finish becomes an item.
     #[cfg(test)]
     pub(super) fn off() -> Self {
@@ -705,4 +716,36 @@ fn record_escalation(
             "reason": reason,
         }),
     );
+}
+
+#[cfg(test)]
+mod owner_choice_tests {
+    use super::*;
+
+    #[test]
+    fn the_owners_choice_wins_and_anything_else_keeps_the_configs() {
+        let base = FleetQuiet::off();
+        assert_eq!(base.policy, HelperPolicy::Everything);
+        assert_eq!(
+            base.with_owner_choice(Some("nothing")).policy,
+            HelperPolicy::Nothing
+        );
+        assert_eq!(
+            base.with_owner_choice(Some("loses_work")).policy,
+            HelperPolicy::LosesWork
+        );
+        assert_eq!(
+            base.with_owner_choice(Some("everything")).policy,
+            HelperPolicy::Everything
+        );
+        // An unset or unknown choice leaves what the config said.
+        assert_eq!(
+            base.with_owner_choice(None).policy,
+            HelperPolicy::Everything
+        );
+        assert_eq!(
+            base.with_owner_choice(Some("sometimes")).policy,
+            HelperPolicy::Everything
+        );
+    }
 }

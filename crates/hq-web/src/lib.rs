@@ -7,6 +7,7 @@ pub use api::HEALTH_SERVICE;
 pub use vault_api::{lite_hides, lite_hides_resolved};
 mod adoption_api;
 pub mod auth;
+mod auto_title;
 mod budgets_api;
 mod capabilities_api;
 mod chat_apps;
@@ -34,6 +35,7 @@ mod oauth;
 mod offers_api;
 mod openrouter_usage_api;
 mod origin;
+mod prefs_api;
 mod profile_gate;
 mod provider_keys;
 mod restart_api;
@@ -408,6 +410,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route("/api/note/create", post(vault_api::note_create_handler))
         .route("/api/note/move", post(vault_api::note_move_handler))
         .route("/api/folder/move", post(vault_api::folder_move_handler))
+        .route(
+            "/api/prefs",
+            get(prefs_api::prefs_get_handler).put(prefs_api::prefs_put_handler),
+        )
         .route("/api/note/versions", get(vault_api::note_versions_handler))
         .route("/api/note/link", post(note_ids::note_link_handler))
         .route("/api/note/by-id/{id}", get(note_ids::note_by_id_handler))
@@ -491,6 +497,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/threads/{thread_id}/messages",
             get(threads_api::get_thread_messages_handler),
+        )
+        .route(
+            "/api/threads/{thread_id}/rename",
+            axum::routing::post(threads_api::rename_thread_handler),
         )
         .route(
             "/api/threads/{thread_id}/archive",

@@ -31,6 +31,7 @@ pub mod note_keep;
 pub mod note_marks;
 pub mod offers;
 pub mod owner_approvals;
+pub mod owner_prefs;
 pub mod pool;
 pub mod provenance;
 pub mod push_subscriptions;

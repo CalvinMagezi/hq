@@ -128,6 +128,51 @@ pub(crate) async fn unarchive_thread_handler(
     }
 }
 
+/// The longest name a person may give a chat.
+const MAX_RENAME_CHARS: usize = 120;
+
+/// `POST /api/threads/{id}/rename` with `{ "title": "..." }`: the owner names a chat. Every tab hears of it, and a
+/// chat renamed this way is never renamed again by HQ.
+pub(crate) async fn rename_thread_handler(
+    State(state): State<Arc<WsState>>,
+    Path(thread_id): Path<String>,
+    axum::Json(body): axum::Json<serde_json::Value>,
+) -> Response {
+    let title: String = body
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(MAX_RENAME_CHARS)
+        .collect();
+    if title.is_empty() {
+        return ApiError::bad_request("a chat needs a name").into_response();
+    }
+    let known = state
+        .db
+        .with_conn(|conn| hq_db::chat::get_thread(conn, &thread_id))
+        .ok()
+        .flatten()
+        .is_some();
+    if !known {
+        return ApiError::not_found().into_response();
+    }
+    match state
+        .db
+        .with_conn(|conn| hq_db::chat::set_thread_title(conn, &thread_id, &title))
+    {
+        Ok(()) => {
+            state.broadcast(&serde_json::json!({"type": "thread_title", "thread_id": thread_id, "title": title}).to_string());
+            axum::Json(serde_json::json!({ "thread_id": thread_id, "title": title }))
+                .into_response()
+        }
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
 pub(crate) async fn archive_thread_handler(
     State(state): State<Arc<WsState>>,
     Path(thread_id): Path<String>,
@@ -138,5 +183,58 @@ pub(crate) async fn archive_thread_handler(
     {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::*;
+
+    async fn body(res: Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_owner_names_a_chat_and_an_empty_or_unknown_one_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(WsState::new(dir.path().to_path_buf(), None));
+        let id = state
+            .db
+            .with_conn(|c| hq_db::chat::create_thread(c, "New chat", "user", "web"))
+            .unwrap()
+            .thread_id;
+        let ok = rename_thread_handler(
+            State(state.clone()),
+            Path(id.clone()),
+            axum::Json(serde_json::json!({ "title": "  Shop   stock\nweek 46 " })),
+        )
+        .await;
+        assert_eq!(ok.status(), StatusCode::OK);
+        assert_eq!(body(ok).await["title"], "Shop stock week 46");
+        let saved = state
+            .db
+            .with_conn(|c| hq_db::chat::get_thread(c, &id))
+            .unwrap()
+            .unwrap()
+            .title;
+        assert_eq!(saved, "Shop stock week 46");
+
+        let empty = rename_thread_handler(
+            State(state.clone()),
+            Path(id),
+            axum::Json(serde_json::json!({ "title": "   " })),
+        )
+        .await;
+        assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+        let unknown = rename_thread_handler(
+            State(state),
+            Path("nope".into()),
+            axum::Json(serde_json::json!({ "title": "x" })),
+        )
+        .await;
+        assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
     }
 }
