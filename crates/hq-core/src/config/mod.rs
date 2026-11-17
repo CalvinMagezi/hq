@@ -35,9 +35,10 @@ mod web_push;
 pub use agent::*;
 pub use agent_host::{
     AgentHostConfig, HOST_SOCKET_FILE, HarnessProfileConfig, HostTransport, KeepAwake, LOCAL_HOST,
-    MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS, NATIVE_HOST, PublishConfig, QuotaCommandConfig,
-    RemoteHostConfig, SandboxConfig, SandboxMode, SandboxProfile, SpawnLimitsConfig,
-    TEAM_MAX_LIVE_CHILDREN_CEILING, TeamsConfig, detect_overrides_dir, native_host_dir,
+    MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS, MergeConfig, NATIVE_HOST, PublishConfig,
+    QuotaCommandConfig, RemoteHostConfig, SandboxConfig, SandboxMode, SandboxProfile,
+    SpawnLimitsConfig, TEAM_MAX_LIVE_CHILDREN_CEILING, TeamsConfig, detect_overrides_dir,
+    native_host_dir,
 };
 pub use backends::{
     BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, SHARED_MODEL_ENDPOINT,

@@ -15,6 +15,7 @@ pub mod identity;
 pub mod losing;
 pub mod machine;
 pub mod mailbox;
+pub mod merge_check;
 pub mod microcompact;
 pub mod middleware;
 pub mod pairing;

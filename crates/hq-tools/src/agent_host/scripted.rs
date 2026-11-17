@@ -7,8 +7,9 @@ use super::backend::HostBackend;
 use super::transport::{RawOutput, run_with_deadline};
 use super::{
     AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, GitHead, Host, INVALID_KEYS_CODE,
-    LaunchRequest, Launched, PendingRead, PromptOutcome, PublishAsk, PublishOutcome, QuotaAsk,
-    WorktreeBase, WorktreeInfo, WorktreeRemoved, WorktreeStatus, bad_reply, validate_keys,
+    LaunchRequest, Launched, MergeAsk, MergeOutcome, PendingRead, PromptOutcome, PublishAsk,
+    PublishOutcome, QuotaAsk, WorktreeBase, WorktreeInfo, WorktreeRemoved, WorktreeStatus,
+    bad_reply, validate_keys,
 };
 use hq_core::quota::LaneQuota;
 use serde_json::Value;
@@ -566,6 +567,12 @@ impl ScriptedHost {
         serde_json::from_value(v).map_err(|e| bad_reply("worktree publish", e))
     }
 
+    pub fn pr_merge(&self, ask: &MergeAsk) -> Result<MergeOutcome, AgentHostError> {
+        let params = serde_json::to_string(ask).map_err(|e| bad_reply("pr merge", e))?;
+        let v = self.json(&["pr", "merge", &params], self.launch_bound)?;
+        serde_json::from_value(v).map_err(|e| bad_reply("pr merge", e))
+    }
+
     /// The script gets the request as one JSON argument and prints the `host.quota` reply.
     pub fn quota(&self, ask: &QuotaAsk) -> Result<Vec<LaneQuota>, AgentHostError> {
         let params = serde_json::to_string(ask).map_err(|e| bad_reply("quota", e))?;
@@ -760,6 +767,9 @@ impl HostBackend for ScriptedHost {
     }
     fn worktree_publish(&self, ask: &PublishAsk) -> Result<PublishOutcome, AgentHostError> {
         ScriptedHost::worktree_publish(self, ask)
+    }
+    fn pr_merge(&self, ask: &MergeAsk) -> Result<MergeOutcome, AgentHostError> {
+        ScriptedHost::pr_merge(self, ask)
     }
     fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
         ScriptedHost::head(self, target)
