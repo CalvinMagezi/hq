@@ -117,7 +117,7 @@ export function foldTrail<T>(trail: readonly T[], max = 4, keepTail = 2): Folded
 }
 
 export type TreeRow =
-  | { kind: 'folder'; path: string; name: string; depth: number; open: boolean; count: number; node: NoteTreeNode }
+  | { kind: 'folder'; path: string; name: string; depth: number; open: boolean; count: number; node: NoteTreeNode; system: boolean }
   | { kind: 'note'; path: string; name: string; depth: number }
   | { kind: 'more'; path: string; folder: string; name: string; depth: number; hiddenCount: number; total: number }
 
@@ -141,21 +141,23 @@ export function countNotesCached(node: NoteTreeNode): number {
 
 /**
  * The rows the tree shows: the root's folders, each open folder's sub-folders and then its notes
- * (A to Z, up to `limit` until it is in `showAll`). Folders that start with an underscore are left out.
+ * (A to Z, up to `limit` until it is in `showAll`). Folders that start with an underscore are left out
+ * unless `showHidden` is set; then they are listed and marked `system`.
  */
 export function treeRows(
   root: NoteTreeNode | null | undefined,
   open: ReadonlySet<string>,
   showAll: ReadonlySet<string> = new Set(),
   limit: number = FOLDER_NOTE_LIMIT,
+  showHidden = false,
 ): TreeRow[] {
   const rows: TreeRow[] = []
   const walk = (parent: NoteTreeNode, depth: number) => {
     const kids = parent.children ?? []
-    const folders = kids.filter((c) => c.type === 'dir' && !isHiddenFolder(c)).sort(byName)
+    const folders = kids.filter((c) => c.type === 'dir' && (showHidden || !isHiddenFolder(c))).sort(byName)
     for (const f of folders) {
       const isOpen = open.has(f.path)
-      rows.push({ kind: 'folder', path: f.path, name: f.name, depth, open: isOpen, count: countNotesCached(f), node: f })
+      rows.push({ kind: 'folder', path: f.path, name: f.name, depth, open: isOpen, count: countNotesCached(f), node: f, system: isHiddenFolder(f) })
       if (isOpen) walk(f, depth + 1)
     }
     if (depth === 0) return // the root's own notes are not part of the tree
@@ -249,4 +251,54 @@ export function siblingsAround<T extends { name: string; path: string; isDir: bo
   const i = notes.findIndex((e) => e.path === current)
   if (i < 0) return { prev: null, next: null }
   return { prev: notes[i - 1] ?? null, next: notes[i + 1] ?? null }
+}
+
+export interface SiblingItem {
+  name: string
+  path: string
+  isDir: boolean
+  /** Notes inside, for a folder. */
+  count: number
+}
+
+/**
+ * The folders beside a folder (or the notes beside a note), for the menu on a crumb: the other
+ * children of its parent, of the same kind, A to Z. Underscore folders are left out.
+ */
+export function siblingsOf(root: NoteTreeNode | null | undefined, path: string): { parent: string; items: SiblingItem[] } {
+  const here = findNode(root, path)
+  const parent = parentPath(path)
+  const parentNode = parent === null ? root : findNode(root, parent)
+  if (!here || !parentNode) return { parent: parent ?? '', items: [] }
+  const items = (parentNode.children ?? [])
+    .filter((c) => c.type === here.type && !isHiddenFolder(c))
+    .sort(byName)
+    .map((c) => ({ name: c.type === 'file' ? noteName(c.path) : c.name, path: c.path, isDir: c.type === 'dir', count: c.type === 'dir' ? countNotesCached(c) : 0 }))
+  return { parent: parent ?? '', items }
+}
+
+/**
+ * The folder to offer when a path is gone: the deepest folder above it that still exists, or Vault
+ * home (an empty path) when none does.
+ */
+export function nearestFolder(root: NoteTreeNode | null | undefined, path: string): string {
+  const above = ancestorPaths(path).filter((p) => p !== NOTEBOOKS_ROOT)
+  for (let i = above.length - 1; i >= 0; i--) {
+    if (findNode(root, above[i])?.type === 'dir') return above[i]
+  }
+  return ''
+}
+
+/** Whether a tree has a folder or note at this path. */
+export const existsInTree = (root: NoteTreeNode | null | undefined, path: string): boolean => findNode(root, path) !== null
+
+export type HistoryAction = 'PUSH' | 'REPLACE' | 'BACK' | 'FORWARD' | 'GO'
+
+/**
+ * Tracks how far forward the person's history reaches. The browser knows how to go back, but not
+ * whether Forward would do anything, so the furthest index seen is kept: a new page (PUSH) cuts off
+ * what lay ahead, and moving back or forward keeps it.
+ */
+export function furthestIndex(furthest: number, action: HistoryAction, index: number): number {
+  return action === 'PUSH' ? index : Math.max(furthest, index)
 }

@@ -4,6 +4,7 @@ import { RouterProvider, createMemoryHistory, createRootRoute, createRouter } fr
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { NoteTreeNode } from '~/lib/vaultApi'
 import { FolderTree, LocationBar } from './VaultNav'
+import { VaultMissing } from './VaultMissing'
 
 /** Renders a view that holds router Links, inside a router with one route. */
 async function inRouter(view: ReactElement): Promise<string> {
@@ -27,7 +28,7 @@ const TREE = dir('Notebooks', [
 ])
 
 const bar = (over: Partial<Parameters<typeof LocationBar>[0]> = {}) =>
-  inRouter(createElement(LocationBar, { path: '', isFile: false, treeOpen: true, treeAvailable: true, onToggleTree: noop, ...over }))
+  inRouter(createElement(LocationBar, { path: '', isFile: false, treeOpen: true, treeMode: 'panel', root: TREE, onToggleTree: noop, ...over }))
 
 describe('the location bar', () => {
   test('on Vault home Up is dimmed and the only part is Vault, as the current page', async () => {
@@ -66,7 +67,45 @@ describe('the location bar', () => {
   test('the folders button says whether the tree is open', async () => {
     expect(await bar({ treeOpen: true })).toContain('aria-pressed="true"')
     expect(await bar({ treeOpen: false })).toContain('aria-pressed="false"')
-    expect(await bar({ treeAvailable: false })).not.toContain('vn-toggle')
+  })
+
+  test('below the panel width the button opens a sheet and is not a toggle', async () => {
+    const html = await bar({ treeMode: 'sheet', treeOpen: false })
+    expect(html).toContain('aria-haspopup="dialog"')
+    expect(html).not.toContain('aria-pressed')
+    expect(html).toContain('Show folders')
+  })
+
+  test('Back and Forward are dimmed until there is somewhere to go', async () => {
+    const none = await bar()
+    expect(none).toMatch(/vn-back[^>]*disabled|disabled[^>]*vn-back/)
+    expect(none).toMatch(/vn-forward[^>]*disabled|disabled[^>]*vn-forward/)
+    const both = await bar({ canBack: true, canForward: true })
+    expect(both).not.toMatch(/vn-back[^>]*disabled|disabled[^>]*vn-back/)
+    expect(both).not.toMatch(/vn-forward[^>]*disabled|disabled[^>]*vn-forward/)
+    expect(both).toContain('aria-label="Back"')
+    expect(both).toContain('aria-label="Forward"')
+  })
+
+  test('Up carries the name of the parent folder for a narrow window', async () => {
+    const html = await bar({ path: 'Notebooks/Projects/Shop' })
+    expect(html).toContain('class="vn-up-label">Projects<')
+  })
+
+  test('a crumb gets a menu of the folders beside it when there are some', async () => {
+    const html = await bar({ path: 'Notebooks/Projects/Shop' })
+    expect(html).toContain('aria-label="Folders beside Shop"')
+    expect(html).toContain('aria-label="Folders beside Projects"')
+    expect(html).not.toContain('Folders beside Vault')
+  })
+
+  test('the crumb menu of a note is about notes', async () => {
+    const html = await bar({ path: 'Notebooks/Projects/Shop/Note 05.md', isFile: true })
+    expect(html).toContain('aria-label="Notes beside Note 05"')
+  })
+
+  test('the Trash part has no menu', async () => {
+    expect(await bar({ extra: 'Trash' })).not.toContain('beside')
   })
 
   test('the Trash is a part under Vault, not a folder', async () => {
@@ -85,8 +124,12 @@ describe('the folder tree', () => {
         current: 'Notebooks/Projects/Shop',
         open: new Set(['Notebooks/Projects', 'Notebooks/Projects/Shop']),
         showAll: new Set<string>(),
+        showSystem: false,
         onToggle: noop,
         onShowAll: noop,
+        onShowSystem: noop,
+        onCollapseAll: noop,
+        onReveal: noop,
         ...over,
       }),
     )
@@ -124,6 +167,25 @@ describe('the folder tree', () => {
     expect(shown).toBe(25)
   })
 
+  test('lists system folders, dimmed and marked read only, only when asked', async () => {
+    expect(await tree()).not.toContain('is-system')
+    const html = await tree({ showSystem: true })
+    expect(html).toContain('_system')
+    expect(html).toContain('is-system')
+    expect(html).toContain('aria-label="read only"')
+  })
+
+  test('has a menu for collapsing, finding the open note and showing system folders', async () => {
+    const html = await tree()
+    expect(html).toContain('aria-label="Folder options"')
+  })
+
+  test('as a sheet body it has no panel id, so it cannot clash with the panel', async () => {
+    const html = await tree({ variant: 'sheet' })
+    expect(html).toContain('is-sheet')
+    expect(html).not.toContain('id="vault-tree"')
+  })
+
   test('has the Trash at its foot', async () => {
     expect(await tree()).toContain('href="/notes/trash"')
   })
@@ -131,5 +193,30 @@ describe('the folder tree', () => {
   test('says so when it is loading or cannot load', async () => {
     expect(await tree({ root: undefined, loading: true })).toContain('role="status"')
     expect(await tree({ root: undefined, failed: true })).toContain('Couldn&#x27;t load the folders.')
+  })
+})
+
+describe('a path that is gone', () => {
+  const page = (path: string) => inRouter(createElement(VaultMissing, { path, root: TREE }))
+
+  test('says so in plain words and names what is missing', async () => {
+    const html = await page('Notebooks/Projects/Old shop.md')
+    expect(html).toContain('This is not in the Vault any more')
+    expect(html).toContain('Old shop may have been moved, renamed or deleted.')
+    expect(html).toContain('role="alert"')
+  })
+
+  test('offers the nearest folder that still exists, a search and the Trash', async () => {
+    const html = await page('Notebooks/Projects/Shop/Old/Gone.md')
+    expect(html).toContain('href="/notes/Notebooks/Projects/Shop"')
+    expect(html).toContain('Go to Shop')
+    expect(html).toContain('Search for Gone')
+    expect(html).toContain('href="/notes/trash"')
+  })
+
+  test('offers Vault home when nothing above it is left', async () => {
+    const html = await page('Notebooks/Lost/Gone.md')
+    expect(html).toContain('Go to Vault')
+    expect(html).toContain('href="/notes"')
   })
 })

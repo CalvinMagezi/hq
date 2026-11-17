@@ -28,7 +28,8 @@ import { usePersistedState } from '~/lib/usePersistedState'
 import { NoteTasks } from '~/components/tasks/NoteTasks'
 import { NEW_CHAT_KEY, restoreDraft } from '~/components/chat/draftStore'
 import { FolderView, NoteBar, NoteLayout, NoteMeta, SiblingLinks, BackLink } from '~/components/vault/NoteViews'
-import { countNotes, parentPath } from '~/components/vault/noteRows'
+import { VaultMissing } from '~/components/vault/VaultMissing'
+import { countNotes, existsInTree, parentPath } from '~/components/vault/noteRows'
 import '~/components/vault/notes.css'
 
 const MD_ZOOM_MIN = 0.7
@@ -53,6 +54,7 @@ export const Route = createFileRoute('/notes/$')({
 function VaultFileRoute() {
     const filePath = Route.useParams()._splat || ''
     const note = useQuery(noteQuery(filePath))
+    const tree = useQuery(noteTreeQuery('Notebooks'))
     if (!note.data) {
         return (
             <div className="an-home">
@@ -71,6 +73,10 @@ function VaultFileRoute() {
                 )}
             </div>
         )
+    }
+    // The server answers a missing note with an empty one. Under Notebooks the tree says whether it is there.
+    if (!note.data.isDir && note.data.content === '' && filePath.startsWith('Notebooks/') && tree.data && !existsInTree(tree.data.tree, filePath)) {
+        return <VaultMissing path={filePath} root={tree.data.tree} />
     }
     if (note.data.isDir) return <FolderRoute dirPath={filePath} entries={note.data.dirEntries ?? []} />
     return (

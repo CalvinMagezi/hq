@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { NoteTreeNode } from '~/lib/vaultApi'
-import { ancestorPaths, countNotesCached, findNode, foldTrail, looksLikeFile, treeMove, treeRows, trailOf, upTarget, vaultLocation, type TreeRow } from './noteRows'
+import { ancestorPaths, countNotesCached, existsInTree, findNode, foldTrail, furthestIndex, looksLikeFile, nearestFolder, siblingsOf, treeMove, treeRows, trailOf, upTarget, vaultLocation, type TreeRow } from './noteRows'
 
 const file = (path: string): NoteTreeNode => ({ name: path.split('/').pop() as string, path, type: 'file' })
 const dir = (path: string, children: NoteTreeNode[]): NoteTreeNode => ({ name: path.split('/').pop() as string, path, type: 'dir', children })
@@ -155,5 +155,75 @@ describe('finding where the person is', () => {
     expect(vaultLocation('/notes/trash')).toEqual({ path: '', special: 'trash' })
     expect(vaultLocation('/notes/n/abc123')).toEqual({ path: '', special: 'id' })
     expect(vaultLocation('/notes/Notebooks/100%')).toEqual({ path: 'Notebooks/100%', special: null })
+  })
+})
+
+describe('the menu on a crumb', () => {
+  test('lists the folders beside a folder, A to Z, with counts, and never an underscore folder', () => {
+    const { parent, items } = siblingsOf(TREE, 'Notebooks/Projects')
+    expect(parent).toBe('Notebooks')
+    expect(items.map((i) => i.name)).toEqual(['Daily', 'Projects'])
+    expect(items.find((i) => i.name === 'Projects')?.count).toBe(4)
+  })
+
+  test('lists the notes beside a note', () => {
+    const { items } = siblingsOf(TREE, 'Notebooks/Projects/Shop/Stock rules.md')
+    expect(items.map((i) => i.name)).toEqual(['Stock rules', 'Supplier terms'])
+    expect(items.every((i) => !i.isDir)).toBe(true)
+  })
+
+  test('is empty for a path that is not in the tree', () => {
+    expect(siblingsOf(TREE, 'Notebooks/Projects/Gone').items).toEqual([])
+    expect(siblingsOf(null, 'Notebooks/Projects').items).toEqual([])
+  })
+})
+
+describe('a path that is gone', () => {
+  test('offers the deepest folder above it that still exists', () => {
+    expect(nearestFolder(TREE, 'Notebooks/Projects/Shop/Old/Gone.md')).toBe('Notebooks/Projects/Shop')
+    expect(nearestFolder(TREE, 'Notebooks/Projects/Gone')).toBe('Notebooks/Projects')
+  })
+
+  test('offers Vault home when nothing above it exists', () => {
+    expect(nearestFolder(TREE, 'Notebooks/Lost/Gone.md')).toBe('')
+    expect(nearestFolder(TREE, 'Lost/Gone.md')).toBe('')
+  })
+
+  test('says whether a path is in the tree', () => {
+    expect(existsInTree(TREE, 'Notebooks/Projects/Shop')).toBe(true)
+    expect(existsInTree(TREE, 'Notebooks/Projects/Old')).toBe(false)
+    expect(existsInTree(null, 'Notebooks')).toBe(false)
+  })
+})
+
+describe('system folders in the tree', () => {
+  test('are listed and marked only when asked for, and a normal folder is not marked', () => {
+    const off = treeRows(TREE, new Set())
+    expect(off.some((r) => r.name === '_system')).toBe(false)
+    const on = treeRows(TREE, new Set(), new Set(), 25, true)
+    const sys = on.find((r) => r.name === '_system')
+    expect(sys && sys.kind === 'folder' && sys.system).toBe(true)
+    const daily = on.find((r) => r.name === 'Daily')
+    expect(daily && daily.kind === 'folder' && daily.system).toBe(false)
+  })
+
+  test('their notes show when one is opened', () => {
+    const rows = treeRows(TREE, new Set(['Notebooks/_system']), new Set(), 25, true)
+    expect(rows.some((r) => r.kind === 'note' && r.name === 'rules')).toBe(true)
+  })
+})
+
+describe('how far forward the history reaches', () => {
+  test('a new page cuts off what lay ahead', () => {
+    expect(furthestIndex(5, 'PUSH', 3)).toBe(3)
+  })
+
+  test('going back keeps it, so Forward stays available', () => {
+    expect(furthestIndex(5, 'BACK', 3)).toBe(5)
+    expect(furthestIndex(3, 'FORWARD', 4)).toBe(4)
+  })
+
+  test('replacing a page changes nothing ahead', () => {
+    expect(furthestIndex(5, 'REPLACE', 3)).toBe(5)
   })
 })

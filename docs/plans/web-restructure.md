@@ -1,6 +1,6 @@
 # Web restructure: build plan
 
-Status: slice 1 built (Vault location bar, folder tree, Previous and Next). The rest are proposals.
+Status: slices 1 and 2 built (Vault navigation). Move and rename wait on the server. The rest are proposals.
 
 The design is the "Restructure" page of the owner's HQ Web & Desktop design canvas (private). This file
 is the build order and the decisions that came out of it, so a session can continue without the canvas.
@@ -36,28 +36,49 @@ can put away, not a permanent sidebar.
 - Folders that start with an underscore are left out of the tree, as the chips already leave them out.
 - The note page's list pane (the sibling notes) is replaced by the tree, and by Previous and Next links
   at the foot of the note. The page no longer draws its own breadcrumb line, since the bar does.
-- Below 1024 px the tree is not shown and neither is its button. The bar's Up replaces the page's back
-  arrow. A bottom or side sheet for the tree is slice 2.
 
 The old test "the tree sidebar is gone" was changed on purpose: it recorded the earlier decision, which
 the owner reversed. The sidebar files it names (`VaultSidebar`, `VaultTree`, `useSidebarResize`) stay
 deleted; the tree is the one component above.
 
+## Slice 2 (built): the rest of Vault navigation
+
+- Back and Forward follow the router's history and are dimmed when there is nowhere to go. The router
+  knows how far back it can go (`__TSR_index`) but not whether Forward would do anything, so the furthest
+  index seen is tracked (`furthestIndex`). Alt Left, Alt Right and Alt Up work from anywhere in the
+  Vault except while typing.
+- Every crumb has a chevron menu: the folders beside it (the notes beside it, for a note), with counts,
+  a check on the current one, arrow keys, a filter past 8 items, and "Open {folder}". The menu is placed
+  in fixed position so the bar's clipping cannot hide it.
+- Below 1024 px the Folders button opens the tree as a side sheet (a bottom sheet below 768 px) that
+  closes by itself when a folder is chosen. Below 768 px the bar wraps: Up names the parent folder, the
+  Folders button sits beside it, and the path is its own scrolling line.
+- A link to something under Notebooks that is not in the tree shows "This is not in the Vault any more"
+  with three exits: the nearest folder that still exists, a search for the name, and the Trash
+  (`VaultMissing.tsx`).
+- The tree's menu has Collapse all, Show the open note and Show system folders. System folders
+  (underscore) are listed dimmed with a lock, and only when asked for.
+
+## Not built in Vault navigation, and why
+
+- Move and rename, drag and drop, and Move to... The server has no route for them (it creates, updates,
+  trashes, restores and links notes). They need a server route, a rule for whether links to a moved note
+  are rewritten, and an Undo that restores the old place. Decide the link rule first.
+- New folder, sort by Modified and the grid view on the folder page: the directory listing carries no
+  modified time, and nothing creates an empty folder.
+- Scroll position on Back is whatever the router restores; it is not guaranteed by this change.
+
 ## Next slices, in order
 
-2. Vault navigation, rest: Back and Forward buttons with a history that knows when they are dimmed, the
-   chevron menu on a crumb that lists the folders beside it, the tree as a sheet below 1024 px, the
-   narrow-width location bar (a back arrow naming the parent), a "not in the Vault any more" page, and
-   "Show system folders".
-3. Chat grammar: the live line, the result line and the fold, the attention slot, hover actions with
+1. Chat grammar: the live line, the result line and the fold, the attention slot, hover actions with
    Save to Vault and Make a task, source chips, the composer's own controls and Stop.
-4. The work pane with the Context and Result tabs (Context first: it needs no new data, the chat
+2. The work pane with the Context and Result tabs (Context first: it needs no new data, the chat
    socket already sends each tool call's name and arguments), then Doc, then the other viewers as the
    suite milestones land.
-5. The palette, then the trigger menu (`@`, `/`, `#`) in the composer.
-6. Inbox: the split view, the helper fold and the digest row, Waiting for later.
-7. Settings: the six groups and search, the Chat page, the Work page.
-8. HQ Hub window: menu bar, Dock badge, the three-state control window.
+3. The palette, then the trigger menu (`@`, `/`, `#`) in the composer.
+4. Inbox: the split view, the helper fold and the digest row, Waiting for later.
+5. Settings: the six groups and search, the Chat page, the Work page.
+6. HQ Hub window: menu bar, Dock badge, the three-state control window.
 
 ## Open questions that block parts of the above
 
