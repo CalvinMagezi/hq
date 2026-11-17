@@ -1,6 +1,6 @@
 # Web restructure: build plan
 
-Status: slices 1 and 2 built (Vault navigation), Chat's grammar, the work pane, the palette and the trigger menu built. Move and rename wait on the server. The rest are proposals.
+Status: slices 1 and 2 built (Vault navigation), Chat's grammar, the work pane, the palette, the trigger menu, the Inbox, Settings and the Hub's menu model built. Move and rename wait on the server. The rest are proposals.
 
 The design is the "Restructure" page of the owner's HQ Web & Desktop design canvas (private). This file
 is the build order and the decisions that came out of it, so a session can continue without the canvas.
@@ -129,12 +129,55 @@ deleted; the tree is the one component above.
   reference in the text, the form Ask HQ already uses, and one Backspace removes a whole reference. Not
   built: files and tags (the web has no index of either), and the Settings choice of what `@` offers.
 
+## Inbox, Settings and the Hub (built, in part)
+
+Inbox (`routes/inbox.tsx`, `components/notifications/`, `lib/inboxView.ts`):
+- On a wide screen the card is never empty while something waits: the sign-in opens by itself, else the
+  oldest request, and answering one opens the next. The sign-in card in the detail pane now carries its own
+  words and "It was me" / "Sign it out", as the list card does.
+- Needs you carries the only number; Updates has a quiet dot when something is unread; Done has nothing.
+  Links to Tasks and Helpers sit at the top of the list (the decided doors, not a fourth place).
+- Requests from helpers fold into one closed row ("From helpers · n") under the owner's own. Three or more
+  helper updates in a day become one digest row. Decision buttons have equal weight: neither is filled
+  and only the one that loses something is red (this also changes the chat's approval card).
+- Later on an update (H, or the button) hides it for three hours, in this browser only, and a closed
+  row "Waiting for later" brings it back. Done lists the sites allowed for good, each with Remove.
+- Keys: J and K (and the arrows) move, Esc goes back, E clears an update, H says Later, Z undoes the last
+  clear. An approval has no key.
+- Not built: the catch-up card for a pile (it needs a server rule for what "finished or stopped" means),
+  the reason line on each item (no field carries it), "Waiting for later" for offers (the server holds
+  those), U to mark unread (no route), and the "Helpers ask me for" setting (see Safety below).
+
+Settings (`lib/settingsGroups.ts`, `components/settings/`):
+- The six groups in the phone's order: Work, AI and money, Chats and devices, This browser, Safety, Your
+  data. Spending moved under AI and money; Folders under Safety. Lite has no Chat row.
+- A search box over every row (`SettingsFind.tsx`, `lib/settingsSearch.ts`) matches the name, the group
+  and the line under each row; Enter opens the page; nothing found offers the Vault.
+- The Chat page (`/settings/chat`): Enter sends, the work pane choice (automatic, card only, never;
+  `lib/paneMode.ts`, honoured by the chat), and every key the app answers, by place. Ctrl or Cmd and `/`
+  opens it. The composer's own "Change" link and this switch write the same setting.
+- Not built: the Work page between the row and Tasks (the rows link straight to Tasks and Helpers),
+  "Let HQ name chats" (no auto-title), and "Helpers ask me for" (it needs a server setting; the board marks
+  it "Needs build" and the web has no route for it).
+
+HQ Hub (`crates/hq-desktop/src/menu.rs`):
+- The title already follows the phone ("HQ" or "HQ · HQ on your phone", `window::main_title`).
+- The menu bar is data and is tested: File (New note, New chat), Go (Vault, Chat, Inbox on Cmd 1, 2, 3,
+  and the palette), View (Work pane). A menu item with a key takes the key before the page does, so each one
+  opens a place or sends the page the event its own key sends (`hq:open-search`, `hq:open-quick-note`,
+  `hq:new-chat`, `hq:toggle-pane`); a test reads the web sources to check the page listens for each. The
+  Dock badge rule (decisions only, nothing at zero, 99+) and the one-line notice for a pile past five are
+  there too.
+- Not built: turning that model into the real menu and Dock badge in `apps/desktop/src-tauri`, and the
+  Hub's count following the grace rule. The shell needs a Mac to build and run, and the count needs HQ's
+  own answer about which helper prompts are handled by a chat. Both are the next step on a Mac; the open
+  questions below still apply (menu and badge versus the no-plugin test; what closing the HQ window does).
+
 ## Next slices, in order
 
 1. The Sheet, Slides and Dashboard viewers in the pane, as the suite milestones land.
-2. Inbox: the split view, the helper fold and the digest row, Waiting for later.
-3. Settings: the six groups and search, the Chat page, the Work page.
-4. HQ Hub window: menu bar, Dock badge, the three-state control window.
+2. On a Mac: the menu, the Dock badge and the Hub's grace-rule count, from the model above.
+3. The catch-up card and the Work page, once the server rules they need exist.
 
 ## Open questions that block parts of the above
 

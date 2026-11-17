@@ -410,8 +410,16 @@ export function ChatView({ active, threadId }: Props) {
         }
       }
     }
+    // The desktop app's menu sends this for Work pane, since its key never reaches the page.
+    const onTogglePane = () => {
+      if (activeThreadId) panes().toggle(activeThreadId)
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('hq:toggle-pane', onTogglePane)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('hq:toggle-pane', onTogglePane)
+    }
   })
 
   const activeThread = threads.find((t) => t.threadId === activeThreadId)

@@ -132,6 +132,10 @@ export function SearchOverlay() {
       }
     }
     const onOpen = (e: Event) => show((e as CustomEvent<OpenDetail | null>).detail ?? {})
+    // The desktop app's menu says New chat with this event, since its key never reaches the page.
+    const onNewChat = () => {
+      if (!lite) void navigate({ to: '/chat', search: { compose: '1' } })
+    }
     // Back from an opened result lands on the entry marked at that time: Search reopens once, as it was left.
     const onPop = () => {
       const back = readBack(window.location.search, window.history.state)
@@ -141,10 +145,12 @@ export function SearchOverlay() {
     }
     window.addEventListener('keydown', onKey)
     window.addEventListener('hq:open-search', onOpen)
+    window.addEventListener('hq:new-chat', onNewChat)
     window.addEventListener('popstate', onPop)
     return () => {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('hq:open-search', onOpen)
+      window.removeEventListener('hq:new-chat', onNewChat)
       window.removeEventListener('popstate', onPop)
     }
   }, [open, navigate, lite])
