@@ -80,6 +80,43 @@ fn open(paths: &SuitePaths, id: &str) -> Result<FolderSink> {
     FolderSink::open(&e.path, &read_code()?).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
+/// `hq suite sink register <folder>`: adds a sink that already exists (made on another machine, or
+/// before the phone was lost) to this vault's list, after checking its recovery code.
+pub fn register(vault: &Path, folder: &Path) -> Result<()> {
+    let paths = SuitePaths::new(vault);
+    let folder = std::fs::canonicalize(folder)
+        .with_context(|| format!("{} cannot be reached", folder.display()))?;
+    let sink = FolderSink::open(&folder, &read_code()?).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let id = sink_id(&sink).to_string();
+    let mut reg = load(&paths)?;
+    // A vault restored on another machine already lists the sink under the old machine's path;
+    // registering points that entry at the folder as it is here.
+    match reg.sinks.iter_mut().find(|e| e.id == id) {
+        Some(existing) => existing.path = folder,
+        None => reg.sinks.push(Entry {
+            id: id.clone(),
+            path: folder,
+        }),
+    }
+    save(&paths, &reg)?;
+    print!("{}", text::sink_registered(&id));
+    Ok(())
+}
+
+/// `hq suite restore-originals --sink <id>`: every original the vault's notes say was sealed into
+/// the sink, put back where it was.
+pub fn restore_all(vault: &Path, sink: &str) -> Result<()> {
+    let paths = SuitePaths::new(vault);
+    let store = open(&paths, sink)?;
+    let r = crate::restore::restore_originals(vault, &store)?;
+    print!("{}", text::restored(&r));
+    if r.failed.is_empty() && r.in_the_way.is_empty() {
+        Ok(())
+    } else {
+        bail!("some originals could not be put back")
+    }
+}
+
 /// `hq suite sink add <id> <folder>`: makes the sink and shows its recovery code once.
 pub fn add(vault: &Path, id: &str, folder: &Path) -> Result<()> {
     let paths = SuitePaths::new(vault);

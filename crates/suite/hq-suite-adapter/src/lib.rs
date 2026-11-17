@@ -10,6 +10,7 @@ pub mod api;
 pub mod docs;
 pub mod governor;
 pub mod measure;
+pub mod restore;
 pub mod shrink;
 pub mod sinks;
 pub mod text;
