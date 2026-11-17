@@ -71,3 +71,8 @@ internal object SheetWire {
         )
     }
 }
+
+/** One computed number of a `tile` block, formatted by hq. */
+data class TileView(val label: String, val text: String)
+
+internal fun tileView(o: JSONObject) = TileView(o.optString("label", ""), o.optString("text", ""))

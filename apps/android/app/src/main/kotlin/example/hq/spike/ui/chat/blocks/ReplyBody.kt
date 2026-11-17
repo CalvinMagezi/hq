@@ -40,6 +40,7 @@ fun BlockView(block: Block, actions: BlockActions) {
         is Block.Table -> TableBlockView(block) { actions.onOpenTable(block) }
         is Block.Image -> VaultImageView(block.src)
         is Block.Sheet -> SheetBlockView(block, actions.onCopied)
+        is Block.Tile -> TileBlockView(block)
     }
 }
 

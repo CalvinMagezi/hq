@@ -7,7 +7,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use hq_suite_calc::{Sheet, Value, column_name};
-use hq_suite_md::{BlockType, Document};
+use hq_suite_md::{BlockType, Document, RangeRef};
 use hq_suite_store::SuitePaths;
 use serde::Serialize;
 
@@ -163,6 +163,80 @@ pub fn view(vault: &Path, note: &str, index: usize, row0: u32, col0: u32) -> Res
     })
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct TileView {
+    pub label: String,
+    /// The number, already formatted (`UGX 213,000`).
+    pub text: String,
+    /// How many numeric cells the function read.
+    pub cells: u32,
+}
+
+/// The `index`th `tile` block of the note, computed over a range of a sheet in the same note.
+pub fn tile(vault: &Path, note: &str, index: usize) -> Result<TileView> {
+    let paths = SuitePaths::new(vault);
+    let text = std::fs::read_to_string(paths.resolve(note)?)
+        .with_context(|| format!("{note} cannot be read"))?;
+    let doc = Document::parse(&text);
+    let blocks: Vec<_> = doc.typed_blocks().filter_map(|(_, b)| b.ok()).collect();
+    let Some(tile) = blocks.iter().filter(|b| b.ty == BlockType::Tile).nth(index) else {
+        bail!("that note has no tile number {}", index + 1);
+    };
+    let from = RangeRef::parse(tile.info.get("from").unwrap_or_default())
+        .map_err(|e| anyhow::anyhow!("from=: {e}"))?;
+    let stem = note
+        .rsplit('/')
+        .next()
+        .unwrap_or(note)
+        .trim_end_matches(".md");
+    if from.note.as_deref().is_some_and(|n| n != stem && n != note) {
+        bail!("a tile reads a sheet in its own note for now");
+    }
+    let sheets = blocks.iter().filter(|b| b.ty == BlockType::Sheet);
+    let wanted = from.block.as_deref();
+    let source = sheets
+        .clone()
+        .find(|b| {
+            wanted.is_none_or(|w| b.info.get("name") == Some(w) || b.info.get("id") == Some(w))
+        })
+        .context("the tile's sheet is not in this note")?;
+    let rows = table_rows(&source.body);
+    let calculated = Sheet::from_table(&rows).calculate();
+    let mut numbers = Vec::new();
+    for r in from.start.row..=from.end.row {
+        for c in from.start.col..=from.end.col {
+            if let Some(Value::Num(n)) = calculated.get(&(c - 1, r - 1)) {
+                numbers.push(*n);
+            }
+        }
+    }
+    let function = tile.info.get("fn").unwrap_or("sum");
+    let result = match function {
+        "count" => numbers.len() as f64,
+        _ if numbers.is_empty() => bail!("the range has no numbers"),
+        "sum" => numbers.iter().sum(),
+        "avg" => numbers.iter().sum::<f64>() / numbers.len() as f64,
+        "min" => numbers.iter().copied().fold(f64::INFINITY, f64::min),
+        "max" => numbers.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        "median" => {
+            numbers.sort_by(f64::total_cmp);
+            let mid = numbers.len() / 2;
+            if numbers.len() % 2 == 1 {
+                numbers[mid]
+            } else {
+                (numbers[mid - 1] + numbers[mid]) / 2.0
+            }
+        }
+        other => bail!("`{other}` is not a tile function"),
+    };
+    let kind = tile.info.get("format").unwrap_or_default();
+    Ok(TileView {
+        label: tile.info.get("label").unwrap_or(function).to_string(),
+        text: show(&Value::Num(result), kind),
+        cells: numbers.len() as u32,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,6 +284,25 @@ mod tests {
         assert_eq!(later.rows[0][1].text, "198");
         let end = view(d.path(), "Notebooks/stock.md", 0, 190, 0).unwrap();
         assert_eq!(end.rows.len(), 11);
+    }
+
+    #[test]
+    fn a_tile_computes_one_number_from_a_range_and_formats_it() {
+        let note = format!(
+            "{NOTE}\n```tile from=\"[[stock]]!D2:D3\" fn=sum label=\"Stock value\" format=ugx\n```\n\n```tile from=\"D2:D3\" fn=avg\n```\n\n```tile from=\"B2:B3\" fn=max label=Largest\n```\n"
+        );
+        let d = vault_with(&note);
+        let t0 = tile(d.path(), "Notebooks/stock.md", 0).unwrap();
+        assert_eq!(
+            (t0.label.as_str(), t0.text.as_str(), t0.cells),
+            ("Stock value", "UGX 213,000", 2)
+        );
+        assert_eq!(
+            tile(d.path(), "Notebooks/stock.md", 1).unwrap().text,
+            "106500"
+        );
+        assert_eq!(tile(d.path(), "Notebooks/stock.md", 2).unwrap().text, "40");
+        assert!(tile(d.path(), "Notebooks/stock.md", 3).is_err());
     }
 
     #[test]
