@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { Archive, EyeOff } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
@@ -11,6 +12,7 @@ import { autoAnswers, type AutoAnswer } from '~/lib/autoAnswers'
 import { Dialog } from '../ui/Dialog'
 import { globalSessionsApi, type WatchedSession } from '~/lib/sessionsApi'
 import { HelperPill } from '../sessions/SessionRow'
+import { chatFoldersKey, fetchChatFolders, revokeChatFolder } from '~/lib/chatFolders'
 
 // What the registry records as the answerer when HQ itself says yes toward the goal.
 const DRIVE_ANSWERER = 'a Drive turn'
@@ -36,10 +38,12 @@ interface Props {
   onUnwatch: (id: string) => void
   /** Archives the chat the panel belongs to. */
   onArchive?: () => void
+  /** The chat the panel belongs to, for the folders allowed in it. */
+  threadId?: string | null
 }
 
 /** The details panel: the helpers this chat watches, each with its say-yes switch and answers, and what is set for the chat. */
-export function SessionsPanel({ sessions, busy, onDrive, onUnwatch, onArchive }: Props) {
+export function SessionsPanel({ sessions, busy, onDrive, onUnwatch, onArchive, threadId }: Props) {
   const [explaining, setExplaining] = useState<string | null>(null)
 
   const turn = (id: string, drive: boolean) => {
@@ -78,6 +82,7 @@ export function SessionsPanel({ sessions, busy, onDrive, onUnwatch, onArchive }:
       )}
       <p className="a-grp">{t('chat_this_chat')}</p>
       <p className="a-body-sm a-muted">{t('chat_alerts_note')}</p>
+      {threadId && <AllowedFolders threadId={threadId} />}
       {onArchive && (
         <div className="a-btns">
           <button type="button" onClick={onArchive} className="a-btn quiet compact">
@@ -98,6 +103,40 @@ export function SessionsPanel({ sessions, busy, onDrive, onUnwatch, onArchive }:
         />
       )}
     </div>
+  )
+}
+
+/** The folders the owner allowed for this chat, each with what it let through and a way to stop. */
+function AllowedFolders({ threadId }: { threadId: string }) {
+  const client = useQueryClient()
+  const key = chatFoldersKey(threadId)
+  const folders = useQuery({ queryKey: key, queryFn: () => fetchChatFolders(threadId), refetchInterval: 10000 })
+  const list = folders.data ?? []
+  if (list.length === 0) return null
+  return (
+    <>
+      <p className="a-grp">{t('chat_folders_title')}</p>
+      <ul className="hq-chat-side" style={{ padding: 0 }}>
+        {list.map((f) => (
+          <li key={f.id} className="a-card">
+            <b title={f.root}>{f.root}</b>
+            <p className="a-body-sm a-muted">
+              {t('chat_folders_until', {
+                time: new Date(f.expires_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              })}{' '}
+              · {tn('chat_folders_used', f.uses)}
+            </p>
+            <button
+              type="button"
+              className="a-btn quiet compact"
+              onClick={() => void revokeChatFolder(threadId, f.id).then(() => client.invalidateQueries({ queryKey: key }))}
+            >
+              {t('chat_folders_revoke')}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
   )
 }
 

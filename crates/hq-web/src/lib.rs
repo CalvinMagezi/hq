@@ -10,6 +10,7 @@ pub mod auth;
 mod budgets_api;
 mod capabilities_api;
 mod chat_apps;
+mod chat_folders_api;
 mod chat_uploads;
 mod coder_api;
 mod copilot_usage_api;
@@ -505,6 +506,14 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/coder/{action}",
             axum::routing::post(coder_api::control_handler),
+        )
+        .route(
+            "/api/chat-folders/{thread}",
+            get(chat_folders_api::list_handler),
+        )
+        .route(
+            "/api/chat-folders/{thread}/{id}",
+            axum::routing::delete(chat_folders_api::revoke_handler),
         )
         .route(
             "/api/fetch-sites",

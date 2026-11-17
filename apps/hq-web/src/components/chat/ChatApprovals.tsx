@@ -7,7 +7,7 @@ import { executeNotificationAction, fetchNotificationsClient, type NotificationI
 import { toastAlert } from '~/lib/toast'
 import { t, tn } from '~/strings'
 
-type ApprovalAction = 'approve' | 'approve_site' | 'reject'
+type ApprovalAction = 'approve' | 'approve_site' | 'approve_folder' | 'reject'
 
 const POLL_MS = 4000
 const HTTP_CONFLICT = 409
@@ -94,6 +94,9 @@ function ApprovalEntry({ item, busy, onAnswer }: EntryProps) {
   const { said, rest } = splitSaid(item.description)
   const words = said?.replace(/^You said:\s*/, '').replace(/^[“"]|[”"]$/g, '') ?? null
   const site = item.metadata.approval?.site
+  const folder = item.metadata.approval?.folder
+  const requests = item.metadata.approval?.recent_requests ?? 0
+  const nudge = requests >= (item.metadata.approval?.nudge_at ?? Number.POSITIVE_INFINITY)
   return (
     <div>
       <p className="text-xs font-semibold px-1 pb-1">
@@ -115,13 +118,34 @@ function ApprovalEntry({ item, busy, onAnswer }: EntryProps) {
         onDecline={() => onAnswer('reject')}
         onAllow={() => onAnswer('approve')}
         more={
-          site ? (
-            <button type="button" className="a-btn secondary" disabled={busy} onClick={() => onAnswer('approve_site')}>
-              {t('approval_allow_site', { site })}
-            </button>
-          ) : undefined
+          <>
+            {site && (
+              <button type="button" className="a-btn secondary" disabled={busy} onClick={() => onAnswer('approve_site')}>
+                {t('approval_allow_site', { site })}
+              </button>
+            )}
+            {folder && (
+              <button
+                type="button"
+                className="a-btn secondary"
+                disabled={busy}
+                title={t('approval_folder_note')}
+                onClick={() => onAnswer('approve_folder')}
+              >
+                {t('approval_allow_folder', { folder })}
+              </button>
+            )}
+          </>
         }
       />
+      {nudge && (
+        <p className="text-xs a-muted px-1 pt-1" data-testid="approval-nudge">
+          {t('approval_nudge', { n: requests })}{' '}
+          <a href="/helpers" className="a-link">
+            {t('approval_nudge_helpers')}
+          </a>
+        </p>
+      )}
     </div>
   )
 }

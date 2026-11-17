@@ -115,7 +115,7 @@ pub enum FolderCover {
 }
 
 /// The tools whose approvals count toward the nudge: the ones a folder allow or a helper spares.
-const STREAK_TOOLS: &[&str] = &[
+pub const STREAK_TOOLS: &[&str] = &[
     "bash",
     "write_file",
     "edit_file",
@@ -125,7 +125,7 @@ const STREAK_TOOLS: &[&str] = &[
 /// Requests in a row, within [`STREAK_WINDOW_SECS`], after which the owner is offered a way out
 /// of approving one call at a time: this folder for this chat, or a helper.
 pub const STREAK_NUDGE_AT: usize = 3;
-const STREAK_WINDOW_SECS: i64 = 30 * 60;
+pub const STREAK_WINDOW_SECS: i64 = 30 * 60;
 
 /// Where a session asks the owner. Set only on sessions the owner drives from a chat; every
 /// other session (sub-agents of unattended work, daemon tasks, watches) has none and never asks.

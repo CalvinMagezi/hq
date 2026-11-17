@@ -127,23 +127,31 @@ pub fn recent_requests(
     tools: &[&str],
     window_secs: i64,
 ) -> Result<usize> {
+    db.with_conn(|c| recent_requests_in(c, key_prefix, tools, window_secs))
+}
+
+/// [`recent_requests`] on a connection already in hand.
+pub fn recent_requests_in(
+    c: &rusqlite::Connection,
+    key_prefix: &str,
+    tools: &[&str],
+    window_secs: i64,
+) -> Result<usize> {
     let floor = (Utc::now() - chrono::Duration::seconds(window_secs))
         .format("%Y-%m-%d %H:%M:%S")
         .to_string();
-    db.with_conn(|c| {
-        let mut stmt = c.prepare(
-            "SELECT o.tool FROM owner_approvals o JOIN value_items v ON v.id = o.item_id
-             WHERE substr(v.dedup_key, 1, length(?1)) = ?1 AND o.created_at >= ?2",
-        )?;
-        let rows = stmt.query_map(params![key_prefix, floor], |r| r.get::<_, String>(0))?;
-        let mut n = 0;
-        for tool in rows {
-            if tools.contains(&tool?.as_str()) {
-                n += 1;
-            }
+    let mut stmt = c.prepare(
+        "SELECT o.tool FROM owner_approvals o JOIN value_items v ON v.id = o.item_id
+         WHERE substr(v.dedup_key, 1, length(?1)) = ?1 AND o.created_at >= ?2",
+    )?;
+    let rows = stmt.query_map(params![key_prefix, floor], |r| r.get::<_, String>(0))?;
+    let mut n = 0;
+    for tool in rows {
+        if tools.contains(&tool?.as_str()) {
+            n += 1;
         }
-        Ok(n)
-    })
+    }
+    Ok(n)
 }
 
 #[cfg(test)]
