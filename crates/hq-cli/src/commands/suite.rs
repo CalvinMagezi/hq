@@ -65,6 +65,11 @@ pub enum SuiteCommand {
         #[arg(long)]
         sink: String,
     },
+    /// Put back every original a restored vault's notes say were sealed into a sink
+    RestoreOriginals {
+        #[arg(long)]
+        sink: String,
+    },
     /// Fetch a spread of stored originals from a sink and check each opens and matches
     RestoreDrill {
         sink: String,
@@ -116,6 +121,8 @@ pub enum SinkCommand {
     },
     /// List the sinks and whether each can be reached now
     List,
+    /// Add a sink that already exists (from another machine or an earlier phone), after checking its code
+    Register { folder: PathBuf },
 }
 
 #[cfg(feature = "suite")]
@@ -135,6 +142,9 @@ pub async fn run(config: &HqConfig, command: SuiteCommand) -> Result<()> {
             }
         }
         SuiteCommand::Offload { job, sink } => hq_suite_adapter::sinks::offload(vault, &job, &sink),
+        SuiteCommand::RestoreOriginals { sink } => {
+            hq_suite_adapter::sinks::restore_all(vault, &sink)
+        }
         SuiteCommand::RestoreDrill { sink, sample } => {
             hq_suite_adapter::sinks::drill(vault, &sink, sample)
         }
@@ -143,6 +153,7 @@ pub async fn run(config: &HqConfig, command: SuiteCommand) -> Result<()> {
                 hq_suite_adapter::sinks::add(vault, &name, &folder)
             }
             SinkCommand::List => hq_suite_adapter::sinks::list(vault),
+            SinkCommand::Register { folder } => hq_suite_adapter::sinks::register(vault, &folder),
         },
         SuiteCommand::Jobs => shrink::jobs(vault),
         SuiteCommand::Recover => shrink::recover(vault),

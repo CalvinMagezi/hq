@@ -167,6 +167,32 @@ asserts the inner tool **never executed**:
 
 Run them with `cargo test -p hq-agent governance`.
 
+## Injection eval suite
+
+`crates/hq-agent/src/governance/injection_eval.rs` is a deterministic, offline table of poisoning
+cases run against the real governance stack (`ToolGuardian`, `TaintTracker`, `OwnerApproval`).
+No model and no network: every tool is a recorder, and the test plays a model that obeys the
+poison. Each case names a source of untrusted text (`web_fetch`, pane text from
+`harness_session_logs`, a mailbox read, a vault note, task text), an optional number of benign
+calls in between (the cross-turn cases: poison in turn 1, action in turn 3), a context
+(`OwnerChat` with an approval inbox and one driven session, `Terminal` with nobody to ask,
+`Unattended`), the action attempted and the expected outcome: `Allowed` (the tool ran), `Asked`
+(held for the owner's approval) or `Denied` (refused outright).
+
+Run it with `cargo test -p hq-agent --lib injection_eval -- --nocapture`. `eval_summary` prints
+`injection eval: total=N passed=N asked=N denied=N allowed=N`, so a change in the numbers shows in
+CI logs. The `held_out_cases` section is for regression checking only: the main table never
+references it, so a policy change tuned to the table still has to hold there.
+
+To add a case, add a `Case::new(name, tool, args, expected)` row to `cases()` and chain
+`.from(source)`, `.ctx(..)`, `.turns(n)`, `.owner_said(..)` or `.trusting(..)` as needed. Write the
+expected outcome from the rules above, not from what the code does today. A case that shows an
+action which should be denied or asked running unasked is not fixed in the suite: add a
+`known_gap_*` test with `#[ignore = "known gap: ..."]` that asserts the outcome governance
+should give, and track the fix separately. Current gap: `vault_write_note` runs unasked after untrusted reads (decision pending, task
+PERSONAL-INBOX-239). `harness_session_publish` asks after untrusted reads and is refused where
+nobody can be asked.
+
 ## Limits
 
 - The bash checks read text. Quote splitting, `${IFS}`, wrappers and common
