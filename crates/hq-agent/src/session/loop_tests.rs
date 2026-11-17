@@ -508,6 +508,27 @@ async fn post_turn_callback_fires_once_with_the_prompt_and_final_reply() {
 }
 
 #[tokio::test]
+async fn post_turn_callback_skips_a_tainted_session() {
+    let provider = Arc::new(MockProvider::new(
+        vec![BufferedReply::Complete("reply".to_string())],
+        vec![],
+    ));
+    let mut agent = session(provider, vec![]);
+    let taint = crate::governance::TaintTracker::new();
+    taint.mark("web_fetch");
+    agent.set_taint(taint);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    agent.set_post_turn_callback(Arc::new(move |exchange| {
+        let _ = tx.send(exchange);
+    }));
+
+    agent.prompt("summarise that page").await.unwrap();
+
+    drop(agent);
+    assert!(rx.recv().await.is_none(), "tainted turn reached memory");
+}
+
+#[tokio::test]
 async fn buffered_session_continues_after_tool_result() {
     let provider = Arc::new(MockProvider::new(
         vec![
