@@ -49,3 +49,16 @@ suite follows that, in its own folder, with a test that keeps it extractable. Re
 of M2. Extraction triggers (any two): a consumer outside HQ needs the engine without the hub;
 suite release cadence or CI cost clearly hurts HQ; the binary budget cannot be met with feature
 gating; the suite is to be licensed separately.
+
+## Docs: a note as a Word file
+
+```bash
+hq suite docx Notebooks/Inbox/report.md      # writes report.docx beside it; never replaces a file
+hq suite check Notebooks/Inbox/report.docx   # read it, render it, read the render, compare
+```
+
+`docx` renders a note with its pictures (the ones linked from the media store are embedded). `check`
+is the regenerate check from the conversion contract: it reads a Word file into a record, renders
+the record, reads that, and requires the two records to be equal on headings, paragraphs, lists,
+tables, links and the pictures they hold. It does not prove what the first read never saw, so the
+preview's list of what a shrink leaves out stays the guard for that.

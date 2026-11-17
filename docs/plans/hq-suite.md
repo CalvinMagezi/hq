@@ -140,6 +140,8 @@ M0, then made a hard CI limit.
   the size budget on pull requests that touch the suite (`.github/workflows/suite-size.yml`).
   The web note page has the same bar (`components/notes/SuiteBar.tsx`).
 
+- 2026-11-17: M2 started with the Docs render and the regenerate check (`hq-suite-docs`; `hq suite docx <note>` and `hq suite check <file>`). On three real Word files (146, 43 and 194 blocks) the render reads back as the same record. A shrunk record renders back to Word with its pictures. Not yet checked in Word or Google Docs themselves.
+
 ## Next
 
 1. **Cold sinks (M3).** The original can only go to the vault's trash today.
