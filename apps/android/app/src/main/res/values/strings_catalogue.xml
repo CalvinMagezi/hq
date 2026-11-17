@@ -4007,6 +4007,8 @@
     <string name="suite_bar_not_now">Not now</string>
     <string name="suite_bar_undo">Undo</string>
     <string name="suite_bar_working">Working on it…</string>
+    <string name="suite_sheet_drawing">Drawing your sheet…</string>
+    <string name="suite_sheet_more">Showing %1$s of %2$s rows</string>
     <string name="suite_bar_failed">Couldn\'t do that, try again.</string>
     <string name="chat_problem_offline">You\'re offline. Unsent messages show Not sent with Try again.</string>
     <string name="chat_problem_signed_out">Signed out of your server HQ.</string>

@@ -198,6 +198,7 @@ private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions, onAsk: 
     val handlers = remember(actions, copied) { BlockActions(onOpenNote = actions.onOpenNote, onCopied = { actions.onNotice(copied) }) }
     androidx.compose.runtime.CompositionLocalProvider(
         example.hq.spike.ui.chat.blocks.LocalNoteFolder provides note.path.substringBeforeLast('/', ""),
+        example.hq.spike.ui.chat.blocks.LocalNotePath provides note.path,
     ) {
     Column(Modifier.fillMaxSize()) {
         TopBar(note.title, listOf(note.trail, phase.edited).filter { it.isNotBlank() }.joinToString(" · "), actions.onBack) {

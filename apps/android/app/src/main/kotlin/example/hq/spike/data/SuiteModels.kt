@@ -46,3 +46,28 @@ internal object SuiteWire {
     /** The sentence hq put in an error body, if it did. */
     fun refusal(body: String): String? = runCatching { JSONObject(body).optString("error", "") }.getOrNull()?.takeIf { it.isNotBlank() }
 }
+
+/** One calculated cell of a sheet, as `/api/suite/sheet` words it. */
+data class SheetCell(val text: String, val formula: Boolean, val number: Boolean, val error: Boolean)
+
+/** A bounded window of a `sheet` block, already calculated and formatted by hq. */
+data class SheetView(val name: String, val rows: List<List<SheetCell>>, val row0: Int, val col0: Int, val rowCount: Int, val colCount: Int, val text: String)
+
+internal object SheetWire {
+    fun view(o: JSONObject): SheetView {
+        val rows = o.optJSONArray("rows")
+        return SheetView(
+            name = o.optString("name", "Sheet"),
+            rows = if (rows == null) emptyList() else (0 until rows.length()).map { r ->
+                val row = rows.optJSONArray(r)
+                if (row == null) emptyList() else (0 until row.length()).map { c ->
+                    val cell = row.optJSONObject(c) ?: JSONObject()
+                    SheetCell(cell.optString("text", ""), cell.optBoolean("formula", false), cell.optBoolean("number", false), cell.optBoolean("error", false))
+                }
+            },
+            row0 = o.optInt("row0", 0), col0 = o.optInt("col0", 0),
+            rowCount = o.optInt("row_count", 0), colCount = o.optInt("col_count", 0),
+            text = o.optString("text", ""),
+        )
+    }
+}
