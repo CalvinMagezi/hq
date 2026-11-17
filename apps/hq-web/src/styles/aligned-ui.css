@@ -510,3 +510,13 @@ textarea.a-input{min-height:96px;resize:vertical}
 .hq-fold-body{padding-bottom:8px}
 .hq-later-row{display:flex;align-items:center;gap:8px}
 .hq-later-row>:first-child{flex:1 1 0;min-width:0}
+
+/* Settings: the Chat page and the search over every row. */
+.st-chat{display:flex;flex-direction:column;gap:8px;padding-bottom:24px}
+.st-radio{flex:none;width:20px;height:20px;border-radius:50%;border:2px solid var(--line)}
+.st-radio.is-on{border-color:var(--brand-green);background:radial-gradient(circle,var(--brand-green) 0 45%,transparent 50%)}
+.st-keys{font-family:var(--font-mono,monospace)}
+.st-keys-place{padding:8px 16px 0;margin:0}
+.st-find{padding:8px 16px 0}
+.st-find-none{padding:16px;display:flex;flex-direction:column;gap:8px}
+.st-find input:focus-visible{outline:none}

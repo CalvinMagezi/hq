@@ -36,6 +36,7 @@ import { WorkPane } from './WorkPane'
 import { useWorkPane, usePane } from '~/store/workPaneStore'
 import { madeNotes, type MadeNote, type ReplySource } from '~/lib/replySources'
 import { readAutoOpened, shouldAutoOpen, writeAutoOpened } from '~/lib/workPane'
+import { readPaneMode } from '~/lib/paneMode'
 
 const FOCUS_DELAY_MS = 50
 // A reply alert links here with the chat to open.
@@ -160,6 +161,8 @@ export function ChatView({ active, threadId }: Props) {
   useEffect(() => {
     if (!active || !activeThreadId) return
     const opened = readAutoOpened()
+    // The Settings choice: only "automatic" opens the pane by itself.
+    if (readPaneMode() !== 'auto') return
     if (!shouldAutoOpen({ made: liveMade, docked, already: opened.includes(activeThreadId) })) return
     writeAutoOpened([...opened, activeThreadId])
     if (liveMade) panes().showNote(activeThreadId, liveMade)
@@ -352,7 +355,9 @@ export function ChatView({ active, threadId }: Props) {
   }
 
   const openMade = (note: MadeNote) => {
-    if (activeThreadId) panes().showNote(activeThreadId, note.path)
+    // "Never" in Settings: a card opens the note as a page in the Vault.
+    if (readPaneMode() === 'never') void navigate({ to: '/notes/$', params: { _splat: note.path } })
+    else if (activeThreadId) panes().showNote(activeThreadId, note.path)
   }
   const openSource = (source: ReplySource) => {
     if (activeThreadId) panes().showSource(activeThreadId, source.ref)

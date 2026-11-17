@@ -71,6 +71,7 @@ export const BAR_PLACES: Place['id'][] = ['notes', 'chat', 'inbox']
 /** The Settings pages that have an address (a name beyond these opens the Settings home). */
 export const SETTINGS_SECTIONS = [
   'browser',
+  'chat',
   'time',
   'version',
   'data',

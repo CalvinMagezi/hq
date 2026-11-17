@@ -73,6 +73,10 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
   const topic = silenceTopicOf(n)
   const answering = (action: string) => loadingAction === `${action}-${n.id}`
   const busy = loadingAction !== null
+  // What the footer offers: a dialog and a sign-in have their own answers; a plain request is allowed or declined; an update is cleared.
+  const plainBody = signInId ? <SignInBody device={device} createdAt={n.created_at} /> : <p className="hq-inbox-text">{n.description}</p>
+  const askable = !dialog && !signInId && approvable
+  const clearable = !dialog && !signInId && !approvable
   const act = async (action: string) => {
     setFailure(null)
     try {
@@ -101,10 +105,8 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
                 <i>{t('approval_in_words')}:</i> {n.description}
               </p>
             </>
-          ) : signInId ? (
-            <SignInBody device={device} createdAt={n.created_at} />
           ) : (
-            <p className="hq-inbox-text">{n.description}</p>
+            plainBody
           )}
           {lapsed(n) && <p className="a-cap a-muted">{t('inbox_request_ran_out')}</p>}
           {link && onOpenLink && (
@@ -164,7 +166,7 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
               }}
             />
           )}
-          {!dialog && !signInId && approvable && (
+          {askable && (
             <>
               <button type="button" className="a-btn secondary" disabled={busy} onClick={() => void act('reject')}>
                 {t('notice_action_decline')}
@@ -180,12 +182,12 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
               </button>
             </>
           )}
-          {!dialog && !signInId && !approvable && (
+          {clearable && (
             <button type="button" className="a-btn secondary" disabled={busy} onClick={() => void act('dismiss')}>
               {t('inbox_clear')}
             </button>
           )}
-          {!dialog && !signInId && !approvable && onLater && (
+          {clearable && onLater && (
             <button type="button" className="a-btn secondary" disabled={busy} onClick={() => onLater(n.id)}>
               {t('inbox_later')}
             </button>

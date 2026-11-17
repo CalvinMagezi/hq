@@ -23,18 +23,19 @@ const read = (p: string) => readFileSync(join(src, p), 'utf8')
 const HERE = { lite: false, hub: false }
 const status = (over: Partial<BackupStatus>): BackupStatus => ({ configured: true, last_ok_at: null, failed: false, overdue: false, ...over })
 
-describe('the four groups (check 1)', () => {
-  test('headings come in the phone order, This browser first', () => {
-    expect(settingsGroups(HERE).map((g) => t(g.label))).toEqual(['This browser', 'Your accounts', 'How HQ behaves', 'What HQ is working on', 'Your data'])
+describe('the six groups (check 1, the 17 Nov restructure)', () => {
+  test('headings come in the phone order: Work first, This browser fourth', () => {
+    expect(settingsGroups(HERE).map((g) => t(g.label))).toEqual(['Work', 'AI and money', 'Chats and devices', 'This browser', 'Safety', 'Your data'])
   })
 
   test('rows are the phone names, and the Claude connector is gone (W34)', () => {
     const rows = settingsGroups(HERE).flatMap((g) => g.rows.map((r) => t(r.label)))
     expect(rows).toEqual([
-      'Notifications', 'Time zone', 'Install and version', 'Data used', 'Sign out this browser',
-      'AI service and keys', 'Messaging apps', 'Other devices', 'GitHub',
-      'Spending limits', 'Safety and limits', 'Folders helpers may use',
       'Tasks', 'Helpers',
+      'AI service and keys', 'Spending limits',
+      'Chat', 'Messaging apps', 'Other devices', 'GitHub',
+      'Notifications', 'Time zone', 'Install and version', 'Data used', 'Sign out this browser',
+      'Safety and limits', 'Folders helpers may use',
       'Backup and about',
     ])
     expect(JSON.stringify(settingsGroups(HERE))).not.toMatch(/claude/i)
@@ -46,14 +47,16 @@ describe('the four groups (check 1)', () => {
 
   test('Lite keeps This browser and Other devices (H8)', () => {
     const rows = settingsGroups({ lite: true, hub: false }).flatMap((g) => g.rows.map((r) => r.id))
-    expect(rows).toEqual(['notifications', 'time', 'version', 'data', 'signout', 'devices', 'work_tasks'])
+    // No chat row: Lite runs no chats.
+    expect(rows).toEqual(['work_tasks', 'devices', 'notifications', 'time', 'version', 'data', 'signout'])
   })
 
   test('the HQ window reads "This window" and has no Install and version (H9, B11)', () => {
     const groups = settingsGroups({ lite: false, hub: true })
-    expect(t(groups[0].label)).toBe('This window')
-    expect(groups[0].rows.map((r) => r.id)).not.toContain('version')
-    expect(t(groups[0].rows.at(-1)!.label)).toBe('Sign out this window')
+    const win = groups.find((g) => g.id === 'browser')!
+    expect(t(win.label)).toBe('This window')
+    expect(win.rows.map((r) => r.id)).not.toContain('version')
+    expect(t(win.rows.at(-1)!.label)).toBe('Sign out this window')
   })
 
   test('the hub header is read as written', () => {

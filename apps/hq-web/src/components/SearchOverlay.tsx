@@ -119,6 +119,12 @@ export function SearchOverlay() {
         if (!lite) void navigate({ to: '/chat', search: { compose: '1' } })
         return
       }
+      // Every key is listed on the Chat page of Settings.
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === '/') {
+        e.preventDefault()
+        if (!lite) void navigate({ to: '/settings/chat' })
+        return
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         if (open) setOpen(false)

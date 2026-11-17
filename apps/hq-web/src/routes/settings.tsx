@@ -10,6 +10,9 @@ import { BackupView, FoldersView, SafetyView, type SafetyTab } from '~/component
 import { CardSlot, useBackupStatus, useNotificationsOff } from '~/components/settings/CardSlot'
 import { NotificationsPage } from '~/components/settings/NotificationsPage'
 import { SettingsHome } from '~/components/settings/SettingsHome'
+import { SettingsFind } from '~/components/settings/SettingsFind'
+import { readEnterSends } from '~/lib/enterRule'
+import { readPaneMode } from '~/lib/paneMode'
 import { Dialog } from '~/components/ui/Dialog'
 import { PaneHead, Panes } from '~/components/ui/Panes'
 import { SettingsSkeleton } from '~/components/settings/SettingsSkeleton'
@@ -210,11 +213,14 @@ export function BackupPage() {
   return <BackupView status={status} canStart={false} version={hello?.version ?? null} />
 }
 
+const PANE_WORD = { auto: 'chat_set_pane_auto', card: 'chat_set_pane_card', never: 'chat_set_pane_never' } as const
+
 function backupRowWords(status: BackupStatus | null): string {
   return status?.configured && status.last_ok_at ? t('backup_row', { age: ageWords(status.last_ok_at) }) : t('backup_not_reported')
 }
 
 const TITLES: Record<string, StringKey> = {
+  '/settings/chat': 'row_chat',
   '/settings/browser': 'row_notifications',
   '/settings/time': 'row_time_zone',
   '/settings/version': 'row_install_version',
@@ -262,6 +268,10 @@ function useTrailing(hub: boolean, phone: boolean, backup: BackupStatus | null, 
     signout: t(hub ? 'trail_sign_out_window' : 'trail_sign_out_browser'),
     backup: backupRowWords(backup),
     github: github ? t(github.key, { owner: github.owner ?? '' }) : '',
+    chat: t('trail_chat', {
+      enter: t(readEnterSends() ?? !window.matchMedia('(pointer: coarse)').matches ? 'chat_set_enter_on' : 'chat_set_enter_off'),
+      pane: t(PANE_WORD[readPaneMode()]),
+    }),
     work_tasks: t('trail_work_tasks'),
     work_helpers: t('trail_work_helpers'),
   }
@@ -314,8 +324,10 @@ function SettingsLayout() {
   const titleKey = notice ? 'row_notifications' : TITLES[pathname]
   const list = (
     <>
-      <CardSlot notificationsOff={notificationsOff} />
-      <SettingsHome lite={lite} hub={hub} phone={phone} trailing={{ ...trailing, notifications: notificationsOff && !wide ? t('trail_notif_none') : trailing.notifications }} needsLook={needsLook} onSignOut={() => setSigningOut(true)} />
+      <SettingsFind lite={lite} hub={hub} onSignOut={() => setSigningOut(true)}>
+        <CardSlot notificationsOff={notificationsOff} />
+        <SettingsHome lite={lite} hub={hub} phone={phone} trailing={{ ...trailing, notifications: notificationsOff && !wide ? t('trail_notif_none') : trailing.notifications }} needsLook={needsLook} onSignOut={() => setSigningOut(true)} />
+      </SettingsFind>
     </>
   )
   const detail = (
