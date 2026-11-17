@@ -243,6 +243,7 @@ function SlidesView({ note, editor }: { note: HqmdNote; editor: Editor }) {
   const [at, setAt] = useState(0)
   const [editingText, setEditingText] = useState(false)
   const [draft, setDraft] = useState('')
+  const [presenting, setPresenting] = useState(false)
   if (note.slides.length === 0) {
     return <p className="a-body-sm a-muted">{t('suite_no_slides')}</p>
   }
@@ -323,6 +324,9 @@ function SlidesView({ note, editor }: { note: HqmdNote; editor: Editor }) {
           </>
         )}
         <div className="su-step">
+          <button type="button" className="a-btn quiet compact" onClick={() => setPresenting(true)}>
+            {t('suite_present')}
+          </button>
           <button type="button" className="a-btn quiet compact" disabled={i === 0} onClick={() => go(i - 1)}>
             {t('suite_slide_prev')}
           </button>
@@ -332,6 +336,35 @@ function SlidesView({ note, editor }: { note: HqmdNote; editor: Editor }) {
           </button>
         </div>
       </section>
+      {presenting && <Presenter slides={note.slides} start={i} onExit={() => setPresenting(false)} />}
+    </div>
+  )
+}
+
+/** A slide at full window: Arrow keys, Space and Page keys move, Escape leaves. Nothing is saved or changed. */
+function Presenter({ slides, start, onExit }: { slides: HqmdNote['slides']; start: number; onExit: () => void }) {
+  const [at, setAt] = useState(start)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onExit()
+      else if (['ArrowRight', 'ArrowDown', ' ', 'PageDown'].includes(e.key)) setAt((n) => Math.min(slides.length - 1, n + 1))
+      else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key)) setAt((n) => Math.max(0, n - 1))
+      else return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [slides.length, onExit])
+  const slide = slides[at]
+  return (
+    <div className="su-present" role="dialog" aria-modal="true" aria-label={t('suite_present_label')}>
+      <button type="button" className="a-btn quiet compact su-present-exit" onClick={onExit}>
+        {t('suite_present_exit')}
+      </button>
+      <h2 className="su-present-title">{slide.title}</h2>
+      {slide.body && <MarkdownViewer content={slide.body} bare />}
+      <p className="a-cap a-muted su-present-n">{t('suite_slide_n', { n: String(at + 1), total: String(slides.length) })}</p>
     </div>
   )
 }

@@ -12,6 +12,9 @@ import { NotificationsPage } from '~/components/settings/NotificationsPage'
 import { SettingsHome } from '~/components/settings/SettingsHome'
 import { SettingsFind } from '~/components/settings/SettingsFind'
 import { readEnterSends } from '~/lib/enterRule'
+import { useHQStore } from '~/store/hqStore'
+import { globalSessionsApi } from '~/lib/sessionsApi'
+import { helpersLine, tasksLine } from '~/lib/workLines'
 import { readPaneMode } from '~/lib/paneMode'
 import { Dialog } from '~/components/ui/Dialog'
 import { PaneHead, Panes } from '~/components/ui/Panes'
@@ -260,6 +263,8 @@ function useTrailing(hub: boolean, phone: boolean, backup: BackupStatus | null, 
   }, [])
   const notif = trailNotifKey(prefs, pushOn)
   const hello = useQuery({ queryKey: ['hello'], queryFn: ({ signal }) => fetchHello(signal) }).data
+  const tasks = useHQStore((s) => s.tasks)
+  const helpers = useQuery({ queryKey: ['search', 'helpers'], queryFn: () => globalSessionsApi.list({}), staleTime: 30_000, retry: false }).data ?? []
   return {
     notifications: hub ? '' : t(notif),
     time: !hqZone ? zoneCity(zone) : zonesDiffer(hqZone, zone) ? t('tz_row_differ', { city: zoneCity(zone), hqCity: zoneCity(hqZone) }) : t('tz_row_same', { city: zoneCity(zone) }),
@@ -272,8 +277,8 @@ function useTrailing(hub: boolean, phone: boolean, backup: BackupStatus | null, 
       enter: t(readEnterSends() ?? !window.matchMedia('(pointer: coarse)').matches ? 'chat_set_enter_on' : 'chat_set_enter_off'),
       pane: t(PANE_WORD[readPaneMode()]),
     }),
-    work_tasks: t('trail_work_tasks'),
-    work_helpers: t('trail_work_helpers'),
+    work_tasks: tasksLine(tasks),
+    work_helpers: helpersLine(helpers),
   }
 }
 

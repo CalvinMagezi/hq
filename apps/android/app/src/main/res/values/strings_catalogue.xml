@@ -1935,6 +1935,10 @@
     <string name="suite_edit_done">Done</string>
     <string name="suite_edit_cancel">Cancel</string>
     <string name="suite_edit_text_label">Slide text</string>
+    <string name="suite_present">Present</string>
+    <string name="suite_present_exit">Exit</string>
+    <string name="suite_present_label">Presenting</string>
+    <string name="suite_preview_rows">Showing %1$s of %2$s rows</string>
     <string name="suite_fidelity_lossy">This import left some things out. The original is kept.</string>
     <string name="suite_fidelity_view">This file is shown as it came in and cannot be changed here.</string>
     <string name="chat_pane_missing">This note could not be opened.</string>
@@ -4139,6 +4143,12 @@
     <string name="trail_github_reconnect">Needs reconnecting</string>
     <string name="trail_work_tasks">What HQ is tracking and doing</string>
     <string name="trail_work_helpers">The agents HQ runs, and starting one</string>
+    <string name="work_tasks_none">Nothing open</string>
+    <string name="work_tasks_line">%1$s open · %2$s waiting on you</string>
+    <string name="work_tasks_line_clear">%1$s open · none waiting on you</string>
+    <string name="work_helpers_none">None working here</string>
+    <string name="work_helpers_line">%1$s working here · %2$s need you</string>
+    <string name="work_helpers_line_clear">%1$s working here · none need you</string>
     <string name="balance_open">Open spending details</string>
     <string name="notes_dot_new">New in your Vault</string>
     <plurals name="inbox_catch_up_body">

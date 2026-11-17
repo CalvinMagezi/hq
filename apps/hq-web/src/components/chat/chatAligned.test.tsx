@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ChatRow, rowLine } from './ChatList'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ChatBubble } from './ChatBubble'
 
 const read = (p: string) => readFileSync(join(import.meta.dir, p), 'utf8')
@@ -95,7 +96,13 @@ describe('A reply reads result first', () => {
     { toolCallId: 'b', toolName: 'vault_write_note', status: 'done' as const, startedAt: 0, progressMessages: [], inputArgs: { path: 'Notebooks/Daily/Steps.md' } },
   ]
   const html = (live: boolean) =>
-    renderToStaticMarkup(createElement(ChatBubble, { live, startedAt: 1, message: { id: 'm', role: 'assistant', content: 'I wrote the steps down.', timestamp: 0, toolSteps: steps } }))
+    renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(ChatBubble, { live, startedAt: 1, message: { id: 'm', role: 'assistant', content: 'I wrote the steps down.', timestamp: 0, toolSteps: steps } }),
+      ),
+    )
 
   test('a saved reply shows its words, then the fold, the made card and the source chips', () => {
     const out = html(false)

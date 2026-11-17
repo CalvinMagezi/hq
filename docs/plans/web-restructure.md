@@ -196,8 +196,12 @@ HQ Hub (`crates/hq-desktop/src/menu.rs`):
   Saves go one at a time against the hash last seen; if HQ says the note changed elsewhere, the edit is
   dropped and the latest text returns. A file kept view-only is never edited. Tiles and charts change
   through Ask HQ, as the board says.
-- Not built: Present for slides, the narrow strip of the chat list when the pane is wide, the card
-  preview in chat, a range that points into another note (it says so), sidecar sheets (`data=`; the layout
+- Present (slides at full window: arrows, Space and Page keys move, Escape leaves; nothing is saved), a
+  three-row preview of a sheet on the chat's made-note card, and a wider pane (560 px, list 240) for a sheet,
+  slides or dashboard are built. Settings' Tasks and Helpers rows now show live state lines ("12 open · 2
+  waiting on you", "3 working here · none need you"). The pane overlay below 1400 px had been applied at every
+  width and floated the pane over the thread; it is now limited to narrow windows.
+- Not built: the folding of the chat list to a strip, a range that points into another note (it says so), sidecar sheets (`data=`; the layout
   is fixed in suite milestone M4), and filters (`where`, `group`, reserved for M5). The formula reader is
   the web's own and small; when the suite's Rust calculator is exposed, the web should ask it instead.
 

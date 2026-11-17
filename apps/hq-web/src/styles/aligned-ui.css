@@ -157,7 +157,7 @@
 .a-pane-detail,.a-pane-side{display:none}
 /* Below the docked width a pane that is open lies over the item, as the design draws it. */
 .a-panes{position:relative}
-.a-panes.side-open .a-pane-side{display:flex;position:absolute;top:0;right:0;bottom:0;width:min(420px,100%);z-index:25;border-left:1px solid var(--hairline)}
+@container app (max-width:1399px){.a-panes.side-open .a-pane-side{display:flex;position:absolute;top:0;right:0;bottom:0;width:min(420px,100%);z-index:25;border-left:1px solid var(--hairline)}}
 .a-panes.is-detail .a-pane-list{display:none}
 .a-panes.is-detail .a-pane-detail{display:flex}
 .a-pane-head{display:flex;align-items:center;gap:8px;min-height:56px;padding:4px 8px 4px 16px;flex:none;border-bottom:1px solid var(--hairline)}
