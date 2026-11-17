@@ -1,7 +1,7 @@
 import { useState, type MouseEvent, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, ChevronRight, Download, FileText, Folder, ListChecks, MessageSquare, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Eye, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Download, FileText, Folder, ListChecks, MessageSquare, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Eye, Plus, Trash2 } from 'lucide-react'
 import type { DirEntry } from '~/lib/vaultApi'
 import { currentVersion, fetchNoteVersions, reviewTag, whoWrote } from '~/lib/noteReview'
 import { relTime } from '~/lib/time'
@@ -9,7 +9,7 @@ import { Panes, PaneHead } from '~/components/ui/Panes'
 import { whoText } from '~/components/notes/NoteHistory'
 import { ReviewTag } from '~/components/notes/ReviewTag'
 import { t, tn } from '~/strings'
-import { FOLDER_NOTE_LIMIT, crumbsOf, noteName, parentPath } from './noteRows'
+import { FOLDER_NOTE_LIMIT, noteName, parentPath, siblingsAround } from './noteRows'
 import './notes.css'
 
 const NOTES_HOME = '/notes'
@@ -27,22 +27,6 @@ export function BackLink({ path }: { path: string }) {
         <Link to={NOTES_HOME} className="a-ib a-back" aria-label={label}>
             <ArrowLeft className="a-ic" aria-hidden="true" />
         </Link>
-    )
-}
-
-/** Each folder above a path as a link that opens it, with Notes itself first. */
-export function Crumbs({ path }: { path: string }) {
-    const crumbs = crumbsOf(path)
-    return (
-        <nav className="an-crumbs" aria-label={t('notes_your_notes')}>
-            <Link to={NOTES_HOME}>{t('notes_your_notes')}</Link>
-            {crumbs.map((c) => (
-                <span key={c.path} style={{ display: 'contents' }}>
-                    <ChevronRight className="a-ic xs" aria-hidden="true" />
-                    <Link to="/notes/$" params={{ _splat: c.path }}>{c.name}</Link>
-                </span>
-            ))}
-        </nav>
     )
 }
 
@@ -72,7 +56,6 @@ export function FolderView({ dirPath, entries, counts, onNewHere }: FolderViewPr
                         </button>
                     </PaneHead>
                     <div className="an-home">
-                        <Crumbs path={`${dirPath}/x`} />
                         <p className="a-body-sm a-muted">{tn('notes_in_folder_count', entries.length)}</p>
                         {folders.length > 0 && (
                             <>
@@ -122,7 +105,6 @@ export function NoteMeta({ path }: { path: string }) {
     const now = versions.data ? currentVersion(versions.data) : null
     return (
         <div className="an-meta">
-            <Crumbs path={path} />
             {now && <span>{t('notes_saved_by', { who: whoText(whoWrote(now)), when: relTime(now.written_at) })}</span>}
             {versions.data && <ReviewTag kind={reviewTag(now)} />}
         </div>
@@ -222,20 +204,29 @@ export function NoteLayout({ filePath, list, side, sideOpen, onToggleSide, onMor
     )
 }
 
-/** The notes beside the open one: the folder it lives in, as the list pane. */
-export function SiblingList({ parent, entries, current }: { parent: string; entries: DirEntry[]; current: string }) {
-    const notes = entries.filter((e) => !e.isDir).sort((a, b) => a.name.localeCompare(b.name))
+/** The notes before and after the open one in its folder, A to Z: reading through a folder, you move along it. */
+export function SiblingLinks({ parent, entries, current }: { parent: string; entries: DirEntry[]; current: string }) {
+    const { prev, next } = siblingsAround(entries, current)
+    if (!prev && !next) return null
+    const folder = noteName(parent)
     return (
-        <>
-            <PaneHead title={noteName(parent)} />
-            <div className="an-rows">
-                {notes.map((n) => (
-                    <Link key={n.path} to="/notes/$" params={{ _splat: n.path }} className="a-row" aria-current={n.path === current ? 'true' : undefined}>
-                        <span className="a-av" aria-hidden="true"><FileText className="a-ic" /></span>
-                        <span className="a-row-main"><b>{noteName(n.path)}</b></span>
-                    </Link>
-                ))}
-            </div>
-        </>
+        <nav className="an-sibs" aria-label={t('notes_siblings_label')}>
+            {prev ? (
+                <Link to="/notes/$" params={{ _splat: prev.path }} rel="prev" className="an-sib">
+                    <span className="a-cap a-muted">{t('notes_previous_in', { folder })}</span>
+                    <b>{noteName(prev.path)}</b>
+                </Link>
+            ) : (
+                <span />
+            )}
+            {next ? (
+                <Link to="/notes/$" params={{ _splat: next.path }} rel="next" className="an-sib an-sib-next">
+                    <span className="a-cap a-muted">{t('notes_next_in', { folder })}</span>
+                    <b>{noteName(next.path)}</b>
+                </Link>
+            ) : (
+                <span />
+            )}
+        </nav>
     )
 }

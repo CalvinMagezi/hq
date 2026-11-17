@@ -73,3 +73,45 @@
 .an-suite-btns{display:flex;flex-wrap:wrap;gap:16px;align-items:center}
 .an-suite-btns button{min-height:44px;background:none;border:0;padding:0;cursor:pointer;font:700 14px/20px var(--font-sans);color:var(--text-blue)}
 .an-suite-btns span{color:var(--ink-muted)}
+
+/* Vault navigation: the location bar, the folder tree and the shell around them (VaultNav.tsx). */
+.vn-shell{display:flex;flex-direction:column;flex:1 1 0;min-height:0;min-width:0}
+.vn-bar{display:flex;align-items:center;gap:4px;min-height:52px;padding:0 8px 0 4px;border-bottom:1px solid var(--hairline);flex:none}
+.vn-up.is-off{opacity:.35}
+.vn-crumbs{flex:1 1 0;min-width:0;overflow:hidden}
+.vn-crumbs ol{display:flex;align-items:center;list-style:none;margin:0;padding:0}
+.vn-crumbs li{display:flex;align-items:center;min-width:0;flex:0 1 auto}
+.vn-crumbs li:last-child{flex:1 1 auto}
+.vn-sep{color:var(--line);flex:none}
+.vn-crumb{display:inline-flex;align-items:center;min-height:36px;padding:0 10px;border-radius:var(--radius-pill);font:400 14px/20px var(--font-sans);color:var(--ink-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
+a.vn-crumb:hover,.vn-crumb-btn:hover{background:var(--surface-200);color:var(--ink)}
+.vn-current{color:var(--ink);font-weight:700}
+.vn-more{position:relative}
+.vn-menu{position:fixed;z-index:60}
+.vn-body{display:flex;flex:1 1 0;min-height:0;min-width:0}
+.vn-main{flex:1 1 0;min-width:0;min-height:0;display:flex;flex-direction:column}
+.vn-tree{display:none;flex-direction:column;width:300px;flex:none;min-height:0;border-right:1px solid var(--hairline);background:var(--surface-000)}
+@container app (min-width:1024px){.vn-tree{display:flex}}
+.vn-tree-head{display:flex;align-items:center;height:44px;padding:0 16px;flex:none}
+.vn-tree-body{flex:1 1 0;min-height:0;overflow-y:auto;padding:2px 8px 8px}
+.vn-tree-note{padding:8px 16px}
+.vn-row{display:flex;align-items:center;gap:2px;min-height:34px;padding-inline-end:8px;border-radius:10px;color:var(--ink);font:400 14px/20px var(--font-sans);cursor:pointer}
+.vn-row:hover{background:var(--surface-100)}
+.vn-row.is-on{background:var(--surface-200);font-weight:700}
+.vn-row.is-path{font-weight:700}
+.vn-row:focus-visible{outline:3px solid var(--focus-ring);outline-offset:-3px}
+.vn-chev{width:24px;height:24px;flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--ink-muted)}
+.vn-kind{display:inline-flex;flex:none;color:var(--ink-muted)}
+.vn-row.is-on .vn-kind{color:var(--brand-green)}
+.vn-name{flex:1 1 0;min-width:0;margin-left:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit;text-align:left}
+.vn-count{font:400 12px/16px var(--font-sans);font-weight:400;color:var(--ink-muted)}
+.vn-show-all{color:var(--text-blue);font-weight:700;font-size:13px}
+.vn-tree-foot{border-top:1px solid var(--hairline);padding:6px 8px;flex:none}
+@media (pointer:coarse){.vn-row{min-height:44px}.vn-crumb{min-height:44px}}
+.an-sibs{display:flex;justify-content:space-between;gap:16px;margin-top:16px;padding-top:16px;border-top:1px solid var(--hairline)}
+.an-sib{display:flex;flex-direction:column;gap:2px;min-height:44px;max-width:48%;color:var(--ink)}
+.an-sib b{font:700 14px/20px var(--font-sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.an-sib-next{text-align:right;margin-left:auto}
+/* Under 1024 px the tree has no room (a sheet comes later), so its button is not shown, and the bar's Up replaces the page's own back arrow. */
+@container app (max-width:1023px){.vn-toggle{display:none}}
+.vn-main .a-back{display:none}

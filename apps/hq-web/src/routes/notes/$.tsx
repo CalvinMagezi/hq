@@ -27,7 +27,7 @@ import { ExportMenu, type ExportMenuState } from '~/components/ExportMenu'
 import { usePersistedState } from '~/lib/usePersistedState'
 import { NoteTasks } from '~/components/tasks/NoteTasks'
 import { NEW_CHAT_KEY, restoreDraft } from '~/components/chat/draftStore'
-import { FolderView, NoteBar, NoteLayout, NoteMeta, SiblingList, BackLink } from '~/components/vault/NoteViews'
+import { FolderView, NoteBar, NoteLayout, NoteMeta, SiblingLinks, BackLink } from '~/components/vault/NoteViews'
 import { countNotes, parentPath } from '~/components/vault/noteRows'
 import '~/components/vault/notes.css'
 
@@ -384,6 +384,7 @@ ${safeHtml}
                 {viewer}
                 {exportNote && <p role="status" className="a-body-sm a-muted">{exportNote}</p>}
                 {isMd && !editing && <NoteTasks path={filePath} />}
+                {isMd && !editing && parent !== null && siblings.data && <SiblingLinks parent={parent} entries={siblingEntries} current={filePath} />}
             </div>
         </Suspense>
     )
@@ -392,7 +393,6 @@ ${safeHtml}
         <>
             <NoteLayout
                 filePath={filePath}
-                list={parent !== null && siblings.data ? <SiblingList parent={parent} entries={siblingEntries} current={filePath} /> : undefined}
                 side={isMd ? <AboutNote path={filePath} /> : undefined}
                 sideOpen={sideOpen}
                 onToggleSide={() => setSideOpen(!sideOpen)}
