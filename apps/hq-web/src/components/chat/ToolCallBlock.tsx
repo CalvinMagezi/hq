@@ -1,64 +1,40 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { t, tn } from '~/strings'
-import { ChevronDown, ChevronRight, CheckCircle2, Loader2, Code2, Terminal, AlignLeft } from 'lucide-react'
+import { ChevronDown, ChevronRight, CheckCircle2, Code2, Terminal, AlignLeft } from 'lucide-react'
 import type { ToolStep } from '~/store/threadStore'
 import { CREDITS_TOOLTIP, formatCredits, type StepCredit } from '~/lib/stepCredits'
-import { stepLine, stepLines, stepText } from '~/lib/stepWords'
+import { stepLines, stepText } from '~/lib/stepWords'
 import { usePersistentToggle } from './usePersistentToggle'
 
 const MS_PER_SECOND = 1000
-// Within this many pixels of the list's end counts as following the newest step.
-const LIST_FOLLOW_SLACK_PX = 24
 
 function formatDuration(ms: number) {
   return ms < MS_PER_SECOND ? `${ms}ms` : `${(ms / MS_PER_SECOND).toFixed(1)}s`
 }
 
-/** The one line a running chain shows while collapsed: what is happening right now. */
-function liveStatus(steps: ToolStep[]) {
-  const running = [...steps].reverse().find((s) => s.status === 'running')
-  const latest = running ?? steps[steps.length - 1]
-  const note = latest.progressMessages[latest.progressMessages.length - 1]
-  return { line: stepText(stepLine(latest.toolName, latest.inputArgs)), note, running: !!running }
-}
-
 interface Props {
   steps: ToolStep[]
-  /** The turn is still streaming, so the header reports progress instead of a summary. */
-  live?: boolean
   /** Credits per agent step; each shows on the step's first tool call. */
   credits?: StepCredit[]
 }
 
 /**
- * A turn's tool calls as one collapsed row, "What I did · N steps". Open, it lists
- * the steps in plain words; tool names, timings, inputs and outputs sit under
- * Technical details. It never opens by itself: a long chain used to open and
- * close on every step, which made the chat jump.
+ * A finished reply's tool calls as one collapsed row, "What I did · N steps", under the answer. Open,
+ * it lists the steps in plain words; tool names, timings, inputs and outputs sit under Technical
+ * details. It never opens by itself. While a reply streams, the live line says what is happening.
  */
-export function ToolCallBlock({ steps, credits, live = false }: Props) {
+export function ToolCallBlock({ steps, credits }: Props) {
   // Keyed on the first call id, which survives the live turn becoming a saved message.
   const [expanded, setExpanded] = usePersistentToggle(`tools:${steps[0]?.toolCallId ?? ''}`, false)
   const [activeStepId, setActiveStepId] = useState<string | null>(null)
   const [technical, setTechnical] = useState(false)
-  const listRef = useRef<HTMLDivElement>(null)
-  const followRef = useRef(true)
-
-  // An open list keeps the newest step in view unless the user scrolled up in it.
-  useEffect(() => {
-    const el = listRef.current
-    if (el && expanded && live && followRef.current) el.scrollTop = el.scrollHeight
-  }, [steps, expanded, live])
-
   if (steps.length === 0) return null
 
-  const done = steps.filter((s) => s.status === 'done').length
   const totalMs = steps.reduce((acc, s) => acc + (s.durationMs ?? 0), 0)
-  const status = live ? liveStatus(steps) : null
   const lines = stepLines(steps)
 
   return (
-    <div className="mb-2 text-xs rounded-xl overflow-hidden bg-white/[0.025] border border-white/[0.07]">
+    <div className="mt-2 text-xs rounded-xl overflow-hidden bg-white/[0.025] border border-white/[0.07]">
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
@@ -66,44 +42,21 @@ export function ToolCallBlock({ steps, credits, live = false }: Props) {
         className="w-full flex items-center gap-2 px-3 min-h-10 py-2 text-left transition-colors hover:bg-white/5"
         style={{ color: 'var(--text-dim)' }}
       >
-        {live ? (
-          <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" style={{ color: 'var(--accent-amber)' }} />
-        ) : (
-          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--accent-green)' }} />
-        )}
+        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--accent-green)' }} />
         <span className="min-w-0 flex-1 truncate">
           <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
-            {status ? (status.running ? status.line : t('chat_working')) : tn('chat_did', lines.length)}
+            {tn('chat_did', lines.length)}
           </span>
-          {status && <span className="opacity-70">{` · ${t('chat_steps_done', { done, total: steps.length })}`}</span>}
         </span>
         {expanded ? <ChevronDown className="w-3.5 h-3.5 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0" />}
       </button>
 
-      {status && !expanded && (
-        <div className="flex items-center gap-1.5 px-3 pb-2 h-6 text-[11px] opacity-80" style={{ color: 'var(--text-dim)' }}>
-          <Terminal className="w-2.5 h-2.5 opacity-50 shrink-0" />
-          <span className="truncate">{status.note || status.line}</span>
-        </div>
-      )}
-
       {expanded && (
-        <div
-          ref={listRef}
-          onScroll={(e) => {
-            const el = e.currentTarget
-            followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < LIST_FOLLOW_SLACK_PX
-          }}
-          className="px-2 sm:px-3 pb-2.5 pt-1 space-y-1.5 border-t border-white/5 max-h-80 overflow-y-auto overscroll-contain"
-        >
+        <div className="px-2 sm:px-3 pb-2.5 pt-1 space-y-1.5 border-t border-white/5 max-h-80 overflow-y-auto overscroll-contain">
           <ul className="text-[13px] space-y-1 py-1" style={{ color: 'var(--text-dim)' }}>
             {lines.map((line, i) => (
               <li key={i} className="flex items-start gap-2 min-h-6">
-                {status?.running && i === lines.length - 1 ? (
-                  <Loader2 className="w-3.5 h-3.5 mt-0.5 shrink-0 animate-spin" style={{ color: 'var(--accent-amber)' }} aria-hidden="true" />
-                ) : (
-                  <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: 'var(--accent-green)' }} aria-hidden="true" />
-                )}
+                <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: 'var(--accent-green)' }} aria-hidden="true" />
                 <span className="min-w-0 break-words">{stepText(line)}</span>
               </li>
             ))}

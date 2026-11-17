@@ -16,6 +16,8 @@ interface Props {
   /** Sends the given text, or the current input when called with none. */
   onSend: (content?: string) => void
   onStop: () => void
+  /** Up Arrow in an empty box takes the last message back to change. */
+  onEditLast?: () => void
   /** A reply is streaming, so the button stops it instead of sending. */
   running: boolean
   attachments: PendingAttachment[]
@@ -32,7 +34,7 @@ interface Props {
 
 /** Message input with attachments, the slash-command palette and the send/stop button. */
 export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function ChatComposer(
-  { value, onChange, onSend, onStop, running, attachments, onAddFiles, onRemoveAttachment, onRetryAttachment, connected, canQueue = false, hasKeptFiles = false },
+  { value, onChange, onSend, onStop, onEditLast, running, attachments, onAddFiles, onRemoveAttachment, onRetryAttachment, connected, canQueue = false, hasKeptFiles = false },
   ref,
 ) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -67,6 +69,11 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Escape' && running) {
       onStop()
+      return
+    }
+    if (e.key === 'ArrowUp' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && value === '' && onEditLast) {
+      e.preventDefault()
+      onEditLast()
       return
     }
     const paletteActive = isSlashInput(value) && !value.includes(' ') && matchingSlashCommands(value).length > 0
@@ -153,17 +160,21 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
         )}
       </div>
       </div>
-      <label className="a-cap a-muted hq-comp-enter" title={t('chat_enter_sends_hint')}>
-        <input
-          type="checkbox"
-          checked={enterSends ?? true}
-          onChange={(e) => {
-            writeEnterSends(e.target.checked)
-            setEnterSends(e.target.checked)
+      <p className="a-cap a-muted hq-comp-enter">
+        {t(enterSends ?? true ? 'chat_hint_sends' : 'chat_hint_newline')}
+        <button
+          type="button"
+          className="a-link"
+          title={t('chat_enter_sends_hint')}
+          onClick={() => {
+            const next = !(enterSends ?? true)
+            writeEnterSends(next)
+            setEnterSends(next)
           }}
-        />
-        {t('chat_enter_sends')}
-      </label>
+        >
+          {t('chat_hint_change')}
+        </button>
+      </p>
     </div>
   )
 })

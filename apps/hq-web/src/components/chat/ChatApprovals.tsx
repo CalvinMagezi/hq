@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApprovalCard } from '~/components/ui/ApprovalCard'
 import { HqHttpError } from '~/lib/hqAuth'
@@ -19,10 +19,12 @@ interface Props {
   waiting: boolean
   /** Asks HQ to finish in this chat once the request was answered after it stopped waiting. */
   onKeepGoing: () => void
+  /** What the slot holds when no approval wants it: an approval always wins the one slot above the box. */
+  otherwise?: ReactNode
 }
 
 /** The owner approvals of this chat: the same items as the Inbox, so answering in either answers both. */
-export function ChatApprovals({ threadId, waiting, onKeepGoing }: Props) {
+export function ChatApprovals({ threadId, waiting, onKeepGoing, otherwise }: Props) {
   const client = useQueryClient()
   const key = ['chat-approvals', threadId]
   const list = useQuery({
@@ -55,7 +57,9 @@ export function ChatApprovals({ threadId, waiting, onKeepGoing }: Props) {
     }
   }
 
-  if (!threadId || (pending.length === 0 && answered === 0 && !waiting)) return null
+  if (!threadId || (pending.length === 0 && answered === 0 && !waiting)) {
+    return otherwise ? <div className="hq-slot">{otherwise}</div> : null
+  }
   return (
     <div className="shrink-0 max-h-[45dvh] overflow-y-auto overscroll-contain px-3 sm:px-6 pb-2">
       <div className="max-w-4xl mx-auto space-y-2">

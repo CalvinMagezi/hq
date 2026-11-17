@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { newClientId } from '~/lib/outbox'
-import { ChevronLeft, Info, Paperclip, PencilLine, X } from 'lucide-react'
+import { ChevronLeft, PanelRight, Paperclip, PencilLine, X } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { useThreadStore, useLiveTurn, type ThreadMessage } from '~/store/threadStore'
 import { useWS } from '~/context/WebSocketContext'
@@ -31,6 +31,11 @@ import { useFileDrop } from './useFileDrop'
 import { useThreadSessions } from './useThreadSessions'
 import { SessionsPanel, DrivingStrip } from './SessionsPanel'
 import { ChatApprovals } from './ChatApprovals'
+import { OfferLine } from './OfferLine'
+import { WorkPane } from './WorkPane'
+import { useWorkPane, usePane } from '~/store/workPaneStore'
+import { madeNotes, type MadeNote, type ReplySource } from '~/lib/replySources'
+import { readAutoOpened, shouldAutoOpen, writeAutoOpened } from '~/lib/workPane'
 
 const FOCUS_DELAY_MS = 50
 // A reply alert links here with the chat to open.
@@ -73,11 +78,13 @@ export function ChatView({ active, threadId }: Props) {
   const [loadingThreads, setLoadingThreads] = useState(false)
   // Below 1024 px the chats list is a sheet; from 1024 it is the list pane.
   const [listOpen, setListOpen] = useState(false)
-  // Below 1400 px the details lie over the chat while open; from 1400 they are docked.
-  const [sideOpen, setSideOpen] = useState(false)
+  // The work pane lies over the chat below 1400 px; from 1400 it sits beside it.
+  const [docked, setDocked] = useState(false)
+  const pane = usePane(activeThreadId)
+  const panes = useWorkPane.getState
   const [followSignal, setFollowSignal] = useState(0)
   const [editing, setEditing] = useState<Editing | null>(null)
-  const [sessionsOpen, setSessionsOpen] = useState(false)
+  const sessionsOpen = pane.open && pane.tab === 'helpers'
   const watched = useThreadSessions(activeThreadId, active, sessionsOpen)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const draft = useDraft(activeThreadId)
@@ -128,14 +135,24 @@ export function ChatView({ active, threadId }: Props) {
     setEditing(null)
   }, [activeThreadId])
 
-  // The watched helpers are asked for only while their details can be seen; resizing across the docked width changes that.
+  // Whether the pane has room beside the chat; below that it lies over it.
   useEffect(() => {
-    const docked = window.matchMedia(DOCKED_QUERY)
-    const update = () => setSessionsOpen(sideOpen || docked.matches)
+    const query = window.matchMedia(DOCKED_QUERY)
+    const update = () => setDocked(query.matches)
     update()
-    docked.addEventListener('change', update)
-    return () => docked.removeEventListener('change', update)
-  }, [sideOpen])
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  // The pane opens by itself once per chat, when HQ finishes making a note, and only when it has room.
+  const liveMade = madeNotes((liveTurn?.toolSteps ?? []).filter((x) => x.status === 'done')).at(-1)?.path ?? null
+  useEffect(() => {
+    if (!active || !activeThreadId) return
+    const opened = readAutoOpened()
+    if (!shouldAutoOpen({ made: liveMade, docked, already: opened.includes(activeThreadId) })) return
+    writeAutoOpened([...opened, activeThreadId])
+    if (liveMade) panes().showNote(activeThreadId, liveMade)
+  }, [active, activeThreadId, liveMade, docked, panes])
 
   // A note action hands over text; append it so a half-written message survives.
   useEffect(() => {
@@ -323,6 +340,64 @@ export function ChatView({ active, threadId }: Props) {
     })
   }
 
+  const openMade = (note: MadeNote) => {
+    if (activeThreadId) panes().showNote(activeThreadId, note.path)
+  }
+  const openSource = (source: ReplySource) => {
+    if (activeThreadId) panes().showSource(activeThreadId, source.ref)
+  }
+  /** Ask HQ about a note the pane shows: its path goes in the box, after anything already typed. */
+  const askAbout = (path: string) => {
+    draft.setText(input.trim() ? `${input}\n\n\`${path}\`` : `\`${path}\``)
+    focusInput()
+  }
+  const taskFromNote = (path: string) => {
+    draft.setText(t('chat_pane_task_draft', { path }))
+    focusInput()
+  }
+  const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
+  const contextSteps = liveTurn?.toolSteps ?? lastAssistant?.toolSteps ?? []
+  const contextCredits = liveTurn?.stepCredits ?? lastAssistant?.stepCredits
+
+  /** The last saved message of mine goes back in the box to be changed and sent again. */
+  const editLast = () => {
+    const mine = [...messages].reverse().find((m) => m.role === 'user' && isSaved(m))
+    if (mine && !liveTurn) startEdit(mine)
+  }
+
+  // Keys for the whole chat: the pane, the neighbouring chats and the last reply.
+  useEffect(() => {
+    if (!active) return
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey
+      if (mod && !e.shiftKey && !e.altKey && e.key === '.') {
+        e.preventDefault()
+        if (activeThreadId) panes().toggle(activeThreadId)
+        return
+      }
+      if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'c') {
+        const reply = [...useThreadStore.getState().threadMessages[activeThreadId ?? ''] ?? []].reverse().find((m) => m.role === 'assistant')
+        // Selected text keeps the browser's own copy.
+        if (reply && !window.getSelection()?.toString()) {
+          e.preventDefault()
+          void navigator.clipboard.writeText(reply.content)
+        }
+        return
+      }
+      if (e.altKey && !mod && !e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        const list = useThreadStore.getState().threads
+        const at = list.findIndex((x) => x.threadId === activeThreadId)
+        const to = list[at + (e.key === 'ArrowUp' ? -1 : 1)]
+        if (to) {
+          e.preventDefault()
+          openThread(to.threadId)
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
   const activeThread = threads.find((t) => t.threadId === activeThreadId)
 
   const chatList = (head: boolean) => (
@@ -339,6 +414,11 @@ export function ChatView({ active, threadId }: Props) {
   )
 
   const title = activeThread?.title ?? t('chat_new_chat')
+  // The one slot above the box: an approval wins it, then an offer. Nothing offers anything while a reply streams.
+  const offerOn = !liveTurn && messages.length > 0 && messages[messages.length - 1].offer ? messages[messages.length - 1] : null
+  const slotOffer = offerOn?.offer ? (
+    <OfferLine offer={offerOn.offer} onAnswer={(yes) => answerOfferOn(offerOn, yes)} onSchedule={(at) => scheduleOfferOn(offerOn, at)} />
+  ) : null
   const detail = (
     <div className="hq-chat-detail" {...drop.handlers}>
       {drop.dragging && (
@@ -353,11 +433,19 @@ export function ChatView({ active, threadId }: Props) {
           <ChevronLeft className="a-ic" aria-hidden="true" />
         </button>
         <h2 className="a-h3">{title}</h2>
-        <button type="button" className="a-ib sm a-side-toggle" aria-label={t('chat_details')} aria-expanded={sideOpen} onClick={() => setSideOpen((v) => !v)}>
-          <Info className="a-ic sm" aria-hidden="true" />
+        <button
+          type="button"
+          className="a-ib sm"
+          aria-label={t('chat_pane_toggle')}
+          aria-pressed={pane.open}
+          aria-controls="hq-pane-panel"
+          disabled={!activeThreadId}
+          onClick={() => activeThreadId && panes().toggle(activeThreadId)}
+        >
+          <PanelRight className="a-ic sm" aria-hidden="true" />
         </button>
       </div>
-      <DrivingStrip sessions={watched.sessions} onOpen={() => setSideOpen(true)} />
+      <DrivingStrip sessions={watched.sessions} onOpen={() => activeThreadId && panes().showTab(activeThreadId, 'helpers')} />
 
       <MessageList
         threadId={activeThreadId}
@@ -368,11 +456,12 @@ export function ChatView({ active, threadId }: Props) {
         onSave={saveReply}
         onMakeTask={makeTaskFrom}
         onPick={(text) => draft.setText(text)}
-        onOffer={answerOfferOn}
-        onScheduleOffer={scheduleOfferOn}
+        onStop={handleStop}
+        onOpenSource={openSource}
+        onOpenMade={openMade}
       />
 
-      <ChatApprovals threadId={activeThreadId} waiting={waitingForOwner} onKeepGoing={() => void handleSend(t('chat_keep_going'))} />
+      <ChatApprovals threadId={activeThreadId} waiting={waitingForOwner} onKeepGoing={() => void handleSend(t('chat_keep_going'))} otherwise={slotOffer} />
 
       <OutboxGroup
         entries={outboxChat.entries}
@@ -419,6 +508,7 @@ export function ChatView({ active, threadId }: Props) {
         onChange={draft.setText}
         onSend={(content) => void handleSend(content)}
         onStop={handleStop}
+        onEditLast={editLast}
         running={!!liveTurn}
         canQueue={outboxChat.enabled && !!activeThreadId && !editing}
         attachments={attachments}
@@ -431,23 +521,29 @@ export function ChatView({ active, threadId }: Props) {
     </div>
   )
 
-  const side = (
-    <>
-      <div className="a-pane-head">
-        <h2 className="a-h3">{t('chat_details')}</h2>
-        <button type="button" className="a-ib sm a-side-toggle" aria-label={t('close')} onClick={() => setSideOpen(false)}>
-          <X className="a-ic sm" aria-hidden="true" />
-        </button>
-      </div>
-      <SessionsPanel
-        sessions={watched.sessions}
-        busy={watched.busy}
-        onDrive={(id, drive) => void watched.setDrive(id, drive)}
-        onUnwatch={(id) => void watched.unwatch(id)}
-        onArchive={activeThreadId ? () => void archiveThread(activeThreadId) : undefined}
-      />
-    </>
-  )
+  const side = activeThreadId ? (
+    <WorkPane
+      pane={pane}
+      onTab={(tab) => panes().showTab(activeThreadId, tab)}
+      onClose={() => panes().close(activeThreadId)}
+      steps={contextSteps}
+      startedAt={liveTurn?.startedAt}
+      credits={contextCredits}
+      running={!!liveTurn}
+      onSelectSource={(ref) => panes().showSource(activeThreadId, ref)}
+      onAsk={askAbout}
+      onTask={taskFromNote}
+      helpers={
+        <SessionsPanel
+          sessions={watched.sessions}
+          busy={watched.busy}
+          onDrive={(id, drive) => void watched.setDrive(id, drive)}
+          onUnwatch={(id) => void watched.unwatch(id)}
+          onArchive={() => void archiveThread(activeThreadId)}
+        />
+      }
+    />
+  ) : undefined
 
   return (
     <>
@@ -456,10 +552,11 @@ export function ChatView({ active, threadId }: Props) {
         listLabel={t('chat_chats')}
         detail={detail}
         detailLabel={title}
-        side={side}
-        sideLabel={t('chat_details')}
+        side={pane.open ? side : undefined}
+        sideLabel={t('chat_pane_toggle')}
         showDetail
-        sideOpen={sideOpen}
+        sideOpen={pane.open}
+        className="hq-chat-panes"
       />
       {listOpen && (
         <Sheet

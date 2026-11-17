@@ -183,7 +183,7 @@ const PREFIXES: [string, StringKey][] = [
 ]
 
 /** The gateway's `hq_call` carries the real tool in its arguments. */
-function unwrap(name: string, args: Args): [string, Args] {
+export function unwrap(name: string, args: Args): [string, Args] {
   if (name !== 'hq_call') return [name, args]
   const inner = raw(args, 'tool') ?? raw(args, 'name')
   if (!inner) return [name, args]

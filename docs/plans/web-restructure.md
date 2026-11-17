@@ -1,6 +1,6 @@
 # Web restructure: build plan
 
-Status: slices 1 and 2 built (Vault navigation), and the first part of Chat (list and reply actions). Move and rename wait on the server. The rest are proposals.
+Status: slices 1 and 2 built (Vault navigation), Chat's grammar and the work pane built. Move and rename wait on the server. The rest are proposals.
 
 The design is the "Restructure" page of the owner's HQ Web & Desktop design canvas (private). This file
 is the build order and the decisions that came out of it, so a session can continue without the canvas.
@@ -77,17 +77,41 @@ deleted; the tree is the one component above.
   finishes and sends; nothing is created until they send it). `lib/saveReply.ts`.
 - Undo on any toast now also drops that toast's action button.
 
+## Chat grammar and the work pane (built)
+
+- The live line (`LiveLine.tsx`, `lib/liveLine.ts`): while a reply streams there is one row above the
+  answer, the step running now in the present tense ("Reading “Stock rules”…", words in `live_step_*`),
+  with seconds and, after ten seconds, a Stop button. It is replaced by the next step, never stacked. The
+  answer's words arrive below it. The phone's `ToolWords` has no present-tense table yet.
+- The result comes first. A finished reply shows its text, then the fold "What I did · N steps"
+  (`ToolCallBlock`, which no longer has a live mode), then a card for each note HQ wrote
+  (`MadeCard`, from `vault_write_note`) and a chip for each note, file and page it read (`SourceChips`).
+  A web page is named by its site, never its address.
+- One slot above the box (`ChatApprovals` with `otherwise`): a pending approval, else the offer under the
+  last reply (`OfferLine`). Offers are not shown while a reply streams. An approval is shown even then,
+  since HQ may be waiting on it; this differs from the board, which hides cards while streaming.
+- The work pane replaces the old details pane (`WorkPane.tsx`, `store/workPaneStore.ts`). Tabs: Result
+  (the note HQ made, with Edit, Ask HQ, Make a task and Pin, and a link that opens the same note full
+  width in the Vault), Context (reading now, already used, sources, this reply's steps, seconds and
+  credit, built from the tool calls the socket already sends) and Helpers (the sessions the chat watches,
+  as before). It opens by itself once per chat when a note is finished, only from 1400 px where it has
+  room (`lib/workPane.ts`, `hq-pane-auto` in `localStorage`), and stays closed once closed. Ctrl or Cmd
+  and the full stop toggle it. Below 1400 px it lies over the chat; that overlay had no CSS before.
+- Keys: Up Arrow in an empty box takes the last message back to edit, Ctrl Shift C copies the last
+  reply, Alt Up and Alt Down move between chats. The "Enter sends" checkbox became a line of hints with a
+  Change link; the choice moves to Settings with that slice.
+- Not built: Export in the pane's bar (it stays on the full page), the Sheet, Slides and Dashboard
+  viewers (the hqmd reader and the suite milestones decide them; the Result tab shows any note as
+  markdown, which hqmd allows), follow-up chips in the slot (no source for them yet), "Not sent / Try
+  again" wording and the auto-title.
+
 ## Next slices, in order
 
-1. Chat grammar, the rest: the live line, the result line and the fold, the attention slot, hover actions with
-   Save to Vault and Make a task, source chips, the composer's own controls and Stop.
-2. The work pane with the Context and Result tabs (Context first: it needs no new data, the chat
-   socket already sends each tool call's name and arguments), then Doc, then the other viewers as the
-   suite milestones land.
-3. The palette, then the trigger menu (`@`, `/`, `#`) in the composer.
-4. Inbox: the split view, the helper fold and the digest row, Waiting for later.
-5. Settings: the six groups and search, the Chat page, the Work page.
-6. HQ Hub window: menu bar, Dock badge, the three-state control window.
+1. The Sheet, Slides and Dashboard viewers in the pane, as the suite milestones land.
+2. The palette, then the trigger menu (`@`, `/`, `#`) in the composer.
+3. Inbox: the split view, the helper fold and the digest row, Waiting for later.
+4. Settings: the six groups and search, the Chat page, the Work page.
+5. HQ Hub window: menu bar, Dock badge, the three-state control window.
 
 ## Open questions that block parts of the above
 

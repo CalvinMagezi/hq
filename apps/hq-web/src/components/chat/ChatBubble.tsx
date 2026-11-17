@@ -1,14 +1,16 @@
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { Mic, Copy, Check, FilePlus, ListChecks, Pencil, Plug, RotateCw, Terminal } from 'lucide-react'
-import type { ChatOffer, ToolStep } from '~/store/threadStore'
+import type { ToolStep } from '~/store/threadStore'
 import type { DriverMeta } from '~/lib/sessionsApi'
 import type { ChatAttachment } from '~/lib/chatUploads'
 import { CREDITS_TOOLTIP, formatCredits, totalCredits, type StepCredit } from '~/lib/stepCredits'
 import { ToolCallBlock } from './ToolCallBlock'
+import { LiveLine } from './LiveLine'
+import { MadeCard, SourceChips } from './ReplyExtras'
+import { madeNotes, sourcesOf, type MadeNote, type ReplySource } from '~/lib/replySources'
 import { ThinkingPanel } from './ThinkingPanel'
 import { MessageAttachments } from './AttachmentChips'
-import { canSchedule, scheduleChoices } from '~/lib/offersApi'
 import { t } from '~/strings'
 import { MarkdownViewer } from '../MarkdownViewer'
 
@@ -30,7 +32,6 @@ interface DisplayMessage {
   viaMcp?: string
   /** Asked by voice. */
   spoken?: boolean
-  offer?: ChatOffer
 }
 
 interface Props {
@@ -45,22 +46,28 @@ interface Props {
   onSave?: () => void
   /** Offered on HQ's saved replies: start a task from this one. */
   onMakeTask?: () => void
-  /** Answers the offer under this reply. */
-  onOffer?: (yes: boolean) => void
-  /** Brings the offer under this reply back at a time, in unix seconds. */
-  onScheduleOffer?: (at: number) => void
+  /** Live only: when the turn started, for the seconds on the live line. */
+  startedAt?: number
+  /** Live only: the live line offers it after ten seconds. */
+  onStop?: () => void
+  /** A source chip was pressed. */
+  onOpenSource?: (source: ReplySource) => void
+  /** A made note's Open was pressed. */
+  onOpenMade?: (note: MadeNote) => void
 }
 
 /**
  * One chat message. A streaming reply renders through this same layout
  * (thinking, tools, then text), so nothing moves when it becomes a saved message.
  */
-export function ChatBubble({ message, live = false, onEdit, onRegenerate, onSave, onMakeTask, onOffer, onScheduleOffer }: Props) {
+export function ChatBubble({ message, live = false, startedAt, onEdit, onRegenerate, onSave, onMakeTask, onStop, onOpenSource, onOpenMade }: Props) {
   const [copied, setCopied] = useState(false)
   const isUser = message.role === 'user'
   const steps = message.toolSteps ?? []
   const replyCredits = isUser ? null : totalCredits(message.stepCredits)
-  const waiting = live && !message.content && !message.reasoning && steps.length === 0
+  // What the reply read and made is only known once it is saved; while it streams, the live line speaks.
+  const sources = !isUser && !live ? sourcesOf(steps) : []
+  const made = !isUser && !live ? madeNotes(steps) : []
 
   const handleCopy = () => {
     void navigator.clipboard.writeText(message.content)
@@ -78,17 +85,15 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate, onSave
       )}
       {!isUser && message.driver && <DriverLabel driver={message.driver} />}
       {!isUser && message.reasoning && <ThinkingPanel content={message.reasoning} live={live} />}
-      {!isUser && steps.length > 0 && <ToolCallBlock steps={steps} credits={message.stepCredits} live={live} />}
+      {!isUser && live && <LiveLine steps={steps} startedAt={startedAt} writing={message.content !== ''} onStop={onStop} />}
       {message.attachments && <MessageAttachments attachments={message.attachments} />}
 
       {message.content && (isUser ? <p className="hq-msg-text">{message.content}</p> : <MarkdownViewer content={message.content} bare />)}
-      {waiting && (
-        <p className="a-body-sm a-muted hq-msg-label">
-          <span className="a-spin" aria-hidden="true" />
-          {t('chat_working')}
-        </p>
-      )}
-      {!isUser && !live && message.offer && onOffer && <OfferLine offer={message.offer} onAnswer={onOffer} onSchedule={onScheduleOffer} />}
+      {!isUser && !live && steps.length > 0 && <ToolCallBlock steps={steps} credits={message.stepCredits} />}
+      {made.map((n) => (
+        <MadeCard key={n.path} note={n} onOpen={(note) => onOpenMade?.(note)} />
+      ))}
+      {sources.length > 0 && <SourceChips sources={sources} onOpen={(s) => onOpenSource?.(s)} />}
 
       {!live && (
         <div className="a-meta">
@@ -130,46 +135,6 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate, onSave
           </span>
         </div>
       )}
-    </div>
-  )
-}
-
-/** One thing HQ can also do here, with Yes and Not now. Not a notification: it sits under the reply. */
-function OfferLine({ offer, onAnswer, onSchedule }: { offer: ChatOffer; onAnswer: (yes: boolean) => void; onSchedule?: (at: number) => void }) {
-  const [picking, setPicking] = useState(false)
-  if (picking && onSchedule) {
-    return (
-      <div className="hq-offer">
-        <span className="a-body-sm a-muted">{offer.line}</span>
-        <span className="a-btns">
-          {scheduleChoices(new Date()).map((c) => (
-            <button key={c.key} type="button" className="a-btn secondary compact" onClick={() => onSchedule(c.at)}>
-              {t(c.key)}
-            </button>
-          ))}
-          <button type="button" className="a-btn quiet compact" onClick={() => setPicking(false)}>
-            {t('chat_offer_back')}
-          </button>
-        </span>
-      </div>
-    )
-  }
-  return (
-    <div className="hq-offer">
-      <span className="a-body-sm a-muted">{offer.line}</span>
-      <span className="a-btns">
-        <button type="button" className="a-btn secondary compact" onClick={() => onAnswer(true)}>
-          {t('chat_offer_yes')}
-        </button>
-        {onSchedule && canSchedule(offer) && (
-          <button type="button" className="a-btn secondary compact" onClick={() => setPicking(true)}>
-            {t('chat_offer_schedule')}
-          </button>
-        )}
-        <button type="button" className="a-btn quiet compact" onClick={() => onAnswer(false)}>
-          {t('chat_offer_not_now')}
-        </button>
-      </span>
     </div>
   )
 }

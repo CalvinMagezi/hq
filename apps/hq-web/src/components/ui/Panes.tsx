@@ -13,25 +13,28 @@ export interface PanesProps {
   listLabel?: string
   detailLabel?: string
   sideLabel?: string
+  /** Extra classes on the grid, for a place that sets its own pane widths. */
+  className?: string
 }
 
 /** The class list for `.a-panes`, the design's one layout for a list and its open item. */
-export function panesClass({ list, side, showDetail, sideOpen }: Pick<PanesProps, 'list' | 'side' | 'showDetail' | 'sideOpen'>): string {
+export function panesClass({ list, side, showDetail, sideOpen, className }: Pick<PanesProps, 'list' | 'side' | 'showDetail' | 'sideOpen' | 'className'>): string {
   return [
     'a-panes hq-panes',
     list === undefined ? 'no-list' : '',
     side === undefined ? '' : 'has-side',
     showDetail ? 'is-detail' : '',
     sideOpen ? 'side-open' : '',
+    className ?? '',
   ]
     .filter(Boolean)
     .join(' ')
 }
 
 /** A list, the open item and its details at every width (AlignedShell 2), from the design's pane classes. */
-export function Panes({ list, detail, side, showDetail, sideOpen, listLabel, detailLabel, sideLabel }: PanesProps) {
+export function Panes({ list, detail, side, showDetail, sideOpen, listLabel, detailLabel, sideLabel, className }: PanesProps) {
   return (
-    <div className={panesClass({ list, side, showDetail, sideOpen })}>
+    <div className={panesClass({ list, side, showDetail, sideOpen, className })}>
       {list !== undefined && (
         <section className="a-pane a-pane-list" aria-label={listLabel}>
           {list}

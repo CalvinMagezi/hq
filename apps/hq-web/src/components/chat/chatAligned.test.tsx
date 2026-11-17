@@ -10,13 +10,15 @@ const read = (p: string) => readFileSync(join(import.meta.dir, p), 'utf8')
 
 // web-matches-phone B1: Chat on the shared panes (AlignedChat).
 describe('Chat on the panes', () => {
-  test('the chats are the list pane, the chat the detail, its details the side pane, and a sheet below 1024 px', () => {
+  test('the chats are the list pane, the chat the detail, the work pane the side pane, and a sheet below 1024 px', () => {
     const view = read('ChatView.tsx')
     expect(view).toContain('<Panes')
-    expect(view).toMatch(/list=\{chatList\(true\)\}[\s\S]*side=\{side\}/)
+    expect(view).toMatch(/list=\{chatList\(true\)\}[\s\S]*side=\{pane\.open \? side : undefined\}/)
     expect(view).toContain('placement="bottom"')
     expect(view).toContain('a-ib a-back')
-    expect(view).toContain('a-ib sm a-side-toggle')
+    // The pane has its own toggle at every width; the old details button hid itself when docked.
+    expect(view).toContain("t('chat_pane_toggle')")
+    expect(view).not.toContain('a-side-toggle')
     expect(view).not.toMatch(/emerald|amber-|neutral-9|ThreadSidebar|ChatHeader/)
   })
   test('a chat row is the design row: title, its line, the time or Working, and an archive button named for it', () => {

@@ -69,12 +69,15 @@ interface LiveTurn {
   stepCredits: StepCredit[]
   /** The socket fell behind and skipped events, so this text has holes until the saved reply replaces it. */
   gap?: boolean
+  /** When this device first saw the turn running; the live line counts seconds from here. */
+  startedAt?: number
 }
 
 // A long tool run reports progress for as long as it runs; only the newest lines are ever shown.
 const MAX_PROGRESS_MESSAGES = 20
 
 const EMPTY_TURN: LiveTurn = { content: '', reasoning: '', toolSteps: [], stepCredits: [] }
+const freshTurn = (): LiveTurn => ({ ...EMPTY_TURN, startedAt: Date.now() })
 
 interface ThreadState {
   threads: Thread[]
@@ -152,7 +155,7 @@ export const useThreadStore = create<ThreadState>()(
     (set, get) => {
       const patchLive = (threadId: string, patch: (turn: LiveTurn) => Partial<LiveTurn>) =>
         set((s) => {
-          const turn = s.live[threadId] ?? EMPTY_TURN
+          const turn = s.live[threadId] ?? freshTurn()
           return { live: { ...s.live, [threadId]: { ...turn, ...patch(turn) } } }
         })
 
@@ -236,7 +239,7 @@ export const useThreadStore = create<ThreadState>()(
           const current = get().live
           const finished = Object.keys(current).filter((id) => !threadIds.includes(id))
           const live: Record<string, LiveTurn> = {}
-          for (const id of threadIds) live[id] = current[id] ?? EMPTY_TURN
+          for (const id of threadIds) live[id] = current[id] ?? freshTurn()
           set({ live })
           return finished
         },

@@ -54,3 +54,48 @@ dialog.hq-sheet.hq-chats-sheet{top:120px;max-height:none}
 .hq-scrolldebug{position:fixed;left:0;top:0;z-index:2147483647;max-width:50vw;margin:0;padding:6px 8px;font:11px/1.35 ui-monospace,monospace;background:var(--surface-100);color:var(--ink);pointer-events:none;white-space:pre-wrap}
 .hq-draft-mark{font-weight:700;margin-right:6px}
 .hq-draft-mark::after{content:" ·"}
+
+/* The chat's panes at desktop width: a narrow list, the thread, and the work pane when it is open. */
+@container app (min-width:1024px){.hq-chat-panes{--list-w:280px}}
+@container app (min-width:1400px){.hq-chat-panes{--side-w:420px}}
+.hq-comp-enter .a-link{margin-left:8px;text-decoration:underline;color:var(--ink-muted)}
+.hq-comp-enter{flex-wrap:wrap;padding-bottom:8px}
+
+/* The live line: the step running now, one row, replaced by the next step. */
+.hq-live{display:flex;align-items:center;gap:8px;margin:0;min-height:32px;font:400 14px/20px var(--font-sans);color:var(--ink)}
+.hq-live-text{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hq-live-time{flex:none}
+.hq-live-stop{margin-left:auto}
+.hq-sources{margin-top:8px;padding:0;flex-wrap:wrap;overflow:visible}
+.hq-made{display:flex;align-items:center;gap:12px;margin-top:8px;padding:8px 8px 8px 12px;border-radius:var(--radius-md);background:var(--surface-100);text-align:left}
+.hq-made-main{flex:1 1 0;min-width:0;display:flex;flex-direction:column}
+.hq-made-main b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* One slot above the box. */
+.hq-slot{flex:none;padding:0 16px 8px}
+.hq-slot .hq-offer{max-width:760px;margin:0 auto;border-top:0;padding-top:0}
+
+/* The work pane. */
+.hq-pane-head{padding-left:8px}
+.hq-pane-tabs{display:flex;flex:1 1 0;min-width:0;gap:4px}
+.hq-pane-tab{position:relative;min-height:44px;padding:0 12px;font:700 14px/20px var(--font-sans);color:var(--ink-muted)}
+.hq-pane-tab:hover{color:var(--ink)}
+.hq-pane-tab[aria-selected="true"]{color:var(--ink)}
+.hq-pane-tab[aria-selected="true"]::after{content:"";position:absolute;left:12px;right:12px;bottom:0;height:3px;border-radius:3px 3px 0 0;background:var(--brand-green)}
+.hq-pane-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:flex;flex-direction:column}
+.hq-pane-empty{padding:24px 16px;display:flex;flex-direction:column;gap:4px}
+.hq-result{padding:12px 16px 24px;display:flex;flex-direction:column;gap:12px}
+.hq-result-head{display:flex;align-items:center;gap:8px}
+.hq-result-head .a-h3{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hq-ctx{padding-bottom:24px}
+.hq-ctx .a-grp{padding:16px 16px 8px}
+.hq-ctx-list{margin:0;padding:0;list-style:none}
+.hq-ctx-row{display:flex;align-items:center;gap:12px;width:100%;min-height:48px;padding:6px 16px;text-align:left;color:var(--ink)}
+.hq-ctx-row:hover,.hq-ctx-row[aria-current="true"]{background:var(--surface-100)}
+.hq-ctx-main{display:flex;flex-direction:column;min-width:0}
+.hq-ctx-main b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hq-ctx-none{padding:0 16px}
+.hq-ctx-detail{margin:12px 16px 0;padding:12px;border-radius:var(--radius-md);background:var(--surface-100);display:flex;flex-direction:column;gap:8px}
+.hq-ctx-detail-head{display:flex;align-items:center;gap:8px}
+.hq-ctx-detail-head b{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hq-ctx-facts{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0;padding:0 16px}
+.hq-result .an-bar{flex-wrap:wrap;overflow:visible;padding:0}
