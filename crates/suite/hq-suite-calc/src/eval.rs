@@ -48,6 +48,11 @@ pub const FUNCTIONS: &[&str] = &[
     "UPPER",
     "LOWER",
     "TRIM",
+    "ROW",
+    "INDEX",
+    "VLOOKUP",
+    "PMT",
+    "EDATE",
 ];
 
 type R = Result<Value, CalcError>;
@@ -91,13 +96,44 @@ pub(crate) fn num(v: &Value) -> Result<f64, CalcError> {
         Value::Empty => Ok(0.0),
         Value::Num(n) => Ok(*n),
         Value::Bool(b) => Ok(f64::from(u8::from(*b))),
-        Value::Text(t) => t.trim().parse::<f64>().map_err(|_| CalcError::Value),
+        Value::Text(t) => t
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .or_else(|| iso_date_serial(t))
+            .ok_or(CalcError::Value),
         Value::Err(e) => Err(*e),
     }
 }
 
+/// `2023-06-01` as a spreadsheet date, which Excel also reads from text in arithmetic.
+fn iso_date_serial(text: &str) -> Option<f64> {
+    let mut parts = text.trim().splitn(3, '-');
+    let (y, m, d) = (parts.next()?, parts.next()?, parts.next()?);
+    let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
+    if !(digits(y, 4) && digits(m, 2) && digits(d, 2)) {
+        return None;
+    }
+    let (y, m, d): (i64, i64, i64) = (y.parse().ok()?, m.parse().ok()?, d.parse().ok()?);
+    if !(1900..=9999).contains(&y) || !(1..=12).contains(&m) || d < 1 || d > days_in_month(y, m) {
+        return None;
+    }
+    Some(spreadsheet_serial(days_from_civil(y, m, d)) as f64)
+}
+
 fn text_of(v: &Value) -> String {
     v.to_string()
+}
+
+/// Excel shows a sum or difference that lands within rounding noise of zero as exactly 0, so
+/// `=A1-B1` over two equal-looking numbers is 0 rather than 1.6E-9.
+fn snap_to_zero(result: f64, x: f64, y: f64) -> f64 {
+    const NOISE: f64 = 1e-15;
+    if result.abs() < x.abs().max(y.abs()) * NOISE {
+        0.0
+    } else {
+        result
+    }
 }
 
 fn binary(op: char, a: &Value, b: &Value) -> R {
@@ -106,8 +142,8 @@ fn binary(op: char, a: &Value, b: &Value) -> R {
     }
     let (x, y) = (num(a)?, num(b)?);
     let out = match op {
-        '+' => x + y,
-        '-' => x - y,
+        '+' => snap_to_zero(x + y, x, y),
+        '-' => snap_to_zero(x - y, x, y),
         '*' => x * y,
         '/' => {
             if y == 0.0 {
@@ -583,6 +619,18 @@ fn table_lookup(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
 /// A spreadsheet date moved by whole months, keeping the day or the month's last day. Excel counts
 /// 1900 as a leap year, so serials before 1 March 1900 sit one day off the rest, and serial 0 is
 /// the day "0 January 1900"; both are reproduced here so a date column written by Excel agrees.
+/// Days since 1970 as a spreadsheet serial, with Excel's missing 29 February 1900.
+fn spreadsheet_serial(days_since_1970: i64) -> i64 {
+    const SHIFT: i64 = 25569;
+    const FIRST_MARCH_1900: i64 = 61;
+    let serial = days_since_1970 + SHIFT;
+    if serial >= FIRST_MARCH_1900 {
+        serial
+    } else {
+        serial - 1
+    }
+}
+
 fn add_months(serial: i64, months: i64) -> Result<i64, CalcError> {
     const SHIFT: i64 = 25569;
     const FIRST_MARCH_1900: i64 = 61;

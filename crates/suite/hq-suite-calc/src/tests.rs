@@ -134,7 +134,7 @@ fn errors_travel_and_iferror_catches_them() {
         ("A6", "=SQRT(-1)"),
         ("A7", "=SUM(A1:A2)"),
         ("A8", "=1+"),
-        ("A9", "=SUM(B1:ZZZ99999)"),
+        ("A9", "=SUM(B1:XFD99999)"),
     ]);
     assert_eq!(at(&s, "A1"), Value::Err(CalcError::Div0));
     assert_eq!(at(&s, "A2"), Value::Err(CalcError::Div0));
@@ -353,5 +353,105 @@ fn edate_reproduces_the_1900_quirks() {
         at(&s, "A5"),
         n(32.0),
         "1 Mar 1900 minus a month is 1 Feb 1900"
+    );
+}
+
+fn book() -> Workbook {
+    let mut b = Workbook::new();
+    let stock = b.add_sheet("Stock").unwrap();
+    let prices = b.add_sheet("Price list").unwrap();
+    b.set(stock, 0, 0, "40");
+    b.set(stock, 1, 0, "='Price list'!A1*A1");
+    b.set(stock, 2, 0, "=SUM(price list!A1:A2)");
+    b.set(stock, 3, 0, "=SUM('PRICE LIST'!A1:A2)+Stock!A1");
+    b.set(prices, 0, 0, "4200");
+    b.set(prices, 0, 1, "=Stock!A1");
+    b.set(prices, 1, 0, "=Nowhere!A1");
+    b.set(prices, 2, 0, "=A1+B2");
+    b
+}
+
+#[test]
+fn a_formula_reads_another_sheet_by_name() {
+    let b = book();
+    assert_eq!(b.get(0, 1, 0), n(168_000.0));
+    assert_eq!(b.get(0, 3, 0), n(4200.0 + 40.0 + 40.0));
+    assert_eq!(b.get(1, 0, 1), n(40.0), "the other sheet reads back");
+}
+
+#[test]
+fn a_sheet_that_does_not_exist_cannot_be_calculated_and_an_unquoted_space_does_not_parse() {
+    let b = book();
+    assert_eq!(b.get(1, 1, 0), Value::Err(CalcError::Name));
+    assert_eq!(b.get(0, 2, 0), Value::Err(CalcError::Name));
+}
+
+#[test]
+fn a_cell_names_its_own_sheet_unless_told_otherwise() {
+    let b = book();
+    assert_eq!(
+        b.get(1, 2, 0),
+        n(4200.0),
+        "A1 on Price list is 4200, B2 is empty"
+    );
+}
+
+#[test]
+fn sheets_that_read_each_other_in_a_loop_are_circular_not_endless() {
+    let mut b = Workbook::new();
+    let (a, c) = (b.add_sheet("A").unwrap(), b.add_sheet("C").unwrap());
+    b.set(a, 0, 0, "=C!A1+1");
+    b.set(c, 0, 0, "=A!A1+1");
+    assert_eq!(b.get(a, 0, 0), Value::Err(CalcError::Circular));
+    assert_eq!(b.add_sheet("a"), Some(0), "names are compared without case");
+    assert!(
+        !b.set(9, 0, 0, "1"),
+        "a sheet that was not added takes nothing"
+    );
+}
+
+#[test]
+fn a_column_past_xfd_is_not_a_cell() {
+    let s = sheet(&[("A1", "=SUM(B1:ZZZ9)"), ("A2", "=ZZZ1")]);
+    assert_eq!(at(&s, "A1"), Value::Err(CalcError::Name));
+    assert_eq!(at(&s, "A2"), Value::Err(CalcError::Name));
+}
+
+#[test]
+fn every_function_the_evaluator_handles_is_in_the_public_list() {
+    let source = include_str!("eval.rs");
+    let body = &source[source.find("fn call(name: &str").expect("call exists")..];
+    for line in body
+        .lines()
+        .filter(|l| l.starts_with("        \"") && l.contains("=>"))
+    {
+        let arm = line.split("=>").next().unwrap_or_default();
+        let names = arm.split('|').map(|n| n.trim().trim_matches('"'));
+        // `+` is the unary plus, an operator written as a call, not a function a person types.
+        for name in names.filter(|n| n.chars().all(|c| c.is_ascii_uppercase())) {
+            assert!(
+                FUNCTIONS.contains(&name),
+                "{name} is handled but missing from FUNCTIONS, so reports would call it unsupported"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_difference_within_rounding_noise_of_zero_is_zero_and_text_dates_count_as_dates() {
+    let s = sheet(&[
+        ("A1", "0.1"),
+        ("A2", "=A1*3"),
+        ("A3", "=A2-0.3"),
+        ("B1", "=\"2023-06-01\"+1"),
+        ("B2", "=\"2023-6-1\"+1"),
+        ("B3", "=DATE_NOT_A_THING"),
+    ]);
+    assert_eq!(at(&s, "A3"), n(0.0));
+    assert_eq!(at(&s, "B1"), n(45079.0));
+    assert_eq!(
+        at(&s, "B2"),
+        Value::Err(CalcError::Value),
+        "only the ISO form is read as a date"
     );
 }

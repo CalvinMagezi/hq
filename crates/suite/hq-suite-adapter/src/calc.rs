@@ -11,12 +11,15 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use calamine::{Data, Reader, open_workbook_auto};
-use hq_suite_calc::{CalcError, Sheet, Value};
+use hq_suite_calc::{CalcError, Value, Workbook};
 
 /// The largest workbook the check reads.
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
 /// Numbers agree when they differ by no more than this share of their size.
 const RELATIVE_TOLERANCE: f64 = 1e-9;
+/// A result this close to the saved one is the same number: chains of money arithmetic differ from
+/// Excel's by floating-point noise (a balance of 0.0000000016 against 0).
+const ABSOLUTE_TOLERANCE: f64 = 1e-6;
 const TOP_UNSUPPORTED: usize = 12;
 
 #[derive(Debug, Default)]
@@ -59,7 +62,8 @@ fn agrees(ours: &Value, theirs: &Data) -> bool {
             let Value::Num(b) = from_data(theirs) else {
                 return false;
             };
-            (a - b).abs() <= RELATIVE_TOLERANCE * a.abs().max(b.abs()).max(1.0)
+            let diff = (a - b).abs();
+            diff <= ABSOLUTE_TOLERANCE || diff <= RELATIVE_TOLERANCE * a.abs().max(b.abs())
         }
         (Value::Text(a), Data::String(b)) => a == b,
         (Value::Bool(a), Data::Bool(b)) => a == b,
@@ -113,35 +117,45 @@ pub fn check(file: &Path) -> Result<CalcReport> {
     let mut book =
         open_workbook_auto(file).context("that is not a workbook this build can read")?;
     let mut report = CalcReport::default();
+    // Every sheet is added before any formula is set, so a formula can name any of them.
+    let mut wb = Workbook::new();
+    let mut loaded = Vec::new();
     for name in book.sheet_names() {
         let (Ok(values), Ok(formulas)) =
             (book.worksheet_range(&name), book.worksheet_formula(&name))
         else {
             continue;
         };
+        let Some(id) = wb.add_sheet(&name) else {
+            continue;
+        };
         report.sheets += 1;
-        let mut sheet = Sheet::new();
+        loaded.push((id, values, formulas));
+    }
+    let mut theirs: Vec<(usize, u32, u32, String, Data)> = Vec::new();
+    for (id, values, formulas) in &loaded {
         let (v0, f0) = (
             values.start().unwrap_or((0, 0)),
             formulas.start().unwrap_or((0, 0)),
         );
         for (r, c, d) in values.cells() {
-            sheet.set_value(c as u32 + v0.1, r as u32 + v0.0, from_data(d));
+            wb.set_value(*id, c as u32 + v0.1, r as u32 + v0.0, from_data(d));
         }
-        let mut theirs: Vec<(u32, u32, String, Data)> = Vec::new();
         for (r, c, f) in formulas.cells() {
             if f.is_empty() {
                 continue;
             }
             let (col, row) = (c as u32 + f0.1, r as u32 + f0.0);
-            sheet.set(col, row, &format!("={f}"));
+            wb.set(*id, col, row, &format!("={f}"));
             // `get_value` takes the position in the sheet, not in the range.
             let saved = values.get_value((row, col)).cloned().unwrap_or(Data::Empty);
-            theirs.push((col, row, f.clone(), saved));
+            theirs.push((*id, col, row, f.clone(), saved));
         }
-        for (col, row, formula, saved) in theirs {
+    }
+    {
+        for (id, col, row, formula, saved) in theirs {
             report.formulas += 1;
-            let ours = sheet.get(col, row);
+            let ours = wb.get(id, col, row);
             if let Value::Err(CalcError::Name) = ours {
                 report.unsupported += 1;
                 let names: Vec<String> = functions_in(&formula)
