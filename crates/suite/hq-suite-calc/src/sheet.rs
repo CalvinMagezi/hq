@@ -75,6 +75,16 @@ impl Sheet {
         true
     }
 
+    /// Puts a value that is already typed, as loaded from a file: text that looks like a number
+    /// stays text, an error stays an error. Returns false if the sheet is full.
+    pub fn set_value(&mut self, col: u32, row: u32, value: Value) -> bool {
+        if self.cells.len() >= MAX_CELLS && !self.cells.contains_key(&(col, row)) {
+            return false;
+        }
+        self.cells.insert((col, row), Cell::Literal(value));
+        true
+    }
+
     /// A table as a sheet: the first row is row 1, the first column is A.
     pub fn from_table(rows: &[Vec<String>]) -> Sheet {
         let mut s = Sheet::new();

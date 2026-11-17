@@ -310,6 +310,8 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
             arity(args, 2, 2)?;
             match run(&args[0], ctx) {
                 Ok(v) => Ok(v),
+                // `#NAME?` means this engine cannot calculate it, not that the sheet has an error to hide.
+                Err(CalcError::Name) => Err(CalcError::Name),
                 Err(_) => run(&args[1], ctx),
             }
         }
@@ -386,6 +388,9 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
                 Expr::Ref(r) => ctx.cell(*r),
                 other => run(other, ctx).unwrap_or_else(Value::Err),
             };
+            if v == Value::Err(CalcError::Name) {
+                return Err(CalcError::Name);
+            }
             Ok(Value::Bool(matches!(
                 (name, &v),
                 ("ISNUMBER", Value::Num(_))
@@ -575,16 +580,39 @@ fn table_lookup(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
     t[i].get(col as usize - 1).cloned().ok_or(CalcError::Ref)
 }
 
-/// Days since 1899-12-30 (a spreadsheet date) moved by whole months, keeping the day or the month's last day.
+/// A spreadsheet date moved by whole months, keeping the day or the month's last day. Excel counts
+/// 1900 as a leap year, so serials before 1 March 1900 sit one day off the rest, and serial 0 is
+/// the day "0 January 1900"; both are reproduced here so a date column written by Excel agrees.
 fn add_months(serial: i64, months: i64) -> Result<i64, CalcError> {
-    const EPOCH_SHIFT: i64 = 25569;
-    let (y, m, d) = civil_from_days(serial - EPOCH_SHIFT);
+    const SHIFT: i64 = 25569;
+    const FIRST_MARCH_1900: i64 = 61;
+    let to_serial = |days: i64| {
+        if days + SHIFT >= FIRST_MARCH_1900 {
+            days + SHIFT
+        } else {
+            days + SHIFT - 1
+        }
+    };
+    let (y, m, d) = if serial == 0 {
+        (1900, 1, 0)
+    } else if serial < FIRST_MARCH_1900 {
+        civil_from_days(serial - SHIFT + 1)
+    } else {
+        civil_from_days(serial - SHIFT)
+    };
     let total = y * 12 + (m - 1) + months;
     let (ny, nm) = (total.div_euclid(12), total.rem_euclid(12) + 1);
     if !(1900..=9999).contains(&ny) {
         return Err(CalcError::Num);
     }
-    Ok(days_from_civil(ny, nm, d.min(days_in_month(ny, nm))) + EPOCH_SHIFT)
+    if d == 0 {
+        return Ok(to_serial(days_from_civil(ny, nm, 1)) - 1);
+    }
+    Ok(to_serial(days_from_civil(
+        ny,
+        nm,
+        d.min(days_in_month(ny, nm)),
+    )))
 }
 
 fn days_in_month(y: i64, m: i64) -> i64 {

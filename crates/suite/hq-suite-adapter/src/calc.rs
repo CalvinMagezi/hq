@@ -29,6 +29,8 @@ pub struct CalcReport {
     pub unsupported: usize,
     /// How many unsupported formulas named each missing function (or `syntax`).
     pub missing: BTreeMap<String, usize>,
+    /// Wrong answers by the kind of value each side gave and the formula's outermost function.
+    pub wrong: BTreeMap<String, usize>,
 }
 
 fn from_data(d: &Data) -> Value {
@@ -40,7 +42,14 @@ fn from_data(d: &Data) -> Value {
         Data::String(s) => Value::Text(s.clone()),
         Data::DateTime(dt) => Value::Num(dt.as_f64()),
         Data::DateTimeIso(s) | Data::DurationIso(s) => Value::Text(s.clone()),
-        Data::Error(_) => Value::Err(CalcError::Value),
+        Data::Error(e) => Value::Err(match e {
+            calamine::CellErrorType::Div0 => CalcError::Div0,
+            calamine::CellErrorType::NA => CalcError::Na,
+            calamine::CellErrorType::Name => CalcError::Name,
+            calamine::CellErrorType::Num => CalcError::Num,
+            calamine::CellErrorType::Ref => CalcError::Ref,
+            _ => CalcError::Value,
+        }),
     }
 }
 
@@ -117,15 +126,7 @@ pub fn check(file: &Path) -> Result<CalcReport> {
             formulas.start().unwrap_or((0, 0)),
         );
         for (r, c, d) in values.cells() {
-            sheet.set(
-                c as u32 + v0.1,
-                r as u32 + v0.0,
-                &match from_data(d) {
-                    Value::Empty => String::new(),
-                    Value::Text(t) => t,
-                    other => other.to_string(),
-                },
-            );
+            sheet.set_value(c as u32 + v0.1, r as u32 + v0.0, from_data(d));
         }
         let mut theirs: Vec<(u32, u32, String, Data)> = Vec::new();
         for (r, c, f) in formulas.cells() {
@@ -165,10 +166,40 @@ pub fn check(file: &Path) -> Result<CalcReport> {
                 report.matched += 1;
             } else {
                 report.mismatched += 1;
+                let head = functions_in(&formula)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| "none".into());
+                let key = format!(
+                    "{head}: ours {}, Excel {}",
+                    kind_of(&ours),
+                    data_kind(&saved)
+                );
+                *report.wrong.entry(key).or_default() += 1;
             }
         }
     }
     Ok(report)
+}
+
+fn kind_of(v: &Value) -> &'static str {
+    match v {
+        Value::Num(_) => "number",
+        Value::Text(_) => "text",
+        Value::Bool(_) => "true/false",
+        Value::Empty => "empty",
+        Value::Err(_) => "error",
+    }
+}
+
+fn data_kind(d: &Data) -> &'static str {
+    match d {
+        Data::Int(_) | Data::Float(_) | Data::DateTime(_) => "number",
+        Data::String(_) | Data::DateTimeIso(_) | Data::DurationIso(_) => "text",
+        Data::Bool(_) => "true/false",
+        Data::Empty => "empty",
+        Data::Error(_) => "error",
+    }
 }
 
 pub fn report_text(r: &CalcReport) -> String {
@@ -192,6 +223,14 @@ pub fn report_text(r: &CalcReport) -> String {
         out.push_str("Missing most often:\n");
         for (name, n) in missing.into_iter().take(TOP_UNSUPPORTED) {
             out.push_str(&format!("  {name}: {n}\n"));
+        }
+    }
+    let mut wrong: Vec<_> = r.wrong.iter().collect();
+    wrong.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    if !wrong.is_empty() {
+        out.push_str("Wrong answers, by leading function:\n");
+        for (kind, n) in wrong.into_iter().take(TOP_UNSUPPORTED) {
+            out.push_str(&format!("  {kind}: {n}\n"));
         }
     }
     out
