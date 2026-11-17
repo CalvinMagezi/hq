@@ -84,4 +84,12 @@ class MessageBlocksTest {
         assertEquals("", sheets[1].info)
         assertEquals(Block.Code("kotlin", "val x = 1", true), b.last())
     }
+
+    @Test
+    fun a_tile_fence_is_a_tile_block_numbered_apart_from_the_sheets() {
+        val b = parseBlocks("```tile from=\"A1:A3\" fn=sum\n```\n\n```sheet\n| a |\n```\n\n```tile from=\"B1\" fn=max\n```\n")
+        val tiles = b.filterIsInstance<Block.Tile>()
+        assertEquals(listOf(0, 1), tiles.map { it.index })
+        assertEquals(0, b.filterIsInstance<Block.Sheet>().single().index)
+    }
 }
