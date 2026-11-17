@@ -998,7 +998,7 @@ fn substitute(e: &Expr, name: &str, with: &Expr) -> Expr {
 /// `LET(a, 1, b, a+1, b*2)`: each name stands for its value in what follows. Calculations here
 /// are pure, so putting the value expression where the name is gives the same answer.
 fn let_call(args: &[Expr], ctx: &mut dyn Cells) -> R {
-    if args.len() < 3 || args.len() % 2 == 0 {
+    if args.len() < 3 || args.len().is_multiple_of(2) {
         return Err(CalcError::Value);
     }
     let (pairs, body) = args.split_at(args.len() - 1);
