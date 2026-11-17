@@ -13,7 +13,9 @@ chrono = { workspace = true }
 hq-vault = { workspace = true }
 hq-suite-store = { workspace = true }
 hq-suite-shrink = { workspace = true }
+hq-suite-docs = { workspace = true }
 hq-suite-governor = { workspace = true }
+hq-suite-md = { workspace = true }
 hq-suite-sinks = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

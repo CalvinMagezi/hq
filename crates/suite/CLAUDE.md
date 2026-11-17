@@ -38,6 +38,7 @@ to delete the guard first and say why in review.
 | `hq-suite-store` | Durable files: atomic writes, media stored by hash, trash in the vault's layout, the shrink journal | `hq-suite-md`, `sha2`, `serde*` |
 | `hq-suite-shrink` | Picture decoding with caps, the encoders (lossy WebP through libwebp for photographs), the measurement report, the shrink pipeline (prepare, confirm, undo, recover) | `hq-convert`, `hq-suite-ingest`, `hq-suite-md`, `hq-suite-store`, `image`, `webp` |
 | `hq-suite-governor` | Storage report in plain words, orphan media, originals that left the trash, the budget and its eviction order. The clock and budget come in as values | `hq-suite-md`, `hq-suite-store`, `hq-suite-shrink`, `chrono` |
+| `hq-suite-docs` | Docs: render a record as a Word file (`hq-export`) and the regenerate check that the render reads back as the same record | `hq-convert`, `hq-export`, `hq-suite-ingest`, `hq-suite-md` |
 | `hq-suite-sinks` | Cold storage: a folder the owner keeps, originals sealed one at a time under a recovery code, read back before they count as stored, and the restore drill | `hq-backup` (the sealing), `hq-suite-store`, `serde*`, `sha2`, `hex` |
 | `hq-suite-adapter` | The only crate that knows HQ: config, tools, CLI glue, daemon task, device actions, REST | everything |
 

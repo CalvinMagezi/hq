@@ -3831,7 +3831,9 @@ version = "0.9.1"
 dependencies = [
  "anyhow",
  "chrono",
+ "hq-suite-docs",
  "hq-suite-governor",
+ "hq-suite-md",
  "hq-suite-shrink",
  "hq-suite-sinks",
  "hq-suite-store",
@@ -3841,6 +3843,18 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml 0.8.2",
+]
+
+[[package]]
+name = "hq-suite-docs"
+version = "0.9.1"
+dependencies = [
+ "hq-convert",
+ "hq-export",
+ "hq-suite-ingest",
+ "hq-suite-md",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

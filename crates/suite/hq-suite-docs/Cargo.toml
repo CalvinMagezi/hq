@@ -1,0 +1,17 @@
+[package]
+name = "hq-suite-docs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HQ Suite Docs: render a record as a Word file and check that the render says what the record says"
+
+# Pure conversion. Files and the vault come in through the adapter (crates/suite/CLAUDE.md).
+[dependencies]
+hq-convert = { workspace = true }
+hq-export = { workspace = true }
+hq-suite-ingest = { workspace = true }
+hq-suite-md = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

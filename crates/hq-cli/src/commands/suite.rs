@@ -81,6 +81,16 @@ pub enum SuiteCommand {
     Jobs,
     /// Finish or resume jobs a crash or a restart interrupted
     Recover,
+    /// Render a note as a Word file, pictures included
+    Docx {
+        /// The note, in the vault
+        note: PathBuf,
+        /// Where to write it (default: beside the note; an existing file is never replaced)
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
+    /// Check that a Word file survives the suite: read it, render it, read the render, compare
+    Check { file: PathBuf },
     /// What the suite holds, in words; with --tidy also removes what nothing needs
     ///
     /// Tidying removes pictures no note links to, marks notes whose original the trash has
@@ -134,6 +144,20 @@ pub async fn run(config: &HqConfig, command: SuiteCommand) -> Result<()> {
         },
         SuiteCommand::Jobs => shrink::jobs(vault),
         SuiteCommand::Recover => shrink::recover(vault),
+        SuiteCommand::Docx { note, out } => {
+            let target = hq_suite_adapter::docs::render(vault, &note, out.as_deref())?;
+            println!("Wrote {}", target.display());
+            Ok(())
+        }
+        SuiteCommand::Check { file } => {
+            let r = hq_suite_adapter::docs::check(&file).await?;
+            print!("{}", hq_suite_adapter::docs::check_text(&r));
+            if r.equal {
+                Ok(())
+            } else {
+                anyhow::bail!("the render differs")
+            }
+        }
         SuiteCommand::Storage { tidy } => {
             use hq_suite_adapter::governor;
             let c = &config.suite;
