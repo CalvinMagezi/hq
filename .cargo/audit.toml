@@ -20,6 +20,12 @@ ignore = [
     "RUSTSEC-2026-0398",
     # Ten more zstd-safe 7.3.0 ids of 2026-10-16, unreachable for the same reason (only `std`
     # is enabled and zip only streams). Reasons in deny.toml.
+    "RUSTSEC-2026-0543",
+    "RUSTSEC-2026-0555",
+    "RUSTSEC-2026-0545",
+    "RUSTSEC-2026-0546",
+    "RUSTSEC-2026-0547",
+    "RUSTSEC-2026-0548",
     "RUSTSEC-2026-0395",
     "RUSTSEC-2026-0396",
     "RUSTSEC-2026-0397",
