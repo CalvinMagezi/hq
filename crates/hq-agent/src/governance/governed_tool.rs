@@ -12,7 +12,7 @@ use super::paths::{PATH_TOOLS, path_args_for_tool, path_values};
 use super::taint::{TaintTracker, is_untrusted_source};
 use super::tainted_calls::drive_after_untrusted_reads;
 use super::tainted_calls::{always_ask_reason, tainted_reason_for, unasked_denial_for};
-use super::{DenialNotifier, DenialTracker, RepeatCallTracker};
+use super::{DenialNotifier, DenialTracker, FolderCover, RepeatCallTracker};
 use crate::coding::text_result;
 use crate::tools::AgentTool;
 
@@ -375,16 +375,39 @@ impl GovernedTool {
     /// In `PermissionMode::Default`, a call that needs the owner runs only once they approve
     /// exactly it; so does, in any mode but bypass, a call a tainted session needs the owner for
     /// (`tainted_reason`) or always (`always_ask_reason`). `Some` carries what the model gets instead.
-    async fn owner_decision(&self, args: &Value) -> Option<String> {
+    async fn owner_decision(&self, args: &mut Value) -> Option<String> {
         let Some(approval) = self.owner_approval.as_ref() else {
             return self.unasked_denial(args);
         };
         let tool_name = self.inner.name();
-        let asks = (matches!(self.permission_mode, PermissionMode::Default)
-            && self.needs_owner(args))
-            || always_ask_reason(tool_name, args).is_some()
-            || (tainted_reason_for(tool_name, self.inner.category(), args, &self.taint).is_some()
-                && !self.sends_to_own_driven_session(approval, args));
+        let default_ask =
+            matches!(self.permission_mode, PermissionMode::Default) && self.needs_owner(args);
+        let always_ask = always_ask_reason(tool_name, args).is_some();
+        let tainted_ask = tainted_reason_for(tool_name, self.inner.category(), args, &self.taint)
+            .is_some()
+            && !self.sends_to_own_driven_session(approval, args);
+        // A folder the owner allowed for this chat clears only the plain Default-mode ask: never
+        // a call a tainted session or a calendar change asks about, and never once this session
+        // has read outside text.
+        if default_ask
+            && !always_ask
+            && !tainted_ask
+            && !self.taint.is_tainted()
+            && !self.taint.is_unattended()
+            && let Some(cover) = approval.folder_cover(tool_name, args)
+        {
+            if let FolderCover::Bash(roots) = &cover
+                && let Some(map) = args.as_object_mut()
+            {
+                map.insert(
+                    super::folder_scope::CONFINE_ARG.into(),
+                    roots.iter().map(|r| r.to_string_lossy()).collect(),
+                );
+            }
+            approval.note_folder_use(&cover);
+            return None;
+        }
+        let asks = default_ask || always_ask || tainted_ask;
         let site_allowed = super::tainted_calls::fetch_site(tool_name, args)
             .is_some_and(|s| approval.site_allowed(&s));
         if !asks || site_allowed {
@@ -398,8 +421,12 @@ impl GovernedTool {
     /// Split out of `execute` so the trait method can wrap this with
     /// cross-cutting concerns — currently the repeat-call advisory —
     /// without duplicating the waterfall itself.
-    async fn execute_governed(&self, id: &str, args: Value) -> Result<ToolResult> {
+    async fn execute_governed(&self, id: &str, mut args: Value) -> Result<ToolResult> {
         let tool_name = self.inner.name();
+        // Only this layer may confine a shell command to a folder (`owner_decision`).
+        if let Some(map) = args.as_object_mut() {
+            map.remove(super::folder_scope::CONFINE_ARG);
+        }
 
         if matches!(self.permission_mode, PermissionMode::BypassPermissions) {
             return self.execute_bypassed(id, args).await;
@@ -459,7 +486,7 @@ impl GovernedTool {
         }
 
         // Asked last, so a call the checks above would refuse never reaches the owner.
-        if let Some(waiting) = self.owner_decision(&args).await {
+        if let Some(waiting) = self.owner_decision(&mut args).await {
             return Ok(text_result(waiting));
         }
 

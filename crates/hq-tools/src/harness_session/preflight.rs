@@ -121,8 +121,14 @@ fn require_found(wanted: &str, roots: &[PathBuf], harness: &str, host: &str) -> 
         return Ok(());
     }
     let searched: Vec<String> = roots.iter().map(|r| r.display().to_string()).collect();
+    // A helper HQ can set up itself says how, so the owner is not sent to a terminal.
+    let hint = if crate::helper_setup::catalog::find(harness).is_some() {
+        " HQ can install it: ask the owner to approve `helper_setup` (action `setup`) for this computer."
+    } else {
+        ""
+    };
     bail!(
-        "harness '{harness}' is not installed on host '{host}' (binary '{wanted}' not found on PATH; searched {})",
+        "harness '{harness}' is not installed on host '{host}' (binary '{wanted}' not found on PATH; searched {}).{hint}",
         searched.join(":")
     )
 }

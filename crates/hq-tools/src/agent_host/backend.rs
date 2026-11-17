@@ -25,6 +25,16 @@ pub struct QuotaAsk {
     pub custom: Vec<QuotaProfile>,
 }
 
+/// A program to run once on a host, in a pane of its own that is read and then removed: how
+/// HQ installs a helper or starts its sign-in on that computer (`crate::helper_setup`).
+#[derive(Debug, Clone)]
+pub struct CommandRun {
+    /// Pane name: `[a-z][a-z0-9_-]{0,31}`, unique among live panes.
+    pub name: String,
+    pub argv: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
 /// What HQ needs from whatever hosts coding agents: the host protocol today, a
 /// built-in host later. Calls block, like the host protocol they wrap, so async
 /// callers use [`super::blocking`].
@@ -221,6 +231,15 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     }
 
     /// Which of these programs the host can start. `None` when it cannot say.
+    /// Starts `run.argv` in a pane that belongs to no agent kind. Read it with `agent` and `read`
+    /// and remove it with `close_workspace`. A host that cannot says so.
+    fn run_command(&self, _run: &CommandRun) -> Result<(), AgentHostError> {
+        Err(AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' cannot run a setup command", self.name()),
+        })
+    }
+
     fn installed_programs(&self, _names: &[String]) -> Option<Vec<String>> {
         None
     }

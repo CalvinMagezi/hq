@@ -58,6 +58,11 @@ pub struct DaemonConfig {
     #[serde(default = "default_true")]
     pub adoption_digest: bool,
 
+    /// Offers, once, to set up the free coding helpers on a connected computer that has none
+    /// (`docs/HELPER_SETUP.md`). One inbox item; nothing is installed until the owner approves it.
+    #[serde(default = "default_true")]
+    pub helper_setup_offer: bool,
+
     /// A daily tidy that moves stale helper requests out of Needs you (restorable for 30 days).
     #[serde(default = "default_true")]
     pub inbox_tidy: bool,
@@ -107,6 +112,7 @@ impl Default for DaemonConfig {
             link_capture: true,
             tool_failure_digest: true,
             adoption_digest: true,
+            helper_setup_offer: true,
             inbox_tidy: true,
         }
     }

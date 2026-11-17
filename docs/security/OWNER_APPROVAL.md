@@ -42,6 +42,7 @@ off everywhere.
 - HQ itself: `config_manage` (except `get`), `self_update_install`, `self_update_rollback`, `skill_manage`, `slash_command_manage`, `task_delete`
 - scheduling an unattended turn: `watch_create`. A watch firing runs later with the owner's tools
   and nobody to ask, so the model (or text it read) setting one up is asked about once, here
+- installing coding helpers and opening their sign-in on a computer (`helper_setup` with `setup`, `install` or `login`): one approval for the whole batch, asked in every mode but bypass; `docs/HELPER_SETUP.md`
 - other machines and agents: `host_add`, `host_send`, `agent_send_message`, and starting a coding agent (`harness_session_spawn`, `harness_session_handoff`, `agent_delegate`), which is as strong as `bash`. Steering an agent already started (`harness_session_send`, `harness_session_answer`) does not ask in a clean session; see below for a tainted one
 - moving an office file's original to the trash: `office_file` with `action: confirm` (the HQ Suite; the original stays recoverable for 30 days, and `status`, `shrink`, `abandon` and `undo` never ask)
 - exports to a path: `convert_from_markdown`, `vault_export` and `vault_export_pdf` when given `output`
@@ -79,6 +80,34 @@ bytes of path and query, and `web_search` with a query over 150 characters. A ta
 into or answer only a coding agent its own web chat watches. The reasoning is in
 `PROMPT_INJECTION.md`, rules 4 and 5. This list is narrower than the claude.ai connector's (`CONNECTOR_CONFIRM_TOOLS` in
 `crates/hq-mcp/src/gateway.rs`), which also guards reads because its caller is remote.
+
+## Folder allow
+
+An approval card for a command or an edit offers "Allow <folder> for this chat". Answering it
+approves that call and allows the folder for this chat for eight hours: its later edits inside the
+folder, and its shell commands, run without asking. The owner sees the folder spelled out on the
+card, and can list and stop each allowed folder in the chat's details.
+
+- **The folder comes from the call, never from the model or the request.** An edit names it by
+  path (the git repository around the file, else its folder); a command by the `cd <dir>` it
+  starts with, written plainly (no variable, substitution or glob). A call that names none offers
+  none (`governance/folder_scope.rs`, `candidate_folder`).
+- **Some folders can never be allowed:** `/`, the home folder or one that contains it, system
+  and scratch folders, any dot-folder under home, HQ's own configuration folder, the vault.
+- **Edits** are covered when every resolved path (`..` and links followed) stays inside an
+  allowed folder.
+- **Shell commands** are not read; they are confined. A covered command runs with its sandbox
+  writing only the allowed folders and scratch space (`BashSettings::confined_to`, the reserved
+  `_hq_confine_roots` argument that only governance sets and that can only narrow). Where no
+  sandbox exists on the machine the command asks as usual.
+- **It never clears the other asks.** A session that has read outside text gets no folder
+  allow at all, and a call a tainted session or a calendar change asks about still asks.
+- **Per chat, written only by the owner.** Grants are rows in `owner_folder_grants`, keyed by the
+  chat scope; the answer route writes them, archiving the chat revokes them, and no tool reaches
+  either. Each use is counted and shown.
+- **A nudge.** From the third approval request for commands and edits in thirty minutes, the card
+  says so and offers helpers, and the model is told to offer the folder allow or a helper
+  (`STREAK_NUDGE_AT`). Setting helpers up: `docs/HELPER_SETUP.md`.
 
 ## How an approval is bound
 

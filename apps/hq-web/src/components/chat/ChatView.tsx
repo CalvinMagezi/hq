@@ -419,6 +419,7 @@ export function ChatView({ active, threadId }: Props) {
         onDrive={(id, drive) => void watched.setDrive(id, drive)}
         onUnwatch={(id) => void watched.unwatch(id)}
         onArchive={activeThreadId ? () => void archiveThread(activeThreadId) : undefined}
+        threadId={activeThreadId}
       />
     </>
   )

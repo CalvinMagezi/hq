@@ -113,7 +113,12 @@ pub fn chat_harness_instructions(cwd: &Path) -> String {
          - For anything else, delegate with `spawn_subagents` before touching your own tools.\n\
          - YOU handle: user intent parsing, response composition, tool orchestration.\n\
          - Call tools immediately - never narrate before calling.\n\
-         - Read files before editing. Read relevant vault context before answering.\n\n\
+         - Read files before editing. Read relevant vault context before answering.\n\
+         - Work on a project folder that takes more than about three commands or edits, or any \
+           script or data job, goes to a helper (`harness_session_spawn`; `helper_setup` shows \
+           which helpers are ready and sets up the free ones). Run `bash` or edit files yourself \
+           only for a one-off. The owner approves your commands one by one, and a helper spares \
+           them that.\n\n\
          ## Tool discipline\n\
          - Read large files (>300 lines) by line range, not whole.\n\
          - NEVER run `find` or `bash` with a path above the working directory ({cwd}).\n\
@@ -156,6 +161,13 @@ mod role_tests {
 #[cfg(test)]
 mod chat_budget_tests {
     use super::*;
+
+    #[test]
+    fn the_chat_is_told_to_hand_multi_step_project_work_to_a_helper() {
+        let text = chat_harness_instructions(Path::new("/work"));
+        assert!(text.contains("goes to a helper"), "{text}");
+        assert!(text.contains("helper_setup"), "{text}");
+    }
 
     #[test]
     fn the_owners_chat_has_no_per_turn_cap() {

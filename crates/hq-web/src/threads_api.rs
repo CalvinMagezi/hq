@@ -136,7 +136,15 @@ pub(crate) async fn archive_thread_handler(
         .db
         .with_conn(|conn| hq_db::chat::archive_thread(conn, &thread_id))
     {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Ok(_) => {
+            // The folders the owner allowed for this chat end with it.
+            if let Err(e) =
+                hq_db::owner_folder_grants::revoke_all(&state.db, &format!("web:{thread_id}"))
+            {
+                tracing::warn!(%e, "revoking an archived chat's folder allows failed");
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => ApiError::internal(e).into_response(),
     }
 }
