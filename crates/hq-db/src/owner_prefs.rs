@@ -1,4 +1,4 @@
-//! Choices the owner makes in the web app that HQ's own background work reads (`sql/137_owner_prefs.sql`).
+//! Choices the owner makes in the web app that HQ's own background work reads (`sql/139_owner_prefs.sql`).
 //!
 //! A pref overrides the config file's value for the same thing, so the owner can change it without editing
 //! files. Only keys listed in [`KNOWN`] can be stored, and each has its own check on the value, so nothing
