@@ -8,9 +8,11 @@ import { formatCredits, totalCredits, type StepCredit } from '~/lib/stepCredits'
 import { sourcesOf, type ReplySource } from '~/lib/replySources'
 import { secondsRunning } from '~/lib/liveLine'
 import { stripFrontmatter } from '~/lib/noteConflict'
+import { hasViewer, readHqmd } from '~/lib/hqmd'
 import { getNote, togglePinNote } from '~/lib/vaultApi'
 import type { PaneState, PaneTab } from '~/lib/workPane'
 import { MarkdownViewer } from '../MarkdownViewer'
+import { NoteBody } from '../suite/NoteBody'
 import { SourceIcon } from './ReplyExtras'
 
 const TABS: { id: PaneTab; label: 'chat_pane_result' | 'chat_pane_context' | 'chat_pane_helpers' }[] = [
@@ -145,9 +147,15 @@ function NoteResult({ path, onAsk, onTask }: { path: string; onAsk: (path: strin
       </div>
       {note.isPending && <p className="a-body-sm a-muted">{t('chat_pane_loading')}</p>}
       {missing && <p role="alert" className="a-body-sm a-muted">{t('chat_pane_missing')}</p>}
-      {!missing && content !== '' && <MarkdownViewer content={stripFrontmatter(content)} bare />}
+      {!missing && content !== '' && <ResultBody content={content} />}
     </div>
   )
+}
+
+/** The note as the pane shows it: a suite viewer for a sheet, slides or dashboard, else its text. */
+function ResultBody({ content }: { content: string }) {
+  const suite = hasViewer(readHqmd(content))
+  return suite ? <NoteBody content={content} /> : <MarkdownViewer content={stripFrontmatter(content)} bare />
 }
 
 interface ContextProps {

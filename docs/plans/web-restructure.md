@@ -173,9 +173,30 @@ HQ Hub (`crates/hq-desktop/src/menu.rs`):
   own answer about which helper prompts are handled by a chat. Both are the next step on a Mac; the open
   questions below still apply (menu and badge versus the no-plugin test; what closing the HQ window does).
 
+## The suite viewers (built: read only)
+
+- `lib/hqmd.ts` reads the parts of an hqmd note the web needs: flat frontmatter (`suite_kind`,
+  `suite_fidelity`), top-level typed blocks (`sheet`, `tile`, `plot`) and level 2 headings as slides. It
+  never writes, and a block it does not know stays a code block. `lib/sheetCalc.ts` reads a sheet's table,
+  shows each column by its type (money as "UGX 4,200", never a stray decimal), and works out formulas of a
+  bounded kind: cell references, + - * / and brackets, and SUM, COUNT, MIN, MAX, AVERAGE over a range. A
+  formula it cannot read, or that loops, is shown as written and marked, never as a zero.
+- `components/suite/SuiteViewer.tsx` draws a Sheet (grid with a formula bar, sticky headers, 200 rows at a
+  time, a tab for each sheet), Slides (a strip, one stage, arrow keys, the `two-column` layout) and a Dashboard
+  (tiles and bar, line, pie and donut charts in plain SVG). A tile that cannot be worked out says why in
+  words. It is its own chunk, loaded only when such a note opens (`NoteBody.tsx`), so Chat's first load does
+  not grow.
+- The same viewer shows in the work pane's Result tab and on the Vault note page, for a note whose
+  `suite_kind` is `sheet`, `slides` or `dashboard`. Everything else, including a doc, stays markdown.
+- Not built: editing (the board recommends cells, text and card titles first; the editing API is
+  block by block), Present for slides, the narrow strip of the chat list when the pane is wide, the card
+  preview in chat, a range that points into another note (it says so), sidecar sheets (`data=`; the layout
+  is fixed in suite milestone M4), and filters (`where`, `group`, reserved for M5). The formula reader is
+  the web's own and small; when the suite's Rust calculator is exposed, the web should ask it instead.
+
 ## Next slices, in order
 
-1. The Sheet, Slides and Dashboard viewers in the pane, as the suite milestones land.
+1. Editing in the suite viewers, and asking the suite's own calculator for formulas.
 2. On a Mac: the menu, the Dock badge and the Hub's grace-rule count, from the model above.
 3. The catch-up card and the Work page, once the server rules they need exist.
 

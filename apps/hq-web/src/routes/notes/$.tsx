@@ -16,7 +16,7 @@ import { useSharedConnection } from '~/lib/connection'
 import { AboutNote } from '~/components/notes/AboutNote'
 import { HqHttpError } from '~/lib/hqAuth'
 import { noteQuery, noteTreeQuery, vaultKeys } from '~/lib/queries'
-import { MarkdownViewer } from '~/components/MarkdownViewer'
+import { NoteBody } from '~/components/suite/NoteBody'
 import { ImageViewer } from '~/components/ImageViewer'
 import { NoteEditor } from '~/components/NoteEditor'
 import { SuiteBar } from '~/components/notes/SuiteBar'
@@ -365,7 +365,7 @@ ${safeHtml}
                             onChanged={() => queryClient.invalidateQueries({ queryKey: vaultKeys.note(filePath) })}
                         />
                     )}
-                    <MarkdownViewer content={content} activePath={filePath} zoom={mdZoom} />
+                    <NoteBody content={content} activePath={filePath} zoom={mdZoom} />
                 </>
             )
         }
