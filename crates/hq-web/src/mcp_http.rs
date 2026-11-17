@@ -249,7 +249,13 @@ async fn handle_mcp(
                     session: session.as_deref(),
                     connector: None,
                 };
-                call_tool(state, id, &body, allowed, caller).await
+                match session.as_deref() {
+                    Some(sid) => {
+                        crate::oauth::guard::session_call(state, id, &body, allowed, caller, sid)
+                            .await
+                    }
+                    None => call_tool(state, id, &body, allowed, caller).await,
+                }
             }
         },
         // Load-bearing: claude.ai probes `server/discover` first and falls back to
