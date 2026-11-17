@@ -149,7 +149,7 @@ M0, then made a hard CI limit.
 
 ## Next
 
-1. **More sinks (M3).** The folder sink exists (sealed per original, recovery code, restore drill). Missing: a sink chosen through Android's document picker, a paired-peer sink over the bridge, a cloud-folder sink, key shares as an alternative to one code, a lost-phone drill on a wiped device, and a button on the phone.
+1. **More sinks (M3).** The folder sink exists (sealed per original, recovery code, restore drill). Missing: a sink chosen through Android's document picker, a paired-peer sink (built 2026-11-17: `hq suite sink peer-serve`, `add-peer`, `register-peer`; sealed on the phone, the peer holds ciphertext; setup of the forward is by hand), a cloud-folder sink, key shares as an alternative to one code, a lost-phone drill on a wiped device, and a button on the phone.
 2. **Web editors** (Docs, Sheets) beyond the bar (milestone M2).
 3. **Adoption beyond the neighbour.** A note an import placed under another name, or in
    `Notebooks/Imports/<month>/` for a file outside `Notebooks/`, is not adopted: the lookup is

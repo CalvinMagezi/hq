@@ -123,6 +123,25 @@ pub enum SinkCommand {
     List,
     /// Add a sink that already exists (from another machine or an earlier phone), after checking its code
     Register { folder: PathBuf },
+    /// Make a sink kept by a paired machine, reached through a loopback forward, and show its recovery code (once)
+    AddPeer {
+        /// A short name: lowercase letters, digits and dashes
+        name: String,
+        /// The forwarded address of the peer's store, such as 127.0.0.1:5700
+        addr: String,
+    },
+    /// Add a sink a paired machine already keeps (this phone was replaced), after checking its code
+    RegisterPeer {
+        /// The forwarded address of the peer's store, such as 127.0.0.1:5700
+        addr: String,
+    },
+    /// Keep sealed originals for another machine's sink, on this machine's loopback address
+    PeerServe {
+        /// Where to keep them
+        dir: PathBuf,
+        #[arg(long, default_value_t = 5700)]
+        port: u16,
+    },
 }
 
 #[cfg(feature = "suite")]
@@ -154,6 +173,13 @@ pub async fn run(config: &HqConfig, command: SuiteCommand) -> Result<()> {
             }
             SinkCommand::List => hq_suite_adapter::sinks::list(vault),
             SinkCommand::Register { folder } => hq_suite_adapter::sinks::register(vault, &folder),
+            SinkCommand::AddPeer { name, addr } => {
+                hq_suite_adapter::sinks::add_peer(vault, &name, &addr)
+            }
+            SinkCommand::RegisterPeer { addr } => {
+                hq_suite_adapter::sinks::register_peer(vault, &addr)
+            }
+            SinkCommand::PeerServe { dir, port } => hq_suite_adapter::sinks::peer_serve(&dir, port),
         },
         SuiteCommand::Jobs => shrink::jobs(vault),
         SuiteCommand::Recover => shrink::recover(vault),
