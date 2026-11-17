@@ -1,6 +1,6 @@
 # Web restructure: build plan
 
-Status: slices 1 and 2 built (Vault navigation). Move and rename wait on the server. The rest are proposals.
+Status: slices 1 and 2 built (Vault navigation), and the first part of Chat (list and reply actions). Move and rename wait on the server. The rest are proposals.
 
 The design is the "Restructure" page of the owner's HQ Web & Desktop design canvas (private). This file
 is the build order and the decisions that came out of it, so a session can continue without the canvas.
@@ -68,9 +68,18 @@ deleted; the tree is the one component above.
   modified time, and nothing creates an empty folder.
 - Scroll position on Back is whatever the router restores; it is not guaranteed by this change.
 
+## Chat, first part (built)
+
+- The chat list shows plain text in its preview line (markdown marks are stripped, `lib/replyText.ts`) and a
+  "Draft" mark when the box for that chat holds unsent text (`rowLine`, `useDraftText`).
+- A finished reply has two more hover actions: Save to Vault (a note in `Notebooks/Inbox`, titled from the
+  reply, with an Open and an Undo in the toast) and Make a task (fills the box with a draft the person
+  finishes and sends; nothing is created until they send it). `lib/saveReply.ts`.
+- Undo on any toast now also drops that toast's action button.
+
 ## Next slices, in order
 
-1. Chat grammar: the live line, the result line and the fold, the attention slot, hover actions with
+1. Chat grammar, the rest: the live line, the result line and the fold, the attention slot, hover actions with
    Save to Vault and Make a task, source chips, the composer's own controls and Stop.
 2. The work pane with the Context and Result tabs (Context first: it needs no new data, the chat
    socket already sends each tool call's name and arguments), then Doc, then the other viewers as the

@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
-import { Mic, Copy, Check, Pencil, Plug, RotateCw, Terminal } from 'lucide-react'
+import { Mic, Copy, Check, FilePlus, ListChecks, Pencil, Plug, RotateCw, Terminal } from 'lucide-react'
 import type { ChatOffer, ToolStep } from '~/store/threadStore'
 import type { DriverMeta } from '~/lib/sessionsApi'
 import type { ChatAttachment } from '~/lib/chatUploads'
@@ -41,6 +41,10 @@ interface Props {
   onEdit?: () => void
   /** Offered on the last reply. */
   onRegenerate?: () => void
+  /** Offered on HQ's saved replies: keep this one as a note in the Vault. */
+  onSave?: () => void
+  /** Offered on HQ's saved replies: start a task from this one. */
+  onMakeTask?: () => void
   /** Answers the offer under this reply. */
   onOffer?: (yes: boolean) => void
   /** Brings the offer under this reply back at a time, in unix seconds. */
@@ -51,7 +55,7 @@ interface Props {
  * One chat message. A streaming reply renders through this same layout
  * (thinking, tools, then text), so nothing moves when it becomes a saved message.
  */
-export function ChatBubble({ message, live = false, onEdit, onRegenerate, onOffer, onScheduleOffer }: Props) {
+export function ChatBubble({ message, live = false, onEdit, onRegenerate, onSave, onMakeTask, onOffer, onScheduleOffer }: Props) {
   const [copied, setCopied] = useState(false)
   const isUser = message.role === 'user'
   const steps = message.toolSteps ?? []
@@ -111,6 +115,16 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate, onOffe
             {message.content && (
               <button type="button" onClick={handleCopy} className="a-ib sm" title={copied ? t('chat_copied') : t('chat_copy')} aria-label={t('chat_copy')}>
                 {copied ? <Check className="a-ic xs a-ok-t" aria-hidden="true" /> : <Copy className="a-ic xs" aria-hidden="true" />}
+              </button>
+            )}
+            {onSave && message.content && (
+              <button type="button" onClick={onSave} className="a-ib sm" title={t('chat_save_vault')} aria-label={t('chat_save_vault')}>
+                <FilePlus className="a-ic xs" aria-hidden="true" />
+              </button>
+            )}
+            {onMakeTask && message.content && (
+              <button type="button" onClick={onMakeTask} className="a-ib sm" title={t('chat_make_task')} aria-label={t('chat_make_task')}>
+                <ListChecks className="a-ic xs" aria-hidden="true" />
               </button>
             )}
           </span>

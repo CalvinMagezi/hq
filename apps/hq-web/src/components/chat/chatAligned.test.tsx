@@ -3,7 +3,8 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ChatRow } from './ChatList'
+import { ChatRow, rowLine } from './ChatList'
+import { ChatBubble } from './ChatBubble'
 
 const read = (p: string) => readFileSync(join(import.meta.dir, p), 'utf8')
 
@@ -27,6 +28,45 @@ describe('Chat on the panes', () => {
     expect(html).toContain('class="a-unread"')
     expect(html).toContain('aria-label="Archive Soak test"')
     expect(read('ChatList.tsx')).toContain('<p className="a-grp">')
+  })
+  test('a chat row shows its last line as plain words, not as markdown', () => {
+    const row = (preview: string) =>
+      renderToStaticMarkup(createElement(ChatRow, { thread: { threadId: 'p', title: 'Plan', status: 'active', createdAt: 0, updatedAt: Date.now(), unreadCount: 0, lastMessagePreview: preview } as never, active: false, working: false, spoken: false, onOpen() {}, onArchive() {} }))
+    const html = row('**Drive switched off for session kan') + row('Created **[Host Fleet and Worksp') + row('Saved the plan at **`Notebooks/P')
+    expect(html).toContain('<span>Drive switched off for session kan</span>')
+    expect(html).toContain('<span>Created Host Fleet and Worksp</span>')
+    expect(html).toContain('<span>Saved the plan at Notebooks/P</span>')
+    expect(html).not.toContain('**')
+  })
+  test('a chat with text the person began and did not send shows that text as a draft', () => {
+    const other = rowLine({ draft: 'Remind me to book the', active: false, spoken: false, preview: 'Done.' })
+    expect(other).toEqual({ hasDraft: true, line: 'Remind me to book the' })
+    // The open chat shows its composer, so its row stays as it was.
+    expect(rowLine({ draft: 'Remind me to book the', active: true, spoken: false, preview: 'Done.' })).toEqual({ hasDraft: false, line: 'Done.' })
+    // Spaces alone are not a draft.
+    expect(rowLine({ draft: '   ', active: false, spoken: false, preview: 'Done.' }).hasDraft).toBe(false)
+    expect(rowLine({ draft: '', active: false, spoken: true, preview: '**Heard** you' }).line).toBe('Spoken · Heard you')
+  })
+  test('the row marks a draft with the word Draft', () => {
+    expect(read('ChatList.tsx')).toContain("t('chat_row_draft')")
+    expect(read('ChatList.tsx')).toContain('useDraftText(th.threadId)')
+  })
+  test('a saved reply can be kept as a note or started as a task, with named buttons', () => {
+    const bubble = (role: 'user' | 'assistant', handlers: object) =>
+      renderToStaticMarkup(createElement(ChatBubble, { message: { id: 'm1', role, content: 'Hello there.', timestamp: 0 }, ...handlers }))
+    const reply = bubble('assistant', { onSave() {}, onMakeTask() {} })
+    expect(reply).toContain('aria-label="Save to Vault"')
+    expect(reply).toContain('aria-label="Make a task"')
+    expect(reply).toContain('aria-label="Copy"')
+    // No handler, no button: a reply that is still streaming, or a helper's post, is not offered.
+    const plain = bubble('assistant', {})
+    expect(plain).not.toContain('Save to Vault')
+    expect(plain).not.toContain('Make a task')
+  })
+  test('only HQ\'s own saved replies are offered the two actions', () => {
+    const list = read('MessageList.tsx')
+    expect(list).toMatch(/onSave=\{onSave && m\.role === 'assistant' && !liveTurn && isSaved\(m\) && !m\.driver/)
+    expect(list).toMatch(/onMakeTask=\{onMakeTask && m\.role === 'assistant' && !liveTurn && isSaved\(m\) && !m\.driver/)
   })
   test('the details pane is the design card list, not the old strip', () => {
     const panel = read('SessionsPanel.tsx')

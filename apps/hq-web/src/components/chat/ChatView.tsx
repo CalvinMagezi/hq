@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { newClientId } from '~/lib/outbox'
 import { ChevronLeft, Info, Paperclip, PencilLine, X } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { useThreadStore, useLiveTurn, type ThreadMessage } from '~/store/threadStore'
 import { useWS } from '~/context/WebSocketContext'
-import { toastUndo, toastAlert, toastNotice } from '~/lib/toast'
+import { toastUndo, toastAlert, toastNotice, useToasts } from '~/lib/toast'
+import { makeTaskDraft, saveReplyToVault } from '~/lib/saveReply'
 import { failureLine } from '~/lib/version'
 import { t } from '~/strings'
 import { sharedConnectionNow, useSharedConnection } from '~/lib/connection'
@@ -51,6 +53,7 @@ interface Props {
 
 /** The whole chat (AlignedChat): the chats list, the open chat and its details, on the shared panes. */
 export function ChatView({ active, threadId }: Props) {
+  const navigate = useNavigate()
   const chatDraft = useHQStore((s) => s.chatDraft)
   const setChatDraft = useHQStore((s) => s.setChatDraft)
   const clearChatUnread = useHQStore((s) => s.clearChatUnread)
@@ -257,6 +260,27 @@ export function ChatView({ active, threadId }: Props) {
     focusInput()
   }
 
+  /** Keeps a reply as a note. The toast says so, offers to open it, and Undo puts it in the Trash. */
+  const saveReply = (m: ThreadMessage) => {
+    void saveReplyToVault(m.content, m.messageId)
+      .then(({ path, undo }) =>
+        useToasts.getState().push({
+          text: t('chat_saved_vault'),
+          kind: 'status',
+          undo,
+          restored: t('chat_save_removed'),
+          action: { label: t('chat_saved_open'), run: () => void navigate({ to: '/notes/$', params: { _splat: path } }) },
+        }),
+      )
+      .catch(() => toastAlert(t('chat_save_failed')))
+  }
+
+  /** A task is HQ's to make, so the request goes in the composer for the person to read and send. */
+  const makeTaskFrom = (m: ThreadMessage) => {
+    draft.setText(makeTaskDraft(m.content))
+    focusInput()
+  }
+
   /** Runs the last question again: it and the reply after it are replaced. */
   const regenerate = () => {
     if (!activeThreadId || !connected || liveTurn) return
@@ -341,6 +365,8 @@ export function ChatView({ active, threadId }: Props) {
         followSignal={followSignal}
         onEdit={startEdit}
         onRegenerate={regenerate}
+        onSave={saveReply}
+        onMakeTask={makeTaskFrom}
         onPick={(text) => draft.setText(text)}
         onOffer={answerOfferOn}
         onScheduleOffer={scheduleOfferOn}

@@ -32,6 +32,10 @@ interface Props {
   followSignal: number
   onEdit: (message: ThreadMessage) => void
   onRegenerate: () => void
+  /** Keeps a reply as a note in the Vault. */
+  onSave?: (message: ThreadMessage) => void
+  /** Starts a task from a reply: a request goes in the composer. */
+  onMakeTask?: (message: ThreadMessage) => void
   /** Puts a suggestion's example in the composer, for the person to send or change. */
   onPick?: (text: string) => void
   /** Answers the offer under the last reply. */
@@ -40,7 +44,7 @@ interface Props {
 }
 
 /** The scrolling message history: older pages on demand, the live reply, and a jump-to-latest button. */
-export function MessageList({ threadId, messages, followSignal, onEdit, onRegenerate, onPick, onOffer, onScheduleOffer }: Props) {
+export function MessageList({ threadId, messages, followSignal, onEdit, onRegenerate, onSave, onMakeTask, onPick, onOffer, onScheduleOffer }: Props) {
   const liveTurn = useLiveTurn(threadId)
   const { connected } = useWS()
   const unansweredKey = connected ? 'fail_finish_reply_no_reply' : 'fail_finish_reply_unreachable'
@@ -102,6 +106,8 @@ export function MessageList({ threadId, messages, followSignal, onEdit, onRegene
               onScheduleOffer={onScheduleOffer && m === last && !liveTurn ? (at) => onScheduleOffer(m, at) : undefined}
               onEdit={m.role === 'user' && !liveTurn && isSaved(m) && !isMcpLocked(messages, i) ? () => onEdit(m) : undefined}
               onRegenerate={canRegenerate && m === last ? onRegenerate : undefined}
+              onSave={onSave && m.role === 'assistant' && !liveTurn && isSaved(m) && !m.driver ? () => onSave(m) : undefined}
+              onMakeTask={onMakeTask && m.role === 'assistant' && !liveTurn && isSaved(m) && !m.driver ? () => onMakeTask(m) : undefined}
             />
             </StreamErrorBoundary>
           ))}

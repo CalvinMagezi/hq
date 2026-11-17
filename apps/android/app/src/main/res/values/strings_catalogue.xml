@@ -1776,6 +1776,15 @@
     <string name="chat_table_expand">Expand table</string>
     <string name="chat_table_copied">Table copied</string>
     <string name="chat_row_running">%1$s running</string>
+    <string name="chat_row_draft">Draft</string>
+    <string name="chat_save_vault">Save to Vault</string>
+    <string name="chat_make_task">Make a task</string>
+    <string name="chat_saved_vault">Saved to your Vault</string>
+    <string name="chat_saved_open">Open</string>
+    <string name="chat_save_removed">Removed from your Vault</string>
+    <string name="chat_save_failed">Couldn\'t save this to your Vault. Try again.</string>
+    <string name="chat_save_default_title">Chat reply</string>
+    <string name="chat_make_task_draft">Make a task from your answer: %1$s</string>
     <string name="chat_spoken">Spoken</string>
     <string name="chat_spoken_quote">You said: “%1$s”</string>
     <string name="chat_stopped">Stopped. What I had so far is kept.</string>
