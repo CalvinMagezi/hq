@@ -16,6 +16,7 @@ const NO_ASK_DENIED_TOOLS: &[&str] = &[
     "harness_session_handoff",
     "agent_delegate",
     "harness_session_send",
+    "harness_session_publish",
 ];
 
 /// Bytes of path, query and fragment a tainted `web_fetch` may carry unasked. Ordinary page
@@ -65,6 +66,9 @@ pub(super) fn tainted_reason_for(
     }
     match tool {
         "harness_session_send" => Some("would type into a running coding agent".into()),
+        "harness_session_publish" => {
+            Some("would push a helper's branch and open a pull request".into())
+        }
         hq_tools::github::coder::CODER_TOOL if coder_write(args) => {
             Some("would start or steer a coding job".into())
         }

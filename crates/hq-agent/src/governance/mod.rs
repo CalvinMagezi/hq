@@ -382,6 +382,9 @@ impl ToolGuardian {
 mod tests;
 
 #[cfg(test)]
+mod injection_eval;
+
+#[cfg(test)]
 mod injection_tests;
 
 #[cfg(test)]
