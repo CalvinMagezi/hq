@@ -365,7 +365,7 @@ ${safeHtml}
                             onChanged={() => queryClient.invalidateQueries({ queryKey: vaultKeys.note(filePath) })}
                         />
                     )}
-                    <NoteBody content={content} activePath={filePath} zoom={mdZoom} />
+                    <NoteBody content={content} activePath={filePath} zoom={mdZoom} hash={hash} onSaved={() => queryClient.invalidateQueries({ queryKey: vaultKeys.note(filePath) })} />
                 </>
             )
         }

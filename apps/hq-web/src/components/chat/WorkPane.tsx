@@ -147,15 +147,15 @@ function NoteResult({ path, onAsk, onTask }: { path: string; onAsk: (path: strin
       </div>
       {note.isPending && <p className="a-body-sm a-muted">{t('chat_pane_loading')}</p>}
       {missing && <p role="alert" className="a-body-sm a-muted">{t('chat_pane_missing')}</p>}
-      {!missing && content !== '' && <ResultBody content={content} />}
+      {!missing && content !== '' && <ResultBody content={content} path={path} hash={note.data?.hash} onSaved={() => void note.refetch()} />}
     </div>
   )
 }
 
 /** The note as the pane shows it: a suite viewer for a sheet, slides or dashboard, else its text. */
-function ResultBody({ content }: { content: string }) {
+function ResultBody({ content, path, hash, onSaved }: { content: string; path: string; hash?: string; onSaved: () => void }) {
   const suite = hasViewer(readHqmd(content))
-  return suite ? <NoteBody content={content} /> : <MarkdownViewer content={stripFrontmatter(content)} bare />
+  return suite ? <NoteBody content={content} activePath={path} hash={hash} onSaved={onSaved} /> : <MarkdownViewer content={stripFrontmatter(content)} bare />
 }
 
 interface ContextProps {

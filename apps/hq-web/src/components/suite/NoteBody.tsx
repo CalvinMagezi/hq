@@ -12,20 +12,24 @@ interface Props {
   /** Passed on to the markdown viewer when the note is plain. */
   activePath?: string
   zoom?: number
+  /** The note's hash, for saving a change against. */
+  hash?: string
+  /** A change was saved: load the note again. */
+  onSaved?: () => void
 }
 
 /**
  * A note's body for reading: a native sheet, slides or dashboard gets its viewer, and everything else is
  * markdown, which hqmd allows since it reads without HQ. The note is never changed here.
  */
-export function NoteBody({ content, activePath, zoom }: Props) {
+export function NoteBody({ content, activePath, zoom, hash, onSaved }: Props) {
   const suite = useMemo(() => hasViewer(readHqmd(content)), [content])
   if (!suite) {
     return <MarkdownViewer content={content} activePath={activePath} zoom={zoom} />
   }
   return (
     <Suspense fallback={<p className="a-body-sm a-muted">{t('chat_pane_loading')}</p>}>
-      <SuiteViewer text={content} />
+      <SuiteViewer text={content} path={activePath} hash={hash} onSaved={onSaved} />
     </Suspense>
   )
 }

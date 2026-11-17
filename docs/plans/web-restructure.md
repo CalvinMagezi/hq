@@ -188,15 +188,22 @@ HQ Hub (`crates/hq-desktop/src/menu.rs`):
   not grow.
 - The same viewer shows in the work pane's Result tab and on the Vault note page, for a note whose
   `suite_kind` is `sheet`, `slides` or `dashboard`. Everything else, including a doc, stays markdown.
-- Not built: editing (the board recommends cells, text and card titles first; the editing API is
-  block by block), Present for slides, the narrow strip of the chat list when the pane is wide, the card
+- Editing (`lib/hqmdEdit.ts`, `components/suite/useSuiteEdit.ts`): a sheet's cells (double click, Enter or F2;
+  Enter keeps, Escape leaves it, Delete clears), a new row at the end, a card's title and a card's text. Each
+  edit is a patch to one place in the note: the cell's row line or the heading or card lines, with every
+  other byte and the line endings as they were. It names what the caller saw and is refused if the note
+  holds something else now (stale). Values must fit the column (money is stored as the plain number).
+  Saves go one at a time against the hash last seen; if HQ says the note changed elsewhere, the edit is
+  dropped and the latest text returns. A file kept view-only is never edited. Tiles and charts change
+  through Ask HQ, as the board says.
+- Not built: Present for slides, the narrow strip of the chat list when the pane is wide, the card
   preview in chat, a range that points into another note (it says so), sidecar sheets (`data=`; the layout
   is fixed in suite milestone M4), and filters (`where`, `group`, reserved for M5). The formula reader is
   the web's own and small; when the suite's Rust calculator is exposed, the web should ask it instead.
 
 ## Next slices, in order
 
-1. Editing in the suite viewers, and asking the suite's own calculator for formulas.
+1. Asking the suite's own calculator for formulas, once it is exposed.
 2. On a Mac: the menu, the Dock badge and the Hub's grace-rule count, from the model above.
 3. The catch-up card and the Work page, once the server rules they need exist.
 

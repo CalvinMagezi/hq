@@ -29,3 +29,23 @@ describe('the suite viewers', () => {
     expect(draw('---\nsuite_kind: doc\n---\n# Doc\n')).not.toContain('su-sheet')
   })
 })
+
+describe('editing in the viewers', () => {
+  test('without a place to save to, nothing can be edited', () => {
+    const html = draw('---\nsuite_kind: slides\n---\n# D\n\n## One\n\nHi\n')
+    expect(html).not.toContain('su-title-input')
+    expect(html).not.toContain('Edit text')
+  })
+  test('with one, a card title is a field, text has an Edit button, and a sheet can take a row', () => {
+    const slides = renderToStaticMarkup(createElement(SuiteViewer, { text: '---\nsuite_kind: slides\n---\n# D\n\n## One\n\nHi\n', path: 'Notebooks/D.md', hash: 'h' }))
+    expect(slides).toContain('su-title-input')
+    expect(slides).toContain('Edit text')
+    const sheet = renderToStaticMarkup(createElement(SuiteViewer, { text: `---\nsuite_kind: sheet\n---\n${SHEET}`, path: 'Notebooks/S.md', hash: 'h' }))
+    expect(sheet).toContain('Add a row')
+  })
+  test('a file kept view-only is never offered an edit', () => {
+    const html = renderToStaticMarkup(createElement(SuiteViewer, { text: `---\nsuite_kind: sheet\nsuite_fidelity: view\n---\n${SHEET}`, path: 'Notebooks/S.md', hash: 'h' }))
+    expect(html).not.toContain('Add a row')
+    expect(html).toContain('cannot be changed here')
+  })
+})

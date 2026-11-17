@@ -39,3 +39,13 @@
 .su-legend{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:4px 16px;font:400 14px/20px var(--font-sans)}
 .su-legend li{display:flex;align-items:center;gap:6px}
 .su-key{width:10px;height:10px;border-radius:2px;flex:none}
+
+.su-input{width:100%;min-width:80px;padding:2px 4px;border:0;background:transparent;color:inherit;font:inherit;text-align:inherit}
+.su-input:focus-visible{outline:2px solid var(--focus-ring);outline-offset:0}
+.su-grid-wrap:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.su-save{min-height:20px;margin:0}
+.su-title-input{width:100%;padding:4px 8px;border:1px solid transparent;border-radius:var(--radius-md);background:transparent;color:var(--ink)}
+.su-title-input:hover{border-color:var(--line)}
+.su-title-input:focus-visible{outline:2px solid var(--focus-ring);border-color:transparent}
+.su-body-edit{display:flex;flex-direction:column;gap:8px}
+.su-textarea{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface-000);color:var(--ink);font:400 14px/20px var(--font-sans)}

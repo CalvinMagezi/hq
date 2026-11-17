@@ -9,6 +9,9 @@ export interface TypedBlock {
   attrs: Record<string, string>
   /** The text between the fences. */
   body: string
+  /** Line numbers (from 0) of the opening and closing fence in the text this was read from. */
+  open?: number
+  close?: number
 }
 
 export interface Slide {
@@ -65,7 +68,7 @@ export function typedBlocks(body: string): TypedBlock[] {
     let end = i + 1
     while (end < lines.length && !(lines[end].startsWith(fence) && lines[end].trim() === fence[0].repeat(lines[end].trim().length) && lines[end].trim().length >= fence.length)) end += 1
     const header = parseHeader(open[2])
-    if (header) out.push({ ...header, body: lines.slice(i + 1, end).join('\n') })
+    if (header) out.push({ ...header, body: lines.slice(i + 1, end).join('\n'), open: i, close: end })
     i = end
   }
   return out
