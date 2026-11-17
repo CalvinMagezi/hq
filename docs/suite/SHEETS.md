@@ -45,3 +45,13 @@ references between sheets. This is the engine and its measurement, milestone M4'
 ## On the phone
 
 A `sheet` block in a note draws as a grid and a `tile` block as a labelled number, both computed by hq (`GET /api/suite/sheet`, `GET /api/suite/tile`). A tile reads a sheet in its own note for now: `from="[[Note]]!D2:D40"` with `fn` of `sum`, `count`, `avg`, `min`, `max` or `median`, and `format` such as `ugx`.
+
+## Accuracy after the first fixes
+
+Re-measured on the same 57 workbooks (86,082 formulas): 62,556 give Excel's saved answer (72.7%), **42 give another answer (0.05%)**, and 23,484 cannot be calculated yet (27.3%). The wrong answers fell from 447 to 42 after three fixes the first measurement pointed at:
+
+- A cell the engine cannot calculate (`#NAME?`) is no longer hidden by `IFERROR` or `ISERROR`: the formula stays "cannot calculate" instead of returning the fallback with confidence. This alone removed about 290 wrong answers, and it is the rule that matters most: an unsupported cell must never turn into a plausible number.
+- Values loaded from a file keep their type (`Sheet::set_value`): text that looks like a number stays text, and each Excel error keeps its kind.
+- `EDATE` reproduces Excel's 1900 quirks (serial 0 is "0 January 1900", and 1900 counts as a leap year).
+
+`hq suite calc-check` now also prints the wrong answers by leading function and by the kind of value on each side (counts only), so the next fix is chosen from numbers.

@@ -299,3 +299,59 @@ fn lookups_payments_and_dates_agree_with_a_spreadsheet() {
     assert_eq!(at(&s, "E3"), n(44530.0));
     assert_eq!(at(&s, "E4"), n(44620.0));
 }
+
+#[test]
+fn a_loaded_value_keeps_its_type() {
+    let mut s = Sheet::new();
+    s.set_value(0, 0, Value::Text("123".into()));
+    s.set_value(1, 0, Value::Err(CalcError::Div0));
+    s.set(2, 0, "=ISTEXT(A1)");
+    s.set(3, 0, "=ISERROR(B1)");
+    s.set(4, 0, "=A1+1");
+    assert_eq!(s.get(2, 0), Value::Bool(true));
+    assert_eq!(s.get(3, 0), Value::Bool(true));
+    assert_eq!(
+        s.get(4, 0),
+        n(124.0),
+        "arithmetic still reads number-like text as a number"
+    );
+}
+
+#[test]
+fn an_error_handler_does_not_hide_what_the_engine_cannot_calculate() {
+    let s = sheet(&[
+        ("A1", "=XLOOKUP(1,2,3)"),
+        ("B1", "=IFERROR(A1,0)"),
+        ("B2", "=ISERROR(A1)"),
+        ("B3", "=IFERROR(1/0,7)"),
+        ("B4", "=ISERROR(1/0)"),
+    ]);
+    assert_eq!(at(&s, "B1"), Value::Err(CalcError::Name));
+    assert_eq!(at(&s, "B2"), Value::Err(CalcError::Name));
+    assert_eq!(at(&s, "B3"), n(7.0));
+    assert_eq!(at(&s, "B4"), Value::Bool(true));
+}
+
+#[test]
+fn edate_reproduces_the_1900_quirks() {
+    let s = sheet(&[
+        ("A1", "=EDATE(0,0)"),
+        ("A2", "=EDATE(0,60)"),
+        ("A3", "=EDATE(0,-1)"),
+        ("A4", "=EDATE(31,1)"),
+        ("A5", "=EDATE(61,-1)"),
+    ]);
+    assert_eq!(at(&s, "A1"), n(0.0));
+    assert_eq!(at(&s, "A2"), n(1827.0));
+    assert_eq!(at(&s, "A3"), Value::Err(CalcError::Num));
+    assert_eq!(
+        at(&s, "A4"),
+        n(59.0),
+        "31 Jan 1900 plus a month is 28 Feb 1900, serial 59"
+    );
+    assert_eq!(
+        at(&s, "A5"),
+        n(32.0),
+        "1 Mar 1900 minus a month is 1 Feb 1900"
+    );
+}
