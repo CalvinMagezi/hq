@@ -246,7 +246,21 @@ mod tests {
         );
         fs::write(&gh, script).unwrap();
         fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
+        wait_until_runnable(&gh);
+        let _ = fs::remove_file(d.join("calls.log"));
         Fixture { dir, gh }
+    }
+
+    /// A sibling test's fork can hold our script open for writing, so the first exec fails with "text file busy".
+    fn wait_until_runnable(gh: &std::path::Path) {
+        for _ in 0..50 {
+            match Command::new(gh).arg("version").output() {
+                Err(e) if e.raw_os_error() == Some(26) => {
+                    std::thread::sleep(std::time::Duration::from_millis(20))
+                }
+                _ => return,
+            }
+        }
     }
 
     fn view(sha: &str, extra: &str) -> String {
