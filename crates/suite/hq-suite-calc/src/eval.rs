@@ -53,6 +53,19 @@ pub const FUNCTIONS: &[&str] = &[
     "VLOOKUP",
     "PMT",
     "EDATE",
+    "COUNTIF",
+    "SUMIF",
+    "SEARCH",
+    "FIND",
+    "SUBSTITUTE",
+    "N",
+    "XLOOKUP",
+    "TEXT",
+    "POWER",
+    "QUOTIENT",
+    "CHAR",
+    "ROWS",
+    "TEXTJOIN",
 ];
 
 type R = Result<Value, CalcError>;
@@ -505,6 +518,144 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
             let months = num(&run(&args[1], ctx)?)?.trunc() as i64;
             Ok(Value::Num(add_months(serial as i64, months)? as f64))
         }
+        "POWER" | "QUOTIENT" => {
+            arity(args, 2, 2)?;
+            let (x, y) = (num(&run(&args[0], ctx)?)?, num(&run(&args[1], ctx)?)?);
+            let out = if name == "POWER" {
+                x.powf(y)
+            } else if y == 0.0 {
+                return Err(CalcError::Div0);
+            } else {
+                (x / y).trunc()
+            };
+            if out.is_finite() {
+                Ok(Value::Num(out))
+            } else {
+                Err(CalcError::Num)
+            }
+        }
+        "CHAR" => {
+            arity(args, 1, 1)?;
+            let code = num(&run(&args[0], ctx)?)?.trunc();
+            if !(1.0..=255.0).contains(&code) {
+                return Err(CalcError::Value);
+            }
+            Ok(Value::Text(char::from(code as u8).to_string()))
+        }
+        "ROWS" => match args {
+            [Expr::Range(a, b)] => Ok(Value::Num(f64::from(a.row.abs_diff(b.row)) + 1.0)),
+            [Expr::Ref(_)] => Ok(Value::Num(1.0)),
+            _ => Err(CalcError::Value),
+        },
+        "TEXTJOIN" => {
+            arity(args, 3, 255)?;
+            let delimiter = text_of(&run(&args[0], ctx)?);
+            let skip_empty = match run(&args[1], ctx)? {
+                Value::Bool(b) => b,
+                v => num(&v)? != 0.0,
+            };
+            let mut parts = Vec::new();
+            for a in &args[2..] {
+                for v in range_list(a, ctx)? {
+                    if let Value::Err(e) = v {
+                        return Err(e);
+                    }
+                    let t = text_of(&v);
+                    if !(skip_empty && t.is_empty()) {
+                        parts.push(t);
+                    }
+                }
+            }
+            Ok(Value::Text(parts.join(&delimiter)))
+        }
+        "COUNTIF" | "SUMIF" => count_or_sum_if(name, args, ctx),
+        "SEARCH" | "FIND" => {
+            arity(args, 2, 3)?;
+            let find = text_of(&run(&args[0], ctx)?);
+            let within = text_of(&run(&args[1], ctx)?);
+            let start = if args.len() == 3 {
+                num(&run(&args[2], ctx)?)?
+            } else {
+                1.0
+            };
+            if start < 1.0 {
+                return Err(CalcError::Value);
+            }
+            let (hay, needle): (Vec<char>, Vec<char>) = if name == "SEARCH" {
+                (
+                    within.to_lowercase().chars().collect(),
+                    find.to_lowercase().chars().collect(),
+                )
+            } else {
+                (within.chars().collect(), find.chars().collect())
+            };
+            let from = start as usize - 1;
+            if from > hay.len() {
+                return Err(CalcError::Value);
+            }
+            let at = (from..=hay.len().saturating_sub(needle.len()))
+                .find(|&i| hay[i..].starts_with(&needle));
+            at.map(|i| Value::Num(i as f64 + 1.0))
+                .ok_or(CalcError::Value)
+        }
+        "SUBSTITUTE" => {
+            arity(args, 3, 4)?;
+            let text = text_of(&run(&args[0], ctx)?);
+            let (old, new) = (text_of(&run(&args[1], ctx)?), text_of(&run(&args[2], ctx)?));
+            if old.is_empty() {
+                return Ok(Value::Text(text));
+            }
+            if args.len() == 3 {
+                return Ok(Value::Text(text.replace(&old, &new)));
+            }
+            let which = num(&run(&args[3], ctx)?)?;
+            if which < 1.0 {
+                return Err(CalcError::Value);
+            }
+            let mut out = String::new();
+            let (mut seen, mut rest) = (0usize, text.as_str());
+            while let Some(i) = rest.find(&old) {
+                seen += 1;
+                out.push_str(&rest[..i]);
+                out.push_str(if seen == which as usize { &new } else { &old });
+                rest = &rest[i + old.len()..];
+            }
+            out.push_str(rest);
+            Ok(Value::Text(out))
+        }
+        "N" => {
+            arity(args, 1, 1)?;
+            Ok(Value::Num(match run(&args[0], ctx)? {
+                Value::Num(n) => n,
+                Value::Bool(b) => f64::from(u8::from(b)),
+                _ => 0.0,
+            }))
+        }
+        "XLOOKUP" => {
+            arity(args, 3, 4)?;
+            let key = run(&args[0], ctx)?;
+            let (look, ret) = (range_list(&args[1], ctx)?, range_list(&args[2], ctx)?);
+            match look
+                .iter()
+                .position(|v| order(v, &key) == Ordering::Equal && rank(v) == rank(&key))
+            {
+                Some(i) => ret.get(i).cloned().ok_or(CalcError::Ref),
+                None if args.len() == 4 => run(&args[3], ctx),
+                None => Err(CalcError::Na),
+            }
+        }
+        "TEXT" => {
+            arity(args, 2, 2)?;
+            let value = run(&args[0], ctx)?;
+            let Value::Text(format) = run(&args[1], ctx)? else {
+                return Err(CalcError::Value);
+            };
+            // Only number formats are reproduced; a date or free-form format stays "cannot calculate".
+            let Some(shown) = format_text(num(&value)?, &format) else {
+                return Err(CalcError::Name);
+            };
+            Ok(Value::Text(shown))
+        }
         "ABS" => one(args, ctx, f64::abs),
         "INT" => one(args, ctx, f64::floor),
         "SQRT" => {
@@ -691,4 +842,122 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     (yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
+/// The cells of a range, or the one value of a single argument, in reading order.
+fn range_list(e: &Expr, ctx: &mut dyn Cells) -> Result<Vec<Value>, CalcError> {
+    match e {
+        Expr::Range(a, b) => range_values(*a, *b, ctx),
+        other => Ok(vec![run(other, ctx)?]),
+    }
+}
+
+/// A `COUNTIF` or `SUMIF` test: `5`, `"text"`, `">5"`, `"<=3"`, `"<>x"`.
+fn criterion_matches(cell: &Value, criterion: &Value) -> bool {
+    let Value::Text(c) = criterion else {
+        return order(cell, criterion) == Ordering::Equal && rank(cell) == rank(criterion);
+    };
+    let (op, rest) = ["<>", "<=", ">=", "<", ">", "="]
+        .iter()
+        .find_map(|op| c.strip_prefix(op).map(|r| (*op, r)))
+        .unwrap_or(("=", c.as_str()));
+    if (op == "=" || op == "<>") && (rest.contains('*') || rest.contains('?')) {
+        let hit = matches!(cell, Value::Text(t) if wildcard_match(&rest.to_lowercase(), &t.to_lowercase()));
+        return if op == "=" { hit } else { !hit };
+    }
+    let wanted = match rest.trim().parse::<f64>() {
+        Ok(n) => Value::Num(n),
+        Err(_) => Value::Text(rest.to_string()),
+    };
+    // A comparison only holds between values of the same kind, as in a spreadsheet.
+    let same_kind = rank(cell) == rank(&wanted) && !matches!(cell, Value::Empty);
+    let ord = order(cell, &wanted);
+    match op {
+        "<>" => !(same_kind && ord == Ordering::Equal),
+        "=" => same_kind && ord == Ordering::Equal,
+        "<" => same_kind && ord == Ordering::Less,
+        ">" => same_kind && ord == Ordering::Greater,
+        "<=" => same_kind && ord != Ordering::Greater,
+        _ => same_kind && ord != Ordering::Less,
+    }
+}
+
+fn count_or_sum_if(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
+    let counting = name == "COUNTIF";
+    arity(args, 2, if counting { 2 } else { 3 })?;
+    let tested = range_list(&args[0], ctx)?;
+    let criterion = run(&args[1], ctx)?;
+    let summed = if !counting && args.len() == 3 {
+        Some(range_list(&args[2], ctx)?)
+    } else {
+        None
+    };
+    let mut total = 0.0;
+    for (i, cell) in tested.iter().enumerate() {
+        if !criterion_matches(cell, &criterion) {
+            continue;
+        }
+        if counting {
+            total += 1.0;
+        } else if let Value::Num(n) = summed
+            .as_ref()
+            .map_or(Some(cell), |s| s.get(i))
+            .unwrap_or(&Value::Empty)
+        {
+            total += n;
+        }
+    }
+    Ok(Value::Num(total))
+}
+
+/// `0`, `0.00`, `#,##0`, `#,##0.00`, `0%`, `0.0%`: the formats a sheet of money and counts uses.
+fn format_text(n: f64, format: &str) -> Option<String> {
+    let percent = format.ends_with('%');
+    let body = format.trim_end_matches('%');
+    let (int_part, frac_part) = body.split_once('.').map_or((body, ""), |(a, b)| (a, b));
+    let valid = |s: &str, allowed: &[char]| s.chars().all(|c| allowed.contains(&c));
+    if body.is_empty() || !valid(int_part, &['0', '#', ',']) || !valid(frac_part, &['0', '#']) {
+        return None;
+    }
+    let grouping = int_part.contains(',');
+    let decimals = frac_part.len();
+    let scaled = if percent { n * 100.0 } else { n };
+    let rounded = round_to(scaled, decimals as f64);
+    let fixed = format!("{:.*}", decimals, rounded.abs());
+    let (whole, frac) = fixed
+        .split_once('.')
+        .map_or((fixed.as_str(), ""), |(a, b)| (a, b));
+    let whole = if grouping {
+        let digits: Vec<char> = whole.chars().collect();
+        let mut out = String::new();
+        for (i, c) in digits.iter().enumerate() {
+            if i > 0 && (digits.len() - i).is_multiple_of(3) {
+                out.push(',');
+            }
+            out.push(*c);
+        }
+        out
+    } else {
+        whole.to_string()
+    };
+    let sign = if rounded < 0.0 { "-" } else { "" };
+    let dot = if decimals > 0 { "." } else { "" };
+    Some(format!(
+        "{sign}{whole}{dot}{frac}{}",
+        if percent { "%" } else { "" }
+    ))
+}
+
+/// `*` is any run of characters and `?` any one, as in a `COUNTIF` criterion.
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    fn go(p: &[char], t: &[char]) -> bool {
+        match p.split_first() {
+            None => t.is_empty(),
+            Some(('*', rest)) => (0..=t.len()).any(|i| go(rest, &t[i..])),
+            Some(('?', rest)) => !t.is_empty() && go(rest, &t[1..]),
+            Some((c, rest)) => t.first() == Some(c) && go(rest, &t[1..]),
+        }
+    }
+    let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), text.chars().collect());
+    go(&p, &t)
 }

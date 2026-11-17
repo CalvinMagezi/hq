@@ -259,7 +259,7 @@ fn every_listed_function_exists_and_an_unlisted_one_does_not() {
         );
     }
     assert_eq!(
-        at(&sheet(&[("A1", "=XLOOKUP(1,2,3)")]), "A1"),
+        at(&sheet(&[("A1", "=LET(1,2,3)")]), "A1"),
         Value::Err(CalcError::Name)
     );
 }
@@ -320,7 +320,7 @@ fn a_loaded_value_keeps_its_type() {
 #[test]
 fn an_error_handler_does_not_hide_what_the_engine_cannot_calculate() {
     let s = sheet(&[
-        ("A1", "=XLOOKUP(1,2,3)"),
+        ("A1", "=LET(1,2,3)"),
         ("B1", "=IFERROR(A1,0)"),
         ("B2", "=ISERROR(A1)"),
         ("B3", "=IFERROR(1/0,7)"),
@@ -454,4 +454,94 @@ fn a_difference_within_rounding_noise_of_zero_is_zero_and_text_dates_count_as_da
         Value::Err(CalcError::Value),
         "only the ISO form is read as a date"
     );
+}
+
+#[test]
+fn counting_searching_and_text_functions_agree_with_a_spreadsheet() {
+    let s = sheet(&[
+        ("A1", "apple"),
+        ("A2", "Apple"),
+        ("A3", "pear"),
+        ("A4", "5"),
+        ("A5", "12"),
+        ("B1", "1"),
+        ("B2", "2"),
+        ("B3", "3"),
+        ("B4", "4"),
+        ("B5", "5"),
+        ("C1", "=COUNTIF(A1:A5,\"apple\")"),
+        ("C2", "=COUNTIF(A1:A5,\">6\")"),
+        ("C3", "=COUNTIF(A1:A5,\"<>pear\")"),
+        ("C4", "=SUMIF(A1:A5,\"apple\",B1:B5)"),
+        ("C5", "=SUMIF(A4:A5,\">=5\")"),
+        ("D1", "=SEARCH(\"P\",\"apple\")"),
+        ("D2", "=FIND(\"P\",\"apple\")"),
+        ("D3", "=SUBSTITUTE(\"a-b-c\",\"-\",\"+\")"),
+        ("D4", "=SUBSTITUTE(\"a-b-c\",\"-\",\"+\",2)"),
+        ("D5", "=N(TRUE)+N(\"x\")+N(3)"),
+        ("E1", "=XLOOKUP(\"pear\",A1:A5,B1:B5)"),
+        ("E2", "=XLOOKUP(\"kiwi\",A1:A5,B1:B5,\"none\")"),
+        ("E3", "=XLOOKUP(\"kiwi\",A1:A5,B1:B5)"),
+        ("F1", "=TEXT(1234567.891,\"#,##0\")"),
+        ("F2", "=TEXT(0.256,\"0.0%\")"),
+        ("F3", "=TEXT(-5.5,\"0.00\")"),
+        ("F4", "=TEXT(44592,\"yyyy-mm-dd\")"),
+    ]);
+    assert_eq!(at(&s, "C1"), n(2.0), "case does not matter");
+    assert_eq!(at(&s, "C2"), n(1.0));
+    assert_eq!(at(&s, "C3"), n(4.0));
+    assert_eq!(at(&s, "C4"), n(3.0));
+    assert_eq!(at(&s, "C5"), n(17.0));
+    assert_eq!(at(&s, "D1"), n(2.0));
+    assert_eq!(at(&s, "D2"), Value::Err(CalcError::Value));
+    assert_eq!(at(&s, "D3"), Value::Text("a+b+c".into()));
+    assert_eq!(at(&s, "D4"), Value::Text("a-b+c".into()));
+    assert_eq!(at(&s, "D5"), n(4.0));
+    assert_eq!(at(&s, "E1"), n(3.0));
+    assert_eq!(at(&s, "E2"), Value::Text("none".into()));
+    assert_eq!(at(&s, "E3"), Value::Err(CalcError::Na));
+    assert_eq!(at(&s, "F1"), Value::Text("1,234,568".into()));
+    assert_eq!(at(&s, "F2"), Value::Text("25.6%".into()));
+    assert_eq!(at(&s, "F3"), Value::Text("-5.50".into()));
+    assert_eq!(
+        at(&s, "F4"),
+        Value::Err(CalcError::Name),
+        "a date format is not reproduced, so it is not guessed"
+    );
+}
+
+#[test]
+fn wildcards_and_the_small_math_and_text_functions_agree_with_a_spreadsheet() {
+    let s = sheet(&[
+        ("A1", "apple pie"),
+        ("A2", "pear"),
+        ("A3", "applesauce"),
+        ("A4", ""),
+        ("A5", "x"),
+        ("B1", "=COUNTIF(A1:A5,\"apple*\")"),
+        ("B2", "=COUNTIF(A1:A5,\"?ear\")"),
+        ("B3", "=COUNTIF(A1:A5,\"<>apple*\")"),
+        ("C1", "=POWER(2,10)"),
+        ("C2", "=QUOTIENT(7,2)"),
+        ("C3", "=QUOTIENT(-7,2)"),
+        ("C4", "=QUOTIENT(1,0)"),
+        ("C5", "=CHAR(65)"),
+        ("D1", "=ROWS(A1:B4)"),
+        ("D2", "=TEXTJOIN(\", \",TRUE,A1:A5)"),
+        ("D3", "=TEXTJOIN(\"-\",FALSE,A4:A5)"),
+    ]);
+    assert_eq!(at(&s, "B1"), n(2.0));
+    assert_eq!(at(&s, "B2"), n(1.0));
+    assert_eq!(at(&s, "B3"), n(3.0));
+    assert_eq!(at(&s, "C1"), n(1024.0));
+    assert_eq!(at(&s, "C2"), n(3.0));
+    assert_eq!(at(&s, "C3"), n(-3.0));
+    assert_eq!(at(&s, "C4"), Value::Err(CalcError::Div0));
+    assert_eq!(at(&s, "C5"), Value::Text("A".into()));
+    assert_eq!(at(&s, "D1"), n(4.0));
+    assert_eq!(
+        at(&s, "D2"),
+        Value::Text("apple pie, pear, applesauce, x".into())
+    );
+    assert_eq!(at(&s, "D3"), Value::Text("-x".into()));
 }
