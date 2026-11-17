@@ -6,6 +6,7 @@
 pub mod codec;
 pub mod measure;
 pub mod pipeline;
+mod place;
 pub mod probe;
 
 pub use codec::{CodecError, Encoder};

@@ -113,6 +113,47 @@ fn docx(text: &str, pics: &[(&str, Vec<u8>)]) -> Vec<u8> {
     buf.into_inner()
 }
 
+/// A document whose pictures sit between "Before" and "After", the way Word writes them.
+fn docx_with_pictures_in_place(pics: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    let drawing = |rid: &str| {
+        format!(
+            r#"<w:p><w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><wp:docPr id="1" name="p" descr="Figure {rid}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:blipFill><a:blip r:embed="{rid}"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"#
+        )
+    };
+    let figures: String = (1..=pics.len())
+        .map(|i| drawing(&format!("rId{i}")))
+        .collect();
+    let body = format!(
+        r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p><w:r><w:t>Before</w:t></w:r></w:p>{figures}<w:p><w:r><w:t>After</w:t></w:r></w:p></w:body></w:document>"#
+    );
+    let rels: String = pics
+        .iter()
+        .enumerate()
+        .map(|(i, (name, _))| format!(r#"<Relationship Id="rId{}" Target="media/{name}"/>"#, i + 1))
+        .collect();
+    let rels = format!(
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{rels}</Relationships>"#
+    );
+    let mut buf = Cursor::new(Vec::new());
+    {
+        let mut z = zip::ZipWriter::new(&mut buf);
+        let o = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        z.start_file("[Content_Types].xml", o).unwrap();
+        z.write_all(TYPES).unwrap();
+        z.start_file("word/document.xml", o).unwrap();
+        z.write_all(body.as_bytes()).unwrap();
+        z.start_file("word/_rels/document.xml.rels", o).unwrap();
+        z.write_all(rels.as_bytes()).unwrap();
+        for (name, data) in pics {
+            z.start_file(format!("word/media/{name}"), o).unwrap();
+            z.write_all(data).unwrap();
+        }
+        z.finish().unwrap();
+    }
+    buf.into_inner()
+}
+
 fn big_pictures() -> Vec<(&'static str, Vec<u8>)> {
     vec![
         ("image1.jpeg", picture(1200, 900, 1, ImageFormat::Jpeg)),
@@ -584,6 +625,37 @@ fn a_retry_after_a_cancelled_attempt_reports_the_same_saving() {
         .block_on(shrinker(&paths2, &notes2, &NoFaults).prepare(SOURCE, DAY))
         .unwrap();
     assert_eq!(retry.saved_bytes, clean.saved_bytes);
+}
+
+#[tokio::test]
+async fn pictures_are_linked_where_they_sat_and_nothing_is_called_omitted() {
+    let original = docx_with_pictures_in_place(&big_pictures());
+    let (d, paths) = vault_with(SOURCE, &original);
+    let notes = FolderNotes(paths.clone());
+    let s = shrinker(&paths, &notes, &NoFaults);
+    let preview = s.prepare(SOURCE, DAY).await.unwrap();
+    let note = std::fs::read_to_string(d.path().join(&preview.note)).unwrap();
+    let before = note.find("Before").unwrap();
+    let after = note.find("After").unwrap();
+    let links: Vec<usize> = note
+        .match_indices("](../../../_media/cas/")
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(links.len(), big_pictures().len(), "{note}");
+    assert!(links.iter().all(|i| before < *i && *i < after), "{note}");
+    assert!(
+        !note.contains("## Pictures"),
+        "every picture was placed:\n{note}"
+    );
+    assert!(!note.contains("hqmedia"), "{note}");
+    assert!(
+        !preview.loss_kinds.iter().any(|k| k == "images_omitted"),
+        "{:?}",
+        preview.loss_kinds
+    );
+    // Finishes like any other shrink: the record checks out and the original can move.
+    s.confirm(&preview.job, DAY).unwrap();
+    assert_finished(&paths, &original);
 }
 
 // ---------------------------------------------------------------------------------------------

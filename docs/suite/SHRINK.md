@@ -38,8 +38,11 @@ removes it.
   every other note that uses the same picture).
 - Not kept: page layout (margins, fonts, columns, headers), and whatever the importer reports it
   cannot carry (charts, embedded objects, text boxes become inline text). The preview lists them.
-- Pictures are appended in a "Pictures" section at the end of the note for now. Placing each one
-  where it sat in the document arrives with the importer mapping in milestone M2.
+- In a Word document each picture is linked where it sat in the text. A picture the text has no
+  place for (one in a header or a text box, or one the importer cannot locate) is listed in a
+  "Pictures" section at the end, so none is lost. Other formats list all their pictures there for
+  now. A note adopted from an earlier import keeps the placeholders that import wrote and gets the
+  pictures at the end.
 - JPEG photographs are scaled to at most 1600 pixels on the long side and recompressed as lossy
   WebP at quality 80 (chosen by measurement, `docs/suite/MEASURE.md`). PNG and WebP graphics are
   recompressed losslessly. A picture is replaced only if the new file is smaller; otherwise the
