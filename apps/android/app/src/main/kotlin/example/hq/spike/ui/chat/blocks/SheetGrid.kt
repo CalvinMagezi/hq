@@ -50,6 +50,7 @@ val LocalNotePath = compositionLocalOf<String?> { null }
 object SheetFixture {
     var view: SheetView? = null
     var tile: TileView? = null
+    var plot: String? = null
 }
 
 private val CellMinWidth = 72.dp
@@ -205,4 +206,29 @@ fun TileBlockView(block: Block.Tile) {
             Text(tile.text, style = HqType.H2, color = Mts.Ink)
         }
     }
+}
+
+/**
+ * A `plot` block: hq computes the chart (labels and values from the sheet range) and this draws it with the same chart card the
+ * chat uses. A plot hq cannot draw says why, in plain words, as the chat's chart does.
+ */
+@Composable
+fun PlotBlockView(block: Block.Plot, onOpen: (ChartSpec) -> Unit) {
+    val path = LocalNotePath.current
+    val fixed = SheetFixture.plot
+    if (path == null && fixed == null) return
+    val client = HqServices.get(LocalContext.current).client
+    val loaded by produceState<Result<String>?>(fixed?.let { Result.success(it) }, path, block.index) {
+        if (fixed == null && path != null) value = runCatching { client.suitePlot(path, block.index) }
+    }
+    val json = loaded ?: return
+    json.fold(
+        { text ->
+            when (val parsed = Charts.parse(text)) {
+                is ChartParse.Ok -> ChartCard(parsed.spec) { onOpen(parsed.spec) }
+                is ChartParse.Bad -> ChartErrorCard(parsed.reason, block.info)
+            }
+        },
+        { ChartErrorCard(stringResource(R.string.suite_plot_failed), block.info) },
+    )
 }

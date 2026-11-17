@@ -41,6 +41,7 @@ fun BlockView(block: Block, actions: BlockActions) {
         is Block.Image -> VaultImageView(block.src)
         is Block.Sheet -> SheetBlockView(block, actions.onCopied)
         is Block.Tile -> TileBlockView(block)
+        is Block.Plot -> PlotBlockView(block) { actions.onOpenChart(it) }
     }
 }
 

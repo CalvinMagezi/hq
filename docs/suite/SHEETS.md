@@ -75,3 +75,9 @@ Left to build, by how often the owner's workbooks use them: `LET`, `TEXT`, `COUN
 Press and hold a cell in a note's sheet to edit what is typed in it (a number, text or a formula). hq changes only that cell's line of the table and writes the note back otherwise byte for byte, then sends the sheet recalculated, so a total follows the new quantity. The edit is refused, and nothing is written, if the cell no longer holds what the phone showed (someone else changed it), if the text contains a `|` or a line break, or if the cell is outside the sheet. `POST /api/suite/sheet/cell` takes `{path, index, row, col, expected, text}`.
 
 Not built: adding or deleting rows and columns, column types, and an undo for an edit (the note's own history is the undo).
+
+## Charts from a sheet: `plot`
+
+A `plot` block draws a chart from a range of a sheet in the same note: `type` is `bar`, `line`, `pie` or `donut`, `from` is a range whose first row names the columns, `x` is the column of labels and `y` the column of values (names are not case sensitive). hq calculates the values (a formula column is drawn as its results) and sends the chart in the format the chat already draws, so the phone uses its existing chart card. `GET /api/suite/plot?path=&index=`.
+
+A plot that cannot be drawn says why instead of guessing: an unknown column, a value that is not a number, no rows, or more rows than a chart takes (50 for bar and line, 12 for pie and donut). One series per plot for now; `where` and `group` are reserved for the dashboard.

@@ -32,6 +32,7 @@ pub(crate) fn routes() -> Router<Arc<WsState>> {
         .route("/api/suite/media", get(media_handler))
         .route("/api/suite/sheet", get(sheet_handler))
         .route("/api/suite/tile", get(tile_handler))
+        .route("/api/suite/plot", get(plot_handler))
         .route("/api/suite/sheet/cell", post(sheet_cell_handler))
 }
 
@@ -196,6 +197,20 @@ pub(crate) async fn sheet_cell_handler(
     })
     .await?;
     Ok(Json(view))
+}
+
+pub(crate) async fn plot_handler(
+    State(state): State<Arc<WsState>>,
+    Query(q): Query<SheetQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let chart =
+        blocking(move || hq_suite_adapter::sheets::plot(&vault, &q.path, q.index.unwrap_or(0)))
+            .await?;
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        chart,
+    ))
 }
 
 pub(crate) async fn tile_handler(
