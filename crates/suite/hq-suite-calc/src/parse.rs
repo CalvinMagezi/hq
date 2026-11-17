@@ -34,6 +34,9 @@ enum Tok {
     Num(f64),
     Text(String),
     Ident(String),
+    /// A sheet name in single quotes, `'Stock 2026'`.
+    Quoted(String),
+    Bang,
     Op(char),
     Cmp(char),
     LParen,
@@ -125,6 +128,32 @@ fn lex(src: &str) -> Result<Vec<Tok>, ParseError> {
                 out.push(Tok::Cmp(tok));
                 i += len;
             }
+            '\'' => {
+                let mut name = String::new();
+                i += 1;
+                loop {
+                    match chars.get(i) {
+                        None => return Err(ParseError("a sheet name is not closed".into())),
+                        Some('\'') if chars.get(i + 1) == Some(&'\'') => {
+                            name.push('\'');
+                            i += 2;
+                        }
+                        Some('\'') => {
+                            i += 1;
+                            break;
+                        }
+                        Some(c) => {
+                            name.push(*c);
+                            i += 1;
+                        }
+                    }
+                }
+                out.push(Tok::Quoted(name));
+            }
+            '!' => {
+                out.push(Tok::Bang);
+                i += 1;
+            }
             '(' => {
                 out.push(Tok::LParen);
                 i += 1;
@@ -171,13 +200,26 @@ pub(crate) fn cell_ref(text: &str) -> Option<CellRef> {
     })
 }
 
-struct Parser {
+/// Where a formula lives in a workbook: its own sheet's column offset, and the offset of every
+/// sheet it may name. A sheet that is alone has offset 0 and names nothing.
+#[derive(Debug, Clone, Default)]
+pub struct RefContext {
+    pub base: u32,
+    /// Lowercase sheet name and its column offset.
+    pub sheets: Vec<(String, u32)>,
+}
+
+/// Columns one sheet may use (Excel's XFD), so sheets laid side by side never overlap.
+pub const MAX_COLUMNS: u32 = 16_384;
+
+struct Parser<'a> {
     toks: Vec<Tok>,
     at: usize,
     depth: usize,
+    ctx: &'a RefContext,
 }
 
-impl Parser {
+impl Parser<'_> {
     fn peek(&self) -> Option<&Tok> {
         self.toks.get(self.at)
     }
@@ -282,32 +324,69 @@ impl Parser {
                     _ => Err(ParseError("a bracket is not closed".into())),
                 }
             }
+            Some(Tok::Quoted(sheet)) => {
+                if self.next() != Some(Tok::Bang) {
+                    return Err(ParseError("a sheet name needs ! and a cell".into()));
+                }
+                self.in_sheet(&sheet)
+            }
             Some(Tok::Ident(name)) => {
                 if self.peek() == Some(&Tok::LParen) {
                     self.next();
                     return self.call(name);
                 }
+                if self.peek() == Some(&Tok::Bang) {
+                    self.next();
+                    return self.in_sheet(&name);
+                }
                 let upper = name.to_ascii_uppercase();
                 if upper == "TRUE" || upper == "FALSE" {
                     return Ok(Expr::Bool(upper == "TRUE"));
                 }
-                let Some(from) = cell_ref(&name) else {
-                    return Err(ParseError(format!("`{name}` is not a cell or a function")));
-                };
-                if self.peek() == Some(&Tok::Colon) {
-                    self.next();
-                    let Some(Tok::Ident(to)) = self.next() else {
-                        return Err(ParseError("a range needs a cell after the colon".into()));
-                    };
-                    let to =
-                        cell_ref(&to).ok_or_else(|| ParseError(format!("`{to}` is not a cell")))?;
-                    return Ok(Expr::Range(from, to));
-                }
-                Ok(Expr::Ref(from))
+                self.cell_or_range(&name, self.ctx.base)
             }
             Some(other) => Err(ParseError(format!("unexpected {other:?}"))),
             None => Err(ParseError("the formula ends too soon".into())),
         }
+    }
+
+    /// The cell or range after `Sheet!`.
+    fn in_sheet(&mut self, sheet: &str) -> Result<Expr, ParseError> {
+        let wanted = sheet.to_lowercase();
+        let Some((_, offset)) = self.ctx.sheets.iter().find(|(n, _)| *n == wanted) else {
+            return Err(ParseError(format!("there is no sheet called `{sheet}`")));
+        };
+        let offset = *offset;
+        let Some(Tok::Ident(cell)) = self.next() else {
+            return Err(ParseError("a sheet name needs a cell after the !".into()));
+        };
+        self.cell_or_range(&cell, offset)
+    }
+
+    /// `A1` or `A1:B2`, placed in the sheet that starts at column `offset`.
+    fn cell_or_range(&mut self, first: &str, offset: u32) -> Result<Expr, ParseError> {
+        let place = |c: CellRef| -> Result<CellRef, ParseError> {
+            if c.col >= MAX_COLUMNS {
+                return Err(ParseError("that column is past XFD".into()));
+            }
+            Ok(CellRef {
+                col: c.col + offset,
+                row: c.row,
+            })
+        };
+        let Some(from) = cell_ref(first) else {
+            return Err(ParseError(format!("`{first}` is not a cell or a function")));
+        };
+        let from = place(from)?;
+        if self.peek() != Some(&Tok::Colon) {
+            return Ok(Expr::Ref(from));
+        }
+        self.next();
+        let Some(Tok::Ident(to)) = self.next() else {
+            return Err(ParseError("a range needs a cell after the colon".into()));
+        };
+        let to = cell_ref(&to).ok_or_else(|| ParseError(format!("`{to}` is not a cell")))?;
+        Ok(Expr::Range(from, place(to)?))
     }
 
     fn call(&mut self, name: String) -> Result<Expr, ParseError> {
@@ -335,6 +414,12 @@ impl Parser {
 
 /// A formula without its leading `=`.
 pub fn parse_formula(src: &str) -> Result<Expr, ParseError> {
+    parse_formula_in(src, &RefContext::default())
+}
+
+/// A formula that lives in a workbook: its references are placed in its own sheet, or in the sheet
+/// a `Name!` or `'Name'!` prefix picks.
+pub fn parse_formula_in(src: &str, ctx: &RefContext) -> Result<Expr, ParseError> {
     if src.chars().count() > MAX_FORMULA_CHARS {
         return Err(ParseError("the formula is too long".into()));
     }
@@ -342,6 +427,7 @@ pub fn parse_formula(src: &str) -> Result<Expr, ParseError> {
         toks: lex(src)?,
         at: 0,
         depth: 0,
+        ctx,
     };
     let e = p.compare()?;
     if p.at < p.toks.len() {

@@ -5,7 +5,7 @@ precedence (`-2^2` is 4, `50%` is 0.5), errors that travel through a calculation
 as `#CIRC!` instead of looping, and a work stack so a chain of thousands of dependent formulas
 cannot overflow. Functions: `SUM PRODUCT AVERAGE MIN MAX COUNT COUNTA IF IFS IFERROR SWITCH AND OR
 NOT ABS INT SQRT ROUND ROUNDUP ROUNDDOWN MOD LEN CONCATENATE CONCAT ISNUMBER ISTEXT ISBLANK ISERROR
-LEFT RIGHT UPPER LOWER TRIM ROW INDEX VLOOKUP PMT EDATE`. Anything else is `#NAME?`; it is never guessed.
+LEFT RIGHT UPPER LOWER TRIM ROW INDEX VLOOKUP PMT EDATE`, plus references between sheets (`=Stock!B2`, `='Price list'!A1:A9`). Anything else is `#NAME?`; it is never guessed.
 
 ## How good it is: measured, not assumed
 
@@ -55,3 +55,11 @@ Re-measured on the same 57 workbooks (86,082 formulas): 62,556 give Excel's save
 - `EDATE` reproduces Excel's 1900 quirks (serial 0 is "0 January 1900", and 1900 counts as a leap year).
 
 `hq suite calc-check` now also prints the wrong answers by leading function and by the kind of value on each side (counts only), so the next fix is chosen from numbers.
+
+## Sheets that read each other
+
+`Workbook` holds several sheets and lets a formula name another one, `Prices!B2` or `'Price list'!A1:A9` (names are not case sensitive). In a note, every `sheet` block is a sheet of one workbook, named by its `name=` (or `Sheet1`, `Sheet2` by position), so one block can read another. A name that does not exist leaves the formula "cannot calculate" rather than guessing. Excel's last column, XFD, is the limit; `ZZZ1` is not a cell.
+
+The same 57 workbooks after this and two more fixes (text dates such as `2023-06-01` read as dates in arithmetic, and a difference within rounding noise of zero is 0 as in Excel): **75,248 of 86,082 formulas match Excel (87.4%), 43 differ (0.05%), 10,791 cannot be calculated yet (12.5%)**. A result within 1e-6 of the saved one, or within 1e-9 of its size, counts as the same number, because chains of money arithmetic differ from Excel by rounding noise.
+
+Left to build, by how often the owner's workbooks use them: `LET`, `TEXT`, `COUNTIF`, `FILTER`, `XLOOKUP`, `SEARCH`, `SUBSTITUTE`, `N`, and some syntax the parser does not read yet.
