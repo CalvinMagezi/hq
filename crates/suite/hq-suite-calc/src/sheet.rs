@@ -170,7 +170,7 @@ impl<'a> Run<'a> {
                 self.depends_on(y, out);
             }
             Expr::Call(_, args) => args.iter().for_each(|a| self.depends_on(a, out)),
-            Expr::Num(_) | Expr::Text(_) | Expr::Bool(_) => {}
+            Expr::Num(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Var(_) => {}
         }
     }
 

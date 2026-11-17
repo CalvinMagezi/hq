@@ -5,7 +5,7 @@ precedence (`-2^2` is 4, `50%` is 0.5), errors that travel through a calculation
 as `#CIRC!` instead of looping, and a work stack so a chain of thousands of dependent formulas
 cannot overflow. Functions: `SUM PRODUCT AVERAGE MIN MAX COUNT COUNTA IF IFS IFERROR SWITCH AND OR
 NOT ABS INT SQRT ROUND ROUNDUP ROUNDDOWN MOD LEN CONCATENATE CONCAT ISNUMBER ISTEXT ISBLANK ISERROR
-LEFT RIGHT UPPER LOWER TRIM ROW INDEX VLOOKUP PMT EDATE`, plus references between sheets (`=Stock!B2`, `='Price list'!A1:A9`). Anything else is `#NAME?`; it is never guessed.
+LEFT RIGHT UPPER LOWER TRIM ROW INDEX VLOOKUP PMT EDATE COUNTIF SUMIF SEARCH FIND SUBSTITUTE N XLOOKUP TEXT POWER QUOTIENT CHAR ROWS TEXTJOIN`, plus references between sheets (`=Stock!B2`, `='Price list'!A1:A9`). Anything else is `#NAME?`; it is never guessed.
 
 ## How good it is: measured, not assumed
 
@@ -63,3 +63,9 @@ Re-measured on the same 57 workbooks (86,082 formulas): 62,556 give Excel's save
 The same 57 workbooks after this and two more fixes (text dates such as `2023-06-01` read as dates in arithmetic, and a difference within rounding noise of zero is 0 as in Excel): **75,248 of 86,082 formulas match Excel (87.4%), 43 differ (0.05%), 10,791 cannot be calculated yet (12.5%)**. A result within 1e-6 of the saved one, or within 1e-9 of its size, counts as the same number, because chains of money arithmetic differ from Excel by rounding noise.
 
 Left to build, by how often the owner's workbooks use them: `LET`, `TEXT`, `COUNTIF`, `FILTER`, `XLOOKUP`, `SEARCH`, `SUBSTITUTE`, `N`, and some syntax the parser does not read yet.
+
+## More functions
+
+`COUNTIF` and `SUMIF` (with `>5`, `<=3`, `<>x` and `*`/`?` wildcards), `SEARCH`, `FIND`, `SUBSTITUTE`, `N`, `XLOOKUP` (exact match), `POWER`, `QUOTIENT`, `CHAR`, `ROWS` and `TEXTJOIN` were added from the owner's usage counts. `TEXT` reproduces number formats (`#,##0`, `0.00`, `0.0%`); a date or free-form format is left "cannot calculate" rather than guessed. Measured on the same 57 workbooks: **76,006 of 86,082 formulas match Excel (88.3%), 54 differ (0.06%), 10,022 cannot be calculated yet (11.6%)**. Still missing by count: `LET` (1,595), `FILTER`, `TODAY` and `NOW` (not repeatable, so not planned), `SUMPRODUCT`, `CHOOSE`.
+
+`LET(x, 5, y, x*2, y+1)` is supported: each name stands for its value in what follows, a name bound again hides the earlier one, and names that build on names stop at a size limit. On its own it did not move the match rate, because the `LET` formulas in the owner's workbooks also use things the parser cannot read yet. The largest groups of unreadable syntax, by count: table references such as `Table1[Column]` (about 1,500), references to sheets that are not in the workbook (external links, about 2,000 together), and whole-column ranges such as `$B:$B` (about 500, which need a lookup that does not copy a million cells).
