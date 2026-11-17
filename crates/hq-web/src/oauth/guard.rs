@@ -13,6 +13,11 @@ use std::time::Duration;
 
 /// Calls one grant may make in a minute.
 pub(crate) const MAX_CALLS_PER_MINUTE: i64 = 120;
+/// Calls one launched session may make in a minute. Higher than a connector's: an agent loops
+/// over tools, but a runaway one still gets stopped.
+pub(crate) const MAX_SESSION_CALLS_PER_MINUTE: i64 = 300;
+/// Session rows share the connector call log, kept apart by this id prefix.
+const SESSION_LOG_PREFIX: &str = "session:";
 const RATE_WINDOW_SECS: i64 = 60;
 /// How long a call that needs approval waits before answering "pending". claude.ai's own
 /// tool timeout is not published, so this stays well under a minute.
@@ -48,12 +53,8 @@ pub(crate) async fn connector_call(
 ) -> Json<Value> {
     let call = Call::of(body);
     let now = super::now();
-    let busy = state
-        .db
-        .with_conn(|c| store::calls_since(c, &grant.grant_id, now - RATE_WINDOW_SECS));
-    // An unreadable count fails closed, like the limit itself.
-    if busy.is_err() || busy.is_ok_and(|n| n >= MAX_CALLS_PER_MINUTE) {
-        log(state, grant, &call, "rate_limited");
+    if over_limit(&state.db, &grant.grant_id, MAX_CALLS_PER_MINUTE, now) {
+        log(&state.db, &grant.grant_id, &call, "rate_limited");
         return tool_text(
             id,
             true,
@@ -61,7 +62,7 @@ pub(crate) async fn connector_call(
         );
     }
     if let Some(stop) = confirmation(state, grant, &call, allowed).await {
-        log(state, grant, &call, stop.outcome);
+        log(&state.db, &grant.grant_id, &call, stop.outcome);
         return tool_text(id, stop.is_error, &stop.text);
     }
     let caller = CallCaller {
@@ -70,8 +71,45 @@ pub(crate) async fn connector_call(
     };
     let reply = call_tool(state, id, body, allowed, caller).await;
     let failed = reply.0.get("error").is_some() || reply.0["result"]["isError"] == true;
-    log(state, grant, &call, if failed { "error" } else { "ok" });
+    log(
+        &state.db,
+        &grant.grant_id,
+        &call,
+        if failed { "error" } else { "ok" },
+    );
     reply
+}
+
+/// One `tools/call` from a launched session that proved its token: logged by session id, tool
+/// and argument digest (never the arguments), and limited per session.
+pub(crate) async fn session_call(
+    state: &WsState,
+    id: Value,
+    body: &Value,
+    allowed: Option<&[&str]>,
+    caller: CallCaller<'_>,
+    session: &str,
+) -> Json<Value> {
+    let call = Call::of(body);
+    let key = format!("{SESSION_LOG_PREFIX}{session}");
+    if over_limit(&state.db, &key, MAX_SESSION_CALLS_PER_MINUTE, super::now()) {
+        log(&state.db, &key, &call, "rate_limited");
+        return tool_text(
+            id,
+            true,
+            "Too many calls from this session in the last minute; wait and try again.",
+        );
+    }
+    let reply = call_tool(state, id, body, allowed, caller).await;
+    let failed = reply.0.get("error").is_some() || reply.0["result"]["isError"] == true;
+    log(&state.db, &key, &call, if failed { "error" } else { "ok" });
+    reply
+}
+
+/// An unreadable count fails closed, like the limit itself.
+fn over_limit(db: &hq_db::Database, key: &str, max: i64, now: i64) -> bool {
+    let busy = db.with_conn(|c| store::calls_since(c, key, now - RATE_WINDOW_SECS));
+    busy.is_err() || busy.is_ok_and(|n| n >= max)
 }
 
 /// The tool a `tools/call` runs and the arguments it runs with: for `hq_call`, the inner tool.
@@ -328,22 +366,14 @@ fn ask_owner(
 /// Longest tool name the log keeps: real names are far shorter, and a caller picks this one.
 const MAX_LOGGED_TOOL_CHARS: usize = 64;
 
-fn log(state: &WsState, grant: &GrantAccess, call: &Call, outcome: &str) {
+fn log(db: &hq_db::Database, log_id: &str, call: &Call, outcome: &str) {
     let tool: String = if call.tool.is_empty() {
         "unknown".into()
     } else {
         call.tool.chars().take(MAX_LOGGED_TOOL_CHARS).collect()
     };
-    let logged = state.db.with_conn(|c| {
-        store::record_call(
-            c,
-            &grant.grant_id,
-            &tool,
-            outcome,
-            &call.digest,
-            super::now(),
-        )
-    });
+    let logged =
+        db.with_conn(|c| store::record_call(c, log_id, &tool, outcome, &call.digest, super::now()));
     if let Err(e) = logged {
         tracing::warn!("connector: logging a call failed: {e}");
     }

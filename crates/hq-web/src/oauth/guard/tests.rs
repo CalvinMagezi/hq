@@ -78,3 +78,42 @@ fn only_hq_call_is_gated_as_a_registry_tool() {
         Call::of(&json!({"params": {"name": "hq_call", "arguments": {"tool": "vault_delete"}}}));
     assert!(wrapped.via_hq_call);
 }
+
+fn session_key(id: &str) -> String {
+    format!("{SESSION_LOG_PREFIX}{id}")
+}
+
+#[test]
+fn a_session_call_is_logged_with_a_digest_and_never_its_arguments() {
+    let db = hq_db::Database::open_memory().unwrap();
+    let call = Call::of(&json!({"params": {"name": "hq_call", "arguments":
+        {"tool": "task_get", "args": {"id": "secret-body-text"}}}}));
+    log(&db, &session_key("s1"), &call, "ok");
+    let rows = db
+        .with_conn(|c| store::recent_calls(c, Some(&session_key("s1")), 5))
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].tool, "task_get");
+    assert_eq!(rows[0].args_sha256, call.digest);
+    assert!(!format!("{:?}", rows[0]).contains("secret-body-text"));
+}
+
+#[test]
+fn a_session_limit_refuses_recovers_after_the_window_and_is_per_session() {
+    let db = hq_db::Database::open_memory().unwrap();
+    let call = Call::of(&json!({"params": {"name": "task_get", "arguments": {}}}));
+    let now = super::super::now();
+    for _ in 0..3 {
+        log(&db, &session_key("busy"), &call, "ok");
+    }
+    assert!(over_limit(&db, &session_key("busy"), 3, now));
+    assert!(!over_limit(&db, &session_key("busy"), 4, now));
+    assert!(
+        !over_limit(&db, &session_key("quiet"), 3, now),
+        "another session is unaffected"
+    );
+    assert!(
+        !over_limit(&db, &session_key("busy"), 3, now + RATE_WINDOW_SECS + 5),
+        "the limit lifts once the window passes"
+    );
+}
