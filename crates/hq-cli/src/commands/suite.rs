@@ -53,8 +53,30 @@ pub enum SuiteCommand {
     Confirm { job: String },
     /// Leave a prepared shrink undone: removes the new note, the original is not touched
     Abandon { job: String },
-    /// Bring an original back from the trash and mark the note as having it again
+    /// Bring an original back (from the trash, or from the sink it was sealed into) and mark the note
     Undo { job: String },
+    /// Seal a prepared document's original into a sink and remove it from this phone
+    ///
+    /// The original is read back from the sink before it is removed. You are asked for the sink's
+    /// recovery code (or give it in HQ_SUITE_RECOVERY_CODE).
+    Offload {
+        job: String,
+        /// The sink's name, from `hq suite sink list`
+        #[arg(long)]
+        sink: String,
+    },
+    /// Fetch a spread of stored originals from a sink and check each opens and matches
+    RestoreDrill {
+        sink: String,
+        /// How many to check (default 20)
+        #[arg(long)]
+        sample: Option<usize>,
+    },
+    /// Folders that keep originals sealed away from this phone: a card, a drive, another machine
+    Sink {
+        #[command(subcommand)]
+        command: SinkCommand,
+    },
     /// List shrink jobs and where each stands
     Jobs,
     /// Finish or resume jobs a crash or a restart interrupted
@@ -71,6 +93,19 @@ pub enum SuiteCommand {
     },
 }
 
+#[derive(Subcommand)]
+pub enum SinkCommand {
+    /// Make a sink in a folder and show its recovery code (once)
+    Add {
+        /// A short name: lowercase letters, digits and dashes
+        name: String,
+        /// The folder, outside the vault
+        folder: PathBuf,
+    },
+    /// List the sinks and whether each can be reached now
+    List,
+}
+
 #[cfg(feature = "suite")]
 pub async fn run(config: &HqConfig, command: SuiteCommand) -> Result<()> {
     use hq_suite_adapter::measure::{Request, run as measure};
@@ -80,7 +115,23 @@ pub async fn run(config: &HqConfig, command: SuiteCommand) -> Result<()> {
         SuiteCommand::Shrink { file, yes } => shrink::shrink(vault, &file, yes).await,
         SuiteCommand::Confirm { job } => shrink::confirm(vault, &job),
         SuiteCommand::Abandon { job } => shrink::abandon(vault, &job),
-        SuiteCommand::Undo { job } => shrink::undo(vault, &job),
+        SuiteCommand::Undo { job } => {
+            if hq_suite_adapter::sinks::undo(vault, &job)? {
+                Ok(())
+            } else {
+                shrink::undo(vault, &job)
+            }
+        }
+        SuiteCommand::Offload { job, sink } => hq_suite_adapter::sinks::offload(vault, &job, &sink),
+        SuiteCommand::RestoreDrill { sink, sample } => {
+            hq_suite_adapter::sinks::drill(vault, &sink, sample)
+        }
+        SuiteCommand::Sink { command } => match command {
+            SinkCommand::Add { name, folder } => {
+                hq_suite_adapter::sinks::add(vault, &name, &folder)
+            }
+            SinkCommand::List => hq_suite_adapter::sinks::list(vault),
+        },
         SuiteCommand::Jobs => shrink::jobs(vault),
         SuiteCommand::Recover => shrink::recover(vault),
         SuiteCommand::Storage { tidy } => {

@@ -81,6 +81,32 @@ suite relies on rename being atomic and on flushing files and folders before and
 (`hq-suite-store::fsx`); the unfinished `.partial-` files such a cut can leave are swept at the
 next run.
 
+## Sealing an original into a sink
+
+The trash keeps an original for 30 days. A sink keeps it for as long as you keep the sink: a
+folder on an SD card, a USB drive, a mounted share or another machine's disk (a path this
+phone can write to, outside the vault).
+
+```bash
+hq suite sink add card /mnt/sdcard/hq-sink     # prints a recovery code, once
+hq suite shrink Notebooks/Inbox/report.docx    # prepare and look, as before
+hq suite offload <job> --sink card             # asks for the recovery code
+hq suite undo <job>                            # fetches it back (asks for the code)
+hq suite restore-drill card                    # checks a spread of stored originals
+```
+
+Each original is sealed on its own (the same ChaCha20-Poly1305 container as `hq backup`) under a
+key made from the recovery code with Argon2id, filed by the SHA-256 of its bytes, and read back
+and compared before the sink says it is stored. Only then is the file removed from the phone. A
+crash at any step leaves the original at its place or safe in the sink, never neither, and the
+same command finishes the job. The note keeps its text and pictures on the phone and says
+`suite_original_state: offloaded` and which sink.
+
+The recovery code is the key. HQ does not keep it, so keep it somewhere that is not this phone. If
+the code is lost, the sealed originals cannot be opened by you or by anyone; the notes still work.
+A new sink refuses to be made in a folder that already is one, so a second run can never replace
+the first key.
+
 ## A note that already exists
 
 If `hq vault import` already made a note for the file (it carries the file's `source_sha256`),
@@ -94,7 +120,8 @@ after the preview is never overwritten and never reverted.
 
 - Only the note named after the file is looked at (`report.docx` and `report.md`). A note an
   import placed under a different name is not adopted.
-- Moving the original to a cold place you own (another device, an SD card) is milestone M3; today
-  the only destination is the vault's trash.
+- A sink must be a folder this phone's `hq` can write to. A folder chosen through Android's
+  document picker is not one; that, and sending to another HQ over the bridge, are the next sink
+  kinds. The phone's bar does not offer a sink yet.
 - When the trash's own 30-day clean-up deletes the original, the storage governor marks the note
   `suite_original_state: gone` on its next pass (every six hours, or `hq suite storage --tidy`).

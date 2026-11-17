@@ -58,6 +58,9 @@ impl Step {
 pub enum Disposition {
     /// Into the vault's trash at this vault-relative path, decided when consent is given.
     Trash { target: String },
+    /// Sealed into a sink the owner keeps, by the hash of the original's bytes. Decided when
+    /// consent is given, before the original leaves its place.
+    Sink { sink: String, sha256: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

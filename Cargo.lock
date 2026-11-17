@@ -3833,6 +3833,7 @@ dependencies = [
  "chrono",
  "hq-suite-governor",
  "hq-suite-shrink",
+ "hq-suite-sinks",
  "hq-suite-store",
  "hq-vault",
  "serde",
@@ -3898,6 +3899,19 @@ dependencies = [
  "tokio",
  "webp",
  "zip 9.0.5",
+]
+
+[[package]]
+name = "hq-suite-sinks"
+version = "0.9.1"
+dependencies = [
+ "hex",
+ "hq-backup",
+ "hq-suite-store",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
 ]
 
 [[package]]

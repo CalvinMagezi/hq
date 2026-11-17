@@ -140,9 +140,11 @@ M0, then made a hard CI limit.
   the size budget on pull requests that touch the suite (`.github/workflows/suite-size.yml`).
   The web note page has the same bar (`components/notes/SuiteBar.tsx`).
 
+- 2026-11-17: M3 started with the owner's default for key recovery (a written-down recovery code). `hq-backup::object` seals one object at a time; `hq-suite-sinks` is a folder sink; `hq suite sink add|list`, `offload`, `undo` (from the sink) and `restore-drill`. The pipeline's `offload` has its own crash matrix.
+
 ## Next
 
-1. **Cold sinks (M3).** The original can only go to the vault's trash today.
+1. **More sinks (M3).** The folder sink exists (sealed per original, recovery code, restore drill). Missing: a sink chosen through Android's document picker, a paired-peer sink over the bridge, a cloud-folder sink, key shares as an alternative to one code, a lost-phone drill on a wiped device, and a button on the phone.
 2. **Web editors** (Docs, Sheets) beyond the bar (milestone M2).
 3. **Adoption beyond the neighbour.** A note an import placed under another name, or in
    `Notebooks/Imports/<month>/` for a file outside `Notebooks/`, is not adopted: the lookup is

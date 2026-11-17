@@ -14,6 +14,7 @@
 //! [`SuitePaths`] and, where a date is needed, the day as text.
 
 pub mod cas;
+pub mod cold;
 mod error;
 pub mod fsx;
 pub mod journal;
@@ -21,6 +22,7 @@ mod paths;
 pub mod trash;
 
 pub use cas::{Cas, CasRef, Stored};
+pub use cold::{ColdError, ColdResult, ColdStore};
 pub use error::StoreError;
 pub use journal::{Disposition, Job, Journal, Step};
 pub use paths::SuitePaths;
