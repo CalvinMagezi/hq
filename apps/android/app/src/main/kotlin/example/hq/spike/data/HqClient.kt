@@ -761,6 +761,13 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     suspend fun suiteSheet(path: String, index: Int): SheetView =
         send(authed("/api/suite/sheet?path=${java.net.URLEncoder.encode(path, "UTF-8")}&index=$index").build()) { SheetWire.view(JSONObject(it)) }
 
+    /**
+     * Sets one cell of the `index`th `sheet` block (zero-based [row] and [col] in the sheet) and returns the sheet recalculated.
+     * [expected] is what the cell held when it was shown; hq refuses the edit if it holds something else now.
+     */
+    suspend fun suiteEditCell(path: String, index: Int, row: Int, col: Int, expected: String, text: String): SheetView =
+        SheetWire.view(postJson("/api/suite/sheet/cell", JSONObject().put("path", path).put("index", index).put("row", row).put("col", col).put("expected", expected).put("text", text)))
+
     /** The `index`th `tile` block of the note at [path]: its label and the number hq computed. */
     suspend fun suiteTile(path: String, index: Int): TileView =
         send(authed("/api/suite/tile?path=${java.net.URLEncoder.encode(path, "UTF-8")}&index=$index").build()) { tileView(JSONObject(it)) }

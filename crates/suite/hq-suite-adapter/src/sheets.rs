@@ -7,8 +7,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use hq_suite_calc::{Value, Workbook, column_name};
-use hq_suite_md::{BlockType, Document, RangeRef, TypedBlock};
-use hq_suite_store::SuitePaths;
+use hq_suite_md::{BlockType, Document, Op, Patch, RangeRef, TypedBlock, apply};
+use hq_suite_store::{SuitePaths, fsx};
 use serde::Serialize;
 
 /// Rows and columns one view may hold, so a large sheet is read a window at a time.
@@ -27,6 +27,8 @@ pub struct Column {
 #[derive(Debug, Clone, Serialize)]
 pub struct CellView {
     pub text: String,
+    /// What is typed in the cell: the formula, or the value as written. What an editor shows.
+    pub raw: String,
     /// The cell holds a formula.
     pub formula: bool,
     /// The cell is a number, so the app aligns it to the right.
@@ -177,6 +179,7 @@ pub fn view(vault: &Path, note: &str, index: usize, row0: u32, col0: u32) -> Res
                     let value = note_book.book.get(index, c, r);
                     CellView {
                         text: show(&value, &kind_of(c)),
+                        raw: raw.cloned().unwrap_or_default(),
                         formula: raw.is_some_and(|t| t.trim_start().starts_with('=')),
                         number: matches!(value, Value::Num(_)),
                         error: matches!(value, Value::Err(_)),
@@ -196,6 +199,101 @@ pub fn view(vault: &Path, note: &str, index: usize, row0: u32, col0: u32) -> Res
         row_count: count,
         col_count: cols,
     })
+}
+
+/// Excel's last column is XFD, the 16,384th.
+const MAX_EDIT_COLUMN: u32 = 16_384;
+/// Longest text one cell may hold when edited from the phone.
+const MAX_CELL_CHARS: usize = 2000;
+
+/// The table lines of a sheet block's text: the lines that start with `|`, other than the rule
+/// under the header, as indexes into `lines`.
+fn table_line_indexes(lines: &[&str]) -> Vec<usize> {
+    let is_rule = |l: &str| {
+        let cells: Vec<&str> = l.trim().trim_matches('|').split('|').collect();
+        cells
+            .iter()
+            .all(|c| !c.trim().is_empty() && c.trim().chars().all(|ch| matches!(ch, '-' | ':')))
+    };
+    lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.trim_start().starts_with('|') && !is_rule(l))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Sets one cell of the `index`th `sheet` block of the note to `text`. Only that cell's line of
+/// the table changes; the rest of the note is written back as it was. Refused if the cell no
+/// longer holds `expected` (someone else changed it), if `text` could break the table, or if the
+/// cell is outside it.
+pub fn edit_cell(
+    vault: &Path,
+    note: &str,
+    index: usize,
+    row: u32,
+    col: u32,
+    expected: &str,
+    text: &str,
+) -> Result<()> {
+    if text.chars().count() > MAX_CELL_CHARS {
+        bail!("a cell holds at most {MAX_CELL_CHARS} characters");
+    }
+    if text.contains('|') || text.contains('\n') || text.contains('\r') {
+        bail!("a cell cannot hold a | or a line break");
+    }
+    let paths = SuitePaths::new(vault);
+    let file = paths.resolve(note)?;
+    let source =
+        std::fs::read_to_string(&file).with_context(|| format!("{note} cannot be read"))?;
+    let doc = Document::parse(&source);
+    let (node, _) = doc
+        .typed_blocks()
+        .filter_map(|(i, b)| b.ok().map(|b| (i, b)))
+        .filter(|(_, b)| b.ty == BlockType::Sheet)
+        .nth(index)
+        .with_context(|| format!("that note has no sheet number {}", index + 1))?;
+    let block_src = doc
+        .node(node)
+        .context("that sheet is not in the note")?
+        .src();
+    let lines: Vec<&str> = block_src.split('\n').collect();
+    let table = table_line_indexes(&lines);
+    let line_no = *table
+        .get(row as usize)
+        .context("that row is not in the sheet")?;
+    let line = lines[line_no];
+    let mut cells: Vec<String> = line
+        .trim()
+        .trim_start_matches('|')
+        .trim_end_matches('|')
+        .split('|')
+        .map(|c| c.trim().to_string())
+        .collect();
+    if col >= MAX_EDIT_COLUMN {
+        bail!("that column is not in the sheet");
+    }
+    if cells.len() <= col as usize {
+        cells.resize(col as usize + 1, String::new());
+    }
+    if cells[col as usize] != expected.trim() {
+        bail!("that cell changed since it was shown; reload the sheet and try again");
+    }
+    cells[col as usize] = text.trim().to_string();
+    let rebuilt = format!("| {} |", cells.join(" | "));
+    let mut out: Vec<String> = lines.iter().map(|l| (*l).to_string()).collect();
+    out[line_no] = rebuilt;
+    let patch = Patch {
+        base_revision: Some(doc.revision()),
+        ops: vec![Op::Replace {
+            at: doc.addr(node).context("that sheet is not in the note")?,
+            markdown: out.join("\n"),
+        }],
+    };
+    let patched =
+        apply(&doc, &patch).map_err(|e| anyhow::anyhow!("the note could not be changed: {e}"))?;
+    fsx::atomic_write(&file, patched.render().as_bytes())?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -354,6 +452,64 @@ mod tests {
         assert!(
             tile(d.path(), "Notebooks/stock.md", 0).is_err(),
             "a tile over a range with no numbers in the first sheet says so"
+        );
+    }
+
+    #[test]
+    fn editing_a_cell_changes_only_that_cell_and_is_refused_when_it_went_stale() {
+        let d = vault_with(NOTE);
+        let file = d.path().join("Notebooks/stock.md");
+        let before = std::fs::read_to_string(&file).unwrap();
+        edit_cell(d.path(), "Notebooks/stock.md", 0, 1, 1, "40", "50").unwrap();
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            after,
+            before.replace(
+                "| Sugar | 40  | 4200  | =B2*C2 |",
+                "| Sugar | 50 | 4200 | =B2*C2 |"
+            ),
+            "one line changed, the rest of the note is byte for byte"
+        );
+        let v = view(d.path(), "Notebooks/stock.md", 0, 0, 0).unwrap();
+        assert_eq!(
+            v.rows[1][3].text, "UGX 210,000",
+            "the total follows the new quantity"
+        );
+        assert_eq!(v.rows[1][1].raw, "50");
+        assert_eq!(v.rows[1][3].raw, "=B2*C2");
+        assert!(
+            edit_cell(d.path(), "Notebooks/stock.md", 0, 1, 1, "40", "60").is_err(),
+            "stale"
+        );
+        edit_cell(
+            d.path(),
+            "Notebooks/stock.md",
+            0,
+            2,
+            3,
+            "=B3*C3",
+            "=B3*C3*2",
+        )
+        .unwrap();
+        let v2 = view(d.path(), "Notebooks/stock.md", 0, 0, 0).unwrap();
+        assert_eq!(v2.rows[2][3].text, "UGX 90,000");
+    }
+
+    #[test]
+    fn an_edit_that_could_break_the_table_or_leave_it_is_refused() {
+        let d = vault_with(NOTE);
+        let file = d.path().join("Notebooks/stock.md");
+        let before = std::fs::read_to_string(&file).unwrap();
+        for bad in ["a | b", "two\nlines", &"x".repeat(MAX_CELL_CHARS + 1)] {
+            assert!(edit_cell(d.path(), "Notebooks/stock.md", 0, 1, 0, "Sugar", bad).is_err());
+        }
+        assert!(edit_cell(d.path(), "Notebooks/stock.md", 0, 99, 0, "", "x").is_err());
+        assert!(edit_cell(d.path(), "Notebooks/stock.md", 5, 1, 0, "Sugar", "x").is_err());
+        assert!(edit_cell(d.path(), "../etc/passwd", 0, 1, 0, "", "x").is_err());
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            before,
+            "nothing was written"
         );
     }
 

@@ -4035,6 +4035,12 @@
     <string name="suite_bar_not_now">Not now</string>
     <string name="suite_bar_undo">Undo</string>
     <string name="suite_bar_working">Working on it…</string>
+    <string name="suite_sheet_edit_title">Edit %1$s</string>
+    <string name="suite_sheet_edit_label">Edit this cell</string>
+    <string name="suite_sheet_edit_hint">Press and hold a cell to edit it.</string>
+    <string name="suite_sheet_edit_failed">Couldn\'t save. The cell may have changed, or the text has a | in it. Close this and try again.</string>
+    <string name="suite_sheet_save">Save</string>
+    <string name="suite_sheet_cancel">Cancel</string>
     <string name="suite_sheet_drawing">Drawing your sheet…</string>
     <string name="suite_sheet_more">Showing %1$s of %2$s rows</string>
     <string name="suite_bar_failed">Couldn\'t do that, try again.</string>
