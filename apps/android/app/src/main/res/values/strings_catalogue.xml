@@ -1119,6 +1119,27 @@
     <string name="inbox_tab_needs">Needs you</string>
     <string name="inbox_tab_updates">Updates</string>
     <string name="inbox_tab_done">Done</string>
+    <string name="inbox_doors_label">Where HQ and its helpers work</string>
+    <string name="inbox_door_tasks">Tasks</string>
+    <string name="inbox_door_helpers">Helpers</string>
+    <string name="inbox_updates_unread">Unread updates</string>
+    <string name="inbox_helpers_fold">From helpers · %1$s</string>
+    <string name="inbox_helpers_fold_line">Their requests wait here until someone answers them.</string>
+    <plurals name="inbox_digest">
+        <item quantity="one">%1$s helper update</item>
+        <item quantity="other">%1$s helper updates</item>
+    </plurals>
+    <string name="inbox_digest_line">Opens one line for each.</string>
+    <string name="inbox_later">Later</string>
+    <string name="inbox_waiting_later">Waiting for later · %1$s</string>
+    <string name="inbox_waiting_line">Updates you said Later to come back by themselves.</string>
+    <string name="inbox_bring_back">Bring it back</string>
+    <string name="inbox_later_done">Back in 3 hours.</string>
+    <string name="inbox_sites_title">Site rules</string>
+    <string name="inbox_site_line">Read pages on %1$s</string>
+    <string name="inbox_site_allowed">Allowed for this site</string>
+    <string name="inbox_site_remove">Remove</string>
+    <string name="inbox_site_removed">Rule removed.</string>
     <string name="inbox_search">Search the Inbox</string>
     <string name="inbox_badge_needs">Needs your OK</string>
     <string name="inbox_badge_update">Update</string>
@@ -4105,7 +4126,6 @@
     <string name="chat_pin_full">You can pin up to %1$s chats, unpin one first.</string>
     <string name="chat_pinned_done">Pinned to the top.</string>
     <string name="chat_unpinned_done">Unpinned.</string>
-    <string name="inbox_bring_back">Bring it back</string>
     <string name="inbox_bring_back_named">%1$s: %2$s</string>
     <string name="inbox_bring_back_failed">Couldn\'t bring that back, try again.</string>
     <string name="row_suggests">What HQ suggests</string>

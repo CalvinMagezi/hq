@@ -501,3 +501,12 @@ textarea.a-input{min-height:96px;resize:vertical}
 .a-msg[data-unread] .a-msg-main b::before{content:"";display:inline-block;width:8px;height:8px;margin-right:8px;border-radius:50%;background:var(--brand-green);vertical-align:middle}
 .a-msg-time .a-ic{margin-right:4px;vertical-align:-3px}
 .hq-inbox-clear{display:flex;flex-wrap:wrap;gap:8px}
+
+/* Inbox: doors to Tasks and Helpers, the dot on Updates, and the closed rows that open to a short list. */
+.hq-inbox-doors{display:flex;gap:4px;padding:0 12px 4px}
+.hq-tab-dot{background:var(--ink-muted);margin-left:2px}
+.hq-fold{border-bottom:1px solid var(--hairline)}
+.hq-fold-head{width:100%;min-height:56px}
+.hq-fold-body{padding-bottom:8px}
+.hq-later-row{display:flex;align-items:center;gap:8px}
+.hq-later-row>:first-child{flex:1 1 0;min-width:0}

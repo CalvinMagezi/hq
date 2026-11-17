@@ -70,7 +70,8 @@ export function ApprovalCard(p: ApprovalCardProps) {
         {p.canAllow !== false && (
           <button
             type="button"
-            className={allowTone(p.loses) === 'danger' ? 'a-btn danger' : 'a-btn'}
+            // Equal weight: neither answer is filled, and only the one that takes something away is red.
+            className={allowTone(p.loses) === 'danger' ? 'a-btn danger' : 'a-btn secondary'}
             disabled={p.busy}
             aria-busy={p.busy || undefined}
             onClick={p.onAllow}

@@ -68,14 +68,16 @@ const view = (over: Partial<InboxViewProps>) => inRouter(() => createElement(Inb
 
 // web-matches-phone B5: the Inbox on the design's panes, cards and rows (AlignedInbox, AlignedInbox2).
 describe('the Inbox panes', () => {
-  test('a list and a detail pane, with the three tabs and their counts', async () => {
+  test('a list and a detail pane, with the three tabs: a number on Needs you, a quiet dot on Updates', async () => {
     const html = await view({ items: [approval], needsCount: 1, updatesCount: 4 })
     expect(html).toContain('class="a-panes hq-panes"')
     expect(html).toContain('a-pane a-pane-list')
     expect(html).toContain('a-pane a-pane-detail')
     expect(html).toContain('class="a-tabs"')
     expect(html).toContain('<em class="need">1</em>')
-    expect(html).toContain('<em>4</em>')
+    expect(html).not.toContain('<em>4</em>')
+    expect(html).toContain('aria-label="Unread updates"')
+    expect(html).toContain('aria-label="Where HQ and its helpers work"')
     expect(html).toContain('class="a-search"')
   })
 
@@ -225,5 +227,37 @@ describe('keeping the inbox: read, Done, silence', () => {
     const own = { ...approval, topic: 'hq' }
     const html = await view({ tab: 'pending', items: [own], selected: own, onSilence: () => undefined })
     for (const key of ['silence_this_helpers', 'silence_this_tasks', 'silence_this_tips', 'silence_this_upkeep', 'silence_this_email'] as const) expect(html).not.toContain(t(key))
+  })
+})
+
+describe('the Inbox on a wide screen', () => {
+  const helperAsk = item({ id: 'h1', metadata: { dialog: { session_id: 's', seq: 1, kind: 'q', question: null, command: null, options: [], approve: null, answered: false } } })
+  test('requests from helpers fold into one closed row under the owner own', async () => {
+    const html = await view({ items: [approval, helperAsk], needsCount: 2 })
+    expect(html).toContain('From helpers · 1')
+    expect(html).toContain('aria-expanded="false"')
+    // The folded request is not drawn as a card until the row is opened.
+    expect(html.match(/hq-inbox-list/g)).toHaveLength(1)
+    expect(html).not.toContain('Helper wants')
+  })
+  test('three helper updates in a day are one digest row', async () => {
+    const helperUpdate = (id: string) => item({ id, kind: 'value_item', actions: ['dismiss'], title: `Helper ${id}`, metadata: { extra: { source_task: 'session-supervisor' } } })
+    const html = await view({ tab: 'all', items: [helperUpdate('a'), helperUpdate('b'), helperUpdate('c'), hqUpdate], updatesCount: 4 })
+    expect(html).toContain('3 helper updates')
+    expect(html).toContain('Backup finished')
+  })
+  test('what waits for later is one closed row with its count', async () => {
+    const html = await view({ tab: 'all', items: [hqUpdate], later: [taskUpdate], updatesCount: 1 })
+    expect(html).toContain('Waiting for later · 1')
+  })
+  test('the doors to Tasks and Helpers are in the list pane, not on the bar', async () => {
+    const html = await view({})
+    expect(html).toContain('href="/tasks"')
+    expect(html).toContain('href="/helpers"')
+  })
+  test('Done lists the sites that were allowed for good, each with a visible Remove', async () => {
+    const html = await view({ tab: 'resolved', sites: ['docs.example.com'] })
+    expect(html).toContain('Read pages on docs.example.com')
+    expect(html).toContain('Remove')
   })
 })
