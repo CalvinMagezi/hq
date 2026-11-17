@@ -17,6 +17,7 @@ import { AboutNote } from '~/components/notes/AboutNote'
 import { HqHttpError } from '~/lib/hqAuth'
 import { noteQuery, noteTreeQuery, vaultKeys } from '~/lib/queries'
 import { NoteBody } from '~/components/suite/NoteBody'
+import { MoveNote } from '~/components/vault/MoveNote'
 import { ImageViewer } from '~/components/ImageViewer'
 import { NoteEditor } from '~/components/NoteEditor'
 import { SuiteBar } from '~/components/notes/SuiteBar'
@@ -127,6 +128,7 @@ function VaultFileView({ filePath, content, hash }: {
     const [isPinned, setIsPinned] = useState(initialPinned)
     const [pinning, setPinning] = useState(false)
     const [editing, setEditing] = useState(false)
+    const [moving, setMoving] = useState(false)
     const [sideOpen, setSideOpen] = useState(false)
     const [exporting, setExporting] = useState<NoteExportFormat | null>(null)
     const inHub = useInHub()
@@ -397,6 +399,7 @@ ${safeHtml}
 
     return (
         <>
+            {moving && <MoveNote path={filePath} onClose={() => setMoving(false)} />}
             <NoteLayout
                 filePath={filePath}
                 side={isMd ? <AboutNote path={filePath} /> : undefined}
@@ -420,6 +423,7 @@ ${safeHtml}
                             onTask={handleConvertToTask}
                             onPin={handleTogglePin}
                             onDelete={() => void handleDelete()}
+                            onMove={() => setMoving(true)}
                             onExport={(e) => {
                                 const rect = e.currentTarget.getBoundingClientRect()
                                 setExportMenu({ x: rect.left, y: rect.bottom + 6 })

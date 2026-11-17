@@ -187,6 +187,20 @@ export interface TrashedNote {
   days_left: number
 }
 
+/** What a move did, or with `dryRun` what it would do: the notes whose links follow the moved one. */
+export interface MoveResult {
+  from: string
+  to: string
+  referrers: string[]
+  linksRewritten: number
+}
+
+/** Moves or renames a note; links to it in other notes are rewritten. Moving it back undoes it. */
+export async function moveNote(from: string, to: string, dryRun: boolean): Promise<MoveResult> {
+  const r = await hqJson<{ from: string; to: string; referrers?: string[]; links_rewritten?: number }>('/api/note/move', 'POST', { from, to, dry_run: dryRun })
+  return { from: r.from, to: r.to, referrers: r.referrers ?? [], linksRewritten: r.links_rewritten ?? 0 }
+}
+
 /** Moves the note to the Trash; `trash_path` is what Undo restores from. */
 export function deleteNote(path: string): Promise<{ success: boolean; trash_path: string }> {
   return hqJson(`/api/note?path=${encodeURIComponent(path)}`, 'DELETE')

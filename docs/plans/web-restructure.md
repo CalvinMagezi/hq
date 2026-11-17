@@ -61,9 +61,11 @@ deleted; the tree is the one component above.
 
 ## Not built in Vault navigation, and why
 
-- Move and rename, drag and drop, and Move to... The server has no route for them (it creates, updates,
-  trashes, restores and links notes). They need a server route, a rule for whether links to a moved note
-  are rewritten, and an Undo that restores the old place. Decide the link rule first.
+- Move and rename: built for a note. `POST /api/note/move` (`{from, to, dry_run}`) runs the same code as the
+  `vault_move` tool, so links to the note in other notes are rewritten (the open question is answered: they
+  follow) and the index follows. The note bar's Move opens a sheet where typing a new place asks for a dry run
+  and says how many notes link here; Move does it and Undo moves it back. Not built: moving a folder, and drag
+  and drop in the tree (the server moves notes, not folders).
 - New folder, sort by Modified and the grid view on the folder page: the directory listing carries no
   modified time, and nothing creates an empty folder.
 - Scroll position on Back is whatever the router restores; it is not guaranteed by this change.
@@ -213,9 +215,8 @@ HQ Hub (`crates/hq-desktop/src/menu.rs`):
 
 ## Open questions that block parts of the above
 
-- Can the web move or rename notes and folders? `vaultApi.ts` has create, update, delete, restore and
-  trash, and no move or rename. Drag and drop and "Move to..." need server work first, and a decision on
-  whether links to a moved note are rewritten.
+- Moving a folder and drag and drop: the server moves notes only. Folders need a route that moves every note
+  under them and rewrites their links as one change.
 - Is the claude.ai connector retired? `docs/plans/web-matches-phone/plan.md` says so, and this repo's
   overview still documents it. Settings shows a "Claude on the web" row only if it is not.
 - Does HQ Hub's helper count and notice follow `agent_host.driver_grace_minutes`, as the Inbox does?

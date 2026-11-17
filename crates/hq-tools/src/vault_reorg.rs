@@ -386,6 +386,21 @@ impl VaultPinTool {
     }
 }
 
+/// Moves or renames a note for the owner, through the same code the `vault_move` tool runs: inbound
+/// wikilinks are rewritten, the search index follows, and the notes the move touched are credited to the
+/// caller. With `dry_run` it only reports which notes link here. Returns the tool's report as JSON.
+pub async fn move_note_value(
+    vault: Arc<VaultClient>,
+    db: Option<Arc<Database>>,
+    from: &str,
+    to: &str,
+    dry_run: bool,
+) -> Result<Value> {
+    VaultMoveTool { vault, db }
+        .execute(json!({ "from": from, "to": to, "dry_run": dry_run }))
+        .await
+}
+
 /// The reorg tools, sharing one client and optional index DB.
 pub fn create_vault_reorg_tools(
     vault: Arc<VaultClient>,

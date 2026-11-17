@@ -1,7 +1,7 @@
 import { useState, type MouseEvent, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Download, FileText, Folder, ListChecks, MessageSquare, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Eye, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Download, FileText, Folder, FolderInput, ListChecks, MessageSquare, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Eye, Plus, Trash2 } from 'lucide-react'
 import type { DirEntry } from '~/lib/vaultApi'
 import { currentVersion, fetchNoteVersions, reviewTag, whoWrote } from '~/lib/noteReview'
 import { relTime } from '~/lib/time'
@@ -123,12 +123,14 @@ interface NoteBarProps {
     onPin: () => void
     onExport: (e: MouseEvent<HTMLButtonElement>) => void
     onDelete: () => void
+    /** Opens the move and rename sheet. */
+    onMove: () => void
     /** HQ Lite runs no chats and serves no export, so Ask HQ and Export are not there. */
     lite?: boolean
 }
 
 /** The note's actions in one row of chips: Edit first, then Ask HQ, Make a task, Pin, Export and Delete. */
-export function NoteBar({ editing, pinned, pinning, exporting, exportOpen, onEdit, onAsk, onTask, onPin, onExport, onDelete, lite }: NoteBarProps) {
+export function NoteBar({ editing, pinned, pinning, exporting, exportOpen, onEdit, onAsk, onTask, onPin, onExport, onDelete, onMove, lite }: NoteBarProps) {
     return (
         <div className="a-chips an-bar" role="group" aria-label={t('notes_actions')}>
             <button type="button" className="a-btn compact" onClick={onEdit}>
@@ -155,6 +157,10 @@ export function NoteBar({ editing, pinned, pinning, exporting, exportOpen, onEdi
                     {t('note_action_export')}
                 </button>
             )}
+            <button type="button" className="a-chip" onClick={onMove}>
+                <FolderInput className="a-ic xs" aria-hidden="true" />
+                {t('notes_move')}
+            </button>
             <button type="button" className="a-chip" onClick={onDelete}>
                 <Trash2 className="a-ic xs" aria-hidden="true" />
                 {t('notes_delete')}
