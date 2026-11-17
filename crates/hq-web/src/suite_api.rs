@@ -32,6 +32,7 @@ pub(crate) fn routes() -> Router<Arc<WsState>> {
         .route("/api/suite/media", get(media_handler))
         .route("/api/suite/sheet", get(sheet_handler))
         .route("/api/suite/tile", get(tile_handler))
+        .route("/api/suite/sheet/cell", post(sheet_cell_handler))
 }
 
 #[derive(Deserialize)]
@@ -46,6 +47,17 @@ pub(crate) struct SheetQuery {
     index: Option<usize>,
     row: Option<u32>,
     col: Option<u32>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct CellEdit {
+    path: String,
+    index: usize,
+    row: u32,
+    col: u32,
+    /// What the cell held when the person opened it; the edit is refused if it holds something else now.
+    expected: String,
+    text: String,
 }
 
 #[derive(Deserialize)]
@@ -160,6 +172,27 @@ pub(crate) async fn sheet_handler(
             q.row.unwrap_or(0),
             q.col.unwrap_or(0),
         )
+    })
+    .await?;
+    Ok(Json(view))
+}
+
+pub(crate) async fn sheet_cell_handler(
+    State(state): State<Arc<WsState>>,
+    Json(b): Json<CellEdit>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let view = blocking(move || {
+        hq_suite_adapter::sheets::edit_cell(
+            &vault,
+            &b.path,
+            b.index,
+            b.row,
+            b.col,
+            &b.expected,
+            &b.text,
+        )?;
+        hq_suite_adapter::sheets::view(&vault, &b.path, b.index, 0, 0)
     })
     .await?;
     Ok(Json(view))
