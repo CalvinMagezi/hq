@@ -48,6 +48,7 @@ pub mod provenance;
 pub mod registry;
 pub mod remote_mcp;
 pub mod self_update;
+pub mod session_policy;
 pub mod session_search;
 pub mod shortcuts;
 pub mod skill_audit;

@@ -35,7 +35,7 @@ pub fn join(db: &Arc<Database>, args: &Value, root: &str) -> Result<(String, i64
         let top = db.with_conn(move |c| registry::tree_root(c, &id))?;
         bail!("session {root} is a worker under {parent}; name the team's root, {top}, as team");
     }
-    let depth = crate::a2a::check_tree_limits(db, &row, &agent_host_config().teams)?;
+    let depth = crate::session_policy::check_tree_limits(db, &row, &agent_host_config().teams)?;
     Ok((row.id, depth))
 }
 

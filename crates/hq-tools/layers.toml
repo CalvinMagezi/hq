@@ -57,6 +57,7 @@ office = 1
 prose_lint = 1
 remote_mcp = 1
 self_update = 1
+session_policy = 1
 skill_bundle = 1
 slash_commands = 1
 spill = 1

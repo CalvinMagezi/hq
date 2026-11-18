@@ -171,7 +171,9 @@ pub fn sessions_in(db: &Arc<Database>, scope: &Scope, reader: &Reader) -> Result
     let mut visible = Vec::new();
     for id in candidates {
         let may = db
-            .with_conn(|c| crate::a2a::check_session_access(c, reader.caller.as_deref(), &id))
+            .with_conn(|c| {
+                crate::session_policy::check_session_access(c, reader.caller.as_deref(), &id)
+            })
             .and_then(|()| match reader.connector {
                 true => connector_may_drive(db, &json!({ CONNECTOR_ARG: "claude.ai" }), &id),
                 false => Ok(()),
