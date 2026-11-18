@@ -2,6 +2,7 @@
 name = "hq-tool-api"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "The HqTool trait and ToolRegistry, plus the small helpers every HQ tool uses. Depends only on hq-core."
 
 [dependencies]
