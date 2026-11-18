@@ -308,7 +308,7 @@ impl HqTool for ConvertFromMarkdownTool {
 // ─── VaultExportTool / VaultExportPdfTool ──────────────────────────────────
 
 /// Shared by `vault_export` and its `vault_export_pdf` alias.
-async fn run_note_export(
+pub(crate) async fn run_note_export(
     vault_path: &std::path::Path,
     args: &Value,
     fixed_format: Option<Format>,

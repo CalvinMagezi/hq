@@ -3843,6 +3843,7 @@ dependencies = [
  "hq-suite-sinks",
  "hq-suite-slides",
  "hq-suite-store",
+ "hq-suite-xlsx",
  "hq-vault",
  "image",
  "serde",
@@ -3964,6 +3965,19 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "hq-suite-xlsx"
+version = "0.9.1"
+dependencies = [
+ "hq-convert",
+ "hq-suite-calc",
+ "hq-suite-md",
+ "roxmltree 0.21.1",
+ "thiserror 2.0.18",
+ "tokio",
+ "zip 9.0.5",
 ]
 
 [[package]]
