@@ -2,6 +2,8 @@
 # Tests changed-areas.sh against throwaway git repositories. No network.
 # Run: bash scripts/ci/changed-areas-test.sh
 set -euo pipefail
+# GitHub sets this on a runner; the script falls back to it, so the cases below must not inherit it.
+unset GITHUB_EVENT_NAME GITHUB_OUTPUT
 here=$(cd "$(dirname "$0")" && pwd)
 script=$here/changed-areas.sh
 t=$(mktemp -d)
