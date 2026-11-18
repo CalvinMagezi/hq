@@ -52,6 +52,9 @@ jobs:
           rustup default "$RUST_TOOLCHAIN"
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: ci-rust
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -105,6 +108,9 @@ jobs:
           rustup default "$RUST_TOOLCHAIN"
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: ci-rust-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The macOS binary ships in every release; a Linux-only call in a dependency or in our
       # code compiles on Linux CI and breaks only here.
@@ -137,6 +143,9 @@ jobs:
           rustup default $env:RUST_TOOLCHAIN
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: ci-rust-windows
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # HQ Lite is the native Windows edition: no coding-agent host, sandbox or relays.
       - name: Build hq.exe
