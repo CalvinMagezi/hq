@@ -128,7 +128,8 @@ One number computed from a range. The body is empty.
 | `fn` | Required: `sum`, `count`, `avg`, `min`, `max` or `median`. |
 | `label` | Text shown with the number. |
 | `format` | A column type used to display the result. |
-| `where`, `group` | Reserved for the dashboard (milestone M5); accepted, not yet read. |
+| `where` | Optional. Row filter such as `qty>30 and item=Sugar`; with it the range's first row names the columns and the number comes from the last column. |
+| `group` | Not allowed on a tile. |
 
 #### `plot`
 
@@ -140,7 +141,8 @@ A chart drawn from a range. The body is empty.
 | `from` | Required. A range, header row first. |
 | `x`, `y` | Required. Column names from the header row (the label and the value). |
 | `title` | Optional. |
-| `where`, `group` | Reserved for the dashboard. |
+| `where` | Optional. Row filter, as on a tile. |
+| `group` | Optional. Column to split into one series per value (bar and line only, up to six). |
 
 #### `chart`
 

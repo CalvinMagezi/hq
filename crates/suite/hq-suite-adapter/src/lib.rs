@@ -9,6 +9,7 @@
 pub mod api;
 pub mod calc;
 pub mod docs;
+pub mod filter;
 pub mod governor;
 pub mod measure;
 pub mod peer;

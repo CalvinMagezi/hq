@@ -81,3 +81,15 @@ Not built: adding or deleting rows and columns, column types, and an undo for an
 A `plot` block draws a chart from a range of a sheet in the same note: `type` is `bar`, `line`, `pie` or `donut`, `from` is a range whose first row names the columns, `x` is the column of labels and `y` the column of values (names are not case sensitive). hq calculates the values (a formula column is drawn as its results) and sends the chart in the format the chat already draws, so the phone uses its existing chart card. `GET /api/suite/plot?path=&index=`.
 
 A plot that cannot be drawn says why instead of guessing: an unknown column, a value that is not a number, no rows, or more rows than a chart takes (50 for bar and line, 12 for pie and donut). One series per plot for now; `where` and `group` are reserved for the dashboard.
+
+## The dashboard: `where` and `group`
+
+Tiles and plots take two more attributes, so a note can hold a small dashboard over its sheets.
+
+`where` keeps only the rows that match: `where="qty>30 and item=Sugar"`. Up to four conditions joined by `and`, each a column name from the range's first row, one of `= != <> > >= < <=`, and a number or text (text is not case sensitive). A comparison only holds between values of the same kind, and `!=` also holds between different kinds, as in a spreadsheet.
+
+On a **tile**, a `where` makes the range's first row the column names and takes the number from the range's **last column**: `from="A1:C6" fn=sum where="region=North"` adds the `amount` of the North rows. Without a `where` the tile reads every number in the range, as before.
+
+On a **plot**, `group=region` draws one series per value of that column (up to six, over the labels in the order they first appear, a label a group lacks counts as 0); it needs a bar or line chart. `where` filters the rows before anything is drawn.
+
+A tile takes no `group` (it shows one number); a pie or donut takes none either. Anything that cannot be read or drawn says why instead of guessing: an unknown column, a condition without a value, more than four conditions, more than six groups.
