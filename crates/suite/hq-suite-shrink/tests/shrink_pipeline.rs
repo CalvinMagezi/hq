@@ -287,6 +287,27 @@ async fn the_same_picture_in_two_documents_is_stored_once() {
 }
 
 #[tokio::test]
+async fn a_file_sent_from_the_app_is_shrunk_with_its_record_outside_media() {
+    const UPLOAD: &str = "_media/web/2026-11-18/1-Report.docx";
+    let original = docx("Sent from the phone", &big_pictures());
+    let (d, paths) = vault_with(UPLOAD, &original);
+    let notes = FolderNotes(paths.clone());
+    let s = shrinker(&paths, &notes, &NoFaults);
+    let preview = s.prepare(UPLOAD, DAY).await.unwrap();
+    assert_eq!(preview.note, "Notebooks/Imports/1-Report.md");
+    assert!(d.path().join(&preview.note).is_file());
+    let outcome = s.confirm(&preview.job, DAY).unwrap();
+    assert_eq!(outcome.trash_path, format!("_trash/{DAY}/{UPLOAD}"));
+    s.undo(&preview.job).unwrap();
+    assert_eq!(std::fs::read(d.path().join(UPLOAD)).unwrap(), original);
+    // The picture store stays HQ's own.
+    assert!(matches!(
+        s.prepare("_media/cas/ab/x.docx", DAY).await,
+        Err(ShrinkError::Refused(Refusal::ProtectedFolder))
+    ));
+}
+
+#[tokio::test]
 async fn refusals_are_specific_and_touch_nothing() {
     // A protected folder.
     let (_d, paths) = vault_with("_media/inbound.docx", &docx("x", &[]));

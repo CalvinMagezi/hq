@@ -343,14 +343,30 @@ fn refuse(r: Refusal) -> ShrinkError {
     ShrinkError::Refused(r)
 }
 
-/// Folders HQ keeps for itself. A file there is not the person's document.
+/// Where a file the person sent from the app lands. It is their document, but the folder is HQ's.
+const UPLOADS_DIR: &str = "_media/web/";
+
+/// Where the record of an uploaded file is written, since a note inside `_media` would be hidden.
+const UPLOAD_NOTES_DIR: &str = "Notebooks/Imports/";
+
+/// Folders HQ keeps for itself. A file there is not the person's document, except an upload.
 fn is_protected(rel: &str) -> bool {
-    rel.split('/')
-        .next()
-        .is_some_and(|top| top.starts_with('_'))
+    !rel.starts_with(UPLOADS_DIR)
+        && rel
+            .split('/')
+            .next()
+            .is_some_and(|top| top.starts_with('_'))
 }
 
 fn note_rel_for(source: &str, taken: impl Fn(&str) -> bool) -> String {
+    let placed;
+    let source = if source.starts_with(UPLOADS_DIR) {
+        let name = source.rsplit('/').next().unwrap_or(source);
+        placed = format!("{UPLOAD_NOTES_DIR}{name}");
+        placed.as_str()
+    } else {
+        source
+    };
     let stem = match source.rfind('.') {
         Some(dot) if dot > source.rfind('/').unwrap_or(0) => &source[..dot],
         _ => source,
