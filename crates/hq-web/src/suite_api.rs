@@ -26,6 +26,7 @@ pub(crate) fn routes() -> Router<Arc<WsState>> {
         .route("/api/suite/file", get(file_handler))
         .route("/api/suite/shrink", post(shrink_handler))
         .route("/api/suite/confirm", post(confirm_handler))
+        .route("/api/suite/offload", post(offload_handler))
         .route("/api/suite/abandon", post(abandon_handler))
         .route("/api/suite/undo", post(undo_handler))
         .route("/api/suite/storage", get(storage_handler))
@@ -148,6 +149,23 @@ pub(crate) async fn confirm_handler(
     let vault = state.vault_path.clone();
     Ok(Json(
         blocking(move || hq_suite_adapter::api::confirm(&vault, &b.job)).await?,
+    ))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct OffloadBody {
+    job: String,
+    sink: String,
+    code: String,
+}
+
+pub(crate) async fn offload_handler(
+    State(state): State<Arc<WsState>>,
+    Json(b): Json<OffloadBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    Ok(Json(
+        blocking(move || hq_suite_adapter::api::offload(&vault, &b.job, &b.sink, &b.code)).await?,
     ))
 }
 

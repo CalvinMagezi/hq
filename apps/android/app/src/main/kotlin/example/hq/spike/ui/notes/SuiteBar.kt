@@ -9,7 +9,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,6 +31,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import example.hq.spike.R
 import example.hq.spike.data.HqServices
+import example.hq.spike.data.SinkInfo
 import example.hq.spike.data.SuiteFile
 import example.hq.spike.data.SuiteRefused
 import example.hq.spike.ui.theme.HqType
@@ -62,6 +66,7 @@ fun SuiteBar(source: SuiteSource, onNotice: (String) -> Unit, onChanged: () -> U
     var busy by remember(source.path) { mutableStateOf(false) }
     var refusal by remember(source.path) { mutableStateOf<String?>(null) }
     val failed = stringResource(R.string.suite_bar_failed)
+    var keeping by remember(source.path) { mutableStateOf<List<SinkInfo>?>(null) }
 
     LaunchedEffect(source.path) { file = runCatching { client.suiteFile(source.path) }.getOrNull() }
 
@@ -90,8 +95,19 @@ fun SuiteBar(source: SuiteSource, onNotice: (String) -> Unit, onChanged: () -> U
         onShrink = { run { client.suiteShrink(source.path) } },
         onConfirm = { run { client.suiteConfirm(f.job.orEmpty()) } },
         onAbandon = { run { client.suiteAbandon(f.job.orEmpty()) } },
+        onKeep = { scope.launch { keeping = runCatching { client.suiteSinks() }.getOrDefault(emptyList()).filter { it.reachable } } },
         onUndo = { run { client.suiteUndo(f.job.orEmpty()) } },
     )
+    keeping?.let { sinks ->
+        KeepInSinkDialog(
+            sinks,
+            onDismiss = { keeping = null },
+            onKeep = { sink, code ->
+                keeping = null
+                run { client.suiteOffload(f.job.orEmpty(), sink, code) }
+            },
+        )
+    }
 }
 
 /** What a fixed screen (`--es fixture n-suite-ready`, `-prepared`, `-shrunk`, `-refused`) shows in the bar, so each state can be checked with no hq. */
@@ -101,7 +117,7 @@ object SuiteBarFixture {
 
 /** The bar for a state, with no hq behind it. */
 @Composable
-fun SuiteBarView(f: SuiteFile, busy: Boolean, refusal: String?, onShrink: () -> Unit, onConfirm: () -> Unit, onAbandon: () -> Unit, onUndo: () -> Unit) {
+fun SuiteBarView(f: SuiteFile, busy: Boolean, refusal: String?, onShrink: () -> Unit, onConfirm: () -> Unit, onAbandon: () -> Unit, onKeep: () -> Unit, onUndo: () -> Unit) {
     Column(Modifier.fillMaxWidth().background(Mts.Surface100).padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)) {
         Text(
             refusal ?: f.headline, style = HqType.BodySm, color = Mts.Ink,
@@ -114,6 +130,7 @@ fun SuiteBarView(f: SuiteFile, busy: Boolean, refusal: String?, onShrink: () -> 
                 f.canShrink -> BarButton(stringResource(R.string.suite_bar_make_smaller), onShrink)
                 f.canConfirm -> {
                     BarButton(stringResource(R.string.suite_bar_move), onConfirm)
+                    BarButton(stringResource(R.string.suite_bar_keep), onKeep)
                     if (f.canAbandon) BarButton(stringResource(R.string.suite_bar_not_now), onAbandon)
                 }
                 f.canUndo -> BarButton(stringResource(R.string.suite_bar_undo), onUndo)
@@ -127,4 +144,27 @@ private fun BarButton(label: String, onClick: () -> Unit) {
     Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick).padding(end = 16.dp), contentAlignment = Alignment.CenterStart) {
         Text(label, style = HqType.BodySmBold, color = Mts.BrandBlue)
     }
+}
+
+@Composable
+private fun KeepInSinkDialog(sinks: List<SinkInfo>, onDismiss: () -> Unit, onKeep: (String, String) -> Unit) {
+    var chosen by remember { mutableStateOf(sinks.firstOrNull()?.id) }
+    var code by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.suite_keep_title)) },
+        text = {
+            Column {
+                if (sinks.isEmpty()) Text(stringResource(R.string.suite_keep_none), style = HqType.BodySm, color = Mts.InkMuted)
+                sinks.forEach { s ->
+                    BarButton((if (s.id == chosen) "● " else "○ ") + s.id) { chosen = s.id }
+                }
+                if (sinks.isNotEmpty()) OutlinedTextField(code, { code = it.uppercase() }, label = { Text(stringResource(R.string.cold_code_label)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { chosen?.let { onKeep(it, code.trim()) } }, enabled = chosen != null && code.isNotBlank()) { Text(stringResource(R.string.suite_keep_go)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cold_cancel)) } },
+    )
 }

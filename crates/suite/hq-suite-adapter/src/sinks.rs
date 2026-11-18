@@ -230,6 +230,18 @@ pub fn offload(vault: &Path, job: &str, sink: &str) -> Result<()> {
     Ok(())
 }
 
+/// Seals a prepared job's original into a sink with a recovery code the caller gives, and removes
+/// it from the phone once it reads back. A wrong code is refused before anything moves.
+pub fn offload_with_code(vault: &Path, job: &str, sink: &str, code: &str) -> Result<()> {
+    let paths = SuitePaths::new(vault);
+    let notes = VaultNotes::new(paths.clone());
+    let store = open_with_code(&paths, sink, code)?;
+    shrinker(&paths, &notes)
+        .offload(job, &*store)
+        .map(drop)
+        .map_err(friendly)
+}
+
 /// Undoes a job whose original went to a sink: fetches it back. For a job that went to the trash
 /// the caller uses the plain undo.
 pub fn undo(vault: &Path, job: &str) -> Result<bool> {
@@ -430,6 +442,16 @@ mod screen_tests {
             .is_err()
         );
         assert!(drill_with_code(vault.path(), "nope", &code, None).is_err());
+        let wrong = offload_with_code(
+            vault.path(),
+            "sj-none",
+            "phone-backup",
+            "AAAA-BBBB-CCCC-DDDD-EEEE",
+        );
+        assert!(
+            wrong.unwrap_err().to_string().contains("does not open"),
+            "a wrong code is refused before the job is looked at"
+        );
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
         server.join().unwrap();
         assert!(

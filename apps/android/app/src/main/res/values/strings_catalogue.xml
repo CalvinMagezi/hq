@@ -4033,6 +4033,10 @@
     <string name="suite_bar_make_smaller">Make it smaller</string>
     <string name="suite_bar_move">Move the original to the trash</string>
     <string name="suite_bar_not_now">Not now</string>
+    <string name="suite_bar_keep">Keep the original in a sink</string>
+    <string name="suite_keep_title">Keep the original in a sink</string>
+    <string name="suite_keep_none">No sink is answering. Add one under Cold storage.</string>
+    <string name="suite_keep_go">Keep it there</string>
     <string name="suite_bar_undo">Undo</string>
     <string name="suite_bar_working">Working on it…</string>
     <string name="suite_sheet_edit_title">Edit %1$s</string>

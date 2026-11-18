@@ -807,6 +807,10 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 
     suspend fun suiteConfirm(job: String): SuiteFile = suiteAction("/api/suite/confirm", JSONObject().put("job", job))
 
+    /** Seals the prepared original into the sink and removes it from the phone once it reads back. The code is sent for this call only. */
+    suspend fun suiteOffload(job: String, sink: String, code: String): SuiteFile =
+        suiteAction("/api/suite/offload", JSONObject().put("job", job).put("sink", sink).put("code", code))
+
     suspend fun suiteAbandon(job: String): SuiteFile = suiteAction("/api/suite/abandon", JSONObject().put("job", job))
 
     suspend fun suiteUndo(job: String): SuiteFile = suiteAction("/api/suite/undo", JSONObject().put("job", job))
