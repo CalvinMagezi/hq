@@ -2,6 +2,7 @@
 name = "hq-tools-web"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "HQ's web tools (search, fetch, the remote MCP bridge) and image generation, split out of hq-tools so a change elsewhere in the tools does not rebuild them."
 
 [dependencies]
