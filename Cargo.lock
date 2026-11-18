@@ -3741,6 +3741,7 @@ dependencies = [
  "hq-core",
  "hq-db",
  "hq-tools",
+ "hq-tools-office",
  "hq-vault",
  "rmcp",
  "serde",
@@ -4004,7 +4005,6 @@ dependencies = [
  "hq-host",
  "hq-llm",
  "hq-memory",
- "hq-suite-adapter",
  "hq-tool-api",
  "hq-tools-web",
  "hq-vault",
@@ -4031,6 +4031,19 @@ dependencies = [
  "which",
  "wiremock",
  "zip 9.0.5",
+]
+
+[[package]]
+name = "hq-tools-office"
+version = "0.9.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "hq-suite-adapter",
+ "hq-tool-api",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
