@@ -205,6 +205,13 @@ pub fn confirm(vault: &Path, job: &str) -> Result<FileStatus> {
     })
 }
 
+/// The person chose to keep the original in a sink instead of the trash.
+pub fn offload(vault: &Path, job: &str, sink: &str, code: &str) -> Result<FileStatus> {
+    after(vault, job, |_| {
+        crate::sinks::offload_with_code(vault, job, sink, code)
+    })
+}
+
 /// The person said no: the new note is removed and nothing moved.
 pub fn abandon(vault: &Path, job: &str) -> Result<FileStatus> {
     after(vault, job, |s| s.abandon(job).map_err(friendly))
