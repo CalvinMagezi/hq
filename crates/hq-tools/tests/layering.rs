@@ -79,10 +79,10 @@ fn modules(src: &Path) -> BTreeMap<String, Vec<PathBuf>> {
         if p.is_dir() {
             let files = mods.entry(name).or_default();
             rust_files(&p, files);
-        } else if let Some(stem) = name.strip_suffix(".rs") {
-            if stem != "lib" {
-                mods.entry(stem.to_string()).or_default().push(p);
-            }
+        } else if let Some(stem) = name.strip_suffix(".rs")
+            && stem != "lib"
+        {
+            mods.entry(stem.to_string()).or_default().push(p);
         }
     }
     for files in mods.values_mut() {
