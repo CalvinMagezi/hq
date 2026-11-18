@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """How much of the workspace must rebuild when a typical commit lands?
 
-Usage:   python3 -I scripts/ci/affected-report.py [--commits N]     (default 400)
+Usage:   python3 -I scripts/ci/affected-report.py [--commits N] [--only PATH_PREFIX]   (N defaults to 400)
 
 For each crate: its own lines of Rust, and the lines in it plus everything that depends on it
 (what a clean-cache CI build has to recompile when that crate changes). Then walks the last N
@@ -10,6 +10,10 @@ workspace's lines that had to rebuild per commit.
 
 A commit that changes Cargo.lock, the root Cargo.toml or .cargo/ counts as 100%.
 Commits that touch no crate are reported separately and left out of the percentages.
+
+--only PATH_PREFIX keeps only the commits that changed a file under that prefix (for example
+`--only crates/suite/` for the suite family), so the median answers "what does a change in this
+area rebuild?". The dependency graph is always the one in the working tree.
 
 Stdlib only. Run it before and after a restructuring; the median is the number to move.
 """
@@ -25,6 +29,9 @@ def main():
     n_commits = 400
     if "--commits" in sys.argv:
         n_commits = int(sys.argv[sys.argv.index("--commits") + 1])
+    only = None
+    if "--only" in sys.argv:
+        only = sys.argv[sys.argv.index("--only") + 1]
 
     crates = {}
     for p in glob.glob("crates/*/Cargo.toml") + glob.glob("crates/suite/*/Cargo.toml"):
@@ -79,6 +86,8 @@ def main():
     shares, no_crate = [], 0
     for blk in out:
         files = [l for l in blk.splitlines()[1:] if l]
+        if only and not any(f.startswith(only) for f in files):
+            continue
         touched, whole = set(), False
         for f in files:
             if f in ("Cargo.lock", "Cargo.toml") or f.startswith(".cargo/"):
