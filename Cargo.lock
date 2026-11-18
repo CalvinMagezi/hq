@@ -3967,6 +3967,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "hq-tool-api"
+version = "0.9.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "hq-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "hq-tools"
 version = "0.9.1"
 dependencies = [
@@ -3990,6 +4005,7 @@ dependencies = [
  "hq-llm",
  "hq-memory",
  "hq-suite-adapter",
+ "hq-tool-api",
  "hq-vault",
  "html2text",
  "libc",

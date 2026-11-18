@@ -386,6 +386,7 @@ a document.
 | `hq-llm` | LLM provider trait, OpenRouter, Ollama, backend chains |
 | `hq-agent` | Session loop, sub-agents, coding tools, governance, 5-layer context engine (`context/`) |
 | `hq-tools` | HQ tools (vault, tasks, skills, agents, harness sessions, web, git), registered in `crates/hq-mcp/src/registry.rs::create_default_registry()`. Its modules are layered: `crates/hq-tools/layers.toml` gives each top-level module a layer and `tests/layering.rs` fails when one reaches up to a higher layer outside `allowed_back_edges`, a list that only shrinks (a new module needs a layer; measure with `python3 -I scripts/ci/module-graph.py`) |
+| `hq-tool-api` | The `HqTool` trait and `ToolRegistry` (`registry`), shared helpers (`util`) and the family gates (`family_guest`, `family_confirm`). Depends only on `hq-core`; `hq-tools` re-exports every module, so `hq_tools::registry::...` still works |
 | `hq-mcp` | MCP stdio server (2-tool gateway) |
 | `hq-daemon` | Agent worker, value bus, memory cycle, email triage (recurring prompts are `/watch`, not a daemon task) |
 | `hq-memory` | Consolidator, ingester, querier, forgetter, entity graph |

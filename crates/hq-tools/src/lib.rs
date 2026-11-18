@@ -27,8 +27,6 @@ pub mod convert;
 pub mod copilot_credits;
 pub mod device_actions;
 pub mod external_runner;
-pub mod family_confirm;
-pub mod family_guest;
 pub mod file_edit;
 pub mod github;
 #[cfg(feature = "gws")]
@@ -45,7 +43,6 @@ pub mod notify;
 pub mod office;
 pub mod prose_lint;
 pub mod provenance;
-pub mod registry;
 pub mod remote_mcp;
 pub mod self_update;
 pub mod session_search;
@@ -61,10 +58,13 @@ pub mod system_info;
 pub mod task_classifier;
 pub mod tasks;
 pub mod usage_forecast;
-pub mod util;
 pub mod vault;
 pub mod vault_reorg;
 pub mod web;
+
+// These modules now live in `hq-tool-api` (they depend only on `hq-core`). Re-exported under the
+// same names so `hq_tools::registry::...` and `crate::registry::...` keep resolving.
+pub use hq_tool_api::{family_confirm, family_guest, registry, util};
 
 pub use external_runner::run_external_cli_harness_strict;
 pub use registry::{HqTool, ToolRegistry, ToolSummary};
