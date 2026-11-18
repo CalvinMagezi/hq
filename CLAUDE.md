@@ -52,6 +52,9 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 - A shortcut you knowingly leave is one new file `docs/techdebt/<slug>.md` (see its README), never a
   row in `TECHDEBT.md`, which is frozen. A temporary re-export left by a split is `facade-<what>.md`
   and says when it can be removed.
+- On a conflict in a generated file (`Cargo.lock`, or the strings outputs `en.gen.ts` and
+  `strings_catalogue.xml`), never merge it by hand: run `scripts/resolve-generated.sh`, then `git add`
+  what it lists. Rebase onto current `main` before the final push.
 - Do not hand-deploy to a server. Servers update themselves from signed releases
   (`docs/UPDATE_SYSTEM.md`, `deploy/README.md`).
 
