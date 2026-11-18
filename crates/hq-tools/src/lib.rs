@@ -36,14 +36,12 @@ pub mod harness_session;
 pub mod harness_usage;
 pub mod harness_usage_collect;
 pub mod helper_setup;
-pub mod imagegen;
 pub mod link_capture;
 pub mod model_control;
 pub mod notify;
 pub mod office;
 pub mod prose_lint;
 pub mod provenance;
-pub mod remote_mcp;
 pub mod self_update;
 pub mod session_search;
 pub mod shortcuts;
@@ -60,11 +58,12 @@ pub mod tasks;
 pub mod usage_forecast;
 pub mod vault;
 pub mod vault_reorg;
-pub mod web;
 
 // These modules now live in `hq-tool-api` (they depend only on `hq-core`). Re-exported under the
 // same names so `hq_tools::registry::...` and `crate::registry::...` keep resolving.
 pub use hq_tool_api::{family_confirm, family_guest, registry, util};
+// `web`, `remote_mcp` and `imagegen` now live in `hq-tools-web`; same names here.
+pub use hq_tools_web::{imagegen, remote_mcp, web};
 
 pub use external_runner::run_external_cli_harness_strict;
 pub use registry::{HqTool, ToolRegistry, ToolSummary};

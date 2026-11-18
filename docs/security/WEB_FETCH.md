@@ -7,7 +7,7 @@ the machine or its network: loopback, the cloud metadata endpoint
 
 ## What is enforced
 
-`crates/hq-tools/src/web/ssrf.rs`, used by the client every `web_fetch` goes
+`crates/hq-tools-web/src/web/ssrf.rs`, used by the client every `web_fetch` goes
 through (`web::guarded_client()` for other tools):
 
 - **Syntax check** (`validate_url`). Only `http` and `https`. `localhost`,
