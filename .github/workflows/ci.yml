@@ -31,9 +31,37 @@ env:
   APT_DEPS: "build-essential pkg-config perl libssl-dev"
 
 jobs:
+  # Which areas does this pull request touch? Jobs that cannot be affected are skipped (job-level
+  # `if`, so a skipped job still reports as passing). The script fails open: a push, an unknown
+  # path or any error runs everything. See scripts/ci/changed-areas.sh.
+  changes:
+    name: Changed areas
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.areas.outputs.rust }}
+      web_app: ${{ steps.areas.outputs.web_app }}
+      android: ${{ steps.areas.outputs.android }}
+      site: ${{ steps.areas.outputs.site }}
+      installer: ${{ steps.areas.outputs.installer }}
+      workflows: ${{ steps.areas.outputs.workflows }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: areas
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: bash scripts/ci/changed-areas.sh
+
   # Lint and test run in parallel; the old single `rust` job took about 33 minutes at p50.
   rust-lint:
     name: Rust (clippy)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -68,6 +96,8 @@ jobs:
 
   rust-test:
     name: Rust (test)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -132,16 +162,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Lint and test both passed
+      - name: Lint and test passed or were skipped
         env:
           LINT: ${{ needs.rust-lint.result }}
           TEST: ${{ needs.rust-test.result }}
         run: |
           echo "lint=$LINT test=$TEST"
-          [ "$LINT" = "success" ] && [ "$TEST" = "success" ]
+          # Skipped is fine: the changes job found nothing Rust-relevant.
+          for r in "$LINT" "$TEST"; do
+            case "$r" in success | skipped) ;; *) exit 1 ;; esac
+          done
 
   rust-macos:
     name: Rust (macOS build)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -176,6 +211,8 @@ jobs:
 
   rust-windows:
     name: Rust (Windows build, smoke)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
@@ -263,6 +300,8 @@ jobs:
 
   windows-installer:
     name: PowerShell installer (5.1 and 7)
+    needs: changes
+    if: needs.changes.outputs.installer == 'true'
     runs-on: windows-2022
     timeout-minutes: 15
     steps:
@@ -278,6 +317,8 @@ jobs:
 
   rustfmt:
     name: Rust (fmt)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -292,6 +333,8 @@ jobs:
 
   web:
     name: Web (tsc, test, build)
+    needs: changes
+    if: needs.changes.outputs.web_app == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -311,6 +354,8 @@ jobs:
 
   npm-installer:
     name: npm installer (test, linux install)
+    needs: changes
+    if: needs.changes.outputs.installer == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -388,6 +433,8 @@ jobs:
         run: bash scripts/release/android-seq-test.sh
       - name: Stable auto-promote picks only soaked, newer main releases
         run: bash scripts/release/pick-promotable-test.sh
+      - name: Changed-areas script fails open and skips only what it should
+        run: bash scripts/ci/changed-areas-test.sh
 
   # The private denylist is a repository secret, which fork pull requests never
   # receive, so it only runs on pushes to main. Pull requests get the baseline above.
@@ -407,6 +454,8 @@ jobs:
 
   site:
     name: Site (build, links)
+    needs: changes
+    if: needs.changes.outputs.site == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -430,6 +479,8 @@ jobs:
 
   deploy-wizard:
     name: Deploy wizard (typecheck, test, build)
+    needs: changes
+    if: needs.changes.outputs.site == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -449,3 +500,32 @@ jobs:
         env:
           HQ_BOOTSTRAP_REF: 0000000000000000000000000000000000000000
           HQ_BOOTSTRAP_SHA256: 0000000000000000000000000000000000000000000000000000000000000000
+
+  # The one check to require. It passes when every needed job passed or was skipped by the changes
+  # job, and fails when any failed or was cancelled (a skipped job alone never fails it).
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs:
+      - changes
+      - rustfmt
+      - rust-lint
+      - rust-test
+      - rust-macos
+      - rust-windows
+      - web
+      - npm-installer
+      - windows-installer
+      - supply-chain
+      - secrets
+      - personal-data
+      - site
+      - deploy-wizard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: No needed job failed or was cancelled
+        env:
+          BAD: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          if [ "$BAD" = "true" ]; then echo "a needed job did not pass"; exit 1; fi
