@@ -16,7 +16,7 @@ const HINT_STOPWORDS: &[&str] = &[
 ];
 
 /// Minimum body lines before a skill counts as more than a stub.
-pub(super) const MIN_SKILL_BODY_LINES: usize = 10;
+pub(crate) const MIN_SKILL_BODY_LINES: usize = 10;
 
 /// Byte ceiling on the combined catalog descriptions. Every one of these ships
 /// in every system prompt on every surface.
@@ -130,9 +130,9 @@ fn skill_names(skills_dir: &Path) -> Option<Vec<String>> {
         .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
         .filter(|n| !n.starts_with('_') && n != "skill-bundles")
         // An active built-in is checked once, from its embedded text, whatever is on disk.
-        .filter(|n| !super::builtin::is_active(n))
+        .filter(|n| !super::shipped::is_active(n))
         .collect();
-    names.extend(super::builtin::active_builtins().map(|b| b.name.to_string()));
+    names.extend(super::shipped::active_builtins().map(|b| b.name.to_string()));
     names.sort();
     Some(names)
 }
@@ -204,7 +204,7 @@ fn check_skill(
 
     // Regression fixtures beside the skill, if it has any: triggers, non-triggers, required steps.
     // An active built-in's files on disk are a mirror, never what runs, so they are not checked.
-    let fixtures = if super::builtin::is_active(name) {
+    let fixtures = if super::shipped::is_active(name) {
         Vec::new()
     } else {
         super::fixtures::skill_failures(skills_dir, name)
@@ -240,4 +240,11 @@ pub fn hint_problem(hint: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+pub(crate) fn validate_skill_name(name: &str) -> anyhow::Result<()> {
+    if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
+        anyhow::bail!("invalid skill name: {}", name);
+    }
+    Ok(())
 }
