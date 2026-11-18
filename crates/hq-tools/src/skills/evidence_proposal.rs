@@ -15,8 +15,8 @@ use hq_db::skill_evidence::{
     MIN_INVOCATIONS, MIN_SESSIONS, Pattern, PatternKind, SkillEvidence, VersionComparison,
 };
 
-use super::fixtures::{FIXTURES_FILE, load_fixtures};
-use super::proposals::validate_skill_name;
+use crate::skill_model::fixtures::{FIXTURES_FILE, load_fixtures};
+use crate::skill_model::validate::validate_skill_name;
 
 /// The file name inside `skills/_proposed/<name>/`.
 pub const PROPOSAL_FILE: &str = "PROPOSAL.md";

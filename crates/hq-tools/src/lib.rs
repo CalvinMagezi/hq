@@ -54,6 +54,7 @@ pub mod skill_audit;
 mod skill_bundle;
 pub mod skill_edit;
 pub mod skill_manage_tool;
+pub mod skill_model;
 pub mod skills;
 pub mod slash_commands;
 pub mod spill;
