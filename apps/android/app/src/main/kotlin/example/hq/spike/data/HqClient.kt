@@ -768,6 +768,17 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     suspend fun suiteEditCell(path: String, index: Int, row: Int, col: Int, expected: String, text: String): SheetView =
         SheetWire.view(postJson("/api/suite/sheet/cell", JSONObject().put("path", path).put("index", index).put("row", row).put("col", col).put("expected", expected).put("text", text)))
 
+    /** The sinks this phone keeps sealed originals in, and whether each answers now. */
+    suspend fun suiteSinks(): List<SinkInfo> = send(authed("/api/suite/sinks").build()) { SinkWire.list(JSONObject(it)) }
+
+    /** Makes a sink kept by a paired machine at [addr] (a loopback forward, such as 127.0.0.1:5700) and returns its recovery code, shown once and kept nowhere. */
+    suspend fun suiteAddPeerSink(id: String, addr: String): String =
+        postJson("/api/suite/sinks/peer", JSONObject().put("id", id).put("addr", addr)).optString("code", "")
+
+    /** Fetches a spread of the sink's originals and checks each opens and matches. The code is sent for this call only. */
+    suspend fun suiteCheckSink(id: String, code: String): SinkCheck =
+        postJson("/api/suite/sinks/check", JSONObject().put("id", id).put("code", code)).let { SinkCheck(it.optString("text", ""), it.optInt("failed", 0)) }
+
     /** The `index`th `plot` block of the note at [path] as the chart JSON the chat charts use, computed by hq from the sheet range. */
     suspend fun suitePlot(path: String, index: Int): String =
         send(authed("/api/suite/plot?path=${java.net.URLEncoder.encode(path, "UTF-8")}&index=$index").build()) { it }

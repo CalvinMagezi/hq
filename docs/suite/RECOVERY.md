@@ -82,3 +82,9 @@ hq suite restore-drill phone-backup
 After a wiped or replaced phone, the vault restores from its backup, and the sink can also be found again from the peer alone: with the forward in place, `hq suite sink register-peer 127.0.0.1:5700` reads the sink's open description from the peer and checks the recovery code, then `hq suite restore-originals --sink phone-backup` puts the originals back.
 
 What is not done: the forward and the pairing are set up by hand today (the service config for `peer-serve`'s port and the forward on the phone), not by one button, and the phone has no screen for it.
+
+## On the phone
+
+Settings, Backup and about, has a Cold storage card. It lists the sinks and whether each answers now, **Add a paired machine** makes a peer sink (a name and the forwarded address, such as `127.0.0.1:5700`) and shows its recovery code once with an "I wrote it down" button, and **Check it** asks for the recovery code and fetches a spread of the sink's originals to prove each still opens. The phone sends the code for that one call; HQ keeps it nowhere, and a wrong code is refused before anything is read.
+
+A folder on a card or drive needs Android's folder picker, so it is still made on a computer (`hq suite sink add`). `GET /api/suite/sinks`, `POST /api/suite/sinks/peer` and `POST /api/suite/sinks/check` are the routes behind the card.

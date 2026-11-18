@@ -29,6 +29,9 @@ pub(crate) fn routes() -> Router<Arc<WsState>> {
         .route("/api/suite/abandon", post(abandon_handler))
         .route("/api/suite/undo", post(undo_handler))
         .route("/api/suite/storage", get(storage_handler))
+        .route("/api/suite/sinks", get(sinks_handler))
+        .route("/api/suite/sinks/peer", post(sink_peer_handler))
+        .route("/api/suite/sinks/check", post(sink_check_handler))
         .route("/api/suite/media", get(media_handler))
         .route("/api/suite/sheet", get(sheet_handler))
         .route("/api/suite/tile", get(tile_handler))
@@ -59,6 +62,20 @@ pub(crate) struct CellEdit {
     /// What the cell held when the person opened it; the edit is refused if it holds something else now.
     expected: String,
     text: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SinkPeerBody {
+    id: String,
+    addr: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SinkCheckBody {
+    id: String,
+    /// The recovery code, typed by the person for this one call; nothing keeps it.
+    code: String,
+    sample: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -222,6 +239,40 @@ pub(crate) async fn tile_handler(
         blocking(move || hq_suite_adapter::sheets::tile(&vault, &q.path, q.index.unwrap_or(0)))
             .await?;
     Ok(Json(view))
+}
+
+pub(crate) async fn sinks_handler(
+    State(state): State<Arc<WsState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let sinks = blocking(move || hq_suite_adapter::sinks::infos(&vault)).await?;
+    Ok(Json(serde_json::json!({ "sinks": sinks })))
+}
+
+pub(crate) async fn sink_peer_handler(
+    State(state): State<Arc<WsState>>,
+    Json(b): Json<SinkPeerBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let id = b.id.clone();
+    let code = blocking(move || hq_suite_adapter::sinks::make_peer(&vault, &b.id, &b.addr)).await?;
+    Ok(Json(serde_json::json!({ "id": id, "code": code })))
+}
+
+pub(crate) async fn sink_check_handler(
+    State(state): State<Arc<WsState>>,
+    Json(b): Json<SinkCheckBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let drill = blocking(move || {
+        hq_suite_adapter::sinks::drill_with_code(&vault, &b.id, &b.code, b.sample)
+    })
+    .await?;
+    Ok(Json(serde_json::json!({
+        "checked": drill.checked,
+        "failed": drill.failed.len(),
+        "text": hq_suite_adapter::text::drill(&drill),
+    })))
 }
 
 pub(crate) async fn storage_handler(
