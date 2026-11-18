@@ -115,7 +115,7 @@ internal fun ColdStorageCard() {
             title = { Text(stringResource(R.string.cold_code_title, id), style = HqType.BodyBold, color = Mts.Ink) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(code, style = HqType.H2, color = Mts.Ink, fontFamily = FontFamily.Monospace)
+                    Text(code, style = HqType.BodyBold, color = Mts.Ink, fontFamily = FontFamily.Monospace, softWrap = false)
                     Text(stringResource(R.string.cold_code_body), style = HqType.BodySm, color = Mts.InkMuted)
                 }
             },
