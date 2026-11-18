@@ -7,6 +7,8 @@ All notable changes to Agent-HQ will be documented in this file.
 - Helpers: starting, handing off to or delegating to a helper no longer waits for approval. After the chat has read outside text the helper starts narrowed: strict sandbox and a brief built from the task's stored text. The approval list is now a zone table (A never asked, B asked at the edge, C asked for HQ itself).
 
 - Agent host: `agent_host.sandbox.strict_paths` runs any session whose working directory lies under a listed folder under the `strict` profile, whatever the default profile is. `hq doctor` lists the strict paths and the network allowlist in force.
+- Web push: `web_push.quiet_hours_utc` holds pushes during a window and sends them when it ends; non-urgent items fold into one push an hour and stop at `web_push.non_urgent_per_day` (default 5). Approvals, `notify_owner` and reminders are not limited by the budget.
+
 - Inbox: one audience function (`hq_db::inbox_prefs::audience`) decides whether an item is for the owner or the agents. The default list, the badge and web push hold only the owner's items; `?include_agent=1` lists the rest.
 
 ### Added

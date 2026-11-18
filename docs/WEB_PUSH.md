@@ -151,3 +151,16 @@ opened on it.
 A push is sent only for items whose audience is the owner (`hq_db::inbox_prefs::audience`, see
 `docs/security/OWNER_APPROVAL.md`). Helper and agent traffic is never pushed, including when
 `push_all` is on.
+
+## Quiet hours and the daily budget
+
+```yaml
+web_push:
+  quiet_hours_utc: "22:00-07:00"   # nothing is pushed in this window (UTC, wraps midnight); unset: none
+  non_urgent_per_day: 5            # pushes a day for items that are not urgent
+```
+
+Urgent items are approvals, `notify_owner` messages and due reminders. They are not limited by the
+budget; during quiet hours they wait and go out when the period ends. Everything else folds into at
+most one push an hour and stops at `non_urgent_per_day`. What is folded or over budget stays in the
+inbox and on the badge. Push is off by default (`web_push.enabled`).
