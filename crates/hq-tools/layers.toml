@@ -9,7 +9,8 @@
 # src/, fails the test too: give a new module a layer when you add it.
 #
 # Layer 0 is empty: the foundation (`registry`, `util`, `family_guest`, `family_confirm`) moved to the
-# hq-tool-api crate, which hq-tools re-exports, so those are no longer modules of this crate. Layer 1
+# hq-tool-api crate, and `web`, `remote_mcp` and `imagegen` to hq-tools-web (both re-exported by
+# hq-tools), so those are no longer modules of this crate. Layer 1
 # is free of the tangle (no path into it). Layers 2 to 18 are the tangle, ordered by `module-graph.py`
 # to have the fewest upward references. Layer 19 depends on the tangle and nothing depends back on it.
 
@@ -45,12 +46,10 @@ gws = 1
 harness_chunk = 1
 harness_usage = 1
 harness_usage_collect = 1
-imagegen = 1
 model_control = 1
 notify = 1
 office = 1
 prose_lint = 1
-remote_mcp = 1
 self_update = 1
 session_policy = 1
 skill_bundle = 1
@@ -60,7 +59,6 @@ subagent_runs = 1
 system_info = 1
 task_classifier = 1
 usage_forecast = 1
-web = 1
 
 # 2 to 18: the tangle, foundation first
 agent_host = 2
