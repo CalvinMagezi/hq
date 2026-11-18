@@ -127,7 +127,7 @@ pub fn create_default_registry(
     tools.extend(convert::create_convert_tools(vault_path.clone()));
     tools.extend(prose_lint::create_prose_lint_tools());
     #[cfg(feature = "suite")]
-    tools.extend(hq_tools::office::create_office_tools(vault_path.clone()));
+    tools.extend(hq_tools_office::create_office_tools(vault_path.clone()));
     tools.extend(brand::create_brand_tools(vault_path.clone()));
     tools.extend(shortcuts::create_shortcut_tools(
         vault_path.clone(),
