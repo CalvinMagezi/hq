@@ -4384,6 +4384,8 @@
     <string name="suite_keep_title">Keep the original in a sink</string>
     <string name="suite_keep_none">No sink is answering. Add one under Cold storage.</string>
     <string name="suite_keep_go">Keep it there</string>
+    <string name="suite_undo_title">Bring the original back</string>
+    <string name="suite_undo_go">Bring it back</string>
     <string name="suite_bar_undo">Undo</string>
     <string name="suite_bar_working">Working on it…</string>
     <string name="suite_sheet_edit_title">Edit %1$s</string>

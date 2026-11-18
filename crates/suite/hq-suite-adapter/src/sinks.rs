@@ -261,6 +261,22 @@ pub fn undo(vault: &Path, job: &str) -> Result<bool> {
     Ok(true)
 }
 
+/// Fetches a sink-sealed original back with a recovery code the caller gives. A wrong code is
+/// refused before anything is read.
+pub fn undo_with_code(vault: &Path, job: &str, code: &str) -> Result<()> {
+    let paths = SuitePaths::new(vault);
+    let sink = match Journal::new(&paths).load(job).map(|j| j.disposition) {
+        Ok(Some(Disposition::Sink { sink, .. })) => sink,
+        _ => anyhow::bail!("This original is not in a sink."),
+    };
+    let notes = VaultNotes::new(paths.clone());
+    let store = open_with_code(&paths, &sink, code)?;
+    shrinker(&paths, &notes)
+        .undo_with(job, &*store)
+        .map(drop)
+        .map_err(friendly)
+}
+
 /// `hq suite restore-drill <sink>`: fetches a spread of stored originals and checks each opens and
 /// hashes to its name.
 pub fn drill(vault: &Path, sink: &str, sample: Option<usize>) -> Result<()> {
@@ -442,6 +458,13 @@ mod screen_tests {
             .is_err()
         );
         assert!(drill_with_code(vault.path(), "nope", &code, None).is_err());
+        assert!(
+            undo_with_code(vault.path(), "sj-none", &code)
+                .unwrap_err()
+                .to_string()
+                .contains("not in a sink"),
+            "a job that was never sealed has nothing to bring back"
+        );
         let wrong = offload_with_code(
             vault.path(),
             "sj-none",

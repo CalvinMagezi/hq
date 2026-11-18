@@ -179,13 +179,24 @@ pub(crate) async fn abandon_handler(
     ))
 }
 
+#[derive(Deserialize)]
+pub(crate) struct UndoBody {
+    job: String,
+    /// The sink's recovery code, for an original sealed away from the phone.
+    code: Option<String>,
+}
+
 pub(crate) async fn undo_handler(
     State(state): State<Arc<WsState>>,
-    Json(b): Json<JobBody>,
+    Json(b): Json<UndoBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     let vault = state.vault_path.clone();
     Ok(Json(
-        blocking(move || hq_suite_adapter::api::undo(&vault, &b.job)).await?,
+        blocking(move || match &b.code {
+            Some(code) => hq_suite_adapter::api::undo_from_sink(&vault, &b.job, code),
+            None => hq_suite_adapter::api::undo(&vault, &b.job),
+        })
+        .await?,
     ))
 }
 

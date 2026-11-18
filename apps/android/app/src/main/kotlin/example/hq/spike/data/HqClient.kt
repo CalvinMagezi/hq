@@ -813,7 +813,9 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 
     suspend fun suiteAbandon(job: String): SuiteFile = suiteAction("/api/suite/abandon", JSONObject().put("job", job))
 
-    suspend fun suiteUndo(job: String): SuiteFile = suiteAction("/api/suite/undo", JSONObject().put("job", job))
+    /** Brings the original back from the trash, or from its sink when [code] (the sink's recovery code, sent for this call only) is given. */
+    suspend fun suiteUndo(job: String, code: String? = null): SuiteFile =
+        suiteAction("/api/suite/undo", JSONObject().put("job", job).apply { code?.let { put("code", it) } })
 
     /** A picture from the suite's media store, by its vault path (`_media/cas/...`); hq serves nothing else here. */
     suspend fun suiteMedia(path: String): ByteArray = withContext(Dispatchers.IO) {

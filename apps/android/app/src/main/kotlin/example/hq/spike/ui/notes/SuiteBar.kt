@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -67,6 +69,7 @@ fun SuiteBar(source: SuiteSource, onNotice: (String) -> Unit, onChanged: () -> U
     var refusal by remember(source.path) { mutableStateOf<String?>(null) }
     val failed = stringResource(R.string.suite_bar_failed)
     var keeping by remember(source.path) { mutableStateOf<List<SinkInfo>?>(null) }
+    var bringingBack by remember(source.path) { mutableStateOf(false) }
 
     LaunchedEffect(source.path) { file = runCatching { client.suiteFile(source.path) }.getOrNull() }
 
@@ -96,8 +99,19 @@ fun SuiteBar(source: SuiteSource, onNotice: (String) -> Unit, onChanged: () -> U
         onConfirm = { run { client.suiteConfirm(f.job.orEmpty()) } },
         onAbandon = { run { client.suiteAbandon(f.job.orEmpty()) } },
         onKeep = { scope.launch { keeping = runCatching { client.suiteSinks() }.getOrDefault(emptyList()).filter { it.reachable } } },
-        onUndo = { run { client.suiteUndo(f.job.orEmpty()) } },
+        onUndo = { if (f.originalInSink) bringingBack = true else run { client.suiteUndo(f.job.orEmpty()) } },
     )
+    if (bringingBack) {
+        RecoveryCodeDialog(
+            title = stringResource(R.string.suite_undo_title),
+            go = stringResource(R.string.suite_undo_go),
+            onDismiss = { bringingBack = false },
+            onGo = { code ->
+                bringingBack = false
+                run { client.suiteUndo(f.job.orEmpty(), code) }
+            },
+        )
+    }
     keeping?.let { sinks ->
         KeepInSinkDialog(
             sinks,
@@ -117,6 +131,7 @@ object SuiteBarFixture {
 
 /** The bar for a state, with no hq behind it. */
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun SuiteBarView(f: SuiteFile, busy: Boolean, refusal: String?, onShrink: () -> Unit, onConfirm: () -> Unit, onAbandon: () -> Unit, onKeep: () -> Unit, onUndo: () -> Unit) {
     Column(Modifier.fillMaxWidth().background(Mts.Surface100).padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)) {
         Text(
@@ -124,7 +139,7 @@ fun SuiteBarView(f: SuiteFile, busy: Boolean, refusal: String?, onShrink: () -> 
             modifier = Modifier.padding(vertical = 8.dp, horizontal = 0.dp).semantics { liveRegion = LiveRegionMode.Polite },
         )
         if (refusal == null && f.canConfirm) f.details.forEach { Text(it, style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 2.dp)) }
-        if (refusal == null) Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.Center) {
             when {
                 busy -> Text(stringResource(R.string.suite_bar_working), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(vertical = 14.dp))
                 f.canShrink -> BarButton(stringResource(R.string.suite_bar_make_smaller), onShrink)
@@ -165,6 +180,18 @@ private fun KeepInSinkDialog(sinks: List<SinkInfo>, onDismiss: () -> Unit, onKee
         confirmButton = {
             TextButton(onClick = { chosen?.let { onKeep(it, code.trim()) } }, enabled = chosen != null && code.isNotBlank()) { Text(stringResource(R.string.suite_keep_go)) }
         },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cold_cancel)) } },
+    )
+}
+
+@Composable
+private fun RecoveryCodeDialog(title: String, go: String, onDismiss: () -> Unit, onGo: (String) -> Unit) {
+    var code by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { OutlinedTextField(code, { code = it.uppercase() }, label = { Text(stringResource(R.string.cold_code_label)) }, singleLine = true, modifier = Modifier.fillMaxWidth()) },
+        confirmButton = { TextButton(onClick = { onGo(code.trim()) }, enabled = code.isNotBlank()) { Text(go) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cold_cancel)) } },
     )
 }
