@@ -83,6 +83,9 @@ Notes:
 - Security-relevant changes (auth, sandbox, governance, updater, anything that
   parses untrusted input) get extra scrutiny. Describe the threat you considered.
 - Keep commits readable. Squash noise before review if asked.
+- Maintainers: once checks you can run locally are green, open the PR and enable auto-merge
+  (`gh pr merge --auto --squash`) rather than waiting on CI, and start the next task from current
+  `main` in a separate worktree.
 
 ## A private copy of HQ
 

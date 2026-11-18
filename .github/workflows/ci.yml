@@ -142,12 +142,10 @@ jobs:
           HQ_REQUIRE_BUILT_APP: "1"
         run: cargo nextest run --workspace --locked --profile ci
 
-      # nextest does not run doctests.
+      # nextest does not run doctests. `hq bridge` needs no test step of its own: hq-cli enables it
+      # by default, so the nextest run above already runs its bridge_commands and bridge_control tests.
       - name: test (doctests)
         run: cargo test --workspace --doc --locked
-
-      - name: test (bridge feature)
-        run: cargo test -p hq-cli --features bridge --locked --bin hq -- bridge_commands bridge_control
 
       - name: test (tunnel feature)
         run: |

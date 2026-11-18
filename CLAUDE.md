@@ -40,6 +40,12 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   in the same binary, or on shared process state, fails there: fix the test, not the config.
 - Work on a branch and open a pull request. Keep changes focused and atomic,
   write tests for new behavior, and follow the style of the surrounding code.
+- Do not sit waiting for CI. Once the gates are green locally, open the PR, turn on auto-merge with
+  `gh pr merge --auto --squash` (the repository's auto-merge setting must be on), and start the next
+  task in a new worktree branched from current `main`. A task that depends on a PR that has not merged
+  branches from that PR's branch instead, and is brought up to date once the PR lands (merge `main`
+  in; rebase only a branch nobody else has pulled). Each worktree has its own `target/`, so keep at
+  most one extra unless there are 50 GB free.
 - Do not hand-deploy to a server. Servers update themselves from signed releases
   (`docs/UPDATE_SYSTEM.md`, `deploy/README.md`).
 
@@ -269,7 +275,7 @@ can reach 100 GB or more in weeks.
 
 - On macOS, a weekly launchd job (`com.agent-hq.cargo-gc`, optional) runs
   `scripts/cargo-gc.sh` at 4am Sunday.
-- Prefer `cargo test -p <crate>` over bare `cargo test`.
+- Prefer `cargo nextest run -p <crate>` over a workspace-wide run.
 - Run `./scripts/cargo-gc.sh` after `./scripts/install-hq.sh` has built, installed
   and verified a release binary, rather than leaving `target/debug` around.
 
