@@ -9,7 +9,42 @@ use std::io::{Cursor, Write};
 
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
+use std::collections::HashMap;
+
 use crate::deck::{Card, Deck, Item, Layout, Run};
+
+/// A picture ready to go in the file: PNG bytes and their size in pixels.
+#[derive(Debug, Clone)]
+pub struct Picture {
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Gives the picture a note links by the path it wrote, or `None` when it must not or cannot be
+/// placed (outside the vault, too large, not an image).
+pub type PictureLoader<'a> = &'a dyn Fn(&str) -> Option<Picture>;
+
+/// What the file holds of the pictures the deck links.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PptxReport {
+    pub pictures_placed: usize,
+    pub pictures_left_out: usize,
+}
+
+/// Pictures found so far while the cards are written, shared by every card.
+struct Media<'a> {
+    load: PictureLoader<'a>,
+    /// The distinct pictures, in the order they were first placed.
+    files: Vec<Picture>,
+    by_src: HashMap<String, usize>,
+    report: PptxReport,
+}
+
+/// Most pictures one file may hold, so a hostile note cannot ask for unbounded memory.
+const MAX_PICTURES: usize = 200;
+/// Least height a picture is given, in EMU.
+const MIN_PICTURE_H: i64 = 457_200;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PptxError {
@@ -128,7 +163,7 @@ fn items_xml(items: &[Item]) -> String {
                     out.push_str(&para(plain_ppr(), &[run], CODE_SIZE));
                 }
             }
-            Item::Table(_) => {}
+            Item::Table(_) | Item::Picture { .. } => {}
         }
     }
     if out.is_empty() {
@@ -223,7 +258,9 @@ fn title_slide(deck: &Deck) -> String {
     slide_part(&shapes)
 }
 
-fn card_slide(card: &Card) -> String {
+/// The slide's XML and the media it uses (indexes into `media.files`, in the order its relationships list them).
+fn card_slide(card: &Card, media: &mut Media<'_>) -> (String, Vec<usize>) {
+    let mut used: Vec<usize> = Vec::new();
     let title = Run {
         text: card.title.clone(),
         ..Run::default()
@@ -240,22 +277,33 @@ fn card_slide(card: &Card) -> String {
     let mut id = 3;
     for (i, items) in card.columns.iter().enumerate() {
         let x = MARGIN + (col_w + GAP) * i as i64;
-        let (tables, text): (Vec<&Item>, Vec<&Item>) =
-            items.iter().partition(|it| matches!(it, Item::Table(_)));
-        let owned: Vec<Item> = text.into_iter().cloned().collect();
+        let tables: Vec<&Item> = items
+            .iter()
+            .filter(|it| matches!(it, Item::Table(_)))
+            .collect();
+        let pictures: Vec<&Item> = items
+            .iter()
+            .filter(|it| matches!(it, Item::Picture { .. }))
+            .collect();
+        let owned: Vec<Item> = items
+            .iter()
+            .filter(|it| !matches!(it, Item::Table(_) | Item::Picture { .. }))
+            .cloned()
+            .collect();
+        let has_below = !tables.is_empty() || !pictures.is_empty();
         let idx = i + 1;
         // Room for the text above a table: a line each, but never more than half the body.
-        let text_h = if tables.is_empty() {
+        let text_h = if !has_below {
             BODY_H
         } else {
             (owned.len() as i64 * LINE_H).clamp(LINE_H, BODY_H / 2)
         };
-        if !(owned.is_empty() && !tables.is_empty()) {
+        if !(owned.is_empty() && has_below) {
             shapes.push_str(&shape(
                 id,
                 &format!("Content Placeholder {id}"),
                 &format!("idx=\"{idx}\""),
-                if columns == 1 && tables.is_empty() {
+                if columns == 1 && !has_below {
                     None
                 } else {
                     Some((x, BODY_TOP, col_w, text_h))
@@ -269,14 +317,77 @@ fn card_slide(card: &Card) -> String {
         } else {
             BODY_TOP + text_h + TABLE_GAP
         };
+        let mut below = table_top;
         for t in tables {
             if let Item::Table(rows) = t {
                 shapes.push_str(&table_xml(id, rows, x, table_top, col_w));
+                below += ROW_H * rows.len() as i64 + TABLE_GAP;
                 id += 1;
             }
         }
+        let loaded: Vec<(usize, &str)> = pictures
+            .iter()
+            .filter_map(|p| {
+                let Item::Picture { src, alt } = p else {
+                    return None;
+                };
+                media.place(src).map(|n| (n, alt.as_str()))
+            })
+            .collect();
+        let room = (BODY_TOP + BODY_H - below).max(MIN_PICTURE_H);
+        let slot = (room / loaded.len().max(1) as i64).max(MIN_PICTURE_H);
+        for (k, (n, alt)) in loaded.iter().enumerate() {
+            let pic = &media.files[*n];
+            // Fit inside the column and the slot, keeping the picture's proportions.
+            let scale =
+                (col_w as f64 / f64::from(pic.width)).min(slot as f64 / f64::from(pic.height));
+            let (w, h) = (
+                (f64::from(pic.width) * scale) as i64,
+                (f64::from(pic.height) * scale) as i64,
+            );
+            let (px, py) = (x + (col_w - w) / 2, below + slot * k as i64);
+            let rid = used.len() + 2;
+            used.push(*n);
+            shapes.push_str(&picture_xml(id, rid, alt, (px, py, w, h)));
+            id += 1;
+        }
     }
-    slide_part(&shapes)
+    (slide_part(&shapes), used)
+}
+
+impl Media<'_> {
+    /// The picture's place in the file, loading it the first time, or `None` if it is left out.
+    fn place(&mut self, src: &str) -> Option<usize> {
+        if let Some(&n) = self.by_src.get(src) {
+            self.report.pictures_placed += 1;
+            return Some(n);
+        }
+        let loaded = if self.files.len() < MAX_PICTURES {
+            (self.load)(src).filter(|p| p.width > 0 && p.height > 0)
+        } else {
+            None
+        };
+        match loaded {
+            Some(p) => {
+                self.files.push(p);
+                let n = self.files.len() - 1;
+                self.by_src.insert(src.to_string(), n);
+                self.report.pictures_placed += 1;
+                Some(n)
+            }
+            None => {
+                self.report.pictures_left_out += 1;
+                None
+            }
+        }
+    }
+}
+
+fn picture_xml(id: u32, rid: usize, alt: &str, (x, y, w, h): (i64, i64, i64, i64)) -> String {
+    format!(
+        "<p:pic><p:nvPicPr><p:cNvPr id=\"{id}\" name=\"Picture {id}\" descr=\"{}\"/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"rId{rid}\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{w}\" cy=\"{h}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr></p:pic>",
+        esc(alt)
+    )
 }
 
 fn rels(entries: &[(&str, &str, &str)]) -> String {
@@ -342,7 +453,16 @@ fn theme_part() -> String {
 }
 
 /// The deck as the bytes of a `.pptx` file.
-pub fn render_pptx(deck: &Deck) -> Result<Vec<u8>, PptxError> {
+pub fn render_pptx(
+    deck: &Deck,
+    load: PictureLoader<'_>,
+) -> Result<(Vec<u8>, PptxReport), PptxError> {
+    let mut media = Media {
+        load,
+        files: Vec::new(),
+        by_src: HashMap::new(),
+        report: PptxReport::default(),
+    };
     let mut parts: Vec<(String, String)> = Vec::new();
     let n = deck.cards.len() + 1;
     let slide_overrides: String = (1..=n)
@@ -350,7 +470,7 @@ pub fn render_pptx(deck: &Deck) -> Result<Vec<u8>, PptxError> {
         .collect();
     parts.push((
         "[Content_Types].xml".into(),
-        format!("{XML}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/ppt/presentation.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml\"/><Override PartName=\"/ppt/slideMasters/slideMaster1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml\"/><Override PartName=\"/ppt/slideLayouts/slideLayout1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml\"/><Override PartName=\"/ppt/slideLayouts/slideLayout2.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml\"/><Override PartName=\"/ppt/theme/theme1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.theme+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/><Override PartName=\"/docProps/app.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.extended-properties+xml\"/>{slide_overrides}</Types>"),
+        format!("{XML}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Override PartName=\"/ppt/presentation.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml\"/><Override PartName=\"/ppt/slideMasters/slideMaster1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml\"/><Override PartName=\"/ppt/slideLayouts/slideLayout1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml\"/><Override PartName=\"/ppt/slideLayouts/slideLayout2.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml\"/><Override PartName=\"/ppt/theme/theme1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.theme+xml\"/><Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/><Override PartName=\"/docProps/app.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.extended-properties+xml\"/>{slide_overrides}</Types>"),
     ));
     parts.push((
         "_rels/.rels".into(),
@@ -425,14 +545,22 @@ pub fn render_pptx(deck: &Deck) -> Result<Vec<u8>, PptxError> {
         } else {
             1
         };
-        parts.push((format!("ppt/slides/slide{slide}.xml"), card_slide(card)));
+        let (xml, used) = card_slide(card, &mut media);
+        parts.push((format!("ppt/slides/slide{slide}.xml"), xml));
+        let layout_target = format!("../slideLayouts/slideLayout{layout}.xml");
+        let image_ids: Vec<String> = (0..used.len()).map(|k| format!("rId{}", k + 2)).collect();
+        let image_targets: Vec<String> = used
+            .iter()
+            .map(|n| format!("../media/image{}.png", n + 1))
+            .collect();
+        let mut entries: Vec<(&str, &str, &str)> =
+            vec![("rId1", "slideLayout", layout_target.as_str())];
+        for (id, target) in image_ids.iter().zip(&image_targets) {
+            entries.push((id.as_str(), "image", target.as_str()));
+        }
         parts.push((
             format!("ppt/slides/_rels/slide{slide}.xml.rels"),
-            rels(&[(
-                "rId1",
-                "slideLayout",
-                &format!("../slideLayouts/slideLayout{layout}.xml"),
-            )]),
+            rels(&entries),
         ));
     }
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
@@ -443,7 +571,15 @@ pub fn render_pptx(deck: &Deck) -> Result<Vec<u8>, PptxError> {
         zip.write_all(xml.as_bytes())
             .map_err(|e| PptxError::Write(e.to_string()))?;
     }
-    zip.finish()
+    for (n, pic) in media.files.iter().enumerate() {
+        zip.start_file(format!("ppt/media/image{}.png", n + 1), options)
+            .map_err(|e| PptxError::Write(e.to_string()))?;
+        zip.write_all(&pic.png)
+            .map_err(|e| PptxError::Write(e.to_string()))?;
+    }
+    let bytes = zip
+        .finish()
         .map(Cursor::into_inner)
-        .map_err(|e| PptxError::Write(e.to_string()))
+        .map_err(|e| PptxError::Write(e.to_string()))?;
+    Ok((bytes, media.report))
 }

@@ -68,12 +68,57 @@ pub fn render(vault: &Path, note: &Path, out: Option<&Path>) -> Result<PathBuf> 
     Ok(target)
 }
 
+/// Largest picture file and decoded size a slide takes.
+const MAX_PICTURE_BYTES: u64 = 25 * 1024 * 1024;
+const MAX_PICTURE_PIXELS: u64 = 40_000_000;
+const PICTURE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
+
+/// A picture a slide links, as PNG: only a file inside the vault, only a known image type, size
+/// and pixel caps, never anything remote. The suite's pictures are WebP, which PowerPoint does not
+/// reliably open, so every picture is decoded and written as PNG.
+fn load_picture(vault: &Path, note_dir: &str, src: &str) -> Option<hq_suite_slides::Picture> {
+    if src.contains("://") || src.starts_with("data:") {
+        return None;
+    }
+    let root = vault.canonicalize().ok()?;
+    let rebased = hq_suite_docs::rebase_pictures(&format!("![]({src})"), note_dir);
+    let rel = rebased.strip_prefix("![](")?.strip_suffix(')')?;
+    let path = root.join(rel).canonicalize().ok()?;
+    if !path.starts_with(&root) {
+        return None;
+    }
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    if !PICTURE_EXTENSIONS.contains(&ext.as_str())
+        || std::fs::metadata(&path).ok()?.len() > MAX_PICTURE_BYTES
+    {
+        return None;
+    }
+    let bytes = std::fs::read(&path).ok()?;
+    let (w, h) = image::ImageReader::new(std::io::Cursor::new(&bytes))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    if w == 0 || h == 0 || u64::from(w) * u64::from(h) > MAX_PICTURE_PIXELS {
+        return None;
+    }
+    let decoded = image::load_from_memory(&bytes).ok()?;
+    let mut png = std::io::Cursor::new(Vec::new());
+    decoded.write_to(&mut png, image::ImageFormat::Png).ok()?;
+    Some(hq_suite_slides::Picture {
+        png: png.into_inner(),
+        width: w,
+        height: h,
+    })
+}
+
 /// What `hq suite pptx` wrote and what it left out.
 #[derive(Debug)]
 pub struct SlidesMade {
     pub path: PathBuf,
     /// Cards after the title card.
     pub cards: usize,
+    pub pictures_placed: usize,
     pub pictures_left_out: usize,
     pub unknown_layouts: Vec<String>,
 }
@@ -82,14 +127,17 @@ pub struct SlidesMade {
 /// heading is the deck title and each level 2 heading a card.
 pub fn render_slides(vault: &Path, note: &Path, out: Option<&Path>) -> Result<SlidesMade> {
     let n = read_note(vault, note)?;
-    let (deck, bytes) = hq_suite_slides::pptx_from_markdown(&n.title, &n.body)
+    let dir = n.rel.rsplit_once('/').map_or("", |(d, _)| d).to_string();
+    let load = |src: &str| load_picture(vault, &dir, src);
+    let (deck, bytes, report) = hq_suite_slides::pptx_from_markdown(&n.title, &n.body, &load)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     let target = target_for(vault, &n.rel, out, "pptx")?;
     fsx::atomic_write(&target, &bytes)?;
     Ok(SlidesMade {
         path: target,
         cards: deck.cards.len(),
-        pictures_left_out: deck.pictures_left_out,
+        pictures_placed: report.pictures_placed,
+        pictures_left_out: report.pictures_left_out,
         unknown_layouts: deck.unknown_layouts,
     })
 }
@@ -100,9 +148,15 @@ pub fn slides_text(m: &SlidesMade) -> String {
         m.path.display(),
         m.cards
     );
+    if m.pictures_placed > 0 {
+        out.push_str(&format!(
+            "{} picture(s) are in the file.\n",
+            m.pictures_placed
+        ));
+    }
     if m.pictures_left_out > 0 {
         out.push_str(&format!(
-            "{} picture(s) are not in the PowerPoint file yet.\n",
+            "{} picture(s) could not be placed (not a picture inside the vault, too large, or damaged).\n",
             m.pictures_left_out
         ));
     }
@@ -150,12 +204,17 @@ pub fn check_text(r: &hq_suite_docs::Regenerated) -> String {
 mod slides_tests {
     use super::*;
 
-    const DECK: &str = "---\ntitle: Board review\nsuite_kind: slides\n---\n\n# Board review\n\nPrepared for the board.\n\n## Results\n\n- Revenue **up** 12%\n  - Uganda strongest\n- Costs flat\n\n## Numbers\n\n| item | qty |\n|---|---|\n| Sugar | 40 |\n\n## Odd\n<!-- layout: carousel -->\n\nSomething ![pic](x.png)\n";
+    const DECK: &str = "---\ntitle: Board review\nsuite_kind: slides\n---\n\n# Board review\n\nPrepared for the board.\n\n## Results\n\n- Revenue **up** 12%\n  - Uganda strongest\n- Costs flat\n\n## Numbers\n\n| item | qty |\n|---|---|\n| Sugar | 40 |\n\n## Odd\n<!-- layout: carousel -->\n\nSomething ![pic](x.png)\n\n![real](pic.png)\n";
 
     fn vault_with_deck() -> tempfile::TempDir {
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(d.path().join("Notebooks")).unwrap();
         std::fs::write(d.path().join("Notebooks/deck.md"), DECK).unwrap();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(80, 40)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        std::fs::write(d.path().join("Notebooks/pic.png"), png.into_inner()).unwrap();
         d
     }
 
@@ -165,7 +224,7 @@ mod slides_tests {
         let made = render_slides(d.path(), &d.path().join("Notebooks/deck.md"), None).unwrap();
         assert_eq!(made.path, d.path().join("Notebooks/deck.pptx"));
         assert_eq!(made.cards, 3);
-        assert_eq!(made.pictures_left_out, 1);
+        assert_eq!((made.pictures_placed, made.pictures_left_out), (1, 1));
         assert_eq!(made.unknown_layouts, vec!["carousel".to_string()]);
         let bytes = std::fs::read(&made.path).unwrap();
         let read = hq_convert::ingest::convert_bytes(
@@ -196,8 +255,17 @@ mod slides_tests {
                 read.markdown
             );
         }
+        assert!(
+            read.markdown.contains("real") || read.markdown.contains("pic"),
+            "the picture is read back: {}",
+            read.markdown
+        );
         let text = slides_text(&made);
-        assert!(text.contains("1 picture(s)") && text.contains("carousel"));
+        assert!(
+            text.contains("1 picture(s) are in the file")
+                && text.contains("1 picture(s) could not")
+                && text.contains("carousel")
+        );
     }
 
     #[test]
@@ -211,5 +279,41 @@ mod slides_tests {
         );
         std::fs::write(d.path().join("Notebooks/x.txt"), "x").unwrap();
         assert!(render_slides(d.path(), &d.path().join("Notebooks/x.txt"), None).is_err());
+    }
+}
+
+#[cfg(test)]
+mod picture_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_picture_inside_the_vault_is_loaded_and_it_comes_out_as_png() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("Notebooks")).unwrap();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(10, 6)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        std::fs::write(d.path().join("Notebooks/in.png"), png.into_inner()).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("out.png"), b"x").unwrap();
+        let v = d.path();
+        let pic = load_picture(v, "Notebooks", "in.png").unwrap();
+        assert_eq!((pic.width, pic.height), (10, 6));
+        assert_eq!(&pic.png[1..4], b"PNG");
+        assert!(load_picture(v, "Notebooks", "https://example.com/a.png").is_none());
+        assert!(load_picture(v, "Notebooks", "data:image/png;base64,AAAA").is_none());
+        assert!(load_picture(v, "Notebooks", "../../../etc/passwd").is_none());
+        assert!(
+            load_picture(
+                v,
+                "Notebooks",
+                &outside.path().join("out.png").display().to_string()
+            )
+            .is_none()
+        );
+        assert!(load_picture(v, "Notebooks", "missing.png").is_none());
+        std::fs::write(d.path().join("Notebooks/bad.png"), b"not an image").unwrap();
+        assert!(load_picture(v, "Notebooks", "bad.png").is_none());
     }
 }

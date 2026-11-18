@@ -3844,6 +3844,7 @@ dependencies = [
  "hq-suite-slides",
  "hq-suite-store",
  "hq-vault",
+ "image",
  "serde",
  "serde_json",
  "sha2 0.10.9",

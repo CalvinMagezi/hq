@@ -8,14 +8,19 @@ pub mod deck;
 pub mod pptx;
 
 pub use deck::{Card, Deck, Item, Layout, Run};
-pub use pptx::{PptxError, render_pptx};
+pub use pptx::{Picture, PictureLoader, PptxError, PptxReport, render_pptx};
 
 /// A slides note's markdown (without its frontmatter) as the deck it describes and the bytes of
-/// its `.pptx`. The deck says what the file leaves out (pictures, unknown layouts).
-pub fn pptx_from_markdown(title: &str, markdown: &str) -> Result<(Deck, Vec<u8>), PptxError> {
+/// its `.pptx`. `load` supplies the pictures the cards link; the report says how many the file
+/// holds and how many it left out, and the deck names any layout it did not know.
+pub fn pptx_from_markdown(
+    title: &str,
+    markdown: &str,
+    load: PictureLoader<'_>,
+) -> Result<(Deck, Vec<u8>, PptxReport), PptxError> {
     let deck = Deck::from_markdown(title, markdown);
-    let bytes = render_pptx(&deck)?;
-    Ok((deck, bytes))
+    let (bytes, report) = render_pptx(&deck, load)?;
+    Ok((deck, bytes, report))
 }
 
 #[cfg(test)]
@@ -26,11 +31,15 @@ mod tests {
     fn parts(bytes: &[u8]) -> Vec<(String, String)> {
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         (0..zip.len())
-            .map(|i| {
+            .filter_map(|i| {
                 let mut f = zip.by_index(i).unwrap();
+                let name = String::from_utf8_lossy(f.name_raw()).into_owned();
+                if name.starts_with("ppt/media/") {
+                    return None;
+                }
                 let mut text = String::new();
                 f.read_to_string(&mut text).unwrap();
-                (String::from_utf8_lossy(f.name_raw()).into_owned(), text)
+                Some((name, text))
             })
             .collect()
     }
@@ -39,7 +48,7 @@ mod tests {
 
     #[test]
     fn the_file_is_a_package_with_a_slide_for_the_title_and_each_card() {
-        let (deck, bytes) = pptx_from_markdown("fallback", NOTE).unwrap();
+        let (deck, bytes, _) = pptx_from_markdown("fallback", NOTE, &|_| None).unwrap();
         assert_eq!(deck.cards.len(), 2);
         let names: Vec<String> = parts(&bytes).into_iter().map(|(n, _)| n).collect();
         for wanted in [
@@ -61,7 +70,7 @@ mod tests {
 
     #[test]
     fn every_part_is_well_formed_xml_and_special_characters_are_escaped() {
-        let (_, bytes) = pptx_from_markdown("fallback", NOTE).unwrap();
+        let (_, bytes, _) = pptx_from_markdown("fallback", NOTE, &|_| None).unwrap();
         for (name, xml) in parts(&bytes) {
             roxmltree::Document::parse(&xml).unwrap_or_else(|e| panic!("{name}: {e}"));
         }
@@ -76,9 +85,63 @@ mod tests {
             "# T\u{1}\u{8}x\n\n## \u{0}A\n\n{}\n",
             "- <&>\"'\n".repeat(50)
         );
-        let (_, bytes) = pptx_from_markdown("t", &hostile).unwrap();
+        let (_, bytes, _) = pptx_from_markdown("t", &hostile, &|_| None).unwrap();
         for (name, xml) in parts(&bytes) {
             roxmltree::Document::parse(&xml).unwrap_or_else(|e| panic!("{name}: {e}"));
         }
+    }
+
+    fn tiny_png(w: u32, h: u32) -> Picture {
+        // A valid PNG header and IHDR is enough for the package; the bytes are not decoded here.
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        png.extend_from_slice(&[0; 16]);
+        Picture {
+            png,
+            width: w,
+            height: h,
+        }
+    }
+
+    #[test]
+    fn a_loaded_picture_is_placed_once_per_file_and_a_missing_one_is_counted_as_left_out() {
+        let md = "# T\n\n## One\n\n![a](a.png)\n\n![gone](gone.png)\n\n## Two\n\nText\n\n![a again](a.png)\n";
+        let load = |src: &str| (src == "a.png").then(|| tiny_png(800, 400));
+        let (_, bytes, report) = pptx_from_markdown("t", md, &load).unwrap();
+        assert_eq!(
+            report,
+            PptxReport {
+                pictures_placed: 2,
+                pictures_left_out: 1
+            }
+        );
+        let names: Vec<String> = parts_names(&bytes);
+        assert_eq!(
+            names.iter().filter(|n| n.starts_with("ppt/media/")).count(),
+            1,
+            "the same picture is stored once"
+        );
+        let all = parts(&bytes);
+        let slide2 = &all
+            .iter()
+            .find(|(n, _)| n == "ppt/slides/slide2.xml")
+            .unwrap()
+            .1;
+        assert!(slide2.contains("<p:pic>") && slide2.contains("r:embed=\"rId2\""));
+        let rels2 = &all
+            .iter()
+            .find(|(n, _)| n == "ppt/slides/_rels/slide2.xml.rels")
+            .unwrap()
+            .1;
+        assert!(rels2.contains("../media/image1.png"));
+        for (name, xml) in &all {
+            roxmltree::Document::parse(xml).unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+    }
+
+    fn parts_names(bytes: &[u8]) -> Vec<String> {
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        (0..zip.len())
+            .map(|i| String::from_utf8_lossy(zip.by_index(i).unwrap().name_raw()).into_owned())
+            .collect()
     }
 }

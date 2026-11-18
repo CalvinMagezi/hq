@@ -12,6 +12,7 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 hex = { workspace = true }
 hq-backup = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 hq-vault = { workspace = true }
 hq-suite-store = { workspace = true }
 hq-suite-shrink = { workspace = true }

@@ -41,11 +41,22 @@ pub struct Run {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Item {
-    Bullet { level: u8, runs: Vec<Run> },
-    Number { level: u8, runs: Vec<Run> },
+    Bullet {
+        level: u8,
+        runs: Vec<Run>,
+    },
+    Number {
+        level: u8,
+        runs: Vec<Run>,
+    },
     Paragraph(Vec<Run>),
     Code(String),
     Table(Vec<Vec<String>>),
+    /// A linked picture, by the path the note wrote. Placed only if the caller can supply it.
+    Picture {
+        src: String,
+        alt: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -62,13 +73,17 @@ pub struct Deck {
     /// The title card's subtitle, if the note has text between its title and its first card.
     pub subtitle: Vec<Vec<Run>>,
     pub cards: Vec<Card>,
-    /// Pictures the cards link, which the writer does not place yet.
-    pub pictures_left_out: usize,
     /// Layout names a card asked for that the suite does not have (the card uses `content`).
     pub unknown_layouts: Vec<String>,
 }
 
-fn runs(inlines: &[Inline], out: &mut Vec<Run>, bold: bool, italic: bool, pictures: &mut usize) {
+fn runs(
+    inlines: &[Inline],
+    out: &mut Vec<Run>,
+    bold: bool,
+    italic: bool,
+    pictures: &mut Vec<(String, String)>,
+) {
     for i in inlines {
         match i {
             Inline::Text(t) => out.push(Run {
@@ -87,7 +102,7 @@ fn runs(inlines: &[Inline], out: &mut Vec<Run>, bold: bool, italic: bool, pictur
             Inline::Emph(c) => runs(c, out, bold, true, pictures),
             Inline::Strike(c) => runs(c, out, bold, italic, pictures),
             Inline::Link { content, .. } => runs(content, out, bold, italic, pictures),
-            Inline::Image { .. } => *pictures += 1,
+            Inline::Image { src, alt } => pictures.push((src.clone(), alt.clone())),
             Inline::SoftBreak => out.push(Run {
                 text: " ".into(),
                 bold,
@@ -104,7 +119,14 @@ fn runs(inlines: &[Inline], out: &mut Vec<Run>, bold: bool, italic: bool, pictur
     }
 }
 
-fn run_list(inlines: &[Inline], pictures: &mut usize) -> Vec<Run> {
+/// Puts the pictures found in a piece of text after it, as items of their own.
+fn flush(pictures: &mut Vec<(String, String)>, out: &mut Vec<Item>) {
+    for (src, alt) in pictures.drain(..) {
+        out.push(Item::Picture { src, alt });
+    }
+}
+
+fn run_list(inlines: &[Inline], pictures: &mut Vec<(String, String)>) -> Vec<Run> {
     let mut out = Vec::new();
     runs(inlines, &mut out, false, false, pictures);
     out
@@ -115,7 +137,7 @@ fn list_items(
     items: &[ListItem],
     level: u8,
     out: &mut Vec<Item>,
-    pictures: &mut usize,
+    pictures: &mut Vec<(String, String)>,
 ) {
     for item in items {
         for block in &item.blocks {
@@ -127,6 +149,7 @@ fn list_items(
                     } else {
                         Item::Bullet { level, runs: r }
                     });
+                    flush(pictures, out);
                 }
                 Block::List {
                     ordered: inner,
@@ -139,7 +162,7 @@ fn list_items(
     }
 }
 
-fn blocks_to_items(blocks: &[Block], out: &mut Vec<Item>, pictures: &mut usize) {
+fn blocks_to_items(blocks: &[Block], out: &mut Vec<Item>, pictures: &mut Vec<(String, String)>) {
     for block in blocks {
         match block {
             Block::Paragraph(inlines) => {
@@ -147,6 +170,7 @@ fn blocks_to_items(blocks: &[Block], out: &mut Vec<Item>, pictures: &mut usize) 
                 if !r.is_empty() {
                     out.push(Item::Paragraph(r));
                 }
+                flush(pictures, out);
             }
             Block::Heading { content, .. } => {
                 let r = run_list(content, pictures);
@@ -228,7 +252,7 @@ impl Deck {
             title: fallback_title.to_string(),
             ..Deck::default()
         };
-        let mut pictures = 0usize;
+        let mut pictures: Vec<(String, String)> = Vec::new();
         let head_md = head.join("\n");
         let head_doc = Document::from_markdown(fallback_title, &head_md);
         let mut subtitle_blocks = Vec::new();
@@ -282,7 +306,6 @@ impl Deck {
                 columns,
             });
         }
-        deck.pictures_left_out = pictures;
         deck
     }
 }
@@ -326,7 +349,7 @@ mod tests {
         assert!(matches!(&plan.columns[1][0], Item::Number { .. }));
         assert_eq!(d.unknown_layouts, ["carousel"]);
         assert_eq!(d.cards[3].layout, Layout::Content);
-        assert_eq!(d.pictures_left_out, 1);
+        assert!(matches!(&d.cards[3].columns[0][1], Item::Picture { src, .. } if src == "x.png"));
     }
 
     #[test]
