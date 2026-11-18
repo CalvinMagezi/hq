@@ -391,6 +391,24 @@ pub(super) async fn run_launch(
     launched
 }
 
+/// What a narrowed launch is told instead of the caller's prompt, or `None` when the launch is not
+/// narrowed. A narrowed session must work on a task: its brief is that task's stored text.
+fn narrowed_prompt(db: &Arc<Database>, l: &Launch<'_>) -> Result<Option<String>> {
+    if !super::narrow::active() {
+        return Ok(None);
+    }
+    let Some(task) = l.mission_id else {
+        bail!(
+            "this chat has read outside text, so a helper can only start on an HQ task (pass task_id); \
+             its brief is the task's stored text, never free text from this chat"
+        );
+    };
+    let goal = db
+        .with_conn(|c| Ok(super::origin::task_goal(c, task)))?
+        .unwrap_or_default();
+    Ok(Some(super::narrow::brief(task, &goal)))
+}
+
 async fn launch_with(
     db: &Arc<Database>,
     harness: &Harness,
@@ -399,7 +417,11 @@ async fn launch_with(
 ) -> Result<Value> {
     let profile = harness.profile.as_ref();
     let acp_argv = acp_argv_for(harness, &l)?;
-    let prompt = l.prompt.filter(|p| !p.trim().is_empty());
+    let narrowed_brief = narrowed_prompt(db, &l)?;
+    let prompt = narrowed_brief
+        .as_deref()
+        .or(l.prompt)
+        .filter(|p| !p.trim().is_empty());
     // A resume is not handed the prompt at start: its prompt is a follow-up, typed in as one.
     let prompt_at_start = match (prompt, l.one_shot, l.resuming) {
         (Some(_), _, _) if acp_argv.is_some() => Vec::new(),
@@ -438,6 +460,7 @@ async fn launch_with(
         policy: l.policy.and_then(|p| serde_json::to_value(p).ok()),
         acp_argv,
         acp_model: harness.model.clone(),
+        strict: narrow::active(),
     };
     let began = std::time::Instant::now();
     let host = l.host.clone();

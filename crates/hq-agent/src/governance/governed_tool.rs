@@ -490,9 +490,26 @@ impl GovernedTool {
             return Ok(text_result(waiting));
         }
 
+        if self.narrows_helper_start() {
+            return hq_tools::harness_session::narrow::scoped(self.run_tracked(id, args)).await;
+        }
         self.run_tracked(id, args).await
     }
+
+    /// A helper started after this session read outside text runs narrowed (strict sandbox, a
+    /// brief built from the stored task) instead of asking the owner. An unattended session
+    /// never gets this far: `injection_denial` refuses it first.
+    fn narrows_helper_start(&self) -> bool {
+        self.taint.is_tainted() && NARROWED_START_TOOLS.contains(&self.inner.name())
+    }
 }
+
+/// Tools that start, brief or delegate to another agent.
+const NARROWED_START_TOOLS: &[&str] = &[
+    "harness_session_spawn",
+    "harness_session_handoff",
+    "agent_delegate",
+];
 
 #[async_trait]
 impl AgentTool for GovernedTool {

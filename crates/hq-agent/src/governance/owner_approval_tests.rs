@@ -143,8 +143,33 @@ fn reads_and_notes_never_need_the_owner() {
         "convert",
         &json!({"path": "a.md"})
     ));
-    assert!(needs_owner("harness_session_spawn", "harness", &json!({})));
     assert!(!needs_owner("read_file", "coding", &json!({})));
+}
+
+#[test]
+fn starting_a_helper_is_zone_a_and_the_edge_stays_asked() {
+    use super::{Zone, zone_of};
+    for tool in [
+        "harness_session_spawn",
+        "harness_session_handoff",
+        "agent_delegate",
+    ] {
+        assert_eq!(zone_of(tool), Zone::A, "{tool}");
+        assert!(!needs_owner(tool, "harness", &json!({})), "{tool}");
+    }
+    for tool in ["bash", "git_pr", "github_write", "host_send"] {
+        assert_eq!(zone_of(tool), Zone::B, "{tool}");
+        assert!(needs_owner(tool, "coding", &json!({})), "{tool}");
+    }
+    for tool in [
+        "self_update_install",
+        "host_add",
+        "skill_manage",
+        "watch_create",
+    ] {
+        assert_eq!(zone_of(tool), Zone::C, "{tool}");
+        assert!(needs_owner(tool, "hq", &json!({})), "{tool}");
+    }
 }
 
 // A watch runs later as an unattended turn that never asks the owner, so a
