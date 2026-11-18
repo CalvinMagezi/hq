@@ -15,7 +15,6 @@
 
 allowed_back_edges = [
   "harness_session -> a2a",
-  "skill_audit -> skills",
   "agent_host -> lane_quotas",
   "agent_host -> harness_session",
   "harness_session -> tasks",
@@ -55,6 +54,7 @@ remote_mcp = 1
 self_update = 1
 session_policy = 1
 skill_bundle = 1
+skill_model = 1
 slash_commands = 1
 spill = 1
 subagent_runs = 1

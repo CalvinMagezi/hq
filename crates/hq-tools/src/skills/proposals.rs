@@ -3,7 +3,8 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
-use super::parse::*;
+use crate::skill_model::parse::*;
+use crate::skill_model::validate::validate_skill_name;
 
 /// Render a SkillDefinition back to SKILL.md text (frontmatter + body).
 pub fn render_skill(skill: &SkillDefinition) -> String {
@@ -55,13 +56,6 @@ pub fn write_proposal_text(skills_dir: &Path, name: &str, text: &str) -> Result<
     let path = dir.join("SKILL.md");
     std::fs::write(&path, text)?;
     Ok(path)
-}
-
-pub(crate) fn validate_skill_name(name: &str) -> Result<()> {
-    if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
-        anyhow::bail!("invalid skill name: {}", name);
-    }
-    Ok(())
 }
 
 /// Promote `<skills_dir>/_proposed/<name>/SKILL.md` to `<skills_dir>/<name>/SKILL.md`.

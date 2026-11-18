@@ -28,7 +28,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use super::hints::word_boundary_match;
+use super::hint_match::word_boundary_match;
 
 /// The file beside `SKILL.md`.
 pub const FIXTURES_FILE: &str = "fixtures.yaml";
