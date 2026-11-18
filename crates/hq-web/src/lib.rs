@@ -1293,6 +1293,28 @@ mod security_header_tests {
     }
 
     #[tokio::test]
+    async fn office_files_download_with_their_own_type_and_a_safe_name() {
+        let (app, _v, _w) = app_with_vault(&[("AI stocks.xlsx", "x"), ("deck.pptx", "x")]);
+        let res = get(&app, "/api/vault-asset?path=AI%20stocks.xlsx").await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            res.headers()["content-type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+        assert_eq!(
+            res.headers()["content-disposition"],
+            "attachment; filename=\"AI stocks.xlsx\""
+        );
+        let deck = get(&app, "/api/vault-asset?path=deck.pptx").await;
+        assert!(
+            deck.headers()["content-disposition"]
+                .to_str()
+                .unwrap()
+                .starts_with("attachment")
+        );
+    }
+
+    #[tokio::test]
     async fn vault_status_says_how_many_notes_are_indexed() {
         let (app, _v, _w) = app_with_vault(&[]);
         let res = get(&app, "/api/vault-status").await;
