@@ -269,11 +269,11 @@ fn the_scanner_catches_planted_breaches() {
     // A faithful copy is clean, so any problem below was planted.
     assert_eq!(problems(&scan(&src), &layers), Vec::<String>::new());
 
-    // 1. A foundation module reaching up into the tangle.
-    let registry = src.join("registry.rs");
-    let mut text = fs::read_to_string(&registry).unwrap();
+    // 1. A module free of the tangle (layer 1) reaching up into it.
+    let file_edit = src.join("file_edit.rs");
+    let mut text = fs::read_to_string(&file_edit).unwrap();
     text.push_str("\nuse crate::tasks::PlantedBreach;\n");
-    fs::write(&registry, text).unwrap();
+    fs::write(&file_edit, text).unwrap();
 
     // 2. A new module nobody gave a layer.
     fs::write(src.join("zz_planted_module.rs"), "pub fn planted() {}\n").unwrap();
@@ -286,20 +286,23 @@ fn the_scanner_catches_planted_breaches() {
     .unwrap();
 
     // 4. A reference that only appears in a comment must NOT be reported.
-    let util = src.join("util.rs");
-    let mut text = fs::read_to_string(&util).unwrap();
+    let usage = src.join("harness_usage.rs");
+    let mut text = fs::read_to_string(&usage).unwrap();
     text.push_str("\n// see crate::vault for how this is used\n");
-    fs::write(&util, text).unwrap();
+    fs::write(&usage, text).unwrap();
 
     let found = problems(&scan(&src), &layers);
     let has = |needle: &str| found.iter().any(|p| p.contains(needle));
-    assert!(has("`registry` (layer 0) uses `tasks`"), "{found:#?}");
+    assert!(has("`file_edit` (layer 1) uses `tasks`"), "{found:#?}");
     assert!(
         has("module `zz_planted_module` is not in layers.toml"),
         "{found:#?}"
     );
     assert!(!has("tests_planted"), "a test file was scanned: {found:#?}");
-    assert!(!has("`util` (layer"), "a comment was scanned: {found:#?}");
+    assert!(
+        !has("`harness_usage` (layer"),
+        "a comment was scanned: {found:#?}"
+    );
     assert_eq!(found.len(), 2, "{found:#?}");
 }
 
@@ -312,7 +315,7 @@ fn the_allowlist_can_only_shrink_and_a_stale_layer_is_named() {
 
     // An allowed edge that is not a back edge (a down-pointing one) is stale, as is one that does
     // not exist at all.
-    layers.allowed.insert(("tasks".into(), "util".into()));
+    layers.allowed.insert(("tasks".into(), "file_edit".into()));
     // A layer for a module that is not there.
     layers.layer.insert("zz_gone".into(), 1);
 
@@ -320,7 +323,7 @@ fn the_allowlist_can_only_shrink_and_a_stale_layer_is_named() {
     assert!(
         found
             .iter()
-            .any(|p| p.contains("`tasks -> util`") && p.contains("no longer a back edge")),
+            .any(|p| p.contains("`tasks -> file_edit`") && p.contains("no longer a back edge")),
         "{found:#?}"
     );
     assert!(

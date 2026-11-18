@@ -166,7 +166,21 @@ async fn number_formats_are_applied_in_xlsx_and_ods() {
                 .all(|w| w.kind != LossKind::NumberFormatsNotApplied),
             "{name}"
         );
-        assert_eq!(r.outcome, Outcome::Ok, "{name}");
+        if name == "tracker.xlsx" {
+            // Two total formulas and a merged title: the tables show values only.
+            assert_eq!(r.outcome, Outcome::Degraded, "{name}");
+            for kind in [
+                LossKind::FormulasShownAsValues,
+                LossKind::MergedRangesUnmerged,
+            ] {
+                assert!(
+                    r.warnings.iter().any(|w| w.kind == kind),
+                    "{name}: {kind:?}"
+                );
+            }
+        } else {
+            assert_eq!(r.outcome, Outcome::Ok, "{name}");
+        }
     }
 }
 

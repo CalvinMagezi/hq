@@ -60,7 +60,7 @@ pub fn assert_within_vault(vault_path: &Path, rel: &str) -> anyhow::Result<()> {
 
 /// Resolves `.`/`..` components without touching the filesystem (unlike
 /// `canonicalize`, which requires the path to exist).
-pub(crate) fn lexically_normalize(path: &Path) -> std::path::PathBuf {
+pub fn lexically_normalize(path: &Path) -> std::path::PathBuf {
     let mut out = std::path::PathBuf::new();
     for component in path.components() {
         match component {

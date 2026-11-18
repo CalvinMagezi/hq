@@ -262,7 +262,7 @@ impl HqTool for HarnessSessionSpawnTool {
         // Joining a remote client's team: checked and held so two starts cannot both pass
         // the team's limits.
         let _joining = match super::team::parse(&args) {
-            Some(_) => Some(crate::a2a::DELEGATION_LOCK.lock().await),
+            Some(_) => Some(crate::session_policy::DELEGATION_LOCK.lock().await),
             None => None,
         };
         let team = match super::team::parse(&args) {
@@ -588,7 +588,9 @@ impl HqTool for HarnessSessionStatusTool {
         let caller = super::caller_session(&args).map(str::to_string);
         tokio::task::spawn_blocking(move || {
             // A launched agent may look at itself, its parent and its children.
-            db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;
+            db.with_conn(|c| {
+                crate::session_policy::check_session_access(c, caller.as_deref(), &id)
+            })?;
             super::status(&db, &id)
         })
         .await?
@@ -636,7 +638,9 @@ impl HqTool for HarnessSessionLogsTool {
             .map(str::to_string);
         tokio::task::spawn_blocking(move || {
             // A launched agent may read the sessions of its own team.
-            db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;
+            db.with_conn(|c| {
+                crate::session_policy::check_session_access(c, caller.as_deref(), &id)
+            })?;
             match since {
                 Some(cursor) => super::logs_since(&db, &id, &cursor, lines.clamp(1, 500)),
                 None => super::tail_log(&db, &id, lines.clamp(1, 500)),
@@ -730,7 +734,9 @@ impl HqTool for HarnessSessionPendingTool {
         super::connector_may_drive(&db, &args, &id)?;
         let caller = super::caller_session(&args).map(str::to_string);
         tokio::task::spawn_blocking(move || {
-            db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;
+            db.with_conn(|c| {
+                crate::session_policy::check_session_access(c, caller.as_deref(), &id)
+            })?;
             super::answer::pending(&db, &id)
         })
         .await?
@@ -939,7 +945,9 @@ impl HqTool for HarnessSessionWaitTool {
             }
             return tokio::task::spawn_blocking(move || {
                 let may_reach = |one: &str| {
-                    db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), one))
+                    db.with_conn(|c| {
+                        crate::session_policy::check_session_access(c, caller.as_deref(), one)
+                    })
                 };
                 Ok(super::wait_all(&db, &many, &until, timeout, &may_reach))
             })
@@ -947,7 +955,9 @@ impl HqTool for HarnessSessionWaitTool {
         }
         super::connector_may_drive(&db, &args, &id)?;
         tokio::task::spawn_blocking(move || {
-            db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;
+            db.with_conn(|c| {
+                crate::session_policy::check_session_access(c, caller.as_deref(), &id)
+            })?;
             super::wait(&db, &id, &until, timeout)
         })
         .await?
@@ -1296,7 +1306,7 @@ impl HqTool for HarnessSessionHandoffTool {
         )
         .await?;
         let _joining = match super::team::parse(&args) {
-            Some(_) => Some(crate::a2a::DELEGATION_LOCK.lock().await),
+            Some(_) => Some(crate::session_policy::DELEGATION_LOCK.lock().await),
             None => None,
         };
         let team = match super::team::parse(&args) {

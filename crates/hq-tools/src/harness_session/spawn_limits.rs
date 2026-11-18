@@ -1,6 +1,6 @@
 //! Bounds on `harness_session_spawn` calls that join no team: how many such sessions may run,
 //! how many may start per hour, and whether a used-up hard budget stops a start. Team starts
-//! have their own limits (`a2a::check_tree_limits`).
+//! have their own limits (`session_policy::check_tree_limits`).
 
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ use hq_db::harness_sessions_registry as registry;
 use hq_db::usage_ledger::{period_bounds, scope_spend};
 use tracing::warn;
 
-use crate::a2a::RATE_WINDOW_MINUTES;
+use crate::session_policy::RATE_WINDOW_MINUTES;
 
 /// Starts that passed the check and have not yet written their session row. The lock is held only
 /// to check and add one, never across a folder approval or a launch, so a slow start cannot

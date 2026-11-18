@@ -114,6 +114,9 @@ fn explain(r: &Refusal) -> String {
         }
         Refusal::NeedsOcr => "It is a scan or a photo. Those are kept as they are for now.".into(),
         Refusal::Unsupported => "HQ cannot read this kind of file yet.".into(),
+        Refusal::SpreadsheetKeepsFormulas => {
+            "A spreadsheet keeps its formulas only in the original file, so it stays as it is. Use Export to make a record of it.".into()
+        }
         Refusal::TooLarge => "It is too large to read safely.".into(),
         Refusal::ProtectedFolder => "It is in a folder HQ keeps for itself.".into(),
         Refusal::NotSmaller { .. } => {
@@ -307,6 +310,7 @@ mod tests {
             Refusal::Encrypted,
             Refusal::NeedsOcr,
             Refusal::Unsupported,
+            Refusal::SpreadsheetKeepsFormulas,
             Refusal::TooLarge,
             Refusal::ProtectedFolder,
             Refusal::NotSmaller { saved_bytes: -5 },
