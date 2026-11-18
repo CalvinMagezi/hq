@@ -30,6 +30,9 @@ import example.hq.spike.data.SinkInfo
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 import kotlinx.coroutines.launch
+import example.hq.spike.data.suiteAddPeerSink
+import example.hq.spike.data.suiteCheckSink
+import example.hq.spike.data.suiteSinks
 
 /**
  * Cold storage on the Backup page: the sinks that keep sealed originals away from this phone, whether each answers now, a way to

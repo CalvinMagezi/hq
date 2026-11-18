@@ -39,6 +39,13 @@ import example.hq.spike.data.SuiteRefused
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 import kotlinx.coroutines.launch
+import example.hq.spike.data.suiteAbandon
+import example.hq.spike.data.suiteConfirm
+import example.hq.spike.data.suiteFile
+import example.hq.spike.data.suiteOffload
+import example.hq.spike.data.suiteShrink
+import example.hq.spike.data.suiteSinks
+import example.hq.spike.data.suiteUndo
 
 /** What a note says about the file it was made from, read from its front matter. */
 data class SuiteSource(val path: String)
