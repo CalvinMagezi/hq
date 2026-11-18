@@ -3,7 +3,9 @@
 //! A slides note is ordinary markdown (`docs/suite/HQMD.md`, "Docs and slides"): the level 1
 //! heading is the deck's title and each level 2 heading starts a card. A line `<!-- layout: NAME -->`
 //! under a card's heading picks its layout. Text between the title and the first card is the title
-//! card's subtitle. A horizontal rule splits a two-column card.
+//! card's subtitle. A horizontal rule splits a two-column card. Comments under a card's heading, or
+//! before the first card for the whole deck, set its look: `<!-- transition: fade slow -->`,
+//! `<!-- background: #1F3A5F -->` and `<!-- color: #FFFFFF -->`. A card's own comment wins.
 
 use hq_export::doc::{Block, Document, Inline, ListItem, plain_text};
 
@@ -28,6 +30,123 @@ impl Layout {
             _ => None,
         }
     }
+}
+
+/// How a card moves in. `None` cancels a deck-wide transition for one card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    None,
+    Fade,
+    Push,
+    Wipe,
+    Split,
+    Cover,
+    Dissolve,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Speed {
+    Slow,
+    #[default]
+    Medium,
+    Fast,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Transition {
+    pub kind: Kind,
+    pub speed: Speed,
+}
+
+/// The names `<!-- transition: NAME [slow|medium|fast] -->` takes.
+pub const TRANSITION_NAMES: &str = "fade, push, wipe, split, cover, dissolve, none";
+
+impl Transition {
+    /// The transition a comment's text picks (`fade`, `push slow`), or `None` for text the suite
+    /// does not know.
+    pub fn parse(text: &str) -> Option<Transition> {
+        let mut words = text.split_whitespace();
+        let kind = match words.next()?.to_ascii_lowercase().as_str() {
+            "none" => Kind::None,
+            "fade" => Kind::Fade,
+            "push" => Kind::Push,
+            "wipe" => Kind::Wipe,
+            "split" => Kind::Split,
+            "cover" => Kind::Cover,
+            "dissolve" => Kind::Dissolve,
+            _ => return None,
+        };
+        let speed = match words.next().map(str::to_ascii_lowercase).as_deref() {
+            None | Some("medium") | Some("med") => Speed::Medium,
+            Some("slow") => Speed::Slow,
+            Some("fast") => Speed::Fast,
+            _ => return None,
+        };
+        words.next().is_none().then_some(Transition { kind, speed })
+    }
+}
+
+/// A colour as six uppercase hex digits, from `#1F3A5F`, `1f3a5f` or `#fff`.
+pub fn parse_color(text: &str) -> Option<String> {
+    let hex = text.trim().trim_start_matches('#');
+    if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    match hex.len() {
+        6 => Some(hex.to_ascii_uppercase()),
+        3 => Some(
+            hex.chars()
+                .flat_map(|c| [c, c])
+                .collect::<String>()
+                .to_ascii_uppercase(),
+        ),
+        _ => None,
+    }
+}
+
+/// What a card looks like beyond its words. Each part is unset until a comment sets it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Look {
+    pub transition: Option<Transition>,
+    /// Six uppercase hex digits.
+    pub background: Option<String>,
+    /// The text colour, six uppercase hex digits.
+    pub color: Option<String>,
+}
+
+impl Look {
+    /// This look with `base` filling every part it leaves unset.
+    fn over(&self, base: &Look) -> Look {
+        Look {
+            transition: self.transition.or(base.transition),
+            background: self.background.clone().or_else(|| base.background.clone()),
+            color: self.color.clone().or_else(|| base.color.clone()),
+        }
+    }
+}
+
+/// Contrast ratio below which a card's colours are reported (WCAG's bar for large text).
+const MIN_CONTRAST: f64 = 3.0;
+/// The slide background and text colour the theme gives a card that sets neither.
+const THEME_BACKGROUND: &str = "FFFFFF";
+const THEME_TEXT: &str = "000000";
+
+fn luminance(hex: &str) -> f64 {
+    let channel = |i: usize| {
+        let v = f64::from(u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0)) / 255.0;
+        if v <= 0.03928 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4)
+}
+
+/// The contrast ratio of two six-digit colours, 1 (none) to 21.
+pub fn contrast(a: &str, b: &str) -> f64 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }
 
 /// A run of text with its emphasis.
@@ -67,10 +186,16 @@ pub struct Card {
     pub columns: Vec<Vec<Item>>,
     /// Speaker notes, one paragraph each: `<!-- notes: ... -->` under the card's heading.
     pub notes: Vec<String>,
+    /// The card's own look over the deck's.
+    pub look: Look,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Deck {
+    /// The look every card has unless it says otherwise; the title card has it as it is.
+    pub look: Look,
+    /// Sentences about a transition or colour the suite could not use, or that is hard to read.
+    pub look_problems: Vec<String>,
     pub title: String,
     /// The title card's subtitle, if the note has text between its title and its first card.
     pub subtitle: Vec<Vec<Run>>,
@@ -202,8 +327,56 @@ fn blocks_to_items(blocks: &[Block], out: &mut Vec<Item>, pictures: &mut Vec<(St
 /// What a card's comments say: the layout name, the speaker notes and the markdown without them.
 struct CardComments {
     layout: Option<String>,
+    transition: Option<String>,
+    background: Option<String>,
+    color: Option<String>,
     notes: Vec<String>,
     markdown: String,
+}
+
+/// The look comments of one place (a card, or the deck's head), checked: what could be used, and a
+/// sentence for each thing that could not.
+fn look_of(c: &CardComments, place: &str, problems: &mut Vec<String>) -> Look {
+    let transition = c.transition.as_deref().and_then(|t| {
+        let parsed = Transition::parse(t);
+        if parsed.is_none() {
+            problems.push(format!(
+                "{place}: `{t}` is not a transition. Use one of {TRANSITION_NAMES}, then slow, medium or fast if you like."
+            ));
+        }
+        parsed
+    });
+    let mut color_of = |name: &str, text: &Option<String>| {
+        text.as_deref().and_then(|t| {
+            let parsed = parse_color(t);
+            if parsed.is_none() {
+                problems.push(format!(
+                    "{place}: `{t}` is not a colour for {name}. Write it as #RRGGBB, for example #1F3A5F."
+                ));
+            }
+            parsed
+        })
+    };
+    let background = color_of("the background", &c.background);
+    let color = color_of("the text", &c.color);
+    Look {
+        transition,
+        background,
+        color,
+    }
+}
+
+/// A sentence when a card's text is hard to read on its background, with the theme's colours
+/// standing in for whichever one the card leaves unset.
+fn contrast_problem(place: &str, look: &Look) -> Option<String> {
+    if look.background.is_none() && look.color.is_none() {
+        return None;
+    }
+    let background = look.background.as_deref().unwrap_or(THEME_BACKGROUND);
+    let text = look.color.as_deref().unwrap_or(THEME_TEXT);
+    (contrast(background, text) < MIN_CONTRAST).then(|| {
+        format!("{place}: the text (#{text}) is hard to read on the background (#{background}).")
+    })
 }
 
 /// The layout and notes comments of a card (`<!-- layout: NAME -->`, `<!-- notes: text -->`, or a notes
@@ -212,6 +385,9 @@ struct CardComments {
 fn take_comments(lines: &[&str]) -> CardComments {
     let mut out = CardComments {
         layout: None,
+        transition: None,
+        background: None,
+        color: None,
         notes: Vec::new(),
         markdown: String::new(),
     };
@@ -250,12 +426,20 @@ fn take_comments(lines: &[&str]) -> CardComments {
             }
             continue;
         }
-        let layout = inner
+        let setting = inner
             .strip_suffix("-->")
             .map(str::trim)
-            .and_then(|c| c.strip_prefix("layout:"));
-        match layout {
-            Some(n) if out.layout.is_none() => out.layout = Some(n.trim().to_string()),
+            .and_then(|c| c.split_once(':'))
+            .map(|(k, v)| (k.trim(), v.trim().to_string()));
+        let slot = match setting.as_ref().map(|(k, _)| *k) {
+            Some("layout") => Some(&mut out.layout),
+            Some("transition") => Some(&mut out.transition),
+            Some("background") => Some(&mut out.background),
+            Some("color") => Some(&mut out.color),
+            _ => None,
+        };
+        match (slot, setting) {
+            (Some(slot), Some((_, value))) if slot.is_none() => *slot = Some(value),
             _ => kept.push(*line),
         }
     }
@@ -319,7 +503,12 @@ impl Deck {
             ..Deck::default()
         };
         let mut pictures: Vec<(String, String)> = Vec::new();
-        let head_md = head.join("\n");
+        let head_comments = take_comments(&head);
+        deck.look = look_of(&head_comments, "The deck", &mut deck.look_problems);
+        if let Some(p) = contrast_problem("The deck", &deck.look) {
+            deck.look_problems.push(p);
+        }
+        let head_md = head_comments.markdown;
         let head_doc = Document::from_markdown(fallback_title, &head_md);
         let mut subtitle_blocks = Vec::new();
         let mut titled = false;
@@ -345,6 +534,14 @@ impl Deck {
             .collect();
         for (title, body) in card_sections.into_iter().take(MAX_CARDS) {
             let comments = take_comments(&body);
+            let place = format!("Card \"{title}\"");
+            let own = look_of(&comments, &place, &mut deck.look_problems);
+            let look = own.over(&deck.look);
+            if (own.background.is_some() || own.color.is_some())
+                && let Some(p) = contrast_problem(&place, &look)
+            {
+                deck.look_problems.push(p);
+            }
             let (layout_name, md, notes) = (comments.layout, comments.markdown, comments.notes);
             let layout = match layout_name.as_deref() {
                 None => Layout::Content,
@@ -372,6 +569,7 @@ impl Deck {
                 layout,
                 columns,
                 notes,
+                look,
             });
         }
         deck

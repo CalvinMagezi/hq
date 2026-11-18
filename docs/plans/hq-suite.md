@@ -150,6 +150,7 @@ M0, then made a hard CI limit.
 - 2026-11-18: M6 started: `hq-suite-slides` and `hq suite pptx`, a native pptx writer (no template, no tool): title card, cards, nested bullets, numbered lists, tables, a two-column layout. Read back by the suite's own pptx reader and rendered correctly by LibreOffice; not yet opened in PowerPoint. Pictures are placed (as PNG, inside the vault only). `docs/suite/SLIDES.md`.
 
 - 2026-11-18: slides gain speaker notes (`<!-- notes: ... -->`): a notes master and a notes page per card, read back by the suite's pptx reader and parsed by LibreOffice. `docs/suite/SLIDES.md`.
+- 2026-11-18: slides gain per-card transitions and background and text colours (comments under a card's heading, or before the first card for the whole deck), with a contrast warning. Opened in Keynote and LibreOffice. `docs/suite/SLIDES.md`.
 
 ## Next
 
