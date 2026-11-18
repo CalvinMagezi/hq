@@ -19,7 +19,6 @@ pub mod brand;
 pub mod budget_status;
 pub mod calendar;
 pub mod capabilities;
-pub mod coding;
 pub mod collection_tip;
 pub mod contacts;
 pub mod context_gateway;
@@ -27,7 +26,6 @@ pub mod convert;
 pub mod copilot_credits;
 pub mod device_actions;
 pub mod external_runner;
-pub mod file_edit;
 pub mod github;
 #[cfg(feature = "gws")]
 pub mod gws;
@@ -64,6 +62,8 @@ pub mod vault_reorg;
 pub use hq_tool_api::{family_confirm, family_guest, registry, util};
 // `web`, `remote_mcp` and `imagegen` now live in `hq-tools-web`; same names here.
 pub use hq_tools_web::{imagegen, remote_mcp, web};
+// `coding` and `file_edit` now live in `hq-tools-coding`; same names here.
+pub use hq_tools_coding::{coding, file_edit};
 
 pub use external_runner::run_external_cli_harness_strict;
 pub use registry::{HqTool, ToolRegistry, ToolSummary};
