@@ -50,6 +50,7 @@ pub fn read(
         Kind::Xlsx => {
             let mut pkg = Package::open(bytes, limits)?;
             pkg.check_sizes()?;
+            super::xlsx_features::scan(&mut pkg, &mut losses);
             let formats = xlsx_formats::read(&mut pkg);
             read_calamine(bytes, Some(&formats))?
         }
@@ -388,6 +389,58 @@ mod tests {
             "| Plain | 12.5 |",
         ] {
             assert!(md.contains(want), "{want}:\n{md}");
+        }
+    }
+
+    #[test]
+    fn formulas_charts_merges_and_rules_are_reported_as_losses() {
+        let main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        let rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        let sheet = format!(
+            r#"<worksheet xmlns="{main}"><sheetData>
+            <row r="1"><c r="A1" t="inlineStr"><is><t>Item</t></is></c><c r="B1" t="inlineStr"><is><t>Cost</t></is></c></row>
+            <row r="2"><c r="A2" t="inlineStr"><is><t>Seed</t></is></c><c r="B2"><v>5</v></c></row>
+            <row r="3"><c r="A3" t="inlineStr"><is><t>Total</t></is></c><c r="B3"><f>SUM(B2:B2)</f><v>5</v></c></row>
+            </sheetData><mergeCells count="1"><mergeCell ref="A4:B4"/></mergeCells>
+            <conditionalFormatting sqref="B2"><cfRule type="cellIs" priority="1"/></conditionalFormatting>
+            <dataValidations count="1"><dataValidation sqref="B2"/></dataValidations></worksheet>"#
+        );
+        let parts: Vec<(&str, Vec<u8>)> = vec![
+            ("[Content_Types].xml", CT.as_bytes().to_vec()),
+            (
+                "_rels/.rels",
+                format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{rel}/officeDocument" Target="xl/workbook.xml"/></Relationships>"#).into_bytes(),
+            ),
+            (
+                "xl/workbook.xml",
+                format!(r#"<workbook xmlns="{main}" xmlns:r="{rel}"><sheets><sheet name="Budget" sheetId="1" r:id="rId1"/></sheets></workbook>"#).into_bytes(),
+            ),
+            (
+                "xl/_rels/workbook.xml.rels",
+                format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{rel}/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#).into_bytes(),
+            ),
+            ("xl/worksheets/sheet1.xml", sheet.into_bytes()),
+            ("xl/charts/chart1.xml", b"<c:chartSpace/>".to_vec()),
+            ("xl/media/image1.png", b"png".to_vec()),
+        ];
+        let bytes = crate::ingest::testutil::zip_of(&parts);
+        let parsed = read(&bytes, Kind::Xlsx, 100, &Limits::default()).unwrap();
+        let kinds: Vec<LossKind> = parsed
+            .losses
+            .into_warnings()
+            .iter()
+            .map(|w| w.kind)
+            .collect();
+        for want in [
+            LossKind::FormulasShownAsValues,
+            LossKind::ChartsOmitted,
+            LossKind::EmbeddedObjectsOmitted,
+            LossKind::MergedRangesUnmerged,
+            LossKind::ConditionalFormatsDropped,
+            LossKind::ValidationRulesDropped,
+        ] {
+            assert!(kinds.contains(&want), "{want:?} missing from {kinds:?}");
+            assert!(want.is_loss());
         }
     }
 

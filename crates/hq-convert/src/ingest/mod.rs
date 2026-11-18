@@ -25,6 +25,7 @@ pub mod sniff;
 #[cfg(test)]
 pub(crate) mod testutil;
 mod text;
+mod xlsx_features;
 mod xlsx_formats;
 mod xmlconv;
 
