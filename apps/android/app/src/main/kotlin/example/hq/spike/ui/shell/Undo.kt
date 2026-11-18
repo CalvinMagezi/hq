@@ -29,6 +29,9 @@ import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 import org.json.JSONObject
 import example.hq.spike.data.restoreTask
+import example.hq.spike.data.unarchiveThread
+import example.hq.spike.data.restoreNotification
+import example.hq.spike.data.restoreBudgets
 
 /** What Undo puts back: each kind has its own restore route on HQ. */
 enum class UndoKind { Thread, Notification, Task, Budgets }

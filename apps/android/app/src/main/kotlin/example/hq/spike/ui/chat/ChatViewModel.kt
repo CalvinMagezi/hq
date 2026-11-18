@@ -40,6 +40,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import example.hq.spike.data.note
+import example.hq.spike.data.download
+import example.hq.spike.data.pinned
+import example.hq.spike.data.setPinned
+import example.hq.spike.data.watchedSessions
+import example.hq.spike.data.setSessionDrive
+import example.hq.spike.data.unwatchSession
 
 /** Everything the chat screen can ask for. A plain bag of functions, so the screen can also be drawn from a fixed state. */
 class ChatActions(

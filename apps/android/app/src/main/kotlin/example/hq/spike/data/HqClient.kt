@@ -46,7 +46,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     /** Starting a helper answers only once the agent has settled, and an export of a large note is made before it is sent; both can take longer than any other call here. */
     /** A shrink decodes and re-encodes every picture, about 25 seconds for a 3 MB document on a Galaxy A32. */
     internal val suiteHttp by lazy { http.newBuilder().readTimeout(SUITE_READ_SECONDS, TimeUnit.SECONDS).callTimeout(0, TimeUnit.SECONDS).build() }
-    private val startHttp by lazy { http.newBuilder().readTimeout(START_READ_SECONDS, TimeUnit.SECONDS).build() }
+    internal val startHttp by lazy { http.newBuilder().readTimeout(START_READ_SECONDS, TimeUnit.SECONDS).build() }
 
     internal val http = OkHttpClient.Builder()
         .connectTimeout(CONNECT_SECONDS, TimeUnit.SECONDS)
@@ -118,87 +118,6 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         send(authed("/api/threads/$threadId/archive").post(EMPTY_JSON).build()) { }
     }
 
-    /** One note as the web reader gets it. A 404 or a refused path is [NoteNotFound], not an outage. */
-    suspend fun note(path: String): NoteBody = withContext(Dispatchers.IO) {
-        val request = authed("/api/note?path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()
-        try {
-            http.newCall(request).execute().use { r ->
-                if (r.code == HTTP_UNAUTHORIZED) refused()
-                if (r.code == HTTP_NOT_FOUND || r.code == HTTP_BAD_REQUEST) throw NoteNotFound(path)
-                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note", status = r.code)
-                val o = JSONObject(r.body.string())
-                if (o.optBoolean("isDir", false)) throw NoteNotFound(path)
-                NoteWire.body(o, path)
-            }
-        } catch (e: IOException) {
-            throw if (e is HqUnavailable || e is NoteNotFound) e else HqUnavailable("hq is not reachable", e)
-        } catch (e: org.json.JSONException) {
-            throw HqUnavailable("hq sent something unreadable", e, status = HqUnavailable.UNREADABLE)
-        }
-    }
-
-    /** Where the note with this id lives now, for a `hq://notes/n/{id}` link. A 404 is [NoteNotFound]. */
-    suspend fun notePathById(id: String): String = withContext(Dispatchers.IO) {
-        val request = authed("/api/note/by-id/${java.net.URLEncoder.encode(id, "UTF-8")}").build()
-        try {
-            http.newCall(request).execute().use { r ->
-                if (r.code == HTTP_UNAUTHORIZED) refused()
-                if (r.code == HTTP_NOT_FOUND) throw NoteNotFound(id)
-                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note/by-id", status = r.code)
-                JSONObject(r.body.string()).optString("path", "").ifBlank { throw NoteNotFound(id) }
-            }
-        } catch (e: IOException) {
-            throw if (e is HqUnavailable || e is NoteNotFound) e else HqUnavailable("hq is not reachable", e)
-        } catch (e: org.json.JSONException) {
-            throw HqUnavailable("hq sent something unreadable", e, status = HqUnavailable.UNREADABLE)
-        }
-    }
-
-    /** Saves a vault file (an upload, say) to [dest]. */
-    suspend fun download(path: String, dest: java.io.File) = withContext(Dispatchers.IO) {
-        val request = authed("/api/vault-asset?path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()
-        try {
-            http.newCall(request).execute().use { r ->
-                if (r.code == HTTP_UNAUTHORIZED) refused()
-                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/vault-asset", status = r.code)
-                dest.parentFile?.mkdirs()
-                r.body.byteStream().use { input -> dest.outputStream().use { input.copyTo(it) } }
-            }
-        } catch (e: IOException) {
-            throw if (e is HqUnavailable) e else HqUnavailable("hq is not reachable", e)
-        }
-    }
-
-    /** Makes one export of a note on hq and saves it under [dir]; cancelling the calling coroutine cancels the request. */
-    suspend fun exportNote(path: String, format: String, dir: java.io.File): ExportedFile {
-        val request = authed("/api/note/export?path=${java.net.URLEncoder.encode(path, "UTF-8")}&format=$format").build()
-        val response = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-            val call = startHttp.newCall(request)
-            cont.invokeOnCancellation { call.cancel() }
-            call.enqueue(object : okhttp3.Callback {
-                override fun onFailure(call: okhttp3.Call, e: IOException) = cont.resumeWith(Result.failure(HqUnavailable("hq is not reachable", e)))
-                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) = cont.resumeWith(Result.success(response))
-            })
-        }
-        return withContext(Dispatchers.IO) {
-            response.use { r ->
-                if (r.code == HTTP_BAD_REQUEST) throw ExportRefused(runCatching { JSONObject(r.body.string()).optString("error") }.getOrNull().orEmpty())
-                if (r.code == HTTP_UNAUTHORIZED) refused()
-                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note/export", status = r.code)
-                val name = fileNameOf(r.header("Content-Disposition")) ?: "note.$format"
-                val dest = java.io.File(dir, name)
-                try {
-                    dest.parentFile?.mkdirs()
-                    r.body.byteStream().use { input -> dest.outputStream().use { input.copyTo(it) } }
-                } catch (e: IOException) {
-                    dest.delete()
-                    throw HqUnavailable("the export could not be saved", e)
-                }
-                ExportedFile(dest, name, r.header("Content-Type")?.substringBefore(';')?.trim().orEmpty())
-            }
-        }
-    }
-
     /** A task as the lists and the detail page need it. Dates are `YYYY-MM-DD`; the ready time is UTC without a zone. */
     data class TaskItem(
         val id: String,
@@ -239,14 +158,6 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     )
 
     internal fun json(body: JSONObject) = body.toString().toRequestBody("application/json".toMediaType())
-
-    /** Undo's restore calls: 200 puts the item back, 409 (surfaced as [HqUnavailable.status]) means it changed or 10 minutes passed. */
-    suspend fun unarchiveThread(id: String) { send(authed("/api/threads/${java.net.URLEncoder.encode(id, "UTF-8")}/unarchive").post(EMPTY_JSON).build()) { } }
-
-    suspend fun restoreNotification(id: String) { send(authed("/api/notifications/${java.net.URLEncoder.encode(id, "UTF-8")}/restore").post(EMPTY_JSON).build()) { } }
-
-    /** Undoes a deleted spending limit by sending the limits as they were. */
-    suspend fun restoreBudgets(limits: JSONObject) { send(authed("/api/budgets").put(json(limits)).build()) { } }
 
     /** One row of the owner's inbox: an approval, a helper waiting, or an update. [actions] says what can be answered. */
     data class InboxItem(
@@ -310,48 +221,6 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         /** Items the tidy moved to Done that can still be restored. */
         val expiredCount: Int = 0,
     )
-
-    /** The inbox, newest first. [state] is pending, approved, dismissed, resolved or history; null for all. */
-    suspend fun notifications(state: String?, limit: Int = 50): InboxList =
-        send(authed("/api/notifications?limit=$limit" + (state?.let { "&state=$it" } ?: "")).build()) { text ->
-            val o = JSONObject(text)
-            InboxList(
-                o.optJSONArray("notifications").objects().map { n ->
-                    val meta = n.optJSONObject("metadata")
-                    val extra = meta?.optJSONObject("extra")
-                    InboxItem(
-                        n.getString("id"), n.optString("kind", ""), n.optString("title", ""), n.optString("description", ""), n.optString("state", ""),
-                        n.optString("created_at", ""), meta?.optStringOrNull("link"), extra?.optStringOrNull("source_task"), extra?.optStringOrNull("val_kind"),
-                        n.optJSONArray("actions").strings(), alertDialog(meta), approvalFacts(meta),
-                        signInDevice(meta), n.optBoolean("silenced", false),
-                        if (n.has("owner_only")) n.optBoolean("owner_only") else null, n.optStringOrNull("source_group"), n.optStringOrNull("expired_reason"),
-                        siteApprovals(n, meta), openLabel = extra?.optStringOrNull("open_label"),
-                    )
-                },
-                o.optInt("unread_count", 0), o.optInt("pending_approvals_count", 0),
-                if (o.has("needs_you_owner_only")) o.optInt("needs_you_owner_only") else null,
-                if (o.has("needs_you_helpers")) o.optInt("needs_you_helpers") else null,
-                o.optInt("expired_count", 0),
-            )
-        }
-
-    /** Records the owner's answer: approve, reject or dismiss. The thing that asked acts on it. */
-    suspend fun answerNotification(id: String, action: String) {
-        send(authed("/api/notifications/${java.net.URLEncoder.encode(id, "UTF-8")}/action").post(JSONObject().put("action", action).toString().toRequestBody("application/json".toMediaType())).build()) { }
-    }
-
-    /**
-     * Answers the dialog behind a helper's notice: [choice] is approve (the yes-once answer the server named) or decline. The
-     * server sends it to that dialog only; 409 means it was answered elsewhere or the helper moved on.
-     */
-    suspend fun answerDialog(id: String, choice: String) {
-        send(authed("/api/notifications/${java.net.URLEncoder.encode(id, "UTF-8")}/answer").post(JSONObject().put("choice", choice).toString().toRequestBody("application/json".toMediaType())).build()) { }
-    }
-
-    /** Types keys such as enter or esc into a helper's terminal. 409 means it is no longer at a prompt. */
-    suspend fun sendSessionKeys(sessionId: String, keys: List<String>) {
-        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(sessionId, "UTF-8")}/send").post(JSONObject().put("keys", JSONArray(keys)).toString().toRequestBody("application/json".toMediaType())).build()) { }
-    }
 
     /** A helper (a coding agent in a terminal on one of the owner's computers), as the list route sends it. */
     data class HelperRow(
@@ -437,63 +306,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         EdgeWorker(o.optBoolean("enabled"), o.optString("tag", "edge-task"), o.optJSONArray("repos").strings(), runs, o.optDouble("task_budget_usd", 0.0))
     }
 
-    /** The agent sessions this chat watches. */
-    suspend fun watchedSessions(threadId: String): List<WatchedSession> =
-        send(authed("/api/threads/${java.net.URLEncoder.encode(threadId, "UTF-8")}/sessions").build()) { example.hq.spike.data.watchedSessions(it) }
-
-    /** Turns Drive on or off for a watched session and returns it as saved. 409 means HQ refused to turn it on; 404 that it is no longer watched. */
-    suspend fun setSessionDrive(id: String, drive: Boolean): WatchedSession =
-        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/drive").post(JSONObject().put("drive", drive).toString().toRequestBody("application/json".toMediaType())).build()) {
-            WatchedSession.from(JSONObject(it).getJSONObject("session"))
-        }
-
-    /** Stops the chat watching a session; the server also switches its Drive off. */
-    suspend fun unwatchSession(id: String) {
-        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/unwatch").post(EMPTY_JSON).build()) { }
-    }
-
-    /** Every helper, newest first, including stopped ones. */
-    suspend fun helpers(): List<HelperRow> = send(authed("/api/harness-sessions").build()) { helperRows(it) }
-
     /** What a helper's terminal shows: its last lines, and whether they were read from the live terminal or are an old snapshot. */
     data class HelperScreen(val lines: List<String>, val live: Boolean)
-
-    suspend fun helperScreen(id: String, lines: Int = SCREEN_LINES): HelperScreen =
-        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/screen?lines=$lines").build()) {
-            val o = JSONObject(it)
-            HelperScreen(o.optJSONArray("lines").strings(), o.optString("source", "") == "live")
-        }
-
-    /** Types a line into a helper. 409 means it is waiting at a prompt and must be answered there first. */
-    suspend fun sendHelperText(id: String, text: String) {
-        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/send").post(JSONObject().put("text", text).toString().toRequestBody("application/json".toMediaType())).build()) { }
-    }
-
-    suspend fun stopHelper(id: String) {
-        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/stop").post(EMPTY_JSON).build()) { }
-    }
-
-    /** Opens the chat that follows this helper, making one if no chat does yet; returns that chat's id. Asking again returns the same chat. */
-    suspend fun followHelper(id: String): String =
-        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/adopt").post(EMPTY_JSON).build()) { JSONObject(it).optString("thread_id") }
-
-    suspend fun renameHelper(id: String, label: String) {
-        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/rename").post(JSONObject().put("label", label).toString().toRequestBody("application/json".toMediaType())).build()) { }
-    }
-
-    /** Starts a helper in a new folder on [host], given its first instruction; returns the new session's id. */
-    suspend fun startHelper(harness: String, host: String, prompt: String, label: String, note: String? = null, taskId: String? = null, repo: String? = null): String =
-        send(
-            authed("/api/harness-sessions").post(JSONObject().put("harness", harness).put("host", host).put("prompt", prompt).put("label", label).put("note", note).put("task_id", taskId).put("repo", repo).toString().toRequestBody("application/json".toMediaType())).build(),
-            caller = startHttp,
-        ) { JSONObject(it).getString("session_id") }
-
-    /** The computers helpers can run on, and whether each answered. */
-    suspend fun helperHosts(): List<HelperHost> = send(authed("/api/workbench/hosts").build()) { text ->
-        val root = JSONObject(text)
-        val every = root.optJSONArray("harnesses").strings()
-        root.optJSONArray("hosts").objects().mapNotNull { h -> h.optStringOrNull("host")?.let { HelperHost(it, h.optBoolean("reachable", false), h.optStringOrNull("error"), h.optJSONArray("agents")?.strings() ?: every) } }
-    }
 
     /** A read-only JSON route as it is, for the Settings pages that only show what the server says. */
     /** The empty chat's chips: what works on this install, untried things first. */
@@ -528,58 +342,16 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val tags: List<String> = emptyList(),
     )
 
-    private fun noteItems(array: JSONArray?) = array.objects().map(NoteWire::item)
+    internal fun noteItems(array: JSONArray?) = array.objects().map(NoteWire::item)
 
     /** The home screen's Recent list and whether HQ filed something the owner has not seen (the dot on Vault). */
     data class VaultSignals(val recent: List<NoteItem>, val hasNew: Boolean)
 
-    suspend fun vaultSignals(): VaultSignals = send(authed("/api/vault-signals").build()) {
-        val o = JSONObject(it)
-        VaultSignals(noteItems(o.optJSONArray("recent")), o.optBoolean("has_new", false))
-    }
-
-    /** The owner opened this note: HQ stops calling it new. An older HQ has no such route, which is fine. */
-    suspend fun markNoteSeen(path: String) {
-        try { send(authed("/api/note/seen").post(json(JSONObject().put("path", path))).build()) { } } catch (e: HqUnavailable) { if (e.status != HTTP_NOT_FOUND) throw e }
-    }
-
-    /** Keep: the owner accepts what HQ wrote. */
-    suspend fun keepNote(path: String) {
-        send(authed("/api/note/review").post(json(JSONObject().put("path", path).put("verdict", "accepted"))).build()) { }
-    }
-
-    /** The newest notes, as the home screen's Recent list. */
-    suspend fun recentNotes(): List<NoteItem> = send(authed("/api/vault-signals").build()) { noteItems(JSONObject(it).optJSONArray("recent")) }
-
-    suspend fun pinnedNotes(): List<NoteItem> = send(authed("/api/pinned").build()) { noteItems(JSONObject(it).optJSONArray("notes")) }
-
-    /** Every folder under Notebooks, Inbox first, as vault paths. */
-    suspend fun folders(): List<String> = send(authed("/api/vault/folders").build()) { JSONObject(it).optJSONArray("folders").strings() }
-
     /** One folder's contents: sub-folders with the notes under each, and the notes directly inside. */
     data class FolderListing(val folders: List<Pair<String, Int>>, val notes: List<String>)
 
-    suspend fun folderListing(path: String): FolderListing =
-        send(authed("/api/tree?recursive=true&path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()) { text ->
-            val tree = JSONObject(text).optJSONObject("tree")
-            val children = tree?.optJSONArray("children").objects()
-            fun count(o: JSONObject): Int = if (o.optString("type") == "file") 1 else o.optJSONArray("children").objects().sumOf(::count)
-            FolderListing(
-                children.filter { it.optString("type") == "dir" }.map { it.optString("path") to count(it) },
-                children.filter { it.optString("type") == "file" && it.optString("name").endsWith(".md") }.map { it.optString("path") },
-            )
-        }
-
     /** Full-text matches with a snippet of the text around the match. */
     data class NoteHit(val path: String, val title: String, val notebook: String, val snippet: String)
-
-    /** [folder] narrows the search to that notes folder and the ones inside it; HQ filters before it cuts to [limit]. */
-    suspend fun searchNoteHits(query: String, limit: Int = 30, folder: String? = null, writtenByHq: Boolean = false, tag: String? = null): List<NoteHit> =
-        send(authed("/api/search?" + noteSearchQuery(query, limit, folder, writtenByHq, tag)).build()) { text ->
-            JSONObject(text).optJSONArray("results").objects().map {
-                NoteHit(it.getString("note_path"), it.optString("title", ""), it.optString("notebook", ""), it.optString("snippet", ""))
-            }
-        }
 
     /** What HQ checked and finished in the last [hours] hours, as the web's While you were away reads it; null when this HQ has no verification (404). */
     suspend fun verificationBriefing(hours: Int = 24): JSONObject? = try {
@@ -587,12 +359,6 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     } catch (e: HqUnavailable) {
         if (e.status == HTTP_NOT_FOUND) null else throw e
     }
-
-    /** Makes a new note and returns its vault path; the title only names the file. */
-    suspend fun createNote(folder: String, title: String, content: String, clientId: String? = null, enrichUrl: String? = null): String =
-        send(authed("/api/note/create").post(JSONObject().put("folder", folder).put("title", title).put("content", content).apply { clientId?.let { put("client_id", it) }; enrichUrl?.let { put("enrich_url", it) } }.toString().toRequestBody("application/json".toMediaType())).build()) {
-            JSONObject(it).getString("path")
-        }
 
     /** A POST with a JSON body (empty by default) whose answer is a JSON object, or none. */
     suspend fun postJson(path: String, body: JSONObject = JSONObject()): JSONObject = send(authed(path).post(json(body)).build()) { if (it.isBlank()) JSONObject() else JSONObject(it) }
@@ -604,67 +370,12 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     /** [byHq] is true when HQ moved the note to the Trash itself; an HQ that does not say reads as the owner. */
     data class TrashedNote(val trashPath: String, val originalPath: String, val trashedOn: String, val daysLeft: Int, val byHq: Boolean = false)
 
-    suspend fun deleteNote(path: String): String =
-        send(authed("/api/note?path=${java.net.URLEncoder.encode(path, "UTF-8")}").delete().build()) {
-            JSONObject(it).getString("trash_path")
-        }
-
-    suspend fun trash(): Pair<List<TrashedNote>, Int> =
-        send(authed("/api/note/trash").build()) { text ->
-            val json = JSONObject(text)
-            val items = json.optJSONArray("items").objects().map {
-                TrashedNote(it.getString("trash_path"), it.getString("original_path"), it.getString("trashed_on"), it.optInt("days_left", 0), it.optString("deleted_by", "") == WRITTEN_BY_HQ)
-            }
-            items to json.optInt("retention_days", 30)
-        }
-
-    suspend fun trashedText(trashPath: String): String =
-        send(authed("/api/note/trash/read?path=${java.net.URLEncoder.encode(trashPath, "UTF-8")}").build()) {
-            JSONObject(it).getString("content")
-        }
-
-    suspend fun restoreNote(trashPath: String): String = restoreNoteTo(trashPath).path
-
     /** Where a restored note went: its own folder, the nearest folder that is left, or the top of the Vault. An older HQ does not say, which reads as its own folder. */
     data class Restored(val path: String, val to: String)
-
-    suspend fun restoreNoteTo(trashPath: String): Restored =
-        send(authed("/api/note/trash/restore").post(JSONObject().put("trash_path", trashPath).toString().toRequestBody("application/json".toMediaType())).build()) {
-            val o = JSONObject(it)
-            Restored(o.getString("path"), NoteWire.restoredTo(o))
-        }
 
     /** Checks an AI provider key with one small call to the provider and, if it works, stores it. 400 means the key was refused, 409 that the environment sets it. */
     suspend fun setProviderKey(provider: String, key: String) {
         send(authed("/api/settings/provider-key").post(JSONObject().put("provider", provider).put("api_key", key).toString().toRequestBody("application/json".toMediaType())).build()) { }
-    }
-
-    /** Replaces a note's text (body only: the server keeps the front matter). Last write wins; there is no version check yet. */
-    suspend fun saveNote(path: String, content: String, base: String? = null) {
-        val body = JSONObject().put("path", path).put("content", content).apply { base?.let { put("base", it) } }
-        val request = authed("/api/note").put(body.toString().toRequestBody("application/json".toMediaType())).build()
-        withContext(Dispatchers.IO) {
-            try {
-                http.newCall(request).execute().use { r ->
-                    if (r.code == HTTP_UNAUTHORIZED) refused()
-                    if (r.code == HTTP_CONFLICT) {
-                        val o = runCatching { JSONObject(r.body.string()) }.getOrDefault(JSONObject())
-                        throw NoteChanged(o.optString("theirs_hash", "").ifBlank { null }, o.optString("by", "").ifBlank { null }, o.optString("at", "").ifBlank { null })
-                    }
-                    if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note", status = r.code)
-                }
-            } catch (e: IOException) {
-                throw if (e is HqUnavailable || e is NoteChanged) e else HqUnavailable("hq is not reachable", e)
-            }
-        }
-    }
-
-    /** The vault paths of the pinned notes. */
-    suspend fun pinned(): Set<String> =
-        send(authed("/api/pinned").build()) { text -> JSONObject(text).optJSONArray("notes").objects().mapNotNull { it.optString("path").ifBlank { null } }.toSet() }
-
-    suspend fun setPinned(path: String, pin: Boolean) {
-        send(authed("/api/pin").post(JSONObject().put("path", path).put("pin", pin).toString().toRequestBody("application/json".toMediaType())).build()) { }
     }
 
     /** A new empty chat with a title, as `/topic <name>` makes. */
@@ -699,12 +410,6 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
             Attachment(o.getString("name"), o.getString("path"), o.optString("mime", ""), o.optLong("size", size))
         }
     }
-
-    /** Notes whose text matches, best first: (vault path, title, notebook). */
-    suspend fun searchNotes(query: String, limit: Int = PICKER_PAGE): List<Triple<String, String, String>> =
-        send(authed("/api/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=$limit").build()) { text ->
-            JSONObject(text).optJSONArray("results").objects().map { Triple(it.getString("note_path"), it.optString("title", ""), it.optString("notebook", "")) }
-        }
 
     /** Top-level tasks, newest first, optionally filtered by words: (display id, title, status). */
     suspend fun searchTasks(query: String, limit: Int = PICKER_PAGE): List<Triple<String, String, String>> =
@@ -776,7 +481,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     }
 
     /** The file name a download asks for: the UTF-8 form when there is one, else the plain one; never a path. */
-    private fun fileNameOf(disposition: String?): String? {
+    internal fun fileNameOf(disposition: String?): String? {
         val d = disposition ?: return null
         val raw = Regex("filename\\*=UTF-8''([^;]+)").find(d)?.groupValues?.get(1)?.let { java.net.URLDecoder.decode(it, "UTF-8") }
             ?: Regex("filename=\"([^\"]+)\"").find(d)?.groupValues?.get(1)
@@ -785,9 +490,9 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 
     companion object {
         val LOCAL_HQ = "http://127.0.0.1:${example.hq.spike.BuildConfig.HQ_PORT}"
-        private const val HTTP_NOT_FOUND = 404
-        private const val HTTP_CONFLICT = 409
-        private const val HTTP_BAD_REQUEST = 400
+        internal const val HTTP_NOT_FOUND = 404
+        internal const val HTTP_CONFLICT = 409
+        internal const val HTTP_BAD_REQUEST = 400
         internal const val HTTP_UNAUTHORIZED = 401
         internal const val HTTP_UNPROCESSABLE = 422
         private const val SUITE_READ_SECONDS = 300L
@@ -797,10 +502,10 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         private const val START_READ_SECONDS = 150L
         private const val PING_SECONDS = 20L
         private const val THREAD_PAGE = 50
-        private const val PICKER_PAGE = 20
+        internal const val PICKER_PAGE = 20
         internal const val TASK_PAGE = 500
         internal const val TASK_CAP = 5_000
-        private const val SCREEN_LINES = 80
+        internal const val SCREEN_LINES = 80
         private const val UPLOAD_CHUNK = 64 * 1024
         const val MESSAGE_PAGE = 100
         internal val EMPTY_JSON = "{}".toRequestBody("application/json".toMediaType())

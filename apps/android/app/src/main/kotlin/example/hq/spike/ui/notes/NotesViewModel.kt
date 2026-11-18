@@ -30,6 +30,23 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import example.hq.spike.data.createTaskNamed
 import example.hq.spike.data.archiveTask
+import example.hq.spike.data.note
+import example.hq.spike.data.notePathById
+import example.hq.spike.data.vaultSignals
+import example.hq.spike.data.markNoteSeen
+import example.hq.spike.data.keepNote
+import example.hq.spike.data.pinnedNotes
+import example.hq.spike.data.folders
+import example.hq.spike.data.folderListing
+import example.hq.spike.data.createNote
+import example.hq.spike.data.deleteNote
+import example.hq.spike.data.trash
+import example.hq.spike.data.trashedText
+import example.hq.spike.data.restoreNote
+import example.hq.spike.data.restoreNoteTo
+import example.hq.spike.data.saveNote
+import example.hq.spike.data.pinned
+import example.hq.spike.data.setPinned
 
 /** Everything the Notes pages can ask for. */
 class NotesActions(
