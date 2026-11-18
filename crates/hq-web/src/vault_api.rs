@@ -729,7 +729,7 @@ pub(crate) async fn note_versions_handler(
     let Ok(vault) = hq_vault::VaultClient::new(state.vault_path.clone()) else {
         return ApiError::internal("the notes folder cannot be opened").into_response();
     };
-    use hq_tools::registry::HqTool;
+    use hq_tool_api::registry::HqTool;
     let tool =
         hq_tools::vault::NoteProvenanceTool::new(Arc::new(vault), Arc::new(state.db.clone()));
     match tool.execute(json!({ "path": path })).await {

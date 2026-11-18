@@ -66,7 +66,7 @@ use axum::{
     Router,
     routing::{get, post},
 };
-use hq_tools::registry::ToolRegistry;
+use hq_tool_api::registry::ToolRegistry;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::broadcast;

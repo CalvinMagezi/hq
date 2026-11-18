@@ -1,6 +1,6 @@
 //! MCP stdio server — implements the rmcp `ServerHandler` trait.
 
-use hq_tools::registry::ToolRegistry;
+use hq_tool_api::registry::ToolRegistry;
 use rmcp::ErrorData;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::{
@@ -106,7 +106,7 @@ impl ServerHandler for HqMcpServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hq_tools::registry::HqTool;
+    use hq_tool_api::registry::HqTool;
 
     struct Stub {
         name: String,

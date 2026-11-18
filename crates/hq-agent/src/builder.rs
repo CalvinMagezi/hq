@@ -47,11 +47,11 @@ pub enum SessionProfile {
 }
 
 impl SessionProfile {
-    pub(crate) fn max_policy(&self) -> hq_tools::registry::ToolPolicy {
+    pub(crate) fn max_policy(&self) -> hq_tool_api::registry::ToolPolicy {
         match self {
-            SessionProfile::Weak => hq_tools::registry::ToolPolicy::Weak,
-            SessionProfile::Standard => hq_tools::registry::ToolPolicy::Standard,
-            SessionProfile::Full => hq_tools::registry::ToolPolicy::Full,
+            SessionProfile::Weak => hq_tool_api::registry::ToolPolicy::Weak,
+            SessionProfile::Standard => hq_tool_api::registry::ToolPolicy::Standard,
+            SessionProfile::Full => hq_tool_api::registry::ToolPolicy::Full,
         }
     }
 }
@@ -156,7 +156,7 @@ impl AgentTool for HqToolAdapter {
         _id: &str,
         args: serde_json::Value,
     ) -> Result<hq_core::types::ToolResult> {
-        let value = hq_tools::registry::validate_and_execute(self.inner.as_ref(), args).await?;
+        let value = hq_tool_api::registry::validate_and_execute(self.inner.as_ref(), args).await?;
         let text = match &value {
             serde_json::Value::String(s) => s.clone(),
             other => serde_json::to_string_pretty(other).unwrap_or_default(),
@@ -171,7 +171,7 @@ impl AgentTool for HqToolAdapter {
         })
     }
 
-    fn tool_policy(&self) -> hq_tools::registry::ToolPolicy {
+    fn tool_policy(&self) -> hq_tool_api::registry::ToolPolicy {
         self.inner.tool_policy()
     }
 

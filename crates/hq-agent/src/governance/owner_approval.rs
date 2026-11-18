@@ -89,12 +89,12 @@ pub fn needs_owner(tool: &str, category: &str, args: &Value) -> bool {
             .unwrap_or_default();
         return !hq_tools::github::coder::READ_ACTIONS.contains(&action);
     }
-    if tool == hq_tools::office::OFFICE_TOOL {
+    if tool == hq_tool_api::office::OFFICE_TOOL {
         let action = args
             .get("action")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        return hq_tools::office::moves_original(action);
+        return hq_tool_api::office::moves_original(action);
     }
     if EXPORT_TOOLS.contains(&tool) {
         return args
@@ -102,9 +102,9 @@ pub fn needs_owner(tool: &str, category: &str, args: &Value) -> bool {
             .and_then(Value::as_str)
             .is_some_and(|o| !o.trim().is_empty());
     }
-    if category == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY {
-        return hq_tools::remote_mcp::asks_owner(
-            hq_tools::remote_mcp::RemoteMcpCaller::Agent,
+    if category == hq_tools_web::remote_mcp::REMOTE_MCP_CATEGORY {
+        return hq_tools_web::remote_mcp::asks_owner(
+            hq_tools_web::remote_mcp::RemoteMcpCaller::Agent,
             tool,
             args,
         );
