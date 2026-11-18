@@ -204,7 +204,7 @@ pub fn check_text(r: &hq_suite_docs::Regenerated) -> String {
 mod slides_tests {
     use super::*;
 
-    const DECK: &str = "---\ntitle: Board review\nsuite_kind: slides\n---\n\n# Board review\n\nPrepared for the board.\n\n## Results\n\n- Revenue **up** 12%\n  - Uganda strongest\n- Costs flat\n\n## Numbers\n\n| item | qty |\n|---|---|\n| Sugar | 40 |\n\n## Odd\n<!-- layout: carousel -->\n\nSomething ![pic](x.png)\n\n![real](pic.png)\n";
+    const DECK: &str = "---\ntitle: Board review\nsuite_kind: slides\n---\n\n# Board review\n\nPrepared for the board.\n\n## Results\n<!-- notes: Open with the revenue number. Then Uganda. -->\n\n- Revenue **up** 12%\n  - Uganda strongest\n- Costs flat\n\n## Numbers\n\n| item | qty |\n|---|---|\n| Sugar | 40 |\n\n## Odd\n<!-- layout: carousel -->\n\nSomething ![pic](x.png)\n\n![real](pic.png)\n";
 
     fn vault_with_deck() -> tempfile::TempDir {
         let d = tempfile::tempdir().unwrap();
@@ -258,6 +258,12 @@ mod slides_tests {
         assert!(
             read.markdown.contains("real") || read.markdown.contains("pic"),
             "the picture is read back: {}",
+            read.markdown
+        );
+        assert!(
+            read.markdown
+                .contains("Open with the revenue number. Then Uganda."),
+            "the speaker notes are read back: {}",
             read.markdown
         );
         let text = slides_text(&made);

@@ -504,6 +504,14 @@ pub fn render_pptx(
         ));
     }
     pres_rels.push((format!("rId{}", n + 2), "theme", "theme/theme1.xml".into()));
+    let has_notes = deck.cards.iter().any(|c| !c.notes.is_empty());
+    if has_notes {
+        pres_rels.push((
+            format!("rId{}", n + 3),
+            "notesMaster",
+            "notesMasters/notesMaster1.xml".into(),
+        ));
+    }
     let borrowed: Vec<(&str, &str, &str)> = pres_rels
         .iter()
         .map(|(a, b, c)| (a.as_str(), *b, c.as_str()))
@@ -538,6 +546,7 @@ pub fn render_pptx(
         "ppt/slides/_rels/slide1.xml.rels".into(),
         rels(&[("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml")]),
     ));
+    let mut notes_slides: Vec<usize> = Vec::new();
     for (i, card) in deck.cards.iter().enumerate() {
         let slide = i + 2;
         let layout = if card.layout == Layout::TwoColumn {
@@ -548,6 +557,8 @@ pub fn render_pptx(
         let (xml, used) = card_slide(card, &mut media);
         parts.push((format!("ppt/slides/slide{slide}.xml"), xml));
         let layout_target = format!("../slideLayouts/slideLayout{layout}.xml");
+        let notes_target = format!("../notesSlides/notesSlide{slide}.xml");
+        let notes_id = format!("rId{}", used.len() + 2);
         let image_ids: Vec<String> = (0..used.len()).map(|k| format!("rId{}", k + 2)).collect();
         let image_targets: Vec<String> = used
             .iter()
@@ -558,10 +569,53 @@ pub fn render_pptx(
         for (id, target) in image_ids.iter().zip(&image_targets) {
             entries.push((id.as_str(), "image", target.as_str()));
         }
+        if !card.notes.is_empty() {
+            entries.push((notes_id.as_str(), "notesSlide", notes_target.as_str()));
+            parts.push((
+                format!("ppt/notesSlides/notesSlide{slide}.xml"),
+                notes_slide(&card.notes),
+            ));
+            parts.push((
+                format!("ppt/notesSlides/_rels/notesSlide{slide}.xml.rels"),
+                rels(&[
+                    ("rId1", "notesMaster", "../notesMasters/notesMaster1.xml"),
+                    ("rId2", "slide", &format!("../slides/slide{slide}.xml")),
+                ]),
+            ));
+            notes_slides.push(slide);
+        }
         parts.push((
             format!("ppt/slides/_rels/slide{slide}.xml.rels"),
             rels(&entries),
         ));
+    }
+    if has_notes {
+        parts.push((
+            "ppt/notesMasters/notesMaster1.xml".into(),
+            notes_master_part(),
+        ));
+        parts.push((
+            "ppt/notesMasters/_rels/notesMaster1.xml.rels".into(),
+            rels(&[("rId1", "theme", "../theme/theme2.xml")]),
+        ));
+        parts.push(("ppt/theme/theme2.xml".into(), theme_part()));
+        let overrides: String = notes_slides
+            .iter()
+            .map(|n| format!("<Override PartName=\"/ppt/notesSlides/notesSlide{n}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml\"/>"))
+            .collect();
+        let extra = format!(
+            "<Override PartName=\"/ppt/notesMasters/notesMaster1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml\"/><Override PartName=\"/ppt/theme/theme2.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.theme+xml\"/>{overrides}"
+        );
+        for (name, xml) in parts.iter_mut() {
+            if name == "[Content_Types].xml" {
+                *xml = xml.replace("</Types>", &format!("{extra}</Types>"));
+            } else if name == "ppt/presentation.xml" {
+                *xml = xml.replace(
+                    "</p:sldMasterIdLst>",
+                    &format!("</p:sldMasterIdLst><p:notesMasterIdLst><p:notesMasterId r:id=\"rId{}\"/></p:notesMasterIdLst>", n + 3),
+                );
+            }
+        }
     }
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
@@ -582,4 +636,26 @@ pub fn render_pptx(
         .map(Cursor::into_inner)
         .map_err(|e| PptxError::Write(e.to_string()))?;
     Ok((bytes, media.report))
+}
+
+/// One notes page: a placeholder for the slide's picture and one for the notes text.
+fn notes_slide(paragraphs: &[String]) -> String {
+    let body: String = paragraphs
+        .iter()
+        .map(|t| {
+            format!(
+                "<a:p><a:r><a:rPr lang=\"en-US\" dirty=\"0\"/><a:t>{}</a:t></a:r></a:p>",
+                esc(t)
+            )
+        })
+        .collect();
+    format!(
+        "{XML}<p:notes xmlns:a=\"{NS_A}\" xmlns:r=\"{NS_R}\" xmlns:p=\"{NS_P}\"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Slide Image Placeholder 1\"/><p:cNvSpPr><a:spLocks noGrp=\"1\" noRot=\"1\" noChangeAspect=\"1\"/></p:cNvSpPr><p:nvPr><p:ph type=\"sldImg\"/></p:nvPr></p:nvSpPr><p:spPr/></p:sp><p:sp><p:nvSpPr><p:cNvPr id=\"3\" name=\"Notes Placeholder 2\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr><p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>{body}</p:txBody></p:sp></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>"
+    )
+}
+
+fn notes_master_part() -> String {
+    format!(
+        "{XML}<p:notesMaster xmlns:a=\"{NS_A}\" xmlns:r=\"{NS_R}\" xmlns:p=\"{NS_P}\"><p:cSld><p:bg><p:bgRef idx=\"1001\"><a:schemeClr val=\"bg1\"/></p:bgRef></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr><p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Slide Image Placeholder 1\"/><p:cNvSpPr><a:spLocks noGrp=\"1\" noRot=\"1\" noChangeAspect=\"1\"/></p:cNvSpPr><p:nvPr><p:ph type=\"sldImg\" idx=\"2\"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"685800\" y=\"1143000\"/><a:ext cx=\"5486400\" cy=\"3086100\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/><a:ln w=\"12700\"><a:solidFill><a:prstClr val=\"black\"/></a:solidFill></a:ln></p:spPr></p:sp><p:sp><p:nvSpPr><p:cNvPr id=\"3\" name=\"Notes Placeholder 2\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr><p:nvPr><p:ph type=\"body\" sz=\"quarter\" idx=\"3\"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"685800\" y=\"4400550\"/><a:ext cx=\"5486400\" cy=\"3600450\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr vert=\"horz\" lIns=\"91440\" tIns=\"45720\" rIns=\"91440\" bIns=\"45720\" rtlCol=\"0\"/><a:lstStyle/><a:p><a:pPr lvl=\"0\"/><a:r><a:rPr lang=\"en-US\"/><a:t>Notes</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld><p:clrMap bg1=\"lt1\" tx1=\"dk1\" bg2=\"lt2\" tx2=\"dk2\" accent1=\"accent1\" accent2=\"accent2\" accent3=\"accent3\" accent4=\"accent4\" accent5=\"accent5\" accent6=\"accent6\" hlink=\"hlink\" folHlink=\"folHlink\"/><p:notesStyle><a:lvl1pPr marL=\"0\" algn=\"l\" defTabSz=\"914400\" rtl=\"0\" eaLnBrk=\"1\" latinLnBrk=\"0\" hangingPunct=\"1\"><a:defRPr sz=\"1200\" kern=\"1200\"><a:solidFill><a:schemeClr val=\"tx1\"/></a:solidFill><a:latin typeface=\"+mn-lt\"/><a:ea typeface=\"+mn-ea\"/><a:cs typeface=\"+mn-cs\"/></a:defRPr></a:lvl1pPr></p:notesStyle></p:notesMaster>"
+    )
 }

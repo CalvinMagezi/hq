@@ -149,6 +149,8 @@ M0, then made a hard CI limit.
 
 - 2026-11-18: M6 started: `hq-suite-slides` and `hq suite pptx`, a native pptx writer (no template, no tool): title card, cards, nested bullets, numbered lists, tables, a two-column layout. Read back by the suite's own pptx reader and rendered correctly by LibreOffice; not yet opened in PowerPoint. Pictures are placed (as PNG, inside the vault only). `docs/suite/SLIDES.md`.
 
+- 2026-11-18: slides gain speaker notes (`<!-- notes: ... -->`): a notes master and a notes page per card, read back by the suite's pptx reader and parsed by LibreOffice. `docs/suite/SLIDES.md`.
+
 ## Next
 
 1. **More sinks (M3).** The folder sink exists (sealed per original, recovery code, restore drill). Missing: a sink chosen through Android's document picker, a paired-peer sink (built 2026-11-17: `hq suite sink peer-serve`, `add-peer`, `register-peer`; sealed on the phone, the peer holds ciphertext; setup of the forward is by hand), a cloud-folder sink, key shares as an alternative to one code, a lost-phone drill on a wiped device, and a button on the phone.
