@@ -77,6 +77,7 @@ while IFS= read -r f; do
         README.md | docs/DESKTOP.md) rust=true ;;
         # Prose nobody builds: docs, and Markdown or licence files at the repository root.
         docs/*) ;;
+        changelog.d/*) ;;
         */*) unknown=$f ;;
         *.md | LICENSE | NOTICE) ;;
         *) unknown=$f ;;
