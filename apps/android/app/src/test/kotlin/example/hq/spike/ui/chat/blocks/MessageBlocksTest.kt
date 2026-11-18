@@ -92,4 +92,11 @@ class MessageBlocksTest {
         assertEquals(listOf(0, 1), tiles.map { it.index })
         assertEquals(0, b.filterIsInstance<Block.Sheet>().single().index)
     }
+
+    @Test
+    fun a_plot_fence_is_a_plot_block_numbered_apart_from_sheets_and_tiles() {
+        val b = parseBlocks("```plot type=bar from=\"A1:B3\" x=a y=b\n```\n\n```tile from=\"B1\" fn=sum\n```\n\n```plot type=pie from=\"A1:B3\" x=a y=b\n```\n")
+        assertEquals(listOf(0, 1), b.filterIsInstance<Block.Plot>().map { it.index })
+        assertEquals(0, b.filterIsInstance<Block.Tile>().single().index)
+    }
 }

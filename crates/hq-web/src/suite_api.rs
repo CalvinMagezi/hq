@@ -29,9 +29,18 @@ pub(crate) fn routes() -> Router<Arc<WsState>> {
         .route("/api/suite/abandon", post(abandon_handler))
         .route("/api/suite/undo", post(undo_handler))
         .route("/api/suite/storage", get(storage_handler))
+        .route("/api/suite/sinks", get(sinks_handler))
+        .route("/api/suite/sinks/peer", post(sink_peer_handler))
+        .route("/api/suite/sinks/check", post(sink_check_handler))
         .route("/api/suite/media", get(media_handler))
         .route("/api/suite/sheet", get(sheet_handler))
         .route("/api/suite/tile", get(tile_handler))
+        .route("/api/suite/blocks", get(blocks_handler))
+        .route("/api/suite/blocks/edit", post(block_edit_handler))
+        .route("/api/suite/blocks/insert", post(block_insert_handler))
+        .route("/api/suite/blocks/delete", post(block_delete_handler))
+        .route("/api/suite/plot", get(plot_handler))
+        .route("/api/suite/sheet/cell", post(sheet_cell_handler))
 }
 
 #[derive(Deserialize)]
@@ -46,6 +55,40 @@ pub(crate) struct SheetQuery {
     index: Option<usize>,
     row: Option<u32>,
     col: Option<u32>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct CellEdit {
+    path: String,
+    index: usize,
+    row: u32,
+    col: u32,
+    /// What the cell held when the person opened it; the edit is refused if it holds something else now.
+    expected: String,
+    text: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SinkPeerBody {
+    id: String,
+    addr: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SinkCheckBody {
+    id: String,
+    /// The recovery code, typed by the person for this one call; nothing keeps it.
+    code: String,
+    sample: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct BlockBody {
+    path: String,
+    /// The block's place and the hash the phone saw; the edit is refused if the block no longer hashes to it.
+    index: Option<usize>,
+    hash: Option<String>,
+    markdown: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -165,6 +208,41 @@ pub(crate) async fn sheet_handler(
     Ok(Json(view))
 }
 
+pub(crate) async fn sheet_cell_handler(
+    State(state): State<Arc<WsState>>,
+    Json(b): Json<CellEdit>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let view = blocking(move || {
+        hq_suite_adapter::sheets::edit_cell(
+            &vault,
+            &b.path,
+            b.index,
+            b.row,
+            b.col,
+            &b.expected,
+            &b.text,
+        )?;
+        hq_suite_adapter::sheets::view(&vault, &b.path, b.index, 0, 0)
+    })
+    .await?;
+    Ok(Json(view))
+}
+
+pub(crate) async fn plot_handler(
+    State(state): State<Arc<WsState>>,
+    Query(q): Query<SheetQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let chart =
+        blocking(move || hq_suite_adapter::sheets::plot(&vault, &q.path, q.index.unwrap_or(0)))
+            .await?;
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        chart,
+    ))
+}
+
 pub(crate) async fn tile_handler(
     State(state): State<Arc<WsState>>,
     Query(q): Query<SheetQuery>,
@@ -174,6 +252,103 @@ pub(crate) async fn tile_handler(
         blocking(move || hq_suite_adapter::sheets::tile(&vault, &q.path, q.index.unwrap_or(0)))
             .await?;
     Ok(Json(view))
+}
+
+pub(crate) async fn sinks_handler(
+    State(state): State<Arc<WsState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let sinks = blocking(move || hq_suite_adapter::sinks::infos(&vault)).await?;
+    Ok(Json(serde_json::json!({ "sinks": sinks })))
+}
+
+pub(crate) async fn sink_peer_handler(
+    State(state): State<Arc<WsState>>,
+    Json(b): Json<SinkPeerBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let id = b.id.clone();
+    let code = blocking(move || hq_suite_adapter::sinks::make_peer(&vault, &b.id, &b.addr)).await?;
+    Ok(Json(serde_json::json!({ "id": id, "code": code })))
+}
+
+pub(crate) async fn sink_check_handler(
+    State(state): State<Arc<WsState>>,
+    Json(b): Json<SinkCheckBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let drill = blocking(move || {
+        hq_suite_adapter::sinks::drill_with_code(&vault, &b.id, &b.code, b.sample)
+    })
+    .await?;
+    Ok(Json(serde_json::json!({
+        "checked": drill.checked,
+        "failed": drill.failed.len(),
+        "text": hq_suite_adapter::text::drill(&drill),
+    })))
+}
+
+pub(crate) async fn blocks_handler(
+    State(state): State<Arc<WsState>>,
+    Query(q): Query<PathQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    Ok(Json(
+        blocking(move || hq_suite_adapter::blocks::list(&vault, &q.path)).await?,
+    ))
+}
+
+pub(crate) async fn block_edit_handler(
+    State(state): State<Arc<WsState>>,
+    Json(b): Json<BlockBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let (Some(index), Some(hash), Some(markdown)) = (b.index, b.hash.clone(), b.markdown.clone())
+    else {
+        return Err(ApiError::bad_request(
+            "an edit names the block, its hash and the new text",
+        ));
+    };
+    Ok(Json(
+        blocking(move || hq_suite_adapter::blocks::edit(&vault, &b.path, index, &hash, &markdown))
+            .await?,
+    ))
+}
+
+pub(crate) async fn block_insert_handler(
+    State(state): State<Arc<WsState>>,
+    Json(b): Json<BlockBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let markdown = b.markdown.clone().unwrap_or_default();
+    let after = b.index.zip(b.hash.clone());
+    let path = b.path.clone();
+    Ok(Json(
+        blocking(move || {
+            hq_suite_adapter::blocks::insert(
+                &vault,
+                &path,
+                after.as_ref().map(|(i, h)| (*i, h.as_str())),
+                &markdown,
+            )
+        })
+        .await?,
+    ))
+}
+
+pub(crate) async fn block_delete_handler(
+    State(state): State<Arc<WsState>>,
+    Json(b): Json<BlockBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let vault = state.vault_path.clone();
+    let (Some(index), Some(hash)) = (b.index, b.hash.clone()) else {
+        return Err(ApiError::bad_request(
+            "a delete names the block and its hash",
+        ));
+    };
+    Ok(Json(
+        blocking(move || hq_suite_adapter::blocks::delete(&vault, &b.path, index, &hash)).await?,
+    ))
 }
 
 pub(crate) async fn storage_handler(

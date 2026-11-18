@@ -48,7 +48,7 @@ internal object SuiteWire {
 }
 
 /** One calculated cell of a sheet, as `/api/suite/sheet` words it. */
-data class SheetCell(val text: String, val formula: Boolean, val number: Boolean, val error: Boolean)
+data class SheetCell(val text: String, val formula: Boolean, val number: Boolean, val error: Boolean, val raw: String = "")
 
 /** A bounded window of a `sheet` block, already calculated and formatted by hq. */
 data class SheetView(val name: String, val rows: List<List<SheetCell>>, val row0: Int, val col0: Int, val rowCount: Int, val colCount: Int, val text: String)
@@ -62,7 +62,7 @@ internal object SheetWire {
                 val row = rows.optJSONArray(r)
                 if (row == null) emptyList() else (0 until row.length()).map { c ->
                     val cell = row.optJSONObject(c) ?: JSONObject()
-                    SheetCell(cell.optString("text", ""), cell.optBoolean("formula", false), cell.optBoolean("number", false), cell.optBoolean("error", false))
+                    SheetCell(cell.optString("text", ""), cell.optBoolean("formula", false), cell.optBoolean("number", false), cell.optBoolean("error", false), cell.optString("raw", ""))
                 }
             },
             row0 = o.optInt("row0", 0), col0 = o.optInt("col0", 0),
@@ -76,3 +76,30 @@ internal object SheetWire {
 data class TileView(val label: String, val text: String)
 
 internal fun tileView(o: JSONObject) = TileView(o.optString("label", ""), o.optString("text", ""))
+
+/** A cold-storage sink as the phone lists it. */
+data class SinkInfo(val id: String, val kind: String, val place: String, val reachable: Boolean)
+
+/** What checking a sink found: the words hq wrote, and how many stored originals could not be restored. */
+data class SinkCheck(val text: String, val failed: Int)
+
+internal object SinkWire {
+    fun list(o: JSONObject): List<SinkInfo> {
+        val a = o.optJSONArray("sinks") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map {
+            SinkInfo(it.optString("id", ""), it.optString("kind", "folder"), it.optString("place", ""), it.optBoolean("reachable", false))
+        }
+    }
+}
+
+/** One block of a note as the block editor lists it: its place, the hash hq checks an edit against, its kind and its markdown. */
+data class BlockRow(val index: Int, val hash: String, val kind: String, val src: String)
+
+internal object BlocksWire {
+    fun list(o: JSONObject): List<BlockRow> {
+        val a = o.optJSONArray("blocks") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map {
+            BlockRow(it.optInt("index", 0), it.optString("hash", ""), it.optString("kind", ""), it.optString("src", ""))
+        }
+    }
+}

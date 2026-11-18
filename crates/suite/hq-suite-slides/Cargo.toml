@@ -1,0 +1,16 @@
+[package]
+name = "hq-suite-slides"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HQ Suite Slides: a slides note as cards, and a native .pptx writer"
+
+# Pure conversion: markdown in, a .pptx file's bytes out. Files and the vault come in through the
+# adapter (crates/suite/CLAUDE.md).
+[dependencies]
+hq-export = { workspace = true }
+thiserror = { workspace = true }
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+roxmltree = "0.21"

@@ -58,3 +58,33 @@ of one code, are not built.
   a laptop, including a sink whose folder had moved. The plan's exit asks for it on a wiped device.
 - A sink on another HQ over the bridge, and one in a cloud folder.
 - Sending backups to a sink.
+
+## A sink kept by a paired machine
+
+A second computer can keep the sealed originals instead of a card or a drive. It stores ciphertext only: the originals are sealed on this phone under the recovery code before they leave, so the other machine never holds the code and cannot open them.
+
+On the machine that will keep them (pair it with HQ first, as for any peer):
+
+```bash
+hq suite sink peer-serve ~/hq-sealed --port 5700
+```
+
+The store listens only on that machine's loopback address. HQ's pairing exposes the port to the phone as a service, and the phone reaches it through a forward on its own loopback address. On the phone, with the forward in place on `127.0.0.1:5700`:
+
+```bash
+hq suite sink add-peer phone-backup 127.0.0.1:5700   # shows the recovery code once
+hq suite offload <job> --sink phone-backup
+hq suite restore-drill phone-backup
+```
+
+`list` says whether the peer answers now. Every original is read back and checked before it counts as stored, exactly as for a folder sink. The store never overwrites a name it already holds, takes only names that are SHA-256 hashes, and refuses a body over 256 MiB.
+
+After a wiped or replaced phone, the vault restores from its backup, and the sink can also be found again from the peer alone: with the forward in place, `hq suite sink register-peer 127.0.0.1:5700` reads the sink's open description from the peer and checks the recovery code, then `hq suite restore-originals --sink phone-backup` puts the originals back.
+
+What is not done: the forward and the pairing are set up by hand today (the service config for `peer-serve`'s port and the forward on the phone), not by one button, and the phone has no screen for it.
+
+## On the phone
+
+Settings, Backup and about, has a Cold storage card. It lists the sinks and whether each answers now, **Add a paired machine** makes a peer sink (a name and the forwarded address, such as `127.0.0.1:5700`) and shows its recovery code once with an "I wrote it down" button, and **Check it** asks for the recovery code and fetches a spread of the sink's originals to prove each still opens. The phone sends the code for that one call; HQ keeps it nowhere, and a wrong code is refused before anything is read.
+
+A folder on a card or drive needs Android's folder picker, so it is still made on a computer (`hq suite sink add`). `GET /api/suite/sinks`, `POST /api/suite/sinks/peer` and `POST /api/suite/sinks/check` are the routes behind the card.

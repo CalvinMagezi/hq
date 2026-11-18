@@ -761,6 +761,43 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     suspend fun suiteSheet(path: String, index: Int): SheetView =
         send(authed("/api/suite/sheet?path=${java.net.URLEncoder.encode(path, "UTF-8")}&index=$index").build()) { SheetWire.view(JSONObject(it)) }
 
+    /**
+     * Sets one cell of the `index`th `sheet` block (zero-based [row] and [col] in the sheet) and returns the sheet recalculated.
+     * [expected] is what the cell held when it was shown; hq refuses the edit if it holds something else now.
+     */
+    suspend fun suiteEditCell(path: String, index: Int, row: Int, col: Int, expected: String, text: String): SheetView =
+        SheetWire.view(postJson("/api/suite/sheet/cell", JSONObject().put("path", path).put("index", index).put("row", row).put("col", col).put("expected", expected).put("text", text)))
+
+    /** The blocks of the note at [path], in order, for the block editor. */
+    suspend fun suiteBlocks(path: String): List<BlockRow> =
+        send(authed("/api/suite/blocks?path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()) { BlocksWire.list(JSONObject(it)) }
+
+    /** Replaces one block with [markdown]. hq refuses it if the block no longer hashes to [hash]; the blocks come back as they are now. */
+    suspend fun suiteEditBlock(path: String, index: Int, hash: String, markdown: String): List<BlockRow> =
+        BlocksWire.list(postJson("/api/suite/blocks/edit", JSONObject().put("path", path).put("index", index).put("hash", hash).put("markdown", markdown)))
+
+    /** Adds [markdown] after the block at [afterIndex] (which must still hash to [afterHash]), or at the top when [afterIndex] is null. */
+    suspend fun suiteInsertBlock(path: String, afterIndex: Int?, afterHash: String?, markdown: String): List<BlockRow> =
+        BlocksWire.list(postJson("/api/suite/blocks/insert", JSONObject().put("path", path).put("markdown", markdown).also { if (afterIndex != null) it.put("index", afterIndex).put("hash", afterHash ?: "") }))
+
+    suspend fun suiteDeleteBlock(path: String, index: Int, hash: String): List<BlockRow> =
+        BlocksWire.list(postJson("/api/suite/blocks/delete", JSONObject().put("path", path).put("index", index).put("hash", hash)))
+
+    /** The sinks this phone keeps sealed originals in, and whether each answers now. */
+    suspend fun suiteSinks(): List<SinkInfo> = send(authed("/api/suite/sinks").build()) { SinkWire.list(JSONObject(it)) }
+
+    /** Makes a sink kept by a paired machine at [addr] (a loopback forward, such as 127.0.0.1:5700) and returns its recovery code, shown once and kept nowhere. */
+    suspend fun suiteAddPeerSink(id: String, addr: String): String =
+        postJson("/api/suite/sinks/peer", JSONObject().put("id", id).put("addr", addr)).optString("code", "")
+
+    /** Fetches a spread of the sink's originals and checks each opens and matches. The code is sent for this call only. */
+    suspend fun suiteCheckSink(id: String, code: String): SinkCheck =
+        postJson("/api/suite/sinks/check", JSONObject().put("id", id).put("code", code)).let { SinkCheck(it.optString("text", ""), it.optInt("failed", 0)) }
+
+    /** The `index`th `plot` block of the note at [path] as the chart JSON the chat charts use, computed by hq from the sheet range. */
+    suspend fun suitePlot(path: String, index: Int): String =
+        send(authed("/api/suite/plot?path=${java.net.URLEncoder.encode(path, "UTF-8")}&index=$index").build()) { it }
+
     /** The `index`th `tile` block of the note at [path]: its label and the number hq computed. */
     suspend fun suiteTile(path: String, index: Int): TileView =
         send(authed("/api/suite/tile?path=${java.net.URLEncoder.encode(path, "UTF-8")}&index=$index").build()) { tileView(JSONObject(it)) }

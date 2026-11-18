@@ -5,10 +5,11 @@
 
 use std::path::Path;
 
+use crate::filter::{Condition, parse_where};
 use anyhow::{Context, Result, bail};
 use hq_suite_calc::{Value, Workbook, column_name};
-use hq_suite_md::{BlockType, Document, RangeRef, TypedBlock};
-use hq_suite_store::SuitePaths;
+use hq_suite_md::{BlockType, Document, Op, Patch, RangeRef, TypedBlock, apply};
+use hq_suite_store::{SuitePaths, fsx};
 use serde::Serialize;
 
 /// Rows and columns one view may hold, so a large sheet is read a window at a time.
@@ -27,6 +28,8 @@ pub struct Column {
 #[derive(Debug, Clone, Serialize)]
 pub struct CellView {
     pub text: String,
+    /// What is typed in the cell: the formula, or the value as written. What an editor shows.
+    pub raw: String,
     /// The cell holds a formula.
     pub formula: bool,
     /// The cell is a number, so the app aligns it to the right.
@@ -177,6 +180,7 @@ pub fn view(vault: &Path, note: &str, index: usize, row0: u32, col0: u32) -> Res
                     let value = note_book.book.get(index, c, r);
                     CellView {
                         text: show(&value, &kind_of(c)),
+                        raw: raw.cloned().unwrap_or_default(),
                         formula: raw.is_some_and(|t| t.trim_start().starts_with('=')),
                         number: matches!(value, Value::Num(_)),
                         error: matches!(value, Value::Err(_)),
@@ -198,6 +202,285 @@ pub fn view(vault: &Path, note: &str, index: usize, row0: u32, col0: u32) -> Res
     })
 }
 
+/// Excel's last column is XFD, the 16,384th.
+const MAX_EDIT_COLUMN: u32 = 16_384;
+/// Longest text one cell may hold when edited from the phone.
+const MAX_CELL_CHARS: usize = 2000;
+
+/// The table lines of a sheet block's text: the lines that start with `|`, other than the rule
+/// under the header, as indexes into `lines`.
+fn table_line_indexes(lines: &[&str]) -> Vec<usize> {
+    let is_rule = |l: &str| {
+        let cells: Vec<&str> = l.trim().trim_matches('|').split('|').collect();
+        cells
+            .iter()
+            .all(|c| !c.trim().is_empty() && c.trim().chars().all(|ch| matches!(ch, '-' | ':')))
+    };
+    lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.trim_start().starts_with('|') && !is_rule(l))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Sets one cell of the `index`th `sheet` block of the note to `text`. Only that cell's line of
+/// the table changes; the rest of the note is written back as it was. Refused if the cell no
+/// longer holds `expected` (someone else changed it), if `text` could break the table, or if the
+/// cell is outside it.
+pub fn edit_cell(
+    vault: &Path,
+    note: &str,
+    index: usize,
+    row: u32,
+    col: u32,
+    expected: &str,
+    text: &str,
+) -> Result<()> {
+    if text.chars().count() > MAX_CELL_CHARS {
+        bail!("a cell holds at most {MAX_CELL_CHARS} characters");
+    }
+    if text.contains('|') || text.contains('\n') || text.contains('\r') {
+        bail!("a cell cannot hold a | or a line break");
+    }
+    let paths = SuitePaths::new(vault);
+    let file = paths.resolve(note)?;
+    let source =
+        std::fs::read_to_string(&file).with_context(|| format!("{note} cannot be read"))?;
+    let doc = Document::parse(&source);
+    let (node, _) = doc
+        .typed_blocks()
+        .filter_map(|(i, b)| b.ok().map(|b| (i, b)))
+        .filter(|(_, b)| b.ty == BlockType::Sheet)
+        .nth(index)
+        .with_context(|| format!("that note has no sheet number {}", index + 1))?;
+    let block_src = doc
+        .node(node)
+        .context("that sheet is not in the note")?
+        .src();
+    let lines: Vec<&str> = block_src.split('\n').collect();
+    let table = table_line_indexes(&lines);
+    let line_no = *table
+        .get(row as usize)
+        .context("that row is not in the sheet")?;
+    let line = lines[line_no];
+    let mut cells: Vec<String> = line
+        .trim()
+        .trim_start_matches('|')
+        .trim_end_matches('|')
+        .split('|')
+        .map(|c| c.trim().to_string())
+        .collect();
+    if col >= MAX_EDIT_COLUMN {
+        bail!("that column is not in the sheet");
+    }
+    if cells.len() <= col as usize {
+        cells.resize(col as usize + 1, String::new());
+    }
+    if cells[col as usize] != expected.trim() {
+        bail!("that cell changed since it was shown; reload the sheet and try again");
+    }
+    cells[col as usize] = text.trim().to_string();
+    let rebuilt = format!("| {} |", cells.join(" | "));
+    let mut out: Vec<String> = lines.iter().map(|l| (*l).to_string()).collect();
+    out[line_no] = rebuilt;
+    let patch = Patch {
+        base_revision: Some(doc.revision()),
+        ops: vec![Op::Replace {
+            at: doc.addr(node).context("that sheet is not in the note")?,
+            markdown: out.join("\n"),
+        }],
+    };
+    let patched =
+        apply(&doc, &patch).map_err(|e| anyhow::anyhow!("the note could not be changed: {e}"))?;
+    fsx::atomic_write(&file, patched.render().as_bytes())?;
+    Ok(())
+}
+
+/// The column (one-based, in the sheet) each condition names, found in the range's first row.
+fn resolve_columns(
+    book: &hq_suite_calc::Workbook,
+    sheet_id: usize,
+    from: &RangeRef,
+    header: u32,
+    conditions: &[Condition],
+) -> Result<Vec<u32>> {
+    conditions
+        .iter()
+        .map(|cond| {
+            (from.start.col..=from.end.col)
+                .find(|c| {
+                    book.get(sheet_id, c - 1, header)
+                        .to_string()
+                        .trim()
+                        .to_lowercase()
+                        == cond.column
+                })
+                .with_context(|| {
+                    format!(
+                        "no column called `{}` in the range's first row",
+                        cond.column
+                    )
+                })
+        })
+        .collect()
+}
+
+/// Most labels a line or bar chart takes, and most slices a pie takes (the phone's own limits).
+const MAX_PLOT_LABELS: usize = 50;
+const MAX_SLICES: usize = 12;
+const MAX_SERIES: usize = 6;
+
+/// The `index`th `plot` block of the note as a chart in the format the phone and the web already
+/// draw (`docs/CHART_BLOCKS.md`): the range's first row names the columns, `x` gives the labels
+/// and `y` the values below it. Anything that would not draw is said plainly instead.
+pub fn plot(vault: &Path, note: &str, index: usize) -> Result<String> {
+    let paths = SuitePaths::new(vault);
+    let text = std::fs::read_to_string(paths.resolve(note)?)
+        .with_context(|| format!("{note} cannot be read"))?;
+    let doc = Document::parse(&text);
+    let blocks: Vec<_> = doc.typed_blocks().filter_map(|(_, b)| b.ok()).collect();
+    let Some(plot) = blocks.iter().filter(|b| b.ty == BlockType::Plot).nth(index) else {
+        bail!("that note has no plot number {}", index + 1);
+    };
+    let kind = plot.info.get("type").unwrap_or_default();
+    if !["bar", "line", "pie", "donut"].contains(&kind) {
+        bail!("`{kind}` is not a chart type: bar, line, pie or donut");
+    }
+    let from = RangeRef::parse(plot.info.get("from").unwrap_or_default())
+        .map_err(|e| anyhow::anyhow!("from=: {e}"))?;
+    let sheet_id = sheet_of_range(&blocks, note, &from, "a plot")?;
+    let book = NoteBook::new(&blocks).book;
+    let (x_name, y_name) = (
+        plot.info.get("x").unwrap_or_default().trim().to_lowercase(),
+        plot.info.get("y").unwrap_or_default().trim().to_lowercase(),
+    );
+    let header = from.start.row - 1;
+    let column_of = |name: &str| {
+        (from.start.col..=from.end.col).find(|c| {
+            book.get(sheet_id, c - 1, header)
+                .to_string()
+                .trim()
+                .to_lowercase()
+                == name
+        })
+    };
+    let x_col = column_of(&x_name)
+        .with_context(|| format!("no column called `{x_name}` in the range's first row"))?;
+    let y_col = column_of(&y_name)
+        .with_context(|| format!("no column called `{y_name}` in the range's first row"))?;
+    let conditions = match plot.info.get("where") {
+        Some(w) => parse_where(w)?,
+        None => Vec::new(),
+    };
+    let cond_cols = resolve_columns(&book, sheet_id, &from, header, &conditions)?;
+    let group_name = plot.info.get("group").map(|g| g.trim().to_lowercase());
+    let group_col = match &group_name {
+        Some(name) => Some(
+            column_of(name)
+                .with_context(|| format!("no column called `{name}` in the range's first row"))?,
+        ),
+        None => None,
+    };
+    if group_col.is_some() && matches!(kind, "pie" | "donut") {
+        bail!("a {kind} chart takes no group; use a bar or line chart to compare groups");
+    }
+    let mut rows: Vec<(String, String, f64)> = Vec::new();
+    for row in (from.start.row + 1)..=from.end.row {
+        let passes = conditions
+            .iter()
+            .zip(&cond_cols)
+            .all(|(cond, c)| cond.passes(&book.get(sheet_id, c - 1, row - 1)));
+        if !passes {
+            continue;
+        }
+        let Value::Num(v) = book.get(sheet_id, y_col - 1, row - 1) else {
+            bail!("row {row} of `{y_name}` is not a number, so it cannot be drawn");
+        };
+        let group = group_col
+            .map(|g| book.get(sheet_id, g - 1, row - 1).to_string())
+            .unwrap_or_default();
+        rows.push((book.get(sheet_id, x_col - 1, row - 1).to_string(), group, v));
+    }
+    // One series per group, over the labels in the order they first appear; a label a group lacks is 0.
+    let mut labels: Vec<String> = Vec::new();
+    let mut groups: Vec<String> = Vec::new();
+    for (label, group, _) in &rows {
+        if !labels.contains(label) {
+            labels.push(label.clone());
+        }
+        if !groups.contains(group) {
+            groups.push(group.clone());
+        }
+    }
+    if group_col.is_some() && groups.len() > MAX_SERIES {
+        bail!(
+            "a chart draws at most {MAX_SERIES} groups; this range has {}",
+            groups.len()
+        );
+    }
+    let (labels, series_values): (Vec<String>, Vec<Vec<f64>>) = if group_col.is_some() {
+        let values = groups
+            .iter()
+            .map(|g| {
+                labels
+                    .iter()
+                    .map(|l| {
+                        rows.iter()
+                            .filter(|(rl, rg, _)| rl == l && rg == g)
+                            .map(|(_, _, v)| v)
+                            .sum()
+                    })
+                    .collect()
+            })
+            .collect();
+        (labels, values)
+    } else {
+        (
+            rows.iter().map(|(l, _, _)| l.clone()).collect(),
+            vec![rows.iter().map(|(_, _, v)| *v).collect()],
+        )
+    };
+    let limit = if matches!(kind, "pie" | "donut") {
+        MAX_SLICES
+    } else {
+        MAX_PLOT_LABELS
+    };
+    if labels.is_empty() {
+        bail!("the range has no rows below its first row");
+    }
+    if labels.len() > limit {
+        bail!(
+            "a {kind} chart draws at most {limit} rows; this range has {}",
+            labels.len()
+        );
+    }
+    let series: Vec<serde_json::Value> = if group_col.is_some() {
+        groups
+            .iter()
+            .zip(&series_values)
+            .map(|(g, v)| serde_json::json!({ "name": g, "values": v }))
+            .collect()
+    } else {
+        vec![
+            serde_json::json!({ "name": plot.info.get("y").unwrap_or_default(), "values": series_values[0] }),
+        ]
+    };
+    let mut chart = serde_json::json!({
+        "type": kind,
+        "labels": labels,
+        "series": series,
+    });
+    if let Some(title) = plot.info.get("title") {
+        chart["title"] = title.into();
+    }
+    if !matches!(kind, "pie" | "donut") {
+        chart["xLabel"] = plot.info.get("x").unwrap_or_default().into();
+        chart["yLabel"] = plot.info.get("y").unwrap_or_default().into();
+    }
+    Ok(chart.to_string())
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TileView {
     pub label: String,
@@ -208,6 +491,27 @@ pub struct TileView {
 }
 
 /// The `index`th `tile` block of the note, computed over a range of a sheet in the same note.
+/// The number (among the note's `sheet` blocks) of the sheet a range reads: the block it names, or
+/// the first. A range in another note is refused for now.
+fn sheet_of_range(blocks: &[TypedBlock], note: &str, from: &RangeRef, what: &str) -> Result<usize> {
+    let stem = note
+        .rsplit('/')
+        .next()
+        .unwrap_or(note)
+        .trim_end_matches(".md");
+    if from.note.as_deref().is_some_and(|n| n != stem && n != note) {
+        bail!("{what} reads a sheet in its own note for now");
+    }
+    let wanted = from.block.as_deref();
+    blocks
+        .iter()
+        .filter(|b| b.ty == BlockType::Sheet)
+        .position(|b| {
+            wanted.is_none_or(|w| b.info.get("name") == Some(w) || b.info.get("id") == Some(w))
+        })
+        .with_context(|| format!("{what}'s sheet is not in this note"))
+}
+
 pub fn tile(vault: &Path, note: &str, index: usize) -> Result<TileView> {
     let paths = SuitePaths::new(vault);
     let text = std::fs::read_to_string(paths.resolve(note)?)
@@ -219,27 +523,34 @@ pub fn tile(vault: &Path, note: &str, index: usize) -> Result<TileView> {
     };
     let from = RangeRef::parse(tile.info.get("from").unwrap_or_default())
         .map_err(|e| anyhow::anyhow!("from=: {e}"))?;
-    let stem = note
-        .rsplit('/')
-        .next()
-        .unwrap_or(note)
-        .trim_end_matches(".md");
-    if from.note.as_deref().is_some_and(|n| n != stem && n != note) {
-        bail!("a tile reads a sheet in its own note for now");
-    }
+    let sheet_id = sheet_of_range(&blocks, note, &from, "a tile")?;
     let note_book = NoteBook::new(&blocks);
-    let wanted = from.block.as_deref();
-    let sheet_id = blocks
-        .iter()
-        .filter(|b| b.ty == BlockType::Sheet)
-        .position(|b| {
-            wanted.is_none_or(|w| b.info.get("name") == Some(w) || b.info.get("id") == Some(w))
-        })
-        .context("the tile's sheet is not in this note")?;
+    if tile.info.get("group").is_some() {
+        bail!("a tile shows one number; put group= on a plot to compare groups");
+    }
+    let conditions = match tile.info.get("where") {
+        Some(w) => parse_where(w)?,
+        None => Vec::new(),
+    };
     let mut numbers = Vec::new();
-    for r in from.start.row..=from.end.row {
-        for c in from.start.col..=from.end.col {
-            if let Value::Num(n) = note_book.book.get(sheet_id, c - 1, r - 1) {
+    if conditions.is_empty() {
+        for r in from.start.row..=from.end.row {
+            for c in from.start.col..=from.end.col {
+                if let Value::Num(n) = note_book.book.get(sheet_id, c - 1, r - 1) {
+                    numbers.push(n);
+                }
+            }
+        }
+    } else {
+        // With a where, the range's first row names the columns and the number comes from its last.
+        let header = from.start.row - 1;
+        let cols = resolve_columns(&note_book.book, sheet_id, &from, header, &conditions)?;
+        for r in (from.start.row + 1)..=from.end.row {
+            let passes = conditions
+                .iter()
+                .zip(&cols)
+                .all(|(cond, c)| cond.passes(&note_book.book.get(sheet_id, c - 1, r - 1)));
+            if passes && let Value::Num(n) = note_book.book.get(sheet_id, from.end.col - 1, r - 1) {
                 numbers.push(n);
             }
         }
@@ -355,6 +666,177 @@ mod tests {
             tile(d.path(), "Notebooks/stock.md", 0).is_err(),
             "a tile over a range with no numbers in the first sheet says so"
         );
+    }
+
+    #[test]
+    fn editing_a_cell_changes_only_that_cell_and_is_refused_when_it_went_stale() {
+        let d = vault_with(NOTE);
+        let file = d.path().join("Notebooks/stock.md");
+        let before = std::fs::read_to_string(&file).unwrap();
+        edit_cell(d.path(), "Notebooks/stock.md", 0, 1, 1, "40", "50").unwrap();
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            after,
+            before.replace(
+                "| Sugar | 40  | 4200  | =B2*C2 |",
+                "| Sugar | 50 | 4200 | =B2*C2 |"
+            ),
+            "one line changed, the rest of the note is byte for byte"
+        );
+        let v = view(d.path(), "Notebooks/stock.md", 0, 0, 0).unwrap();
+        assert_eq!(
+            v.rows[1][3].text, "UGX 210,000",
+            "the total follows the new quantity"
+        );
+        assert_eq!(v.rows[1][1].raw, "50");
+        assert_eq!(v.rows[1][3].raw, "=B2*C2");
+        assert!(
+            edit_cell(d.path(), "Notebooks/stock.md", 0, 1, 1, "40", "60").is_err(),
+            "stale"
+        );
+        edit_cell(
+            d.path(),
+            "Notebooks/stock.md",
+            0,
+            2,
+            3,
+            "=B3*C3",
+            "=B3*C3*2",
+        )
+        .unwrap();
+        let v2 = view(d.path(), "Notebooks/stock.md", 0, 0, 0).unwrap();
+        assert_eq!(v2.rows[2][3].text, "UGX 90,000");
+    }
+
+    #[test]
+    fn an_edit_that_could_break_the_table_or_leave_it_is_refused() {
+        let d = vault_with(NOTE);
+        let file = d.path().join("Notebooks/stock.md");
+        let before = std::fs::read_to_string(&file).unwrap();
+        for bad in ["a | b", "two\nlines", &"x".repeat(MAX_CELL_CHARS + 1)] {
+            assert!(edit_cell(d.path(), "Notebooks/stock.md", 0, 1, 0, "Sugar", bad).is_err());
+        }
+        assert!(edit_cell(d.path(), "Notebooks/stock.md", 0, 99, 0, "", "x").is_err());
+        assert!(edit_cell(d.path(), "Notebooks/stock.md", 5, 1, 0, "Sugar", "x").is_err());
+        assert!(edit_cell(d.path(), "../etc/passwd", 0, 1, 0, "", "x").is_err());
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            before,
+            "nothing was written"
+        );
+    }
+
+    #[test]
+    fn a_plot_becomes_the_chart_spec_the_apps_already_draw() {
+        let note = format!(
+            "{NOTE}\n```plot type=bar from=\"[[stock]]!A1:D3\" x=item y=total title=\"Stock value\"\n```\n\n```plot type=pie from=\"A1:D3\" x=item y=qty\n```\n\n```plot type=line from=\"A1:D3\" x=item y=missing\n```\n\n```plot type=bar from=\"A1:D4\" x=item y=item\n```\n"
+        );
+        let d = vault_with(&note);
+        let bar: serde_json::Value =
+            serde_json::from_str(&plot(d.path(), "Notebooks/stock.md", 0).unwrap()).unwrap();
+        assert_eq!(bar["type"], "bar");
+        assert_eq!(bar["title"], "Stock value");
+        assert_eq!(bar["labels"], serde_json::json!(["Sugar", "Salt"]));
+        assert_eq!(
+            bar["series"][0]["values"],
+            serde_json::json!([168000.0, 45000.0]),
+            "values are the calculated totals"
+        );
+        assert_eq!(bar["xLabel"], "item");
+        let pie: serde_json::Value =
+            serde_json::from_str(&plot(d.path(), "Notebooks/stock.md", 1).unwrap()).unwrap();
+        assert_eq!(pie["series"][0]["values"], serde_json::json!([40.0, 25.0]));
+        assert!(pie.get("xLabel").is_none(), "a pie has no axes");
+        assert!(
+            plot(d.path(), "Notebooks/stock.md", 2)
+                .unwrap_err()
+                .to_string()
+                .contains("no column called `missing`")
+        );
+        assert!(
+            plot(d.path(), "Notebooks/stock.md", 3)
+                .unwrap_err()
+                .to_string()
+                .contains("not a number")
+        );
+        assert!(plot(d.path(), "Notebooks/stock.md", 4).is_err());
+    }
+
+    const SALES: &str = "```sheet name=Sales\n| region | month | amount |\n|---|---|---|\n| North | Jan | 100 |\n| South | Jan | 50 |\n| North | Feb | 120 |\n| South | Feb | 70 |\n| East | Feb | 30 |\n```\n\n";
+
+    fn spec(note: &str, plot_index: usize) -> serde_json::Value {
+        let d = vault_with(&format!("{SALES}{note}"));
+        serde_json::from_str(&plot(d.path(), "Notebooks/stock.md", plot_index).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_tile_with_a_where_adds_only_the_rows_that_match() {
+        let note = format!(
+            "{SALES}```tile from=\"A1:C6\" fn=sum where=\"region=north\"\n```\n\n```tile from=\"A1:C6\" fn=avg where=\"amount>=70 and month=Feb\"\n```\n\n```tile from=\"A1:C6\" fn=count where=\"region=nowhere\"\n```\n\n```tile from=\"A1:C6\" fn=sum where=\"nope=1\"\n```\n\n```tile from=\"A1:C6\" fn=sum group=region\n```\n"
+        );
+        let d = vault_with(&note);
+        let t = |i| tile(d.path(), "Notebooks/stock.md", i);
+        assert_eq!(t(0).unwrap().text, "220");
+        assert_eq!(
+            t(1).unwrap().text,
+            "95",
+            "120 and 70 are the Feb rows of 70 or more"
+        );
+        assert_eq!(t(2).unwrap().text, "0");
+        assert!(
+            t(3).unwrap_err()
+                .to_string()
+                .contains("no column called `nope`")
+        );
+        assert!(t(4).unwrap_err().to_string().contains("one number"));
+    }
+
+    #[test]
+    fn a_plot_with_a_group_has_one_series_per_group_and_a_where_filters_rows() {
+        let grouped = spec(
+            "```plot type=bar from=\"A1:C6\" x=month y=amount group=region\n```\n",
+            0,
+        );
+        assert_eq!(grouped["labels"], serde_json::json!(["Jan", "Feb"]));
+        let series = grouped["series"].as_array().unwrap();
+        assert_eq!(series.len(), 3);
+        assert_eq!(series[0]["name"], "North");
+        assert_eq!(series[0]["values"], serde_json::json!([100.0, 120.0]));
+        assert_eq!(series[1]["values"], serde_json::json!([50.0, 70.0]));
+        assert_eq!(
+            series[2]["values"],
+            serde_json::json!([0.0, 30.0]),
+            "a month a group lacks is 0"
+        );
+        let filtered = spec(
+            "```plot type=line from=\"A1:C6\" x=month y=amount where=\"region!=south\" group=region\n```\n",
+            0,
+        );
+        assert_eq!(filtered["series"].as_array().unwrap().len(), 2);
+        let plain = spec(
+            "```plot type=pie from=\"A1:C6\" x=region y=amount where=\"month=Feb\"\n```\n",
+            0,
+        );
+        assert_eq!(
+            plain["labels"],
+            serde_json::json!(["North", "South", "East"])
+        );
+    }
+
+    #[test]
+    fn a_plot_that_cannot_group_or_filter_says_why() {
+        let d = vault_with(&format!(
+            "{SALES}```plot type=pie from=\"A1:C6\" x=region y=amount group=month\n```\n\n```plot type=bar from=\"A1:C6\" x=month y=amount where=\"amount>\"\n```\n\n```plot type=bar from=\"A1:C6\" x=month y=amount group=ghost\n```\n\n```plot type=bar from=\"A1:C6\" x=month y=amount where=\"region=none\"\n```\n"
+        ));
+        let say = |i| {
+            plot(d.path(), "Notebooks/stock.md", i)
+                .unwrap_err()
+                .to_string()
+        };
+        assert!(say(0).contains("takes no group"));
+        assert!(say(1).contains("needs a column on the left"));
+        assert!(say(2).contains("no column called `ghost`"));
+        assert!(say(3).contains("no rows"), "{}", say(3));
     }
 
     #[test]

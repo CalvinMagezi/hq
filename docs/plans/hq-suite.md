@@ -147,9 +147,13 @@ M0, then made a hard CI limit.
 - 2026-11-17: M4 started: `hq-suite-calc`, a formula engine, and `hq suite calc-check`, which measures it against the answers Excel saved. First run on 57 real workbooks (86,082 formulas): 68.1% give Excel's answer, 0.4% a different one, 31.5% cannot be calculated yet. `docs/suite/SHEETS.md`.
 - 2026-11-17: the lost-phone path is built and run end to end on a laptop (`hq suite sink register`, `restore-originals`).
 
+- 2026-11-18: M6 started: `hq-suite-slides` and `hq suite pptx`, a native pptx writer (no template, no tool): title card, cards, nested bullets, numbered lists, tables, a two-column layout. Read back by the suite's own pptx reader and rendered correctly by LibreOffice; not yet opened in PowerPoint. Pictures are placed (as PNG, inside the vault only). `docs/suite/SLIDES.md`.
+
+- 2026-11-18: slides gain speaker notes (`<!-- notes: ... -->`): a notes master and a notes page per card, read back by the suite's pptx reader and parsed by LibreOffice. `docs/suite/SLIDES.md`.
+
 ## Next
 
-1. **More sinks (M3).** The folder sink exists (sealed per original, recovery code, restore drill). Missing: a sink chosen through Android's document picker, a paired-peer sink over the bridge, a cloud-folder sink, key shares as an alternative to one code, a lost-phone drill on a wiped device, and a button on the phone.
+1. **More sinks (M3).** The folder sink exists (sealed per original, recovery code, restore drill). Missing: a sink chosen through Android's document picker, a paired-peer sink (built 2026-11-17: `hq suite sink peer-serve`, `add-peer`, `register-peer`; sealed on the phone, the peer holds ciphertext; setup of the forward is by hand), a cloud-folder sink, key shares as an alternative to one code, a lost-phone drill on a wiped device, and a button on the phone.
 2. **Web editors** (Docs, Sheets) beyond the bar (milestone M2).
 3. **Adoption beyond the neighbour.** A note an import placed under another name, or in
    `Notebooks/Imports/<month>/` for a file outside `Notebooks/`, is not adopted: the lookup is

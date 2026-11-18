@@ -18,6 +18,9 @@ sealed interface Block {
     /** A `tile` fence: one number from a sheet range, found again by its place among the tiles. */
     data class Tile(val info: String, val index: Int) : Block
 
+    /** A `plot` fence: a chart drawn from a sheet range, found again by its place among the plots. */
+    data class Plot(val info: String, val index: Int) : Block
+
     data class Sheet(val info: String, val source: String, val closed: Boolean, val index: Int) : Block
 }
 
@@ -30,7 +33,7 @@ fun parseBlocks(text: String, streaming: Boolean = false): List<Block> {
     val lines = text.lines()
     val out = mutableListOf<Block>()
     var i = 0
-    val sheets = intArrayOf(0, 0)
+    val sheets = intArrayOf(0, 0, 0)
     while (i < lines.size) {
         val line = lines[i]
         val fence = FENCE.matchEntire(line)
@@ -72,6 +75,7 @@ private fun fenced(lines: List<String>, start: Int, lang: String, info: String, 
         "chart" -> Block.ChartBlock(if (closed) Charts.parse(text) else ChartParse.Bad("still arriving"), text, closed)
         "sheet" -> Block.Sheet(info, text, closed, sheets[0]++)
         "tile" -> Block.Tile(info, sheets[1]++)
+        "plot" -> Block.Plot(info, sheets[2]++)
         "mermaid" -> Charts.parseMermaidPie(text).let { if (it is ChartParse.Ok) Block.ChartBlock(it, text, closed) else Block.Code(lang, text, closed) }
         else -> Block.Code(lang, text, closed)
     }

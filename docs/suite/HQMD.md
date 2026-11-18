@@ -128,7 +128,8 @@ One number computed from a range. The body is empty.
 | `fn` | Required: `sum`, `count`, `avg`, `min`, `max` or `median`. |
 | `label` | Text shown with the number. |
 | `format` | A column type used to display the result. |
-| `where`, `group` | Reserved for the dashboard (milestone M5); accepted, not yet read. |
+| `where` | Optional. Row filter such as `qty>30 and item=Sugar`; with it the range's first row names the columns and the number comes from the last column. |
+| `group` | Not allowed on a tile. |
 
 #### `plot`
 
@@ -140,7 +141,8 @@ A chart drawn from a range. The body is empty.
 | `from` | Required. A range, header row first. |
 | `x`, `y` | Required. Column names from the header row (the label and the value). |
 | `title` | Optional. |
-| `where`, `group` | Reserved for the dashboard. |
+| `where` | Optional. Row filter, as on a tile. |
+| `group` | Optional. Column to split into one series per value (bar and line only, up to six). |
 
 #### `chart`
 
@@ -206,7 +208,7 @@ These conventions are carried by ordinary markdown, so they need no block type:
   finds becomes a block the editor shows and does not change.
 - A **slides** note has `suite_kind: slides`. The level 1 heading is the deck title and each
   level 2 heading starts a card. An optional HTML comment under the heading picks a layout:
-  `<!-- layout: two-column -->`. Layout names are fixed in milestone M6.
+  `<!-- layout: two-column -->`. The layouts are `content` (the default) and `two-column`, where a horizontal rule splits the columns; see `docs/suite/SLIDES.md`.
 - Images use relative links into `_media/cas/`: `![](../../_media/cas/ab/abcdef.webp)`.
 
 ## Editing
