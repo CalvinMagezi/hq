@@ -46,6 +46,15 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   branches from that PR's branch instead, and is brought up to date once the PR lands (merge `main`
   in; rebase only a branch nobody else has pulled). Each worktree has its own `target/`, so keep at
   most one extra unless there are 50 GB free.
+- A change a user or operator would notice adds one `changelog.d/<slug>.<kind>.md` file (see
+  `changelog.d/README.md`) instead of editing `CHANGELOG.md`, so two parallel pull requests never
+  collide on it. `scripts/changelog-compile.sh` folds them in when a release is cut.
+- A shortcut you knowingly leave is one new file `docs/techdebt/<slug>.md` (see its README), never a
+  row in `TECHDEBT.md`, which is frozen. A temporary re-export left by a split is `facade-<what>.md`
+  and says when it can be removed.
+- On a conflict in a generated file (`Cargo.lock`, or the strings outputs `en.gen.ts` and
+  `strings_catalogue.xml`), never merge it by hand: run `scripts/resolve-generated.sh`, then `git add`
+  what it lists. Rebase onto current `main` before the final push.
 - Do not hand-deploy to a server. Servers update themselves from signed releases
   (`docs/UPDATE_SYSTEM.md`, `deploy/README.md`).
 
