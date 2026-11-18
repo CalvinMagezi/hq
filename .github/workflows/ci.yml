@@ -433,6 +433,10 @@ jobs:
         run: bash scripts/release/pick-promotable-test.sh
       - name: Changed-areas script fails open and skips only what it should
         run: bash scripts/ci/changed-areas-test.sh
+      - name: Changelog fragments are well formed, and the compile script works
+        run: |
+          bash scripts/changelog-compile.sh --check
+          bash scripts/changelog-compile-test.sh
 
   # The private denylist is a repository secret, which fork pull requests never
   # receive, so it only runs on pushes to main. Pull requests get the baseline above.

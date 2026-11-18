@@ -12,6 +12,6 @@
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo test --workspace`
 - [ ] `bun run build` in `apps/hq-web` (if the web UI changed)
-- [ ] Docs and `CHANGELOG.md` updated (if behavior, config or CLI changed)
+- [ ] Docs updated, and a `changelog.d/<slug>.<kind>.md` file added (if behavior, config or CLI changed; see `changelog.d/README.md`)
 - [ ] No real keys, tokens, hostnames or personal data in the diff
 - [ ] Security-relevant change? I described the threat I considered
