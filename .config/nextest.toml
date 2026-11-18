@@ -1,0 +1,8 @@
+# `cargo nextest run -p <crate>` is the fast local loop. Retries stay at 0: a retry would hide a
+# flaky test, and a flake is a bug to fix.
+[profile.default]
+fail-fast = false
+
+[profile.ci]
+fail-fast = false
+retries = 0

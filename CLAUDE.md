@@ -31,9 +31,13 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   a session (fresh clones, cloud sessions included, don't have it): the
   pre-commit hook then rustfmts staged `.rs` files on every commit. Without it,
   run `cargo fmt --all` before committing.
-- `cargo test --workspace` aborts at the first failing test binary, so one bad
-  test masks every crate after it. A partial run is not a green run: check the
-  totals, not the exit of the first suite.
+- CI runs tests with `cargo nextest` (install once: `cargo install cargo-nextest --locked`), which
+  runs every test and does not stop at the first failing binary. `cargo nextest run -p <crate>` is
+  the fast local loop. Plain `cargo test --workspace` still works but aborts at the first failing
+  test binary, which masks every crate after it, and it is the one that runs doctests (CI runs
+  `cargo test --workspace --doc`). A partial run is not a green run: check the totals.
+  Nextest runs each test in its own process, so a test that depends on running after another one
+  in the same binary, or on shared process state, fails there: fix the test, not the config.
 - Work on a branch and open a pull request. Keep changes focused and atomic,
   write tests for new behavior, and follow the style of the surrounding code.
 - Do not hand-deploy to a server. Servers update themselves from signed releases
@@ -226,8 +230,9 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 
 ```bash
 cargo check                       # type check all crates
-cargo test -p hq-tools            # test one crate (prefer this for speed)
-cargo test --workspace            # all tests (slow; run before a PR)
+cargo nextest run -p hq-tools     # test one crate (prefer this for speed)
+cargo nextest run --workspace     # all tests (slow; run before a PR), then
+cargo test --workspace --doc      # doctests, which nextest does not run
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt
 hq mcp doctor                     # verify MCP connection health

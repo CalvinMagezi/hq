@@ -59,8 +59,12 @@ cd apps/hq-web && bun run build        # when you touched the web UI
 
 Notes:
 
-- `cargo test --workspace` stops at the first failing test binary, so read the
-  totals. Run `cargo test -p <crate>` while iterating.
+- CI runs `cargo nextest run --workspace` plus `cargo test --workspace --doc`. Install nextest
+  with `cargo install cargo-nextest --locked`; it runs every test even after a failure and
+  `cargo nextest run -p <crate>` is the fast loop. Plain `cargo test --workspace` stops at the
+  first failing test binary, so read the totals if you use it.
+- Optional, local only: a shared compile cache such as `sccache` (`RUSTC_WRAPPER=sccache` in your
+  shell profile) can speed up several worktrees. The repository does not require it or configure it.
 - Tests that need external state (a real vault, Ollama, the network, an
   authenticated harness binary) must be `#[ignore]` with a reason and an opt-in
   command. They are diagnostics, not gates.
