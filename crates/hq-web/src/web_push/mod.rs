@@ -95,9 +95,15 @@ impl WebPush {
             item.state,
             ValueState::Pending | ValueState::Routed | ValueState::Delivered
         );
-        open && (self.config.push_all
-            || ALWAYS_PUSHED_SOURCES.contains(&item.source_task.as_str())
-            || matches!(item.kind, ValueKind::ActionNeeded | ValueKind::Proposal))
+        let needs_answer = matches!(item.kind, ValueKind::ActionNeeded | ValueKind::Proposal);
+        // Helper and agent traffic is never pushed, whatever `push_all` says.
+        let for_owner =
+            hq_db::inbox_prefs::audience(&item.source_task, item.owner_only, needs_answer)
+                == hq_db::inbox_prefs::Audience::Owner;
+        open && for_owner
+            && (self.config.push_all
+                || ALWAYS_PUSHED_SOURCES.contains(&item.source_task.as_str())
+                || needs_answer)
     }
 
     /// Pushes `payload` to one subscription, recording the result on it.
@@ -445,6 +451,21 @@ mod tests {
         let key = agreement::EphemeralPrivateKey::generate(&agreement::ECDH_P256, &rng).unwrap();
         let public = key.compute_public_key().unwrap();
         (B64.encode(public.as_ref()), B64.encode([9u8; 16]))
+    }
+
+    #[test]
+    fn helper_chatter_is_never_pushed_even_with_push_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let wp = push(dir.path(), true);
+        let chatter = ValueItem::new("harness-sessions", ValueKind::Fyi, "turn done", "b");
+        assert!(!wp.wants(&chatter));
+        let ask = ValueItem::new(
+            "harness-sessions",
+            ValueKind::ActionNeeded,
+            "needs you",
+            "b",
+        );
+        assert!(wp.wants(&ask), "an item the owner must answer is pushed");
     }
 
     fn push(dir: &Path, push_all: bool) -> WebPush {

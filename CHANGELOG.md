@@ -5,6 +5,7 @@ All notable changes to Agent-HQ will be documented in this file.
 ## [Unreleased]
 
 - Tasks: moving a task to review raises an inbox card only when the task is assigned to the owner (`owner`) or waits on them. Other reviews are silent.
+- Inbox: one audience function (`hq_db::inbox_prefs::audience`) decides whether an item is for the owner or the agents. The default list, the badge and web push hold only the owner's items; `?include_agent=1` lists the rest.
 
 ### Added
 
