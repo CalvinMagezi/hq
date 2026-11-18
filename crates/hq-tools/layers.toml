@@ -38,6 +38,7 @@ brand = 1
 budget_status = 1
 coding = 1
 convert = 1
+deliver = 1
 copilot_credits = 1
 external_runner = 1
 file_edit = 1

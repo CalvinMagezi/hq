@@ -6,6 +6,7 @@
 //!   - `convert_to_markdown` — convert a file at a given path to Markdown
 //!   - `convert_from_markdown` — export Markdown to DOCX, PDF, HTML, etc. via pandoc
 //!   - `vault_export` — export a vault note as pdf, png, svg, html, md, xlsx, csv, json, jsonl, xml, latex, ipynb, jira or code (frontmatter and wikilinks cleaned up)
+//!   - `file_deliver` — copy a file a session made into Exports/ and return its typed `files` entry (see `deliver.rs`)
 //!   - `vault_export_pdf` — the PDF-only form of `vault_export`
 //!   - `ocr_extract_text` — extract text from an image via macOS Vision (on-device, model-agnostic)
 
@@ -28,6 +29,7 @@ use crate::brand::brand_param_schema;
 use hq_convert::outbound::OutboundConverter;
 use hq_convert::types::{ConvertError, ExportFormat};
 
+use crate::deliver::{self, FileDeliverTool, file_entry};
 use crate::registry::HqTool;
 
 // ─── ConvertToMarkdownTool ─────────────────────────────────────────────────
@@ -149,6 +151,24 @@ fn refuse_protected_output(dest: &Path, vault: &Path) -> Result<()> {
     Ok(())
 }
 
+/// A destination inside the vault. A relative path is taken from the vault root; one that leads
+/// outside it is refused, because a file there is invisible to the owner and to every client.
+fn confine_to_vault(dest: &Path, vault: &Path) -> Result<PathBuf> {
+    let joined = if dest.is_absolute() {
+        dest.to_path_buf()
+    } else {
+        vault.join(dest)
+    };
+    let dest = crate::util::lexically_normalize(&joined);
+    if !dest.starts_with(crate::util::lexically_normalize(vault)) {
+        anyhow::bail!(
+            "output '{}' is outside the vault, where nobody can open it. Leave `output` out to save to Exports/, or make the file elsewhere and call file_deliver",
+            dest.display()
+        );
+    }
+    Ok(dest)
+}
+
 // ─── ConvertFromMarkdownTool ────────────────────────────────────────────────
 
 pub struct ConvertFromMarkdownTool {
@@ -195,11 +215,15 @@ impl HqTool for ConvertFromMarkdownTool {
                 },
                 "output": {
                     "type": "string",
-                    "description": "Absolute destination path for the output file."
+                    "description": "Optional destination inside the vault (a vault-relative path, or an absolute path under the vault). Defaults to Exports/<yyyy-mm>/<name>.<format>. Paths outside the vault are refused."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "File name without extension, used when `output` is not given (default: document)."
                 },
                 "brand": brand_schema
             },
-            "required": ["content", "format", "output"]
+            "required": ["content", "format"]
         })
     }
 
@@ -218,15 +242,22 @@ impl HqTool for ConvertFromMarkdownTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing required arg: format"))?;
 
-        let output_str = args
-            .get("output")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("missing required arg: output"))?;
-
         let format = ExportFormat::from_str(format_str)
             .map_err(|e| anyhow::anyhow!("invalid format '{format_str}': {e}"))?;
 
-        let dest = PathBuf::from(output_str);
+        let dest = match args.get("output").and_then(|v| v.as_str()) {
+            Some(out) => confine_to_vault(Path::new(out), &self.vault_path)?,
+            None => {
+                let stem = deliver::clean_stem(
+                    args.get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("document"),
+                );
+                let dir = self.vault_path.join(deliver::exports_month_dir());
+                std::fs::create_dir_all(&dir)?;
+                deliver::unique_path(&dir, &stem, format_str)
+            }
+        };
         refuse_protected_output(&dest, &self.vault_path)?;
 
         if let Some(parent) = dest.parent() {
@@ -259,9 +290,15 @@ impl HqTool for ConvertFromMarkdownTool {
         .map_err(|e| anyhow::anyhow!("export failed: {e}"))?;
 
         let size = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
+        let rel = dest
+            .strip_prefix(&self.vault_path)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
 
         Ok(json!({
             "output_path": dest.to_string_lossy(),
+            "web_path": rel,
+            "files": [file_entry(&self.vault_path, &rel)],
             "format": format.pandoc_format(),
             "size_bytes": size,
         }))
@@ -341,9 +378,20 @@ async fn run_note_export(
         .flatten()
         .map(|p| p.to_string_lossy().into_owned());
 
+    let files: Vec<Value> = web_path
+        .iter()
+        .map(|rel| file_entry(vault_path, rel))
+        .collect();
+    let outside_note = (!in_vault).then_some(
+        "Saved outside the vault: the owner cannot open this from Notes or chat. Call file_deliver to bring it in.",
+    );
+
     Ok(json!({
         "output_path": dest.to_string_lossy(),
         "web_path": web_path,
+        "files": files,
+        "in_vault": in_vault,
+        "note": outside_note,
         "title": done.title,
         "format": format.name(),
         "mime": done.output.mime,
@@ -546,7 +594,10 @@ pub fn create_convert_tools(vault_path: PathBuf) -> Vec<Box<dyn HqTool>> {
         Box::new(VaultExportTool {
             vault_path: vault_path.clone(),
         }),
-        Box::new(VaultExportPdfTool { vault_path }),
+        Box::new(VaultExportPdfTool {
+            vault_path: vault_path.clone(),
+        }),
+        Box::new(FileDeliverTool::new(vault_path)),
         Box::new(OcrExtractTextTool),
     ]
 }
@@ -585,6 +636,44 @@ mod protected_output_tests {
 }
 
 #[cfg(test)]
+mod confine_tests {
+    use super::*;
+
+    #[test]
+    fn a_destination_must_stay_in_the_vault() {
+        let vault = Path::new("/srv/hq/.vault");
+        let inside = confine_to_vault(Path::new("Notebooks/x.docx"), vault).unwrap();
+        assert_eq!(inside, vault.join("Notebooks/x.docx"));
+        assert!(confine_to_vault(&vault.join("Exports/y.pdf"), vault).is_ok());
+        for bad in [
+            "/tmp/x.docx",
+            "../escape.docx",
+            "Notebooks/../../escape.docx",
+        ] {
+            let err = confine_to_vault(Path::new(bad), vault)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("file_deliver"), "{bad}: {err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn convert_from_markdown_refuses_an_outside_output_before_doing_any_work() {
+        let v = tempfile::tempdir().unwrap();
+        let tool = ConvertFromMarkdownTool {
+            vault_path: v.path().to_path_buf(),
+        };
+        let err = tool
+            .execute(json!({"content": "x", "format": "docx", "output": "/tmp/out.docx"}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("outside the vault"), "{err}");
+        assert!(!v.path().join("Exports").exists());
+    }
+}
+
+#[cfg(test)]
 mod export_tests {
     use super::*;
 
@@ -614,6 +703,8 @@ mod export_tests {
             .await
             .unwrap();
         assert_eq!(out["web_path"], "Exports/Plan.csv");
+        assert_eq!(out["files"][0]["path"], "Exports/Plan.csv");
+        assert_eq!(out["files"][0]["kind"], "sheet");
         assert_eq!(out["format"], "csv");
         let written = std::fs::read_to_string(v.path().join("Exports/Plan.csv")).unwrap();
         assert_eq!(written, "a,b\n1,2\n");
@@ -628,6 +719,9 @@ mod export_tests {
             .await
             .unwrap();
         assert!(out["web_path"].is_null());
+        assert_eq!(out["in_vault"], false);
+        assert!(out["files"].as_array().unwrap().is_empty());
+        assert!(out["note"].as_str().unwrap().contains("file_deliver"));
         assert!(std::fs::read_to_string(dest).unwrap().starts_with("# Plan"));
     }
 
