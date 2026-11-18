@@ -39,14 +39,19 @@ const OWNED = [
   'components/vault/PinnedCard.tsx',
   'components/vault/GetStartedCard.tsx',
   'components/vault/NoteViews.tsx',
+  'components/vault/VaultNav.tsx',
   'components/vault/notes.css',
 ]
 
 describe('Notes on the aligned boards', () => {
-  test('the tree sidebar is gone and the layout is only an outlet', () => {
+  test('the layout is the Vault shell: a location bar and a folder tree around the outlet', () => {
     const layout = read('routes/notes.tsx')
-    expect(layout).not.toContain('VaultSidebar')
-    expect(layout).toContain('Outlet')
+    expect(layout).toContain('VaultShell')
+    const shell = read('components/vault/VaultNav.tsx')
+    expect(shell).toContain('Outlet')
+    expect(shell).toContain('LocationBar')
+    expect(shell).toContain('FolderTree')
+    // The old sidebar files stay gone: the tree is one component, with no resize handle.
     for (const gone of ['VaultSidebar.tsx', 'VaultTree.tsx', 'useSidebarResize.ts']) {
       expect(existsSync(join(SRC, 'components/vault', gone))).toBe(false)
     }
@@ -93,7 +98,8 @@ describe('Notes on the aligned boards', () => {
       }),
     )
     expect(html).toContain('a-row')
-    expect(html).toContain('an-crumbs')
+    // The folder's path is the location bar's job now (VaultNav), so the page does not repeat it.
+    expect(html).not.toContain('an-crumbs')
     expect(html).not.toContain('📁')
   })
 

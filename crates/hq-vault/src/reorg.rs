@@ -211,6 +211,63 @@ pub(crate) fn move_note(
     })
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct FolderMoveReport {
+    pub from: String,
+    pub to: String,
+    pub dry_run: bool,
+    /// The notes under the folder, by their old paths. Their wikilinks name the note, not the folder, so none
+    /// needs rewriting: a link still finds its note after the folder moves.
+    pub notes: Vec<String>,
+}
+
+/// Move a whole folder of notes to a new place under `Notebooks/`.
+///
+/// Both paths must be inside `Notebooks/` and out of the protected folders, the destination must not exist,
+/// and a folder cannot move into itself. Wikilinks are by note name, so they keep working; the caller
+/// reindexes the notes the report lists. With `dry_run` nothing changes.
+pub(crate) fn move_folder(
+    vault_path: &Path,
+    from: &str,
+    to: &str,
+    dry_run: bool,
+) -> Result<FolderMoveReport> {
+    let from = &guard_rel_path(from)?;
+    let to = &guard_rel_path(to)?;
+    let inside = |p: &str| p.starts_with("Notebooks/");
+    if !inside(from) || !inside(to) {
+        bail!("only folders inside Notebooks/ can be moved");
+    }
+    let src = vault_path.join(from);
+    let dst = vault_path.join(to);
+    if !src.is_dir() {
+        bail!("source folder '{from}' does not exist");
+    }
+    if dst.exists() {
+        bail!("destination '{to}' already exists");
+    }
+    if to == from || to.starts_with(&format!("{from}/")) {
+        bail!("a folder cannot be moved into itself");
+    }
+    let notes: Vec<String> = {
+        let mut n = notes_under(vault_path, from);
+        n.sort();
+        n
+    };
+    if !dry_run {
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::rename(&src, &dst)?;
+    }
+    Ok(FolderMoveReport {
+        from: from.to_string(),
+        to: to.to_string(),
+        dry_run,
+        notes,
+    })
+}
+
 /// Move a note into `_trash/YYYY-MM-DD/<original path>`. Never a hard delete.
 /// Returns the trash-relative destination path.
 pub(crate) fn trash_note(vault_path: &Path, rel: &str, dry_run: bool) -> Result<String> {

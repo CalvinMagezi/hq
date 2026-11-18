@@ -1,7 +1,7 @@
 import { useState, type MouseEvent, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, ChevronRight, Download, FileText, Folder, ListChecks, MessageSquare, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Eye, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Download, FileText, Folder, FolderInput, ListChecks, MessageSquare, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Eye, Plus, Trash2 } from 'lucide-react'
 import type { DirEntry } from '~/lib/vaultApi'
 import { currentVersion, fetchNoteVersions, reviewTag, whoWrote } from '~/lib/noteReview'
 import { relTime } from '~/lib/time'
@@ -9,7 +9,7 @@ import { Panes, PaneHead } from '~/components/ui/Panes'
 import { whoText } from '~/components/notes/NoteHistory'
 import { ReviewTag } from '~/components/notes/ReviewTag'
 import { t, tn } from '~/strings'
-import { FOLDER_NOTE_LIMIT, crumbsOf, noteName, parentPath } from './noteRows'
+import { FOLDER_NOTE_LIMIT, noteName, parentPath, siblingsAround } from './noteRows'
 import './notes.css'
 
 const NOTES_HOME = '/notes'
@@ -30,32 +30,18 @@ export function BackLink({ path }: { path: string }) {
     )
 }
 
-/** Each folder above a path as a link that opens it, with Notes itself first. */
-export function Crumbs({ path }: { path: string }) {
-    const crumbs = crumbsOf(path)
-    return (
-        <nav className="an-crumbs" aria-label={t('notes_your_notes')}>
-            <Link to={NOTES_HOME}>{t('notes_your_notes')}</Link>
-            {crumbs.map((c) => (
-                <span key={c.path} style={{ display: 'contents' }}>
-                    <ChevronRight className="a-ic xs" aria-hidden="true" />
-                    <Link to="/notes/$" params={{ _splat: c.path }}>{c.name}</Link>
-                </span>
-            ))}
-        </nav>
-    )
-}
-
 interface FolderViewProps {
     dirPath: string
     entries: DirEntry[]
     /** Notes inside each sub-folder, by path, once known. */
     counts?: Record<string, number>
     onNewHere: () => void
+    /** Opens the sheet that moves or renames this folder; not given for the Vault's top folder. */
+    onMove?: () => void
 }
 
 /** A folder: its sub-folders, then its notes A to Z. A long list stops at 25 until "See all". */
-export function FolderView({ dirPath, entries, counts, onNewHere }: FolderViewProps) {
+export function FolderView({ dirPath, entries, counts, onNewHere, onMove }: FolderViewProps) {
     const [all, setAll] = useState(false)
     const folders = entries.filter((e) => e.isDir)
     const notes = entries.filter((e) => !e.isDir).sort((a, b) => a.name.localeCompare(b.name))
@@ -66,13 +52,18 @@ export function FolderView({ dirPath, entries, counts, onNewHere }: FolderViewPr
             detail={
                 <>
                     <PaneHead title={noteName(dirPath)} back={<BackLink path={dirPath} />}>
+                        {onMove && (
+                            <button type="button" className="a-btn quiet compact" onClick={onMove}>
+                                <FolderInput className="a-ic" aria-hidden="true" />
+                                {t('notes_move_folder')}
+                            </button>
+                        )}
                         <button type="button" className="a-btn compact" onClick={onNewHere}>
                             <Plus className="a-ic" aria-hidden="true" />
                             {t('notes_new_note_here')}
                         </button>
                     </PaneHead>
                     <div className="an-home">
-                        <Crumbs path={`${dirPath}/x`} />
                         <p className="a-body-sm a-muted">{tn('notes_in_folder_count', entries.length)}</p>
                         {folders.length > 0 && (
                             <>
@@ -122,7 +113,6 @@ export function NoteMeta({ path }: { path: string }) {
     const now = versions.data ? currentVersion(versions.data) : null
     return (
         <div className="an-meta">
-            <Crumbs path={path} />
             {now && <span>{t('notes_saved_by', { who: whoText(whoWrote(now)), when: relTime(now.written_at) })}</span>}
             {versions.data && <ReviewTag kind={reviewTag(now)} />}
         </div>
@@ -141,12 +131,14 @@ interface NoteBarProps {
     onPin: () => void
     onExport: (e: MouseEvent<HTMLButtonElement>) => void
     onDelete: () => void
+    /** Opens the move and rename sheet. */
+    onMove: () => void
     /** HQ Lite runs no chats and serves no export, so Ask HQ and Export are not there. */
     lite?: boolean
 }
 
 /** The note's actions in one row of chips: Edit first, then Ask HQ, Make a task, Pin, Export and Delete. */
-export function NoteBar({ editing, pinned, pinning, exporting, exportOpen, onEdit, onAsk, onTask, onPin, onExport, onDelete, lite }: NoteBarProps) {
+export function NoteBar({ editing, pinned, pinning, exporting, exportOpen, onEdit, onAsk, onTask, onPin, onExport, onDelete, onMove, lite }: NoteBarProps) {
     return (
         <div className="a-chips an-bar" role="group" aria-label={t('notes_actions')}>
             <button type="button" className="a-btn compact" onClick={onEdit}>
@@ -173,6 +165,10 @@ export function NoteBar({ editing, pinned, pinning, exporting, exportOpen, onEdi
                     {t('note_action_export')}
                 </button>
             )}
+            <button type="button" className="a-chip" onClick={onMove}>
+                <FolderInput className="a-ic xs" aria-hidden="true" />
+                {t('notes_move')}
+            </button>
             <button type="button" className="a-chip" onClick={onDelete}>
                 <Trash2 className="a-ic xs" aria-hidden="true" />
                 {t('notes_delete')}
@@ -222,20 +218,29 @@ export function NoteLayout({ filePath, list, side, sideOpen, onToggleSide, onMor
     )
 }
 
-/** The notes beside the open one: the folder it lives in, as the list pane. */
-export function SiblingList({ parent, entries, current }: { parent: string; entries: DirEntry[]; current: string }) {
-    const notes = entries.filter((e) => !e.isDir).sort((a, b) => a.name.localeCompare(b.name))
+/** The notes before and after the open one in its folder, A to Z: reading through a folder, you move along it. */
+export function SiblingLinks({ parent, entries, current }: { parent: string; entries: DirEntry[]; current: string }) {
+    const { prev, next } = siblingsAround(entries, current)
+    if (!prev && !next) return null
+    const folder = noteName(parent)
     return (
-        <>
-            <PaneHead title={noteName(parent)} />
-            <div className="an-rows">
-                {notes.map((n) => (
-                    <Link key={n.path} to="/notes/$" params={{ _splat: n.path }} className="a-row" aria-current={n.path === current ? 'true' : undefined}>
-                        <span className="a-av" aria-hidden="true"><FileText className="a-ic" /></span>
-                        <span className="a-row-main"><b>{noteName(n.path)}</b></span>
-                    </Link>
-                ))}
-            </div>
-        </>
+        <nav className="an-sibs" aria-label={t('notes_siblings_label')}>
+            {prev ? (
+                <Link to="/notes/$" params={{ _splat: prev.path }} rel="prev" className="an-sib">
+                    <span className="a-cap a-muted">{t('notes_previous_in', { folder })}</span>
+                    <b>{noteName(prev.path)}</b>
+                </Link>
+            ) : (
+                <span />
+            )}
+            {next ? (
+                <Link to="/notes/$" params={{ _splat: next.path }} rel="next" className="an-sib an-sib-next">
+                    <span className="a-cap a-muted">{t('notes_next_in', { folder })}</span>
+                    <b>{noteName(next.path)}</b>
+                </Link>
+            ) : (
+                <span />
+            )}
+        </nav>
     )
 }

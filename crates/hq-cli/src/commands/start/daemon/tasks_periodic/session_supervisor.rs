@@ -277,7 +277,13 @@ pub async fn run_session_supervisor(db: &Database, config: &HqConfig) -> Result<
             host_budget: HOST_SWEEP_BUDGET,
             unreachable_after: config.agent_host.unreachable_alert_after(),
             driver_grace: config.agent_host.driver_grace(),
-            fleet: FleetQuiet::from_config(&config.inbox.fleet),
+            // What the owner chose in the web app wins over the config file.
+            fleet: FleetQuiet::from_config(&config.inbox.fleet).with_owner_choice(
+                hq_db::owner_prefs::get(db, hq_db::owner_prefs::HELPERS_ASK_LEVEL)
+                    .ok()
+                    .flatten()
+                    .as_deref(),
+            ),
         },
     )
     .await

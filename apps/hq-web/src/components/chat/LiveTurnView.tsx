@@ -7,7 +7,7 @@ import { StreamErrorBoundary } from './StreamErrorBoundary'
 const LIVE_TIMESTAMP = 0
 
 /** The reply streaming into one chat, in the same bubble it will be saved as. Renders nothing when idle. */
-export function LiveTurnView({ threadId }: { threadId: string | null | undefined }) {
+export function LiveTurnView({ threadId, onStop }: { threadId: string | null | undefined; onStop?: () => void }) {
   const turn = useLiveTurn(threadId)
   if (!turn) return null
   return (
@@ -15,6 +15,8 @@ export function LiveTurnView({ threadId }: { threadId: string | null | undefined
       <StreamErrorBoundary plainText={turn.content} resetKey={turn.content.length}>
         <ChatBubble
           live
+          startedAt={turn.startedAt}
+          onStop={onStop}
           message={{
             id: `live-${threadId}`,
             role: 'assistant',

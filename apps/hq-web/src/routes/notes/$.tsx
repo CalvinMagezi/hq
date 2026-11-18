@@ -16,7 +16,8 @@ import { useSharedConnection } from '~/lib/connection'
 import { AboutNote } from '~/components/notes/AboutNote'
 import { HqHttpError } from '~/lib/hqAuth'
 import { noteQuery, noteTreeQuery, vaultKeys } from '~/lib/queries'
-import { MarkdownViewer } from '~/components/MarkdownViewer'
+import { NoteBody } from '~/components/suite/NoteBody'
+import { MoveNote } from '~/components/vault/MoveNote'
 import { ImageViewer } from '~/components/ImageViewer'
 import { NoteEditor } from '~/components/NoteEditor'
 import { SuiteBar } from '~/components/notes/SuiteBar'
@@ -27,8 +28,9 @@ import { ExportMenu, type ExportMenuState } from '~/components/ExportMenu'
 import { usePersistedState } from '~/lib/usePersistedState'
 import { NoteTasks } from '~/components/tasks/NoteTasks'
 import { NEW_CHAT_KEY, restoreDraft } from '~/components/chat/draftStore'
-import { FolderView, NoteBar, NoteLayout, NoteMeta, SiblingList, BackLink } from '~/components/vault/NoteViews'
-import { countNotes, parentPath } from '~/components/vault/noteRows'
+import { FolderView, NoteBar, NoteLayout, NoteMeta, SiblingLinks, BackLink } from '~/components/vault/NoteViews'
+import { VaultMissing } from '~/components/vault/VaultMissing'
+import { countNotes, existsInTree, parentPath } from '~/components/vault/noteRows'
 import '~/components/vault/notes.css'
 
 const MD_ZOOM_MIN = 0.7
@@ -53,6 +55,7 @@ export const Route = createFileRoute('/notes/$')({
 function VaultFileRoute() {
     const filePath = Route.useParams()._splat || ''
     const note = useQuery(noteQuery(filePath))
+    const tree = useQuery(noteTreeQuery('Notebooks'))
     if (!note.data) {
         return (
             <div className="an-home">
@@ -71,6 +74,10 @@ function VaultFileRoute() {
                 )}
             </div>
         )
+    }
+    // The server answers a missing note with an empty one. Under Notebooks the tree says whether it is there.
+    if (!note.data.isDir && note.data.content === '' && filePath.startsWith('Notebooks/') && tree.data && !existsInTree(tree.data.tree, filePath)) {
+        return <VaultMissing path={filePath} root={tree.data.tree} />
     }
     if (note.data.isDir) return <FolderRoute dirPath={filePath} entries={note.data.dirEntries ?? []} />
     return (
@@ -91,13 +98,20 @@ function subfolderCounts(tree: NoteTreeNode | undefined): Record<string, number>
 
 function FolderRoute({ dirPath, entries }: { dirPath: string; entries: DirEntry[] }) {
     const tree = useQuery(noteTreeQuery(dirPath))
+    const [moving, setMoving] = useState(false)
+    // The top folder and the system folders stay where they are.
+    const movable = dirPath.startsWith('Notebooks/') && !dirPath.split('/').some((p) => p.startsWith('_'))
     return (
-        <FolderView
-            dirPath={dirPath}
-            entries={entries}
-            counts={subfolderCounts(tree.data?.tree)}
-            onNewHere={() => window.dispatchEvent(new CustomEvent('hq:open-quick-note', { detail: { folder: dirPath } }))}
-        />
+        <>
+            {moving && <MoveNote path={dirPath} kind="folder" onClose={() => setMoving(false)} />}
+            <FolderView
+                dirPath={dirPath}
+                entries={entries}
+                counts={subfolderCounts(tree.data?.tree)}
+                onNewHere={() => window.dispatchEvent(new CustomEvent('hq:open-quick-note', { detail: { folder: dirPath } }))}
+                onMove={movable ? () => setMoving(true) : undefined}
+            />
+        </>
     )
 }
 
@@ -121,6 +135,7 @@ function VaultFileView({ filePath, content, hash }: {
     const [isPinned, setIsPinned] = useState(initialPinned)
     const [pinning, setPinning] = useState(false)
     const [editing, setEditing] = useState(false)
+    const [moving, setMoving] = useState(false)
     const [sideOpen, setSideOpen] = useState(false)
     const [exporting, setExporting] = useState<NoteExportFormat | null>(null)
     const inHub = useInHub()
@@ -359,7 +374,7 @@ ${safeHtml}
                             onChanged={() => queryClient.invalidateQueries({ queryKey: vaultKeys.note(filePath) })}
                         />
                     )}
-                    <MarkdownViewer content={content} activePath={filePath} zoom={mdZoom} />
+                    <NoteBody content={content} activePath={filePath} zoom={mdZoom} hash={hash} onSaved={() => queryClient.invalidateQueries({ queryKey: vaultKeys.note(filePath) })} />
                 </>
             )
         }
@@ -384,15 +399,16 @@ ${safeHtml}
                 {viewer}
                 {exportNote && <p role="status" className="a-body-sm a-muted">{exportNote}</p>}
                 {isMd && !editing && <NoteTasks path={filePath} />}
+                {isMd && !editing && parent !== null && siblings.data && <SiblingLinks parent={parent} entries={siblingEntries} current={filePath} />}
             </div>
         </Suspense>
     )
 
     return (
         <>
+            {moving && <MoveNote path={filePath} onClose={() => setMoving(false)} />}
             <NoteLayout
                 filePath={filePath}
-                list={parent !== null && siblings.data ? <SiblingList parent={parent} entries={siblingEntries} current={filePath} /> : undefined}
                 side={isMd ? <AboutNote path={filePath} /> : undefined}
                 sideOpen={sideOpen}
                 onToggleSide={() => setSideOpen(!sideOpen)}
@@ -414,6 +430,7 @@ ${safeHtml}
                             onTask={handleConvertToTask}
                             onPin={handleTogglePin}
                             onDelete={() => void handleDelete()}
+                            onMove={() => setMoving(true)}
                             onExport={(e) => {
                                 const rect = e.currentTarget.getBoundingClientRect()
                                 setExportMenu({ x: rect.left, y: rect.bottom + 6 })

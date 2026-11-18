@@ -1,4 +1,4 @@
-// The four Settings groups, the card slot and the rules around them (web wave 1 spec 06).
+// The six Settings groups in the phone's order, the card slot and the rules around them (web wave 1 spec 06).
 
 import type { StringKey } from '~/strings'
 
@@ -7,6 +7,7 @@ export type SettingsPath =
   | '/settings/time'
   | '/settings/version'
   | '/settings/data'
+  | '/settings/chat'
   | '/settings/keys'
   | '/settings/messaging'
   | '/settings/devices'
@@ -24,7 +25,7 @@ export interface SettingsRowDef {
 }
 
 export interface SettingsGroupDef {
-  id: 'browser' | 'accounts' | 'behaves' | 'work' | 'data'
+  id: 'work' | 'money' | 'chats' | 'browser' | 'safety' | 'data'
   label: StringKey
   rows: SettingsRowDef[]
 }
@@ -49,26 +50,6 @@ export function settingsGroups({ lite, hub }: WhereHqRuns): SettingsGroupDef[] {
     { id: 'signout', label: hub ? 'row_sign_out_window' : 'row_sign_out_browser', path: null },
   ]
   const groups: SettingsGroupDef[] = [
-    { id: 'browser', label: hub ? 'group_window' : 'group_browser', rows: browser },
-    {
-      id: 'accounts',
-      label: 'group_accounts',
-      rows: [
-        { id: 'keys', label: 'row_ai_keys', path: '/settings/keys' },
-        { id: 'messaging', label: 'row_messaging', path: '/settings/messaging' },
-        { id: 'devices', label: 'row_other_devices', path: '/settings/devices' },
-        { id: 'github', label: 'row_github', path: '/settings/github' },
-      ],
-    },
-    {
-      id: 'behaves',
-      label: 'group_behaves',
-      rows: [
-        { id: 'spending', label: 'row_spending', path: '/settings/spending' },
-        { id: 'safety', label: 'row_safety', path: '/settings/safety' },
-        { id: 'folders', label: 'row_folders', path: '/settings/folders' },
-      ],
-    },
     {
       // Tasks and Helpers are where HQ and its agents work. They are off the bar, and this is
       // the door for a person who wants to look in.
@@ -79,12 +60,42 @@ export function settingsGroups({ lite, hub }: WhereHqRuns): SettingsGroupDef[] {
         { id: 'work_helpers', label: 'row_work_helpers', path: '/helpers' },
       ],
     },
+    {
+      id: 'money',
+      label: 'group_money',
+      rows: [
+        { id: 'keys', label: 'row_ai_keys', path: '/settings/keys' },
+        { id: 'spending', label: 'row_spending', path: '/settings/spending' },
+      ],
+    },
+    {
+      id: 'chats',
+      label: 'group_chats',
+      rows: [
+        { id: 'chat', label: 'row_chat', path: '/settings/chat' },
+        { id: 'messaging', label: 'row_messaging', path: '/settings/messaging' },
+        { id: 'devices', label: 'row_other_devices', path: '/settings/devices' },
+        { id: 'github', label: 'row_github', path: '/settings/github' },
+      ],
+    },
+    { id: 'browser', label: hub ? 'group_window' : 'group_browser', rows: browser },
+    {
+      id: 'safety',
+      label: 'group_safety',
+      rows: [
+        { id: 'safety', label: 'row_safety', path: '/settings/safety' },
+        { id: 'folders', label: 'row_folders', path: '/settings/folders' },
+      ],
+    },
     { id: 'data', label: 'group_data', rows: [{ id: 'backup', label: 'row_backup', path: '/settings/backup' }] },
   ]
   // Lite keeps its tasks and runs no helpers.
   if (lite) {
     const work = groups.find((g) => g.id === 'work')!
     work.rows = work.rows.filter((r) => r.id === 'work_tasks')
+    // Lite runs no chats, so there is nothing to set about them.
+    const chats = groups.find((g) => g.id === 'chats')!
+    chats.rows = chats.rows.filter((r) => r.id !== 'chat')
   }
   if (!lite) return groups
   return groups
@@ -101,6 +112,7 @@ export function liteNotice(path: string, lite: boolean): StringKey | null {
 /** Where each old `#section` link goes now. */
 const HASH_PATHS: Record<string, SettingsPath> = {
   clock: '/settings/time',
+  keyboard: '/settings/chat',
   devices: '/settings/devices',
   'chat-apps': '/settings/messaging',
   model: '/settings/keys',

@@ -20,3 +20,16 @@
 .sr-recent{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:16px 24px 6px}
 .sr-chips{padding:4px 16px 8px}
 .sr-top .a-search input:focus-visible{outline:none}
+
+/* The palette's preview sits beside the results where there is room. */
+.sr-split{display:flex;flex:1 1 auto;min-height:0}
+.sr-split .sr-body{flex:1 1 0;min-width:0}
+.sr-preview{display:none;flex-direction:column;gap:8px;padding:16px 24px;overflow:auto}
+.sr-preview b{font:700 16px/24px var(--font-sans);color:var(--ink)}
+.sr-preview-lines{display:flex;flex-direction:column;gap:6px;font:400 14px/20px var(--font-sans);color:var(--ink-muted)}
+.sr-preview-lines p{margin:0}
+.sr-keys{margin-left:auto;flex:none}
+@container app (min-width:1100px){
+  .sr-panel{width:min(1040px,calc(100% - 48px))}
+  .sr-preview{display:flex;flex:0 0 320px;border-left:1px solid var(--hairline)}
+}

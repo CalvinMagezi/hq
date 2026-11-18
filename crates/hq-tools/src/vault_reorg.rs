@@ -386,6 +386,47 @@ impl VaultPinTool {
     }
 }
 
+/// Moves or renames a note for the owner, through the same code the `vault_move` tool runs: inbound
+/// wikilinks are rewritten, the search index follows, and the notes the move touched are credited to the
+/// caller. With `dry_run` it only reports which notes link here. Returns the tool's report as JSON.
+pub async fn move_note_value(
+    vault: Arc<VaultClient>,
+    db: Option<Arc<Database>>,
+    from: &str,
+    to: &str,
+    dry_run: bool,
+) -> Result<Value> {
+    VaultMoveTool { vault, db }
+        .execute(json!({ "from": from, "to": to, "dry_run": dry_run }))
+        .await
+}
+
+/// Moves a folder of notes for the owner. The search index, link graph and provenance of every note under it
+/// follow to the new paths. Returns the report as JSON; with `dry_run` nothing changes.
+pub async fn move_folder_value(
+    vault: Arc<VaultClient>,
+    db: Option<Arc<Database>>,
+    from: &str,
+    to: &str,
+    dry_run: bool,
+) -> Result<Value> {
+    let (f, t) = (from.to_string(), to.to_string());
+    let client = vault.clone();
+    let report = tokio::task::spawn_blocking(move || client.move_folder(&f, &t, dry_run)).await??;
+    if !dry_run {
+        let (old_root, new_root) = (report.from.clone(), report.to.clone());
+        for old in &report.notes {
+            let new = format!("{new_root}{}", &old[old_root.len()..]);
+            reindex_moved_note(db.as_ref(), &vault, old, &new);
+            if let Some(db) = &db {
+                let (o, n) = (old.clone(), new.clone());
+                let _ = db.with_conn(move |c| hq_db::provenance::move_path(c, &o, &n).map(|_| ()));
+            }
+        }
+    }
+    Ok(serde_json::to_value(&report)?)
+}
+
 /// The reorg tools, sharing one client and optional index DB.
 pub fn create_vault_reorg_tools(
     vault: Arc<VaultClient>,

@@ -1,7 +1,7 @@
 import { answerErrorLine } from '~/lib/inboxCard'
 import { createFileRoute, useNavigate, useParams, useRouter } from '@tanstack/react-router'
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useHQStore } from '~/store/hqStore'
 import {
   fetchNotificationsClient,
@@ -14,6 +14,9 @@ import {
   unsilenceTopic,
   restoreNotification,
   restoreNotifications,
+  fetchTrustedSites,
+  restoreClearedDialogs,
+  forgetTrustedSite,
   clearableUpdateIds,
   inInboxTab,
   type InboxTab,
@@ -26,6 +29,9 @@ import { t, tn } from '~/strings'
 import { failureLine } from '~/lib/version'
 import { InboxView } from '~/components/notifications/InboxView'
 import type { UpdateFilter } from '~/components/notifications/updateKind'
+import { globalSessionsApi } from '~/lib/sessionsApi'
+import { clearedDialogs, inBatches, pileOf, staleRequests } from '~/lib/catchUp'
+import { LATER_MS, neighbour, preferredItem, readLater, splitLater, writeLater, type LaterMap } from '~/lib/inboxView'
 
 export const Route = createFileRoute('/inbox')({
   validateSearch: (search: Record<string, unknown>): { tab?: 'updates' | 'done' } => {
@@ -48,6 +54,13 @@ function NotificationsPage() {
   const [loadingAction, setLoadingAction] = useState<string | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [checkedAt, setCheckedAt] = useState<Date | null>(null)
+  // "Later" on an update keeps it out of the list for a few hours, in this browser only.
+  const [later, setLater] = useState<LaterMap>(() => readLater())
+  const [clock, setClock] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setClock(Date.now()), 60_000)
+    return () => window.clearInterval(id)
+  }, [])
 
   const notifications = useHQStore((s) => s.notifications)
   const setNotifications = useHQStore((s) => s.setNotifications)
@@ -182,12 +195,124 @@ function NotificationsPage() {
       .then(forgetSilences)
       .catch(failed)
 
-  const items = useMemo(() => {
+  const matching = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     return notifications.filter(
       (item) => inInboxTab(item, activeTab) && (!q || item.title.toLowerCase().includes(q) || item.description.toLowerCase().includes(q)),
     )
   }, [notifications, activeTab, searchQuery])
+  // Updates that wait for later leave the list; a request never does, since an approval has no Later.
+  const { waiting, rest } = useMemo(
+    () => (activeTab === 'all' ? splitLater(matching, later, clock) : { waiting: [], rest: matching }),
+    [matching, later, clock, activeTab],
+  )
+
+  const sendLater = (id: string) => {
+    const next = { ...later, [id]: Date.now() + LATER_MS }
+    setLater(next)
+    writeLater(next)
+    if (linkedId === id) closeDetail()
+    toastUndo(t('inbox_later_done'), async () => {
+      const { [id]: _gone, ...back } = next
+      setLater(back)
+      writeLater(back)
+    }, t('inbox_bring_back'))
+  }
+  const bringBack = (id: string) => {
+    const { [id]: _gone, ...back } = later
+    setLater(back)
+    writeLater(back)
+  }
+
+  // The catch-up card: past five waiting requests, the ones from helpers that are done can be cleared together.
+  const helperSessions = useQuery({ queryKey: ['search', 'helpers'], queryFn: () => globalSessionsApi.list({}), enabled: activeTab === 'pending', staleTime: 30_000, retry: false })
+  const [onlyNeeds, setOnlyNeeds] = useState(false)
+  const [clearing, setClearing] = useState(false)
+  const waitingRequests = notifications.filter((n) => inInboxTab(n, 'pending') && n.state === 'pending')
+  // Without an answer about the helpers nothing is called old, so nothing is offered for clearing by mistake.
+  const stale = useMemo(() => (helperSessions.data ? staleRequests(waitingRequests, helperSessions.data) : []), [waitingRequests, helperSessions.data])
+  const pile = activeTab === 'pending' ? pileOf(waitingRequests, stale) : null
+  // "Show the ones that need you" sets the old ones aside without clearing them.
+  const staleIds = useMemo(() => new Set(stale.map((n) => n.id)), [stale])
+  const items = onlyNeeds && pile ? rest.filter((n) => !staleIds.has(n.id)) : rest
+  const clearOld = async () => {
+    setClearing(true)
+    try {
+      const cleared = await inBatches(stale, 6, (n) => executeNotificationAction(n.id, 'dismiss'))
+      await loadData()
+      if (cleared.length > 0) {
+        const ids = cleared.map((n) => n.id)
+        toastUndo(
+          tn('inbox_pile_cleared', ids.length),
+          async () => {
+            await restoreClearedDialogs(ids)
+            await loadData()
+          },
+          t('restored_updates'),
+        )
+      }
+      if (cleared.length < stale.length) toastAlert(t('inbox_pile_failed'))
+    } finally {
+      setClearing(false)
+    }
+  }
+  const restoreGone = (ids: string[]) =>
+    restoreClearedDialogs(ids)
+      .then(loadData)
+      .then(() => toastNotice(tn('inbox_gone_restored', ids.length)))
+      .catch(failed)
+
+  const sites = useQuery({ queryKey: ['inbox-sites'], queryFn: fetchTrustedSites, enabled: activeTab === 'resolved', staleTime: 30_000 })
+  const forgetSite = (site: string) =>
+    forgetTrustedSite(site)
+      .then(() => queryClient.invalidateQueries({ queryKey: ['inbox-sites'] }))
+      .then(() => toastNotice(t('inbox_site_removed')))
+      .catch(failed)
+
+  // On a wide screen the card is never empty while something waits: the sign-in, or the oldest request, opens by itself.
+  // Answering one closes it, and the next opens.
+  const [wide, setWide] = useState(false)
+  useEffect(() => {
+    const query = window.matchMedia('(min-width: 1024px)')
+    const update = () => setWide(query.matches)
+    update()
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+  const autoOpen = wide && activeTab === 'pending' && !linkedId && checkedAt !== null && searchQuery.trim() === '' ? preferredItem(items) : null
+  useEffect(() => {
+    if (autoOpen) void navigate({ to: '/inbox/$id', params: { id: autoOpen.id }, replace: true })
+  }, [autoOpen, navigate])
+
+  // Keys: J and K move, Esc goes back, E clears an update, H says Later, Z undoes the last clear.
+  // An approval has no single-key answer on purpose; answering takes a deliberate click.
+  const lastCleared = useRef<string | null>(null)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (e.ctrlKey || e.metaKey || e.altKey || (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)))) return
+      const open = items.find((n) => n.id === linkedId)
+      const go = (step: 1 | -1) => {
+        const id = neighbour(items, linkedId, step)
+        if (id) void navigate({ to: '/inbox/$id', params: { id } })
+      }
+      if (e.key === 'j' || e.key === 'ArrowDown') go(1)
+      else if (e.key === 'k' || e.key === 'ArrowUp') go(-1)
+      else if (e.key === 'Escape' && linkedId) closeDetail()
+      else if (e.key === 'e' && open && open.kind === 'value_item' && open.state === 'pending') {
+        lastCleared.current = open.id
+        void handleAction(open.id, 'dismiss')
+      } else if (e.key === 'h' && open && open.kind === 'value_item' && open.state === 'pending') sendLater(open.id)
+      else if (e.key === 'z' && lastCleared.current) {
+        const id = lastCleared.current
+        lastCleared.current = null
+        void restoreNotification(id).then(loadData)
+      } else return
+      e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   // The server's unread count covers every waiting item; Updates is what is left after the requests.
   const updatesCount =
@@ -218,6 +343,18 @@ function NotificationsPage() {
       onReadAll={activeTab === 'all' && notifications.some((n) => inInboxTab(n, 'all') && n.read === false) ? handleReadAll : undefined}
       onClearDone={activeTab === 'resolved' && items.length > 0 ? handleClearDone : undefined}
       onSilence={handleSilence}
+      later={waiting}
+      pile={pile}
+      pileBusy={clearing}
+      onClearOld={() => void clearOld()}
+      onlyNeeds={onlyNeeds}
+      onToggleNeeds={() => setOnlyNeeds((v) => !v)}
+      cleared={activeTab === 'resolved' ? clearedDialogs(notifications) : undefined}
+      onRestore={(ids) => void restoreGone(ids)}
+      onLater={sendLater}
+      onBringBack={bringBack}
+      sites={sites.data?.sites}
+      onForgetSite={(site) => void forgetSite(site)}
       onAction={handleAction}
       onClear={(id) => handleAction(id, 'dismiss').catch((e) => useHQStore.getState().setSystemNotice(answerErrorLine(e)))}
       onAnswered={handleAnswered}

@@ -88,6 +88,11 @@ const useDraftStore = create<DraftState>()((set, get) => {
  * file picked in one chat can never be sent into another, and an upload that
  * finishes after switching chats lands in the chat it was picked in.
  */
+/** The text waiting unsent in one chat, for a "Draft" mark in the list. Empty when there is none. */
+export function useDraftText(threadId: string): string {
+  return useDraftStore((s) => s.drafts[threadId]?.text) ?? ''
+}
+
 export function useDraft(threadId: string | null | undefined) {
   const key = threadId ?? NEW_CHAT_KEY
   const draft = useDraftStore((s) => s.drafts[key]) ?? EMPTY

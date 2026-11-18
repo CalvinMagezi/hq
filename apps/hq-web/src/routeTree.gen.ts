@@ -38,6 +38,7 @@ import { Route as SettingsGithubRouteImport } from './routes/settings/github'
 import { Route as SettingsFoldersRouteImport } from './routes/settings/folders'
 import { Route as SettingsDevicesRouteImport } from './routes/settings/devices'
 import { Route as SettingsDataRouteImport } from './routes/settings/data'
+import { Route as SettingsChatRouteImport } from './routes/settings/chat'
 import { Route as SettingsBrowserRouteImport } from './routes/settings/browser'
 import { Route as SettingsBackupRouteImport } from './routes/settings/backup'
 import { Route as NotesTrashRouteImport } from './routes/notes/trash'
@@ -192,6 +193,11 @@ const SettingsDataRoute = SettingsDataRouteImport.update({
   path: '/data',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsChatRoute = SettingsChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsBrowserRoute = SettingsBrowserRouteImport.update({
   id: '/browser',
   path: '/browser',
@@ -255,6 +261,7 @@ export interface FileRoutesByFullPath {
   '/notes/trash': typeof NotesTrashRoute
   '/settings/backup': typeof SettingsBackupRoute
   '/settings/browser': typeof SettingsBrowserRoute
+  '/settings/chat': typeof SettingsChatRoute
   '/settings/data': typeof SettingsDataRoute
   '/settings/devices': typeof SettingsDevicesRoute
   '/settings/folders': typeof SettingsFoldersRoute
@@ -292,6 +299,7 @@ export interface FileRoutesByTo {
   '/notes/trash': typeof NotesTrashRoute
   '/settings/backup': typeof SettingsBackupRoute
   '/settings/browser': typeof SettingsBrowserRoute
+  '/settings/chat': typeof SettingsChatRoute
   '/settings/data': typeof SettingsDataRoute
   '/settings/devices': typeof SettingsDevicesRoute
   '/settings/folders': typeof SettingsFoldersRoute
@@ -332,6 +340,7 @@ export interface FileRoutesById {
   '/notes/trash': typeof NotesTrashRoute
   '/settings/backup': typeof SettingsBackupRoute
   '/settings/browser': typeof SettingsBrowserRoute
+  '/settings/chat': typeof SettingsChatRoute
   '/settings/data': typeof SettingsDataRoute
   '/settings/devices': typeof SettingsDevicesRoute
   '/settings/folders': typeof SettingsFoldersRoute
@@ -373,6 +382,7 @@ export interface FileRouteTypes {
     | '/notes/trash'
     | '/settings/backup'
     | '/settings/browser'
+    | '/settings/chat'
     | '/settings/data'
     | '/settings/devices'
     | '/settings/folders'
@@ -410,6 +420,7 @@ export interface FileRouteTypes {
     | '/notes/trash'
     | '/settings/backup'
     | '/settings/browser'
+    | '/settings/chat'
     | '/settings/data'
     | '/settings/devices'
     | '/settings/folders'
@@ -449,6 +460,7 @@ export interface FileRouteTypes {
     | '/notes/trash'
     | '/settings/backup'
     | '/settings/browser'
+    | '/settings/chat'
     | '/settings/data'
     | '/settings/devices'
     | '/settings/folders'
@@ -689,6 +701,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsDataRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/chat': {
+      id: '/settings/chat'
+      path: '/chat'
+      fullPath: '/settings/chat'
+      preLoaderRoute: typeof SettingsChatRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/browser': {
       id: '/settings/browser'
       path: '/browser'
@@ -798,6 +817,7 @@ const NotesRouteWithChildren = NotesRoute._addFileChildren(NotesRouteChildren)
 interface SettingsRouteChildren {
   SettingsBackupRoute: typeof SettingsBackupRoute
   SettingsBrowserRoute: typeof SettingsBrowserRoute
+  SettingsChatRoute: typeof SettingsChatRoute
   SettingsDataRoute: typeof SettingsDataRoute
   SettingsDevicesRoute: typeof SettingsDevicesRoute
   SettingsFoldersRoute: typeof SettingsFoldersRoute
@@ -814,6 +834,7 @@ interface SettingsRouteChildren {
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsBackupRoute: SettingsBackupRoute,
   SettingsBrowserRoute: SettingsBrowserRoute,
+  SettingsChatRoute: SettingsChatRoute,
   SettingsDataRoute: SettingsDataRoute,
   SettingsDevicesRoute: SettingsDevicesRoute,
   SettingsFoldersRoute: SettingsFoldersRoute,

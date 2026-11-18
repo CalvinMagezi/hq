@@ -4,6 +4,8 @@ import { useThreadStore, type Thread } from '~/store/threadStore'
 import { relTime } from '~/lib/time'
 import { t } from '~/strings'
 import { groupChats, isSpokenThread } from '~/lib/chatGroups'
+import { plainPreview } from '~/lib/replyText'
+import { useDraftText } from './draftStore'
 import './chat.css'
 
 interface Props {
@@ -93,10 +95,20 @@ interface RowProps {
   onArchive: (threadId: string) => void
 }
 
+/**
+ * The line under a chat's title. Text the person began and did not send is what they will want to come back
+ * to, so it takes the place of the last reply, except in the chat that is open (it has its own composer).
+ */
+export function rowLine({ draft, active, spoken, preview }: { draft: string; active: boolean; spoken: boolean; preview: string | null | undefined }): { hasDraft: boolean; line: string } {
+  const hasDraft = !active && draft.trim() !== ''
+  const line = [spoken && !hasDraft ? t('chat_spoken') : null, plainPreview(hasDraft ? draft : preview)].filter(Boolean).join(' · ')
+  return { hasDraft, line }
+}
+
 /** One chat in the list: its title and last line, the time or "Working", unread, and archive (on hover, or always on a touch screen). */
 export function ChatRow({ thread: th, active, working, spoken, onOpen, onArchive }: RowProps) {
   const unread = !active && th.unreadCount !== 0
-  const line = [spoken ? t('chat_spoken') : null, th.lastMessagePreview].filter(Boolean).join(' · ')
+  const { hasDraft, line } = rowLine({ draft: useDraftText(th.threadId), active, spoken, preview: th.lastMessagePreview })
   return (
     <div className="hq-chatrow">
       <a
@@ -112,7 +124,12 @@ export function ChatRow({ thread: th, active, working, spoken, onOpen, onArchive
       >
         <span className="a-row-main">
           <b>{th.title}</b>
-          {line && <span>{line}</span>}
+          {line && (
+            <span>
+              {hasDraft && <span className="a-warn-t hq-draft-mark">{t('chat_row_draft')}</span>}
+              {line}
+            </span>
+          )}
         </span>
         <span className="a-row-trail">
           {working ? (

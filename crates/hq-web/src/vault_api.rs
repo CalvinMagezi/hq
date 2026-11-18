@@ -739,6 +739,91 @@ pub(crate) async fn note_versions_handler(
 }
 
 /// `POST /api/note/review {path, verdict, reason}`: the owner's Looks right (`accepted`) or
+/// Moves or renames a note as the owner: `{from, to, dry_run?}`. Links to it in other notes are rewritten
+/// and the index follows, exactly as the `vault_move` tool does; a dry run only lists who links here. Moving
+/// it back undoes it. Both paths must be notes the profile may see, and a path already taken is refused.
+pub(crate) async fn note_move_handler(
+    State(state): State<Arc<WsState>>,
+    Json(body): Json<Value>,
+) -> Response {
+    let text = |k: &str| {
+        body.get(k)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let (from, to) = (text("from"), text("to"));
+    let dry_run = body
+        .get("dry_run")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if from.is_empty() || to.is_empty() {
+        return ApiError::bad_request("from and to are both needed").into_response();
+    }
+    if !state.path_allowed(&from) || !state.path_allowed(&to) {
+        return ApiError::not_found().into_response();
+    }
+    let Ok(vault) = hq_vault::VaultClient::new(state.vault_path.clone()) else {
+        return ApiError::internal("the notes folder cannot be opened").into_response();
+    };
+    match hq_tools::vault_reorg::move_note_value(
+        Arc::new(vault),
+        Some(Arc::new(state.db.clone())),
+        &from,
+        &to,
+        dry_run,
+    )
+    .await
+    {
+        Ok(report) => Json(report).into_response(),
+        // The vault's own refusals (a path taken, a protected folder, a missing note) are the person's to fix.
+        Err(e) => ApiError::bad_request(e.to_string()).into_response(),
+    }
+}
+
+/// Moves a folder of notes as the owner: `{from, to, dry_run?}`, both inside Notebooks. The notes keep their names, so
+/// links to them keep working, and the index follows. Moving it back undoes it.
+pub(crate) async fn folder_move_handler(
+    State(state): State<Arc<WsState>>,
+    Json(body): Json<Value>,
+) -> Response {
+    let text = |k: &str| {
+        body.get(k)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .trim_end_matches('/')
+            .to_string()
+    };
+    let (from, to) = (text("from"), text("to"));
+    let dry_run = body
+        .get("dry_run")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if from.is_empty() || to.is_empty() {
+        return ApiError::bad_request("from and to are both needed").into_response();
+    }
+    if !state.path_allowed(&from) || !state.path_allowed(&to) {
+        return ApiError::not_found().into_response();
+    }
+    let Ok(vault) = hq_vault::VaultClient::new(state.vault_path.clone()) else {
+        return ApiError::internal("the notes folder cannot be opened").into_response();
+    };
+    match hq_tools::vault_reorg::move_folder_value(
+        Arc::new(vault),
+        Some(Arc::new(state.db.clone())),
+        &from,
+        &to,
+        dry_run,
+    )
+    .await
+    {
+        Ok(report) => Json(report).into_response(),
+        Err(e) => ApiError::bad_request(e.to_string()).into_response(),
+    }
+}
+
 /// Something's wrong (`disputed`, with a reason) on the version on disk. It goes through
 /// `review_note`, the one place review decisions are applied, as the owner.
 pub(crate) async fn note_review_handler(
@@ -1382,6 +1467,126 @@ mod tests {
             .unwrap();
         let reviewed: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(reviewed["review_state"], "disputed");
+    }
+
+    #[tokio::test]
+    async fn a_note_moves_with_its_links_and_a_taken_path_is_refused() {
+        let v = vault();
+        let state = Arc::new(WsState::new(v.path().to_path_buf(), None));
+        let root = v.path().join("Notebooks/Inbox");
+        std::fs::write(root.join("Idea.md"), "# Idea\n").unwrap();
+        std::fs::write(root.join("Other.md"), "See [[Idea]] later.\n").unwrap();
+        let ask =
+            |from: &str, to: &str, dry: bool| json!({ "from": from, "to": to, "dry_run": dry });
+
+        let dry = note_move_handler(
+            State(state.clone()),
+            Json(ask(
+                "Notebooks/Inbox/Idea.md",
+                "Notebooks/Projects/Plan.md",
+                true,
+            )),
+        )
+        .await;
+        assert_eq!(dry.status(), StatusCode::OK);
+        assert!(root.join("Idea.md").exists(), "a dry run moves nothing");
+
+        let moved = note_move_handler(
+            State(state.clone()),
+            Json(ask(
+                "Notebooks/Inbox/Idea.md",
+                "Notebooks/Projects/Plan.md",
+                false,
+            )),
+        )
+        .await;
+        assert_eq!(moved.status(), StatusCode::OK);
+        assert!(!root.join("Idea.md").exists());
+        assert!(v.path().join("Notebooks/Projects/Plan.md").exists());
+        let other = std::fs::read_to_string(root.join("Other.md")).unwrap();
+        assert!(
+            other.contains("[[Plan]]"),
+            "the link follows the note: {other}"
+        );
+
+        // Moving it back undoes it; a path that is taken is refused.
+        let taken = note_move_handler(
+            State(state.clone()),
+            Json(ask(
+                "Notebooks/Projects/Plan.md",
+                "Notebooks/Inbox/Other.md",
+                false,
+            )),
+        )
+        .await;
+        assert_eq!(taken.status(), StatusCode::BAD_REQUEST);
+        let empty = note_move_handler(State(state.clone()), Json(json!({ "from": "x" }))).await;
+        assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+        let back = note_move_handler(
+            State(state),
+            Json(ask(
+                "Notebooks/Projects/Plan.md",
+                "Notebooks/Inbox/Idea.md",
+                false,
+            )),
+        )
+        .await;
+        assert_eq!(back.status(), StatusCode::OK);
+        assert!(root.join("Idea.md").exists());
+    }
+
+    #[tokio::test]
+    async fn a_folder_moves_with_its_notes_and_never_into_itself() {
+        let v = vault();
+        let state = Arc::new(WsState::new(v.path().to_path_buf(), None));
+        let nb = v.path().join("Notebooks");
+        std::fs::create_dir_all(nb.join("Inbox/Old/Deep")).unwrap();
+        std::fs::write(nb.join("Inbox/Old/A.md"), "# A\n").unwrap();
+        std::fs::write(nb.join("Inbox/Old/Deep/B.md"), "See [[A]].\n").unwrap();
+        let ask =
+            |from: &str, to: &str, dry: bool| json!({ "from": from, "to": to, "dry_run": dry });
+        let call = |b: Value| {
+            let state = state.clone();
+            async move { folder_move_handler(State(state), Json(b)).await }
+        };
+
+        let dry = call(ask("Notebooks/Inbox/Old", "Notebooks/Projects/Old", true)).await;
+        assert_eq!(dry.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(dry.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(report["notes"].as_array().unwrap().len(), 2);
+        assert!(
+            nb.join("Inbox/Old/A.md").exists(),
+            "a dry run moves nothing"
+        );
+
+        let moved = call(ask("Notebooks/Inbox/Old", "Notebooks/Projects/Old", false)).await;
+        assert_eq!(moved.status(), StatusCode::OK);
+        assert!(nb.join("Projects/Old/Deep/B.md").exists());
+        assert!(!nb.join("Inbox/Old").exists());
+
+        let into_self = call(ask(
+            "Notebooks/Projects/Old",
+            "Notebooks/Projects/Old/Deep/Old",
+            false,
+        ))
+        .await;
+        assert_eq!(into_self.status(), StatusCode::BAD_REQUEST);
+        let outside = call(ask("Notebooks/Projects/Old", "Elsewhere/Old", false)).await;
+        assert_eq!(outside.status(), StatusCode::BAD_REQUEST);
+        std::fs::create_dir_all(nb.join("Inbox/Taken")).unwrap();
+        let taken = call(ask(
+            "Notebooks/Projects/Old",
+            "Notebooks/Inbox/Taken",
+            false,
+        ))
+        .await;
+        assert_eq!(taken.status(), StatusCode::BAD_REQUEST);
+        let back = call(ask("Notebooks/Projects/Old", "Notebooks/Inbox/Old", false)).await;
+        assert_eq!(back.status(), StatusCode::OK);
+        assert!(nb.join("Inbox/Old/A.md").exists());
     }
 
     #[tokio::test]

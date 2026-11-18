@@ -138,10 +138,11 @@ describe('Approval card (02 checks 2 and 6)', () => {
     expect(html).not.toContain('class="a-btn"')
   })
 
-  test('a plain request is "Allow once" in green, after Decline', () => {
+  test('a plain request is "Allow once" at the same weight as Decline, after it: neither is filled', () => {
     const html = card({ tool: 'vault_write', args: { path: 'a.md' }, loses: false, verb: null })
     expect(html).toContain('Allow once')
-    expect(html).toContain('class="a-btn"')
+    expect(html).toContain('class="a-btn secondary"')
+    expect(html).not.toContain('class="a-btn"')
     expect(html.indexOf('Decline')).toBeLessThan(html.indexOf('Allow once'))
   })
 })

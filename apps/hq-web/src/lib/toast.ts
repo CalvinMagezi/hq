@@ -94,7 +94,7 @@ export async function pressUndo(id: number, now = Date.now()): Promise<'restored
     return 'failed'
   }
   if (toast.counter) count(toast.counter, NOTICED_VERSION)
-  replace(id, { text: toast.restored ?? '', kind: 'status', undo: undefined })
+  replace(id, { text: toast.restored ?? '', kind: 'status', undo: undefined, action: undefined })
   if (!toast.restored) useToasts.getState().dismiss(id)
   return 'restored'
 }

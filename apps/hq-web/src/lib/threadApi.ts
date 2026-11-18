@@ -146,6 +146,8 @@ export const threadApi = {
   listThreads: (): Promise<{ threads: ApiThread[]; running?: string[] }> => hqJson('/api/threads'),
 
   createThread: (title: string): Promise<ApiThread> => hqJson('/api/threads', 'POST', { title }),
+  renameThread: (threadId: string, title: string): Promise<{ thread_id: string; title: string }> =>
+    hqJson(`/api/threads/${encodeURIComponent(threadId)}/rename`, 'POST', { title }),
 
   /** The newest `limit` messages, or the `limit` before message `before`; oldest first either way. */
   getMessages: (threadId: string, limit = MESSAGE_PAGE_SIZE, before?: string): Promise<ApiMessage[]> => {

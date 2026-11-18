@@ -13,6 +13,7 @@ pub mod claude;
 pub mod desktop;
 pub mod helpers;
 pub mod host;
+pub mod menu;
 pub mod notice;
 pub mod pairing;
 pub mod proxy;
