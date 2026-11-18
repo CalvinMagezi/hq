@@ -1,6 +1,6 @@
 //! Discord "family guest" scoping: one channel, real per-message threads,
 //! full tool access with two specific hard gates (see remote_mcp.rs and
-//! harness_session/tools.rs).
+//! harness_session/tools/spawn.rs).
 
 use std::collections::HashSet;
 use std::path::Path;
