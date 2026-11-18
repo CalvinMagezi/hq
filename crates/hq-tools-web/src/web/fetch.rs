@@ -110,18 +110,37 @@ async fn off_thread<T: Send + 'static>(
         .ok()?
 }
 
-/// Environment switch for the third-party Jina Reader fallback: `0` turns it off.
+/// Environment switch for the third-party Jina Reader fallback: it is off unless this is set to
+/// `1`, `true`, `on` or `yes`, because it sends the page URL to a third party.
 pub(super) const JINA_ENV: &str = "HQ_WEB_FETCH_JINA";
 
-/// A privacy opt-out, so any plausible "off" spelling disables it.
 pub(super) fn jina_base_from_env() -> &'static str {
-    let off = std::env::var(JINA_ENV).is_ok_and(|v| {
+    jina_base(std::env::var(JINA_ENV).ok().as_deref())
+}
+
+fn jina_base(setting: Option<&str>) -> &'static str {
+    let on = setting.is_some_and(|v| {
         matches!(
             v.trim().to_lowercase().as_str(),
-            "" | "0" | "false" | "off" | "no"
+            "1" | "true" | "on" | "yes"
         )
     });
-    if off { "" } else { JINA_READER_BASE }
+    if on { JINA_READER_BASE } else { "" }
+}
+
+#[cfg(test)]
+mod jina_tests {
+    use super::*;
+
+    #[test]
+    fn jina_is_off_unless_asked_for() {
+        assert_eq!(jina_base(None), "");
+        assert_eq!(jina_base(Some("")), "");
+        assert_eq!(jina_base(Some("0")), "");
+        assert_eq!(jina_base(Some("maybe")), "");
+        assert_eq!(jina_base(Some("1")), JINA_READER_BASE);
+        assert_eq!(jina_base(Some(" On ")), JINA_READER_BASE);
+    }
 }
 
 /// Render a URL through Jina Reader, which executes JS server-side and

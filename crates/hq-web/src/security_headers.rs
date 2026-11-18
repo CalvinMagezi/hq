@@ -185,6 +185,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_policy_blocks_remote_images_so_a_model_written_image_url_cannot_leak() {
+        let policy = content_security_policy(std::path::Path::new("/nonexistent"));
+        let policy = policy.to_str().unwrap().to_string();
+        assert!(policy.contains("img-src 'self' data: blob:;"), "{policy}");
+        assert!(
+            !policy.contains("img-src *") && !policy.contains("https:"),
+            "{policy}"
+        );
+    }
+
+    #[test]
     fn hashes_cover_inline_scripts_only() {
         let html = r#"<script>var a=1</script><script src="/x.js"></script><script type="module" async="">import("/m.js")</script>"#;
         let hashes = inline_script_hashes(html);

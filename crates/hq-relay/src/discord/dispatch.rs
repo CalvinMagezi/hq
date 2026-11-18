@@ -18,7 +18,10 @@ pub(super) fn dc_sender(
         let http = http.clone();
         tokio::spawn(async move {
             for chunk in split_message(&text, DC_MESSAGE_CHARS) {
-                if let Err(e) = channel.say(&http, &chunk).await {
+                let message = serenity::builder::CreateMessage::new()
+                    .content(&chunk)
+                    .flags(serenity::model::channel::MessageFlags::SUPPRESS_EMBEDS);
+                if let Err(e) = channel.send_message(&http, message).await {
                     tracing::warn!(error = %e, "discord delivery failed");
                     break;
                 }
@@ -187,7 +190,7 @@ fn spawn_ticker(
         loop {
             tick.tick().await;
             let text = ticker_line(&feed.lock().unwrap(), start.elapsed().as_secs());
-            let edit = EditMessage::new().content(text);
+            let edit = EditMessage::new().content(text).suppress_embeds(true);
             let _ = channel.edit_message(&ctx.http, placeholder_id, edit).await;
         }
     })
