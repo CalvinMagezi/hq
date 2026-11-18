@@ -110,17 +110,17 @@ import example.hq.spike.ui.webhost.WebPage
 import example.hq.spike.ui.theme.Mts
 import kotlinx.coroutines.delay
 
-private val SmallText = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp)
+internal val SmallText = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp)
 private const val LINE_MS = 4_000L
 private const val REFRESH_MS = 15_000L
 private const val PAIR_POLL_MS = 3_000L
 private val BAR_HEIGHT = 8.dp
 private const val DISABLED_ALPHA = 0.5f
-private const val SCRIM_ALPHA = 0.62f
-private val VALUE_MAX = 180.dp
+internal const val SCRIM_ALPHA = 0.62f
+internal val VALUE_MAX = 180.dp
 private val KEY_COLUMN = 120.dp
 
-private fun icon(key: String): ImageVector = when (key) {
+internal fun icon(key: String): ImageVector = when (key) {
     "background" -> HqIcons.Power
     "battery" -> HqIcons.Battery
     "notifications" -> HqIcons.Inbox
@@ -151,7 +151,7 @@ private fun pageTitle(ui: SettingsUi): String = when (ui.page) {
 }
 
 @Composable
-private fun title(page: SettingsPage) = when (page) {
+internal fun title(page: SettingsPage) = when (page) {
     SettingsPage.Home -> stringResource(R.string.settings_title)
     SettingsPage.Safety -> stringResource(R.string.row_safety)
     SettingsPage.Keys -> stringResource(R.string.row_ai_keys)
@@ -489,7 +489,7 @@ internal fun SettingsSearchResultRow(label: String, first: Boolean, onClick: () 
 }
 
 @Composable
-private fun Home(ui: SettingsUi, actions: SettingsActions) {
+internal fun Home(ui: SettingsUi, actions: SettingsActions) {
     val w = example.hq.spike.ui.shell.rememberWords()
     val context = androidx.compose.ui.platform.LocalContext.current
     val strip = ui.savedAt?.takeIf { ui.stale }?.let { w.s(R.string.bk_strip_saved, android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date(it.toEpochMilli()))) }
@@ -752,7 +752,7 @@ private fun AppCardView(c: SettingsWords.AppCard, platform: String, busy: Boolea
 }
 
 @Composable
-private fun GreenButton(label: String, enabled: Boolean = true, busy: Boolean = false, modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit) {
+internal fun GreenButton(label: String, enabled: Boolean = true, busy: Boolean = false, modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit) {
     Row(
         modifier.heightIn(min = 48.dp).clip(CircleShape).background(if (enabled) Mts.BrandGreen else Mts.Surface200).clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically,
@@ -882,7 +882,7 @@ private fun KeyValue(key: String, value: String, color: Color = Mts.Ink) {
 
 /** A word that acts, in a colour, with a 48 dp target. */
 @Composable
-private fun TextLink(text: String, color: Color, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun TextLink(text: String, color: Color, enabled: Boolean = true, onClick: () -> Unit) {
     Box(Modifier.heightIn(min = 48.dp).clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
         Text(text, style = HqType.BodySmBold, color = if (enabled) color else Mts.InkMuted)
     }
@@ -993,7 +993,7 @@ private fun BudgetCardView(c: SettingsWords.BudgetCard) {
 // ---------------------------------------------------------------- background work
 
 @Composable
-private fun Background(ui: SettingsUi, actions: SettingsActions) {
+internal fun Background(ui: SettingsUi, actions: SettingsActions) {
     val active = ui.mode == "active"
     val scroller = rememberSectionScroller(ui, actions.onSectionConsumed)
     Page(scroller) {
@@ -1030,7 +1030,7 @@ private fun ModeCard(title: String, text: String, selected: Boolean, enabled: Bo
 }
 
 @Composable
-private fun DialogButton(label: String, onClick: () -> Unit) {
+internal fun DialogButton(label: String, onClick: () -> Unit) {
     Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
         Text(label, style = HqType.BodySmBold, color = Mts.Ink)
     }
@@ -1040,7 +1040,7 @@ private fun DialogButton(label: String, onClick: () -> Unit) {
 
 /** A card with a bold line over a plain one, amber-bordered when something needs a look. */
 @Composable
-private fun NoticeCard(title: String, text: String, warn: Boolean) {
+internal fun NoticeCard(title: String, text: String, warn: Boolean) {
     val shape = RoundedCornerShape(12.dp)
     Row(
         Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (warn) Mts.Amber else Mts.Hairline, shape).padding(16.dp),
@@ -1088,253 +1088,6 @@ private fun KeepRunning(ui: SettingsUi, actions: SettingsActions) {
         }
         Label(stringResource(R.string.settings_label_history))
         Facts(listOf(page.history))
-    }
-}
-
-@Composable
-internal fun Notifications(ui: SettingsUi, actions: SettingsActions) {
-    val n = ui.notif
-    var asking by remember { androidx.compose.runtime.mutableStateOf(false) }
-    // The one-time card is shown on the first visit; the stored note goes once it has been on screen.
-    LaunchedEffect(n.upgraderNote) { if (n.upgraderNote) actions.onUpgraderNoteSeen() }
-    Page {
-        if (n.upgraderNote) {
-            Box(Modifier.padding(top = 4.dp)) { InfoCard(stringResource(R.string.notif_upgrader_title), stringResource(R.string.notif_upgrader_body)) }
-        }
-        val notif = LocalNotif.current
-        val turnOn: () -> Unit = { notif?.turnOn(NotifOrigin.Later) ?: if (n.allowed) actions.onChannel(AlertPoster.NEEDS) else actions.onFix(PhoneFix.Notifications) }
-        if (!n.allowed) {
-            Box(Modifier.padding(top = 4.dp)) { NoticeCard(stringResource(R.string.notify_app_off_title), stringResource(R.string.notify_app_off_body), true) }
-            Box(Modifier.padding(start = 16.dp, top = 8.dp)) { DialogButton(stringResource(R.string.notify_turn_on), onClick = turnOn) }
-        } else if (n.needsImportance == 0) {
-            Box(Modifier.padding(top = 4.dp)) { NoticeCard(stringResource(R.string.notify_needs_off_title), stringResource(R.string.notify_needs_off_body), true) }
-            Box(Modifier.padding(start = 16.dp, top = 8.dp)) { DialogButton(stringResource(R.string.notify_turn_on), onClick = turnOn) }
-        } else if (n.needsImportance in 1..3) {
-            Text(
-                stringResource(if (n.needsImportance == 3) R.string.notify_needs_default_note else R.string.notify_needs_quiet_note),
-                style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 4.dp, end = 20.dp),
-            )
-        }
-        Label(stringResource(R.string.notif_group_show))
-        DetailsRow(n, onChange = { on -> if (on) asking = true else actions.onDetails(false) })
-        if (n.secure) {
-            val compact = LocalConfiguration.current.let { it.fontScale >= 2f && it.screenWidthDp <= 360 }
-            Text(stringResource(if (compact) R.string.notif_details_note_short else R.string.notif_details_note), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
-        } else {
-            Text(stringResource(R.string.notif_no_lock_note), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
-            Box(Modifier.padding(start = 8.dp, top = 4.dp)) { DialogButton(stringResource(R.string.notif_open_android_settings)) { actions.onFix(PhoneFix.ScreenLock) } }
-            Text(stringResource(R.string.notif_then_screen_lock), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, end = 20.dp))
-        }
-        Label(stringResource(R.string.notif_group_channels))
-        Group {
-            n.channels.forEachIndexed { i, c ->
-                if (i > 0) Divider()
-                Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable(role = Role.Button) { actions.onChannel(c.id) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(PhoneWords.channelNameRes(c.id)), style = HqType.BodyBold, color = Mts.Ink)
-                        Text(stringResource(PhoneWords.channelLineRes(c, appOff = !n.allowed)), style = HqType.BodySm, color = Mts.InkMuted)
-                    }
-                    Icon(HqIcons.External, null, Modifier.size(20.dp), tint = Mts.InkMuted)
-                }
-            }
-        }
-        ui.silences?.let { SilenceSection(it, ui.silenceBusy, actions) }
-        ServerHqSection(n.server, ui, actions)
-    }
-    if (asking) DetailsDialog(onKeep = { asking = false }, onShow = { asking = false; actions.onDetails(true) })
-}
-
-private const val PAUSE_HOUR_MINUTES = 60
-private const val PAUSE_NIGHT_MINUTES = 8 * 60
-
-private val SILENCE_TOPICS = listOf(
-    Triple("helpers", R.string.topic_helpers, R.string.topic_helpers_about),
-    // Shown only when HQ lists this topic; an HQ that folds finishes into "helpers" has no row for it.
-    Triple("helpers_finishing", R.string.topic_helpers_finishing, R.string.topic_helpers_finishing_about),
-    Triple("tasks", R.string.topic_tasks, R.string.topic_tasks_about),
-    Triple("tips", R.string.topic_tips, R.string.topic_tips_about),
-    Triple("upkeep", R.string.topic_upkeep, R.string.topic_upkeep_about),
-    Triple("email", R.string.topic_email, R.string.topic_email_about),
-)
-
-/** Which topics may interrupt the owner. Kept on HQ, so it holds for the web as well. Each switch reads "notifications on". */
-@Composable
-private fun SilenceSection(silences: Silences, busy: Boolean, actions: SettingsActions) {
-    val w = example.hq.spike.ui.shell.rememberWords()
-    val paused = SettingsWords.pauseLine(w, silences.pause)
-    Label(stringResource(R.string.silence_title))
-    Text(stringResource(R.string.silence_intro), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 4.dp, end = 20.dp, bottom = 8.dp))
-    Group {
-        Column(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(stringResource(R.string.silence_pause), style = HqType.BodyBold, color = Mts.Ink)
-            if (paused != null) Text(paused, style = HqType.BodySm, color = Mts.InkMuted)
-            Row {
-                if (paused != null) DialogButton(stringResource(R.string.silence_resume)) { if (!busy) actions.onResume() }
-                else {
-                    DialogButton(stringResource(R.string.silence_pause_hour)) { if (!busy) actions.onPause(PAUSE_HOUR_MINUTES) }
-                    DialogButton(stringResource(R.string.silence_pause_night)) { if (!busy) actions.onPause(PAUSE_NIGHT_MINUTES) }
-                }
-            }
-        }
-        for ((topic, name, about) in SILENCE_TOPICS) {
-            val row = silences.topics.firstOrNull { it.topic == topic } ?: continue
-            Divider()
-            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(name), style = HqType.BodyBold, color = Mts.Ink)
-                    Text(SettingsWords.silenceLine(w, row) + " \u00b7 " + stringResource(about), style = HqType.BodySm, color = Mts.InkMuted)
-                }
-                Switch(
-                    checked = !row.silenced, onCheckedChange = { on -> actions.onSilenceTopic(topic, !on) }, enabled = !busy,
-                    colors = SwitchDefaults.colors(
-                        checkedTrackColor = Mts.BrandGreen, checkedThumbColor = Mts.OnGreen, checkedBorderColor = Mts.BrandGreen,
-                        uncheckedTrackColor = Mts.Surface200, uncheckedThumbColor = Mts.Line, uncheckedBorderColor = Mts.Line,
-                    ),
-                )
-            }
-        }
-    }
-}
-
-/** The details switch. With no secure screen lock it is dimmed, drawn off and cannot be turned on. */
-@Composable
-private fun DetailsRow(n: NotifFacts, onChange: (Boolean) -> Unit) {
-    val config = LocalConfiguration.current
-    val stacked = config.fontScale >= 2f && config.screenWidthDp <= 360
-    val on = n.showDetails && n.secure
-    val line = stringResource(if (!n.secure) R.string.notif_no_lock_line else if (on) R.string.notif_details_on_line else R.string.notif_details_off_line)
-    val toggle: @Composable () -> Unit = {
-        Switch(
-            checked = on, onCheckedChange = onChange, enabled = n.secure,
-            colors = SwitchDefaults.colors(
-                checkedTrackColor = Mts.BrandGreen, checkedThumbColor = Mts.OnGreen, checkedBorderColor = Mts.BrandGreen,
-                uncheckedTrackColor = Mts.Surface200, uncheckedThumbColor = Mts.Line, uncheckedBorderColor = Mts.Line,
-            ),
-        )
-    }
-    val words: @Composable (Modifier) -> Unit = { m ->
-        Column(m) {
-            Text(stringResource(R.string.notif_details_title), style = HqType.BodyBold, color = Mts.Ink)
-            Text(line, style = HqType.BodySm, color = Mts.InkMuted)
-        }
-    }
-    Group {
-        Box(Modifier.alpha(if (n.secure) 1f else 0.5f)) {
-            if (stacked) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { toggle(); words(Modifier) }
-            } else {
-                Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    words(Modifier.weight(1f)); toggle()
-                }
-            }
-        }
-    }
-}
-
-/** Asked once when details are turned on. Keep hidden, Back and a tap outside leave them off. */
-@Composable
-private fun DetailsDialog(onKeep: () -> Unit, onShow: () -> Unit) {
-    androidx.compose.ui.window.Dialog(onDismissRequest = onKeep) {
-        Column(Modifier.clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.notif_dialog_title), style = HqType.H2, color = Mts.Ink)
-            Text(stringResource(R.string.notif_dialog_body_unlocked), style = HqType.BodySm, color = Mts.InkMuted)
-            Text(stringResource(R.string.notif_dialog_body_allow), style = HqType.BodySm, color = Mts.InkMuted)
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedChoice(stringResource(R.string.notif_keep_hidden), Modifier.weight(1f), onKeep)
-                OutlinedChoice(stringResource(R.string.notif_show_details), Modifier.weight(1f), onShow)
-            }
-        }
-    }
-}
-
-@Composable
-private fun OutlinedChoice(label: String, modifier: Modifier, onClick: () -> Unit) {
-    Box(modifier.heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-        Text(label, style = HqType.BodySmBold, color = Mts.Ink)
-    }
-}
-
-/** A quiet card with an info icon, for a note that is not a warning. */
-@Composable
-private fun InfoCard(title: String, text: String) {
-    val shape = RoundedCornerShape(12.dp)
-    Row(
-        Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top,
-    ) {
-        Icon(HqIcons.Info, null, Modifier.padding(top = 1.dp).size(24.dp), tint = Mts.InkMuted)
-        Column {
-            Text(title, style = HqType.BodyBold, color = Mts.Ink)
-            Text(text, style = HqType.BodySm, color = Mts.Ink)
-        }
-    }
-}
-
-/** The owner's HQ on a server: this phone signs in to it with a one-time code, and its questions then arrive here too. */
-@Composable
-private fun ServerHqSection(server: ServerFacts, ui: SettingsUi, actions: SettingsActions) {
-    Label(stringResource(R.string.settings_server_hq_title))
-    if (server.connected) {
-        Group {
-            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.settings_signed_in), style = HqType.BodyBold, color = Mts.Ink)
-                    Text(server.address.orEmpty(), style = HqType.BodySm, color = Mts.InkMuted)
-                }
-                DialogButton(stringResource(R.string.settings_disconnect)) { actions.onAskServerDisconnect(true) }
-            }
-        }
-        Text(
-            stringResource(R.string.settings_questions_from_coding_agents),
-            style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp),
-        )
-        return
-    }
-    if (server.keyLost) NewPhoneCard()
-    else if (server.signedOut) Box(Modifier.padding(top = 4.dp)) { NoticeCard(stringResource(R.string.settings_server_signed_out_title), stringResource(R.string.settings_server_signed_out_body, server.address.orEmpty()), true) }
-    val busy = ui.busy == SERVER_BUSY
-    var address by remember { androidx.compose.runtime.mutableStateOf(server.address.orEmpty()) }
-    var code by remember { androidx.compose.runtime.mutableStateOf("") }
-    Column(Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.settings_if_your_hq_runs), style = HqType.BodySm, color = Mts.InkMuted)
-        ServerField(stringResource(R.string.sheet_address_label), address, "https://hq.example.com", busy, androidx.compose.ui.text.input.KeyboardType.Uri) { address = it }
-        ServerField(stringResource(R.string.signin_code_label), code, "XXXXX-XXXXX", busy, androidx.compose.ui.text.input.KeyboardType.Ascii) { code = it }
-        ui.serverError?.let { Text(it, style = HqType.BodySm, color = Mts.DangerText) }
-        GreenButton(stringResource(if (busy) R.string.settings_signing_in_dots else R.string.settings_sign_in), enabled = !busy && address.isNotBlank() && code.isNotBlank(), busy = busy) { actions.onServerConnect(address, code) }
-    }
-}
-
-/** A server HQ's owner on a new phone: the notes are on the server, only this phone's sign-in stayed behind. */
-@Composable
-private fun NewPhoneCard() {
-    var hidden by remember { androidx.compose.runtime.mutableStateOf(false) }
-    if (hidden) return
-    val context = androidx.compose.ui.platform.LocalContext.current
-    Box(Modifier.padding(top = 4.dp)) { NoticeCard(stringResource(R.string.server_new_phone_title), stringResource(R.string.server_new_phone_body), true) }
-    Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.server_new_phone_how), style = HqType.BodySm, color = Mts.InkMuted)
-        GreenButton(stringResource(R.string.server_new_phone_scan)) {
-            context.startActivity(android.content.Intent(context, example.hq.spike.ui.pairing.PairingActivity::class.java).putExtra(example.hq.spike.ui.pairing.PairingActivity.EXTRA_SCREEN, "scan"))
-        }
-        TextLink(stringResource(R.string.server_new_phone_later), Mts.Ink) { hidden = true }
-    }
-}
-
-/** One labelled line of text for the server sign-in, with a hint while it is empty. */
-@Composable
-private fun ServerField(label: String, value: String, hint: String, busy: Boolean, keyboard: androidx.compose.ui.text.input.KeyboardType, onChange: (String) -> Unit) {
-    val field = RoundedCornerShape(12.dp)
-    Column(Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(field).background(Mts.Surface000).border(2.dp, Mts.Line, field).padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text(label, style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
-        Box {
-            if (value.isEmpty()) Text(hint, style = HqType.Body, color = Mts.InkMuted)
-            androidx.compose.foundation.text.BasicTextField(
-                value, onChange, Modifier.fillMaxWidth(), enabled = !busy, singleLine = true,
-                textStyle = HqType.Body.copy(color = Mts.Ink),
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(Mts.Ink),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = keyboard, autoCorrectEnabled = false),
-            )
-        }
     }
 }
 
@@ -1489,8 +1242,8 @@ private fun About(ui: SettingsUi, actions: SettingsActions) {
 
 // ---------------------------------------------------------------- technical details and what HQ noticed
 
-private val NARROW_DP = 360
-private val CELL_WIDTH = 72.dp
+internal val NARROW_DP = 360
+internal val CELL_WIDTH = 72.dp
 
 @Composable
 private fun Technical(ui: SettingsUi, actions: SettingsActions) {
@@ -1566,210 +1319,11 @@ internal fun CopyDetailsSheet(text: String, onClose: () -> Unit) {
 
 /** A card at the foot of the page over a scrim; a tap outside closes it. */
 @Composable
-private fun Sheet(onClose: () -> Unit, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+internal fun Sheet(onClose: () -> Unit, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = SCRIM_ALPHA)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose))
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = 560.dp).clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(Mts.Surface200).navigationBarsPadding().padding(24.dp), content = content)
     }
-}
-
-/** The counters, this version and the last, read only from the counter file: it works with HQ stopped. */
-@Composable
-internal fun NoticedPage(counters: Counters) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var snap by remember { mutableStateOf(counters.snapshot()) }
-    var line by remember { mutableStateOf<NoticeLine?>(null) }
-    var askClear by remember { mutableStateOf(false) }
-    val config = LocalConfiguration.current
-    val narrow = config.screenWidthDp <= NARROW_DP && config.fontScale >= 2f
-    val words = CellWords({ a, b -> context.getString(R.string.noticed_of, a.toString(), b.toString()) }, stringResource(R.string.noticed_yes), stringResource(R.string.noticed_no))
-    val asksPermission = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
-    val notAsked = stringResource(R.string.noticed_not_asked)
-    Page {
-        Text(stringResource(R.string.noticed_intro), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp))
-        if (!snap.on) Box(Modifier.padding(top = 12.dp)) { Notice(stringResource(R.string.noticed_off_note, Noticed.day(snap.stoppedOn)), HqIcons.Info, warn = true) }
-        Row(Modifier.fillMaxWidth().padding(start = 32.dp, top = 16.dp, end = 32.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.noticed_since, Noticed.day(snap.current.since)), style = HqType.BodySmBold, color = Mts.InkMuted, modifier = Modifier.weight(1f))
-            Text(snap.current.version, style = HqType.BodySmBold, color = Mts.Ink, textAlign = TextAlign.End, modifier = Modifier.width(CELL_WIDTH))
-            if (!narrow) snap.previous?.let { Text(it.version, style = HqType.BodySmBold, color = Mts.InkMuted, textAlign = TextAlign.End, modifier = Modifier.width(CELL_WIDTH)) }
-        }
-        if (narrow) snap.previous?.let { Text(stringResource(R.string.noticed_narrow_caption, it.version), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 32.dp, end = 32.dp)) }
-        Noticed.lines.groupBy { it.group }.forEach { (group, rows) ->
-            Label(stringResource(group))
-            Group {
-                rows.forEachIndexed { i, l ->
-                    if (i > 0) Divider()
-                    val skipped = l.asksPermission && !asksPermission
-                    val now = if (skipped) notAsked else Noticed.cell(snap.current, l, words)
-                    val before = if (skipped) null else snap.previous?.let { Noticed.cell(it, l, words) }
-                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { line = l }.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(stringResource(l.label), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.weight(1f))
-                        if (narrow) {
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(now, style = HqType.BodySmBold, color = Mts.Ink, textAlign = TextAlign.End)
-                                before?.let { Text(it, style = SmallText, color = Mts.InkMuted, textAlign = TextAlign.End) }
-                            }
-                        } else {
-                            Text(now, style = HqType.BodySmBold, color = Mts.Ink, textAlign = TextAlign.End, modifier = if (skipped) Modifier.widthIn(max = VALUE_MAX) else Modifier.width(CELL_WIDTH))
-                            if (!skipped) before?.let { Text(it, style = HqType.BodySm, color = Mts.InkMuted, textAlign = TextAlign.End, modifier = Modifier.width(CELL_WIDTH)) }
-                        }
-                    }
-                }
-            }
-        }
-        Label(stringResource(R.string.noticed_switch))
-        Group {
-            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Switch) { counters.setOn(!snap.on); snap = counters.snapshot() }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.noticed_switch), style = HqType.BodyBold, color = Mts.Ink)
-                    Text(stringResource(if (snap.on) R.string.noticed_switch_on else R.string.noticed_switch_off), style = HqType.BodySm, color = Mts.InkMuted)
-                }
-                Switch(
-                    checked = snap.on, onCheckedChange = null,
-                    colors = SwitchDefaults.colors(checkedTrackColor = Mts.BrandGreen, checkedThumbColor = Mts.OnGreen, checkedBorderColor = Mts.BrandGreen, uncheckedTrackColor = Mts.Surface200, uncheckedThumbColor = Mts.Line, uncheckedBorderColor = Mts.Line),
-                )
-            }
-            Divider()
-            Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button) { askClear = true }.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.Center) {
-                Text(stringResource(R.string.noticed_clear), style = HqType.BodyBold, color = Mts.Ink)
-                Text(stringResource(R.string.noticed_clear_sub), style = HqType.BodySm, color = Mts.InkMuted)
-            }
-        }
-        Text(stringResource(R.string.noticed_foot), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp))
-    }
-    line?.let { l ->
-        BackHandler { line = null }
-        Sheet({ line = null }) {
-            Text(stringResource(l.label), style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(bottom = 8.dp))
-            Text(stringResource(l.what), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.padding(bottom = 8.dp))
-            Text(stringResource(l.only), style = HqType.BodySm, color = Mts.InkMuted)
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) { DialogButton(stringResource(R.string.noticed_done)) { line = null } }
-        }
-    }
-    if (askClear) {
-        BackHandler { askClear = false }
-        Box(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = SCRIM_ALPHA)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { askClear = false })
-            Column(Modifier.align(Alignment.Center).padding(24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp)) {
-                Text(stringResource(R.string.noticed_clear_title), style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(bottom = 12.dp))
-                Text(stringResource(R.string.noticed_clear_body), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 20.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                    DialogButton(stringResource(R.string.noticed_clear_keep)) { askClear = false }
-                    DialogButton(stringResource(R.string.noticed_clear_confirm)) { counters.clear(); snap = counters.snapshot(); askClear = false }
-                }
-            }
-        }
-    }
-}
-
-/** The App updates rows: one that opens the Update page when a version is waiting (or checks when none is), and the test-versions switch. */
-@Composable
-/** [busyDialog] is false where the page draws the busy dialog itself, so one install question never shows twice. */
-internal fun UpdateGroup(ui: SettingsUi, actions: SettingsActions, checkRow: Boolean = true, busyDialog: Boolean = true) {
-    val state = ui.update
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val working = state == UpdateState.Checking
-    val waiting = Updater.manifestOf(state) != null && state !is UpdateState.Installing
-    Group {
-        if (checkRow) Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = !working, role = Role.Button) { if (waiting) actions.onPage(SettingsPage.Update) else actions.onCheckUpdate() }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                Text(stringResource(if (waiting) R.string.upd_row_install else R.string.upd_row_check), style = HqType.BodyBold, color = Mts.Ink)
-                Text(UpdateLogic.wordsFor(context, state), style = HqType.BodySm, color = if (state is UpdateState.Problem || state is UpdateState.Failed) Mts.Amber else Mts.InkMuted)
-            }
-            if (working) Spinner(20) else Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
-        }
-        if (busyDialog && state is UpdateState.Busy) {
-            example.hq.spike.update.InstallBusyDialog(
-                state.reason,
-                onWait = { actions.onWaitThenInstall(state.manifest) },
-                onStop = { actions.onStopAndInstall(state.manifest) },
-                onDismiss = { actions.onBusyDismiss(state.manifest) },
-            )
-        }
-        if (checkRow) Divider()
-        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Switch) { actions.onUpdateMain(!ui.updateMain) }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                Text(stringResource(R.string.settings_follow_every_build_of), style = HqType.BodyBold, color = Mts.Ink)
-                Text(stringResource(if (ui.updateMain) R.string.settings_update_on_line else R.string.settings_update_off_line), style = HqType.BodySm, color = Mts.InkMuted)
-            }
-            Text(stringResource(if (ui.updateMain) R.string.settings_update_toggle_on else R.string.settings_update_toggle_off), style = HqType.BodySmBold, color = Mts.Ink)
-        }
-    }
-}
-
-/** The Home card that stands in for a warning on the backup row: tapping it opens Backup and about. */
-@Composable
-private fun BackupSlot(slot: BackupWords.Slot, onOpen: () -> Unit) {
-    val shape = RoundedCornerShape(12.dp)
-    Column(
-        Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Amber, shape)
-            .clickable(role = Role.Button, onClick = onOpen).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(HqIcons.Warning, null, Modifier.size(22.dp), tint = Mts.Amber)
-            Text(slot.title, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.semantics { heading() })
-        }
-        Text(slot.body, style = HqType.BodySm, color = Mts.Ink)
-    }
-}
-
-/** What backups on this phone are doing, and Save a copy now: idle, running, done or failed. */
-@Composable
-private fun BackupCard(ui: SettingsUi, actions: SettingsActions) {
-    val w = example.hq.spike.ui.shell.rememberWords()
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zip")) { uri -> if (uri != null) actions.onSaveCopy(uri) }
-    val save = { picker.launch(example.hq.spike.safe.NotesCopy.fileName(java.time.LocalDateTime.now())) }
-    var details by remember { mutableStateOf<String?>(null) }
-    val shape = RoundedCornerShape(12.dp)
-    fun time(ms: Long) = android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date(ms))
-    when (val c = ui.copy) {
-        is BackupCopy.State.Busy -> CardFrame(shape, false) {
-            CardTitle(w.s(R.string.bk_busy_title), false)
-            Text(w.s(R.string.bk_busy_body, "${c.percent}%", c.doneMb, c.totalMb), style = HqType.BodySm, color = Mts.Ink)
-            val label = w.s(R.string.bk_busy_percent, c.percent)
-            Box(
-                Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Mts.Surface200)
-                    .semantics { contentDescription = label; progressBarRangeInfo = androidx.compose.ui.semantics.ProgressBarRangeInfo(c.percent / 100f, 0f..1f) },
-            ) { Box(Modifier.fillMaxWidth(c.percent / 100f).height(4.dp).background(Mts.BrandBlue)) }
-            CardButton(w.s(R.string.bk_cancel), false, actions.onSaveCopyCancel)
-        }
-        is BackupCopy.State.Done -> CardFrame(shape, c.onPhone) {
-            CardTitle(w.s(if (c.onPhone) R.string.bk_here_too_title else R.string.bk_done_title), c.onPhone)
-            Text(if (c.onPhone) w.s(R.string.bk_here_too_body) else w.s(R.string.bk_done_body, time(c.atMs)), style = HqType.BodySm, color = Mts.Ink)
-            CardButton(w.s(R.string.bk_got_it), false, actions.onSaveCopyClear)
-            if (c.onPhone) CardButton(w.s(R.string.bk_save_copy), true, save)
-        }
-        is BackupCopy.State.Failed -> CardFrame(shape, true) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-                Icon(HqIcons.Warning, null, Modifier.size(22.dp), tint = Mts.Amber)
-                Text(c.message, style = HqType.BodySm, color = Mts.Ink)
-            }
-            CardButton(w.s(R.string.bk_save_copy), true, save)
-            CardButton(w.s(R.string.bk_got_it), false, actions.onSaveCopyClear)
-        }
-        BackupCopy.State.Idle -> {
-            val card = BackupWords.card(w, ui.backup, Instant.now())
-            val warn = card.tone == BackupWords.Tone.Warn
-            CardFrame(shape, warn) {
-                CardTitle(card.title, warn)
-                Text(card.body, style = HqType.BodySm, color = Mts.Ink)
-                card.said?.let { Text(it, style = HqType.BodySm, color = Mts.InkMuted) }
-                card.small?.let { Text(it, style = HqType.BodySm, color = Mts.InkMuted) }
-                card.lock?.let { Text(it, style = HqType.BodySm, color = Mts.InkMuted) }
-                card.actions.forEach { a ->
-                    when (a) {
-                        BackupWords.Action.SaveCopy -> CardButton(w.s(R.string.bk_save_copy), warn, save)
-                        BackupWords.Action.OpenBackground -> CardButton(w.s(R.string.bk_open_background), false) { actions.onPage(SettingsPage.Background) }
-                        BackupWords.Action.GotIt -> CardButton(w.s(R.string.bk_got_it), false, actions.onGotIt)
-                        BackupWords.Action.CopyDetails -> CardButton(w.s(R.string.bk_copy_details), false) { details = BackupWords.details(ui.backup, Instant.now()) }
-                    }
-                }
-            }
-        }
-    }
-    details?.let { CopyDetailsSheet(it) { details = null } }
 }
 
 @Composable
