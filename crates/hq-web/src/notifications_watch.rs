@@ -73,6 +73,7 @@ pub(crate) fn spawn_notifications_watcher(state: Arc<WsState>) {
                 Some("pending"),
                 None,
                 50,
+                false,
             ) {
                 state.broadcast(
                     &serde_json::json!({

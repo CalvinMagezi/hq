@@ -122,6 +122,9 @@ pub(crate) struct NotificationItem {
     pub(crate) owner_only: bool,
     /// Who it is from: `you`, `helpers` or `system`.
     pub(crate) source_group: String,
+    /// `owner` or `agent` (`hq_db::inbox_prefs::audience`): what decides the default list, the
+    /// badge and push.
+    pub(crate) audience: &'static str,
     /// Why it left Needs you by itself (`auto_tidy:<rule>`), for the Done list's "No longer
     /// waiting". Absent for every other item.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,6 +151,9 @@ pub(crate) struct ListNotificationsParams {
     pub(crate) state: Option<String>,
     pub(crate) category: Option<String>,
     pub(crate) limit: Option<usize>,
+    /// `1` lists helper and agent traffic too (the Helpers and Tasks pages); the default list
+    /// and the badge hold only what is for the owner.
+    pub(crate) include_agent: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -310,6 +316,10 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
         silenced: false,
         owner_only,
         source_group: hq_db::inbox_prefs::source_group(&source_for_group, owner_only).to_string(),
+        audience: match hq_db::inbox_prefs::audience(&source_for_group, owner_only, needs_answer) {
+            hq_db::inbox_prefs::Audience::Owner => "owner",
+            hq_db::inbox_prefs::Audience::Agent => "agent",
+        },
         expired_reason: row.get(23)?,
     })
 }
@@ -392,8 +402,12 @@ pub(crate) fn aggregate_notifications(
     state_filter: Option<&str>,
     category_filter: Option<&str>,
     limit: usize,
+    include_agent: bool,
 ) -> Result<NotificationsResponse, anyhow::Error> {
     let mut all = scan_value_items(db, state_filter)?;
+    if !include_agent {
+        all.retain(|n| n.audience == "owner");
+    }
     if let Some(cat) = category_filter.filter(|c| *c != "all") {
         all.retain(|n| n.category == cat);
     }
@@ -677,6 +691,7 @@ pub(crate) async fn list_notifications_handler(
         params.state.as_deref(),
         params.category.as_deref(),
         limit,
+        params.include_agent.as_deref() == Some("1"),
     ) {
         Ok(res) => with_etag(&res, &headers),
         Err(e) => {
@@ -817,7 +832,7 @@ pub(crate) async fn notification_action_handler(
 /// Tells every open tab that the inbox changed, with the counts its badge shows.
 fn announce_inbox(state: &WsState) {
     state.announce_change(crate::CHANGE_INBOX);
-    if let Ok(res) = aggregate_notifications(&state.db, Some("pending"), None, 50) {
+    if let Ok(res) = aggregate_notifications(&state.db, Some("pending"), None, 50, false) {
         state.broadcast(
             &serde_json::json!({
                 "type": "notification:badge_count",
@@ -1023,10 +1038,32 @@ mod tests {
     #[tokio::test]
     async fn test_aggregate_empty_notifications() {
         let db = hq_db::Database::open_memory().unwrap();
-        let res = aggregate_notifications(&db, Some("pending"), None, 50).unwrap();
+        let res = aggregate_notifications(&db, Some("pending"), None, 50, true).unwrap();
         assert_eq!(res.notifications.len(), 0);
         assert_eq!(res.unread_count, 0);
         assert_eq!(res.pending_approvals_count, 0);
+    }
+
+    #[tokio::test]
+    async fn the_default_list_and_badge_hold_only_the_owners_items() {
+        use hq_core::types::{ValueItem, ValueKind};
+        let db = hq_db::Database::open_memory().unwrap();
+        for i in 0..200 {
+            let (source, kind) = match i % 4 {
+                0 => ("harness-sessions", ValueKind::Fyi),
+                1 => ("fleet-digest", ValueKind::Fyi),
+                2 => ("session-supervisor", ValueKind::ActionNeeded),
+                _ => ("notify_owner", ValueKind::Fyi),
+            };
+            let item = ValueItem::new(source, kind, format!("t{i}"), "b");
+            hq_db::value_items::insert(&db, &item).unwrap();
+        }
+        let default = aggregate_notifications(&db, Some("pending"), None, 500, false).unwrap();
+        assert_eq!(default.notifications.len(), 100);
+        assert!(default.notifications.iter().all(|n| n.audience == "owner"));
+        assert_eq!(default.unread_count, default.notifications.len());
+        let all = aggregate_notifications(&db, Some("pending"), None, 500, true).unwrap();
+        assert_eq!(all.notifications.len(), 200);
     }
 
     #[tokio::test]
@@ -1064,7 +1101,7 @@ mod tests {
         assert_eq!(items[0].kind, NotificationKind::ActionNeeded);
         assert_eq!(items[0].actions, ["approve", "reject"]);
 
-        let res = aggregate_notifications(&db, Some("pending"), Some("all"), 50).unwrap();
+        let res = aggregate_notifications(&db, Some("pending"), Some("all"), 50, true).unwrap();
         assert_eq!(res.notifications.len(), 1);
         assert_eq!(res.pending_approvals_count, 1);
     }
@@ -1227,6 +1264,7 @@ mod tests {
                 state: Some("pending".into()),
                 category: None,
                 limit: Some(30),
+                include_agent: Some("1".into()),
             };
             list_notifications_handler(State(state.clone()), Query(params), headers)
         };
@@ -1286,7 +1324,7 @@ mod tests {
         })
         .unwrap();
 
-        let res = aggregate_notifications(&db, None, None, 50).unwrap();
+        let res = aggregate_notifications(&db, None, None, 50, true).unwrap();
         assert_eq!(res.needs_you_owner_only, 1);
         assert_eq!(res.needs_you_helpers, 2);
         assert_eq!(res.pending_approvals_count, 3, "the old count is unchanged");
@@ -1738,7 +1776,8 @@ mod tests {
         assert_eq!(act("val_abc12345", "approve").await.status(), 200);
         assert_eq!(act("val_missing99", "approve").await.status(), 404);
         assert_eq!(act("val_abc12345", "explode").await.status(), 400);
-        let approved = aggregate_notifications(&state.db, Some("approved"), None, 10).unwrap();
+        let approved =
+            aggregate_notifications(&state.db, Some("approved"), None, 10, true).unwrap();
         assert_eq!(approved.notifications[0].state, NotificationState::Approved);
     }
 
@@ -1877,18 +1916,18 @@ mod tests {
         let state = Arc::new(WsState::new(dir.path().to_path_buf(), None));
         let news = insert(&state, "agent_notify", ValueKind::Fyi);
         insert(&state, "disk-watchdog", ValueKind::Fyi);
-        let before = aggregate_notifications(&state.db, Some("pending"), None, 50).unwrap();
+        let before = aggregate_notifications(&state.db, Some("pending"), None, 50, true).unwrap();
         assert_eq!(before.unread_updates_count, 2);
 
         let res = read_handler(State(state.clone()), AxumPath(news.clone())).await;
         assert_eq!(res.status(), 200);
-        let after = aggregate_notifications(&state.db, Some("pending"), None, 50).unwrap();
+        let after = aggregate_notifications(&state.db, Some("pending"), None, 50, true).unwrap();
         assert_eq!(after.unread_updates_count, 1);
         assert_eq!(after.notifications.len(), 2, "read is not put away");
         assert!(after.notifications.iter().any(|n| n.id == news && n.read));
 
         assert_eq!(read_all_handler(State(state.clone())).await.status(), 200);
-        let after = aggregate_notifications(&state.db, Some("pending"), None, 50).unwrap();
+        let after = aggregate_notifications(&state.db, Some("pending"), None, 50, true).unwrap();
         assert_eq!(
             (after.unread_updates_count, after.notifications.len()),
             (0, 2)
@@ -1968,7 +2007,7 @@ mod tests {
         assert_eq!(helpers.unwrap()["silenced"], true);
         assert!(helpers.unwrap()["until"].is_string());
 
-        let list = aggregate_notifications(&state.db, Some("pending"), None, 50).unwrap();
+        let list = aggregate_notifications(&state.db, Some("pending"), None, 50, true).unwrap();
         assert_eq!(
             list.notifications.len(),
             2,
@@ -1983,7 +2022,7 @@ mod tests {
 
         let res = unsilence_handler(State(state.clone()), AxumPath("helpers".into())).await;
         assert_eq!(res.status(), 200);
-        let list = aggregate_notifications(&state.db, Some("pending"), None, 50).unwrap();
+        let list = aggregate_notifications(&state.db, Some("pending"), None, 50, true).unwrap();
         assert_eq!(list.pending_approvals_count, 2);
     }
 }
