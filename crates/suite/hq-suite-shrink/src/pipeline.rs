@@ -99,6 +99,9 @@ pub enum Refusal {
     /// A scan or photo with no text layer. These keep their page images and are not shrunk yet.
     NeedsOcr,
     Unsupported,
+    /// A workbook's formulas, charts and formats live only in the original, and the record keeps
+    /// values alone, so moving the original away would lose them.
+    SpreadsheetKeepsFormulas,
     TooLarge,
     /// The file lives in a folder HQ keeps for itself (`_media`, `_trash`, `_data`, ...).
     ProtectedFolder,
@@ -597,6 +600,9 @@ impl<'a> Shrinker<'a> {
         let kind = sniff(&data, &ext).kind;
         if kind == Kind::Image {
             return Err(refuse(Refusal::NeedsOcr));
+        }
+        if kind == Kind::Xlsx {
+            return Err(refuse(Refusal::SpreadsheetKeepsFormulas));
         }
         let data = Arc::new(data);
         let doc = read_document((*data).clone(), &ext, &self.options.convert)
