@@ -46,6 +46,9 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   branches from that PR's branch instead, and is brought up to date once the PR lands (merge `main`
   in; rebase only a branch nobody else has pulled). Each worktree has its own `target/`, so keep at
   most one extra unless there are 50 GB free.
+- No Rust file grows past 1,500 production lines (inline `#[cfg(test)]` code does not count);
+  `scripts/ci/file-size.py` fails the lint job on one, and the two files already over are capped in
+  `scripts/ci/file-size-allow.toml`, which can only shrink. Split by concern, not by line count.
 - Do not hand-deploy to a server. Servers update themselves from signed releases
   (`docs/UPDATE_SYSTEM.md`, `deploy/README.md`).
 
