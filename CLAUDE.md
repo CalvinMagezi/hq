@@ -49,6 +49,9 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 - A change a user or operator would notice adds one `changelog.d/<slug>.<kind>.md` file (see
   `changelog.d/README.md`) instead of editing `CHANGELOG.md`, so two parallel pull requests never
   collide on it. `scripts/changelog-compile.sh` folds them in when a release is cut.
+- A shortcut you knowingly leave is one new file `docs/techdebt/<slug>.md` (see its README), never a
+  row in `TECHDEBT.md`, which is frozen. A temporary re-export left by a split is `facade-<what>.md`
+  and says when it can be removed.
 - Do not hand-deploy to a server. Servers update themselves from signed releases
   (`docs/UPDATE_SYSTEM.md`, `deploy/README.md`).
 
