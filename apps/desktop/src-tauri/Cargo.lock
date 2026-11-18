@@ -1966,6 +1966,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hq-acp"
+version = "0.9.1"
+dependencies = [
+ "nix",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "hq-bridge"
 version = "0.9.1"
 dependencies = [
@@ -2094,10 +2103,14 @@ dependencies = [
 name = "hq-host"
 version = "0.9.1"
 dependencies = [
+ "chrono",
+ "hq-acp",
+ "hq-core",
  "hq-sandbox",
  "nix",
  "portable-pty",
  "regex",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -4510,6 +4523,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",
