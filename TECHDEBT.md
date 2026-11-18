@@ -1,3 +1,6 @@
+> **Frozen.** This table keeps its rows, but new items are no longer added here: each one is a file
+> in [`docs/techdebt/`](docs/techdebt/README.md), so two pull requests never collide on this table.
+
 | Item | Reason skipped | Date | File:line |
 |------|-----------------|------|-----------|
 | `start_all` spawns Discord/Telegram relay tasks via bare `tokio::spawn` and drops the `JoinHandle`; a relay that returns `Err` logs via `tracing::error!` and dies silently, and `hq start all` keeps reporting the component as running. | Pre-existing, discovered while investigating relay-bridge registry wiring, out of scope for that task (not a registry/duplication problem) and non-trivial to fix correctly (needs a supervised-task pattern, not a one-line change). | 2026-09-11 | crates/hq-cli/src/commands/start/mod.rs:219 (discord), :255 (telegram) |

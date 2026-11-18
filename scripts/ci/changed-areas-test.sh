@@ -52,6 +52,7 @@ T=true F=false
 #     rust web_app android site installer workflows
 check "$F,$F,$F,$F,$F,$F" docs/ARCHITECTURE.md                      # docs only: nothing runs
 check "$F,$F,$F,$F,$F,$F" CHANGELOG.md LICENSE NOTICE               # root prose
+check "$F,$F,$F,$F,$F,$F" changelog.d/a-change.added.md              # a changelog fragment
 check "$T,$F,$F,$F,$F,$F" README.md                                 # a Rust test reads it
 check "$T,$F,$F,$F,$F,$F" docs/DESKTOP.md                           # a Rust test reads it
 check "$T,$F,$T,$F,$F,$F" crates/hq-core/src/lib.rs                 # Rust, and the Android build
