@@ -208,7 +208,7 @@ These conventions are carried by ordinary markdown, so they need no block type:
   finds becomes a block the editor shows and does not change.
 - A **slides** note has `suite_kind: slides`. The level 1 heading is the deck title and each
   level 2 heading starts a card. An optional HTML comment under the heading picks a layout:
-  `<!-- layout: two-column -->`. Layout names are fixed in milestone M6.
+  `<!-- layout: two-column -->`. The layouts are `content` (the default) and `two-column`, where a horizontal rule splits the columns; see `docs/suite/SLIDES.md`.
 - Images use relative links into `_media/cas/`: `![](../../_media/cas/ab/abcdef.webp)`.
 
 ## Editing

@@ -3834,14 +3834,17 @@ dependencies = [
  "chrono",
  "hex",
  "hq-backup",
+ "hq-convert",
  "hq-suite-calc",
  "hq-suite-docs",
  "hq-suite-governor",
  "hq-suite-md",
  "hq-suite-shrink",
  "hq-suite-sinks",
+ "hq-suite-slides",
  "hq-suite-store",
  "hq-vault",
+ "image",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3938,6 +3941,16 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+]
+
+[[package]]
+name = "hq-suite-slides"
+version = "0.9.1"
+dependencies = [
+ "hq-export",
+ "roxmltree 0.21.1",
+ "thiserror 2.0.18",
+ "zip 9.0.5",
 ]
 
 [[package]]
