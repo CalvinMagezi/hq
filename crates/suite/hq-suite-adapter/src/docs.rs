@@ -121,6 +121,8 @@ pub struct SlidesMade {
     pub pictures_placed: usize,
     pub pictures_left_out: usize,
     pub unknown_layouts: Vec<String>,
+    /// Sentences about a transition or colour that could not be used or is hard to read.
+    pub look_problems: Vec<String>,
 }
 
 /// `hq suite pptx <note> [--out file]`: the slides note as a native PowerPoint file. The level 1
@@ -139,6 +141,7 @@ pub fn render_slides(vault: &Path, note: &Path, out: Option<&Path>) -> Result<Sl
         pictures_placed: report.pictures_placed,
         pictures_left_out: report.pictures_left_out,
         unknown_layouts: deck.unknown_layouts,
+        look_problems: deck.look_problems,
     })
 }
 
@@ -164,6 +167,10 @@ pub fn slides_text(m: &SlidesMade) -> String {
         out.push_str(&format!(
             "The layout `{name}` is not one of content or two-column, so that card uses content.\n"
         ));
+    }
+    for problem in &m.look_problems {
+        out.push_str(problem);
+        out.push('\n');
     }
     out
 }

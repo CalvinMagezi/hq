@@ -7,7 +7,7 @@
 pub mod deck;
 pub mod pptx;
 
-pub use deck::{Card, Deck, Item, Layout, Run};
+pub use deck::{Card, Deck, Item, Kind, Layout, Look, Run, Speed, Transition};
 pub use pptx::{Picture, PictureLoader, PptxError, PptxReport, render_pptx};
 
 /// A slides note's markdown (without its frontmatter) as the deck it describes and the bytes of
@@ -192,5 +192,105 @@ mod tests {
             !parts(&none).iter().any(|(n, _)| n.contains("notes")),
             "a deck without notes has no notes parts"
         );
+    }
+
+    fn slide(bytes: &[u8], n: usize) -> String {
+        parts(bytes)
+            .into_iter()
+            .find(|(name, _)| *name == format!("ppt/slides/slide{n}.xml"))
+            .unwrap()
+            .1
+    }
+
+    const LOOK_NOTE: &str = "# Board\n<!-- transition: fade -->\n<!-- color: #222 -->\n\n## Dark\n<!-- background: #1F3A5F -->\n<!-- color: #FFFFFF -->\n<!-- transition: push slow -->\n\n- White on blue\n\n## Plain\n\nUses the deck look.\n\n## Still\n<!-- transition: none -->\n\nNo motion.\n";
+
+    #[test]
+    fn a_cards_look_comes_from_its_comments_over_the_deck_look() {
+        let (deck, bytes, _) = pptx_from_markdown("x", LOOK_NOTE, &|_| None).unwrap();
+        assert!(deck.look_problems.is_empty(), "{:?}", deck.look_problems);
+        let (title, dark, plain, still) = (
+            slide(&bytes, 1),
+            slide(&bytes, 2),
+            slide(&bytes, 3),
+            slide(&bytes, 4),
+        );
+        assert!(title.contains("<p:transition spd=\"med\"><p:fade/></p:transition>"));
+        assert!(title.contains("<a:srgbClr val=\"222222\"/>"), "{title}");
+        assert!(dark.contains("<p:bg><p:bgPr><a:solidFill><a:srgbClr val=\"1F3A5F\"/>"));
+        assert!(dark.contains("<p:transition spd=\"slow\"><p:push/></p:transition>"));
+        assert!(dark.contains("<a:rPr lang=\"en-US\" sz=\"3600\" dirty=\"0\"><a:solidFill><a:srgbClr val=\"FFFFFF\"/>"), "{dark}");
+        assert!(plain.contains("<p:fade/>") && !plain.contains("<p:bg>"));
+        assert!(
+            !still.contains("<p:transition"),
+            "none cancels the deck transition"
+        );
+    }
+
+    #[test]
+    fn the_transition_follows_the_colour_map_and_the_fill_leads_the_run_properties() {
+        let (_, bytes, _) = pptx_from_markdown("x", LOOK_NOTE, &|_| None).unwrap();
+        for n in 1..=4 {
+            let xml = slide(&bytes, n);
+            roxmltree::Document::parse(&xml).unwrap();
+            if let Some(t) = xml.find("<p:transition") {
+                assert!(
+                    xml.find("</p:clrMapOvr>").unwrap() < t,
+                    "transition is after clrMapOvr"
+                );
+            }
+            for run in xml.split("<a:rPr ").skip(1) {
+                let body = &run[run.find('>').unwrap() + 1..];
+                if let (Some(fill), Some(latin)) =
+                    (body.find("<a:solidFill>"), body.find("<a:latin"))
+                {
+                    assert!(fill < latin, "fill before latin");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_unusable_transition_or_colour_is_reported_and_hard_to_read_colours_are_flagged() {
+        let md = "# T\n\n## A\n<!-- transition: swirl -->\n<!-- background: red -->\n\nx\n\n## B\n<!-- background: #FFFFFF -->\n<!-- color: #F0F0F0 -->\n\ny\n\n## C\n<!-- transition: fade fast -->\n\nz\n";
+        let (deck, bytes, _) = pptx_from_markdown("x", md, &|_| None).unwrap();
+        let said = deck.look_problems.join("\n");
+        assert!(said.contains("`swirl` is not a transition"), "{said}");
+        assert!(
+            said.contains("`red` is not a colour for the background"),
+            "{said}"
+        );
+        assert!(
+            said.contains("Card \"B\": the text (#F0F0F0) is hard to read"),
+            "{said}"
+        );
+        assert_eq!(deck.look_problems.len(), 3, "{said}");
+        assert!(slide(&bytes, 4).contains("<p:transition spd=\"fast\"><p:fade/>"));
+        assert!(!slide(&bytes, 2).contains("<p:transition"));
+    }
+
+    #[test]
+    fn a_card_that_sets_only_a_background_is_checked_against_the_themes_black_text() {
+        let md = "# T\n\n## Night\n<!-- background: #000000 -->\n\nBlack on black\n";
+        let (deck, _, _) = pptx_from_markdown("x", md, &|_| None).unwrap();
+        assert_eq!(deck.look_problems.len(), 1, "{:?}", deck.look_problems);
+    }
+
+    #[test]
+    fn colours_parse_from_three_or_six_digits_and_transitions_from_a_name_and_a_speed() {
+        use crate::deck::{Kind, Speed, Transition, parse_color};
+        assert_eq!(parse_color("#1f3a5f").as_deref(), Some("1F3A5F"));
+        assert_eq!(parse_color("abc").as_deref(), Some("AABBCC"));
+        for bad in ["", "#12", "#GGGGGG", "red", "#1234567"] {
+            assert_eq!(parse_color(bad), None, "{bad}");
+        }
+        assert_eq!(
+            Transition::parse("Wipe FAST"),
+            Some(Transition {
+                kind: Kind::Wipe,
+                speed: Speed::Fast
+            })
+        );
+        assert_eq!(Transition::parse("fade slowly"), None);
+        assert_eq!(Transition::parse("fade slow extra"), None);
     }
 }

@@ -11,7 +11,7 @@ use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 use std::collections::HashMap;
 
-use crate::deck::{Card, Deck, Item, Layout, Run};
+use crate::deck::{Card, Deck, Item, Kind, Layout, Look, Run, Speed};
 
 /// A picture ready to go in the file: PNG bytes and their size in pixels.
 #[derive(Debug, Clone)]
@@ -223,9 +223,64 @@ fn table_xml(id: u32, rows: &[Vec<String>], x: i64, y: i64, w: i64) -> String {
     )
 }
 
-fn slide_part(shapes: &str) -> String {
+fn solid(hex: &str) -> String {
+    format!("<a:solidFill><a:srgbClr val=\"{hex}\"/></a:solidFill>")
+}
+
+/// `xml` with a text colour on every run, so a card's text takes the colour its comment names. The
+/// fill goes first in the run properties, where the schema wants it.
+fn tint(xml: &str, hex: &str) -> String {
+    let fill = solid(hex);
+    let mut out = String::with_capacity(xml.len() + xml.matches("<a:rPr ").count() * fill.len());
+    let mut rest = xml;
+    while let Some(at) = rest.find("<a:rPr ") {
+        let Some(close) = rest[at..].find('>') else {
+            break;
+        };
+        let end = at + close + 1;
+        out.push_str(&rest[..end]);
+        out.push_str(&fill);
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn background_xml(look: &Look) -> String {
+    look.background.as_deref().map_or_else(String::new, |hex| {
+        format!("<p:bg><p:bgPr>{}<a:effectLst/></p:bgPr></p:bg>", solid(hex))
+    })
+}
+
+fn transition_xml(look: &Look) -> String {
+    let Some(t) = look.transition else {
+        return String::new();
+    };
+    let kind = match t.kind {
+        Kind::None => return String::new(),
+        Kind::Fade => "fade",
+        Kind::Push => "push",
+        Kind::Wipe => "wipe",
+        Kind::Split => "split",
+        Kind::Cover => "cover",
+        Kind::Dissolve => "dissolve",
+    };
+    let speed = match t.speed {
+        Speed::Slow => "slow",
+        Speed::Medium => "med",
+        Speed::Fast => "fast",
+    };
+    format!("<p:transition spd=\"{speed}\"><p:{kind}/></p:transition>")
+}
+
+fn slide_part(shapes: &str, look: &Look) -> String {
+    let shapes = match look.color.as_deref() {
+        Some(hex) => tint(shapes, hex),
+        None => shapes.to_string(),
+    };
+    let (bg, transition) = (background_xml(look), transition_xml(look));
     format!(
-        "{XML}<p:sld xmlns:a=\"{NS_A}\" xmlns:r=\"{NS_R}\" xmlns:p=\"{NS_P}\"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"
+        "{XML}<p:sld xmlns:a=\"{NS_A}\" xmlns:r=\"{NS_R}\" xmlns:p=\"{NS_P}\"><p:cSld>{bg}<p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>{transition}</p:sld>"
     )
 }
 
@@ -255,7 +310,7 @@ fn title_slide(deck: &Deck) -> String {
             &body,
         ));
     }
-    slide_part(&shapes)
+    slide_part(&shapes, &deck.look)
 }
 
 /// The slide's XML and the media it uses (indexes into `media.files`, in the order its relationships list them).
@@ -352,7 +407,7 @@ fn card_slide(card: &Card, media: &mut Media<'_>) -> (String, Vec<usize>) {
             id += 1;
         }
     }
-    (slide_part(&shapes), used)
+    (slide_part(&shapes, &card.look), used)
 }
 
 impl Media<'_> {
