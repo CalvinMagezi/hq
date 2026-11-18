@@ -80,6 +80,8 @@ Notes:
 - Follow the surrounding code style. Named constants instead of magic numbers,
   error paths before happy paths, no new abstraction for a single call site.
 - Update docs and `CHANGELOG.md` when behavior, config or CLI output changes.
+- A shortcut you knowingly leave is a file `docs/techdebt/<slug>.md` (see `docs/techdebt/README.md`),
+  not a new row in `TECHDEBT.md`, which is frozen.
 - Security-relevant changes (auth, sandbox, governance, updater, anything that
   parses untrusted input) get extra scrutiny. Describe the threat you considered.
 - Keep commits readable. Squash noise before review if asked.

@@ -46,6 +46,9 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   branches from that PR's branch instead, and is brought up to date once the PR lands (merge `main`
   in; rebase only a branch nobody else has pulled). Each worktree has its own `target/`, so keep at
   most one extra unless there are 50 GB free.
+- A shortcut you knowingly leave is one new file `docs/techdebt/<slug>.md` (see its README), never a
+  row in `TECHDEBT.md`, which is frozen. A temporary re-export left by a split is `facade-<what>.md`
+  and says when it can be removed.
 - Do not hand-deploy to a server. Servers update themselves from signed releases
   (`docs/UPDATE_SYSTEM.md`, `deploy/README.md`).
 
