@@ -4406,6 +4406,14 @@
     <string name="docblocks_edit_title">Edit this %1$s</string>
     <string name="docblocks_add_title">Add a block</string>
     <string name="docblocks_save">Save</string>
+    <string name="docblocks_fmt_bold">Bold</string>
+    <string name="docblocks_fmt_italic">Italic</string>
+    <string name="docblocks_fmt_code">Code</string>
+    <string name="docblocks_fmt_link">Link</string>
+    <string name="docblocks_fmt_heading">Heading</string>
+    <string name="docblocks_fmt_bullets">Bullets</string>
+    <string name="docblocks_fmt_numbers">Numbers</string>
+    <string name="docblocks_fmt_quote">Quote</string>
     <string name="docblocks_delete">Delete</string>
     <string name="docblocks_cancel">Cancel</string>
     <string name="docblocks_failed">That change was refused. The block may have changed since you opened this, or what you wrote is more than one block.</string>

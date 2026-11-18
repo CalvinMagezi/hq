@@ -1,6 +1,8 @@
 package example.hq.spike.ui.notes
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,6 +28,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -95,7 +99,8 @@ fun DocBlocksEditor(path: String, onClose: (changed: Boolean) -> Unit) {
 
             editing?.let { target ->
                 val start = (target as? BlockEdit.Change)?.row?.src.orEmpty()
-                var text by remember(target) { mutableStateOf(start) }
+                var field by remember(target) { mutableStateOf(TextFieldValue(start, TextRange(start.length))) }
+                val text = field.text
                 var failed by remember(target) { mutableStateOf(false) }
                 var busy by remember(target) { mutableStateOf(false) }
                 fun run(call: suspend () -> List<BlockRow>) {
@@ -117,7 +122,8 @@ fun DocBlocksEditor(path: String, onClose: (changed: Boolean) -> Unit) {
                     },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(text, { text = it; failed = false }, minLines = 3, maxLines = 12, modifier = Modifier.fillMaxWidth())
+                            FormatToolbar { field = it(field); failed = false }
+                            OutlinedTextField(field, { field = it; failed = false }, minLines = 3, maxLines = 12, modifier = Modifier.fillMaxWidth())
                             if (failed) Text(stringResource(R.string.docblocks_failed), style = HqType.BodySm, color = Mts.InkMuted)
                         }
                     },
@@ -145,6 +151,28 @@ fun DocBlocksEditor(path: String, onClose: (changed: Boolean) -> Unit) {
                     },
                     containerColor = Mts.Surface100,
                 )
+            }
+        }
+    }
+}
+
+/** The formatting buttons above the block's text: each one rewrites the field's text and selection. */
+@Composable
+private fun FormatToolbar(apply: ((TextFieldValue) -> TextFieldValue) -> Unit) {
+    val buttons = listOf<Pair<Int, (TextFieldValue) -> TextFieldValue>>(
+        R.string.docblocks_fmt_bold to { it.bold() },
+        R.string.docblocks_fmt_italic to { it.italic() },
+        R.string.docblocks_fmt_code to { it.code() },
+        R.string.docblocks_fmt_link to { it.link() },
+        R.string.docblocks_fmt_heading to { it.toggleLines(LineStyle.Heading(2)) },
+        R.string.docblocks_fmt_bullets to { it.toggleLines(LineStyle.Bullet) },
+        R.string.docblocks_fmt_numbers to { it.toggleLines(LineStyle.Numbered) },
+        R.string.docblocks_fmt_quote to { it.toggleLines(LineStyle.Quote) },
+    )
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        buttons.forEach { (label, change) ->
+            TextButton({ apply(change) }, Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(label), style = HqType.BodySmBold, color = Mts.BrandBlue)
             }
         }
     }
