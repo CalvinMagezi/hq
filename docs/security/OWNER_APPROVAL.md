@@ -188,3 +188,18 @@ chat reaches the helper. Unattended sessions still never start helpers. Known ga
 by a tainted session is not yet flagged, so its text can reach a later narrowed brief
 (`known_gap_a_task_written_by_a_tainted_session_launders_a_start`). Pairing this with
 `agent_host.sandbox.strict_paths` keeps client folders on a bounded network.
+## Audience: what reaches the owner
+
+One function, `hq_db::inbox_prefs::audience`, decides whether an inbox item is for the owner or
+for the agents. The default inbox list (`GET /api/notifications`), the badge counts and web push
+all obey it, so they cannot disagree.
+
+- `owner`: anything the owner can approve, reject or answer (a proposal or action-needed item,
+  whatever its source), anything the runtime marked `owner_only`, and HQ's own items, task cards,
+  reminders, tips and upkeep notices.
+- `agent`: helper and delegated-run traffic nobody has to answer, such as finished turns, exits
+  and fleet digests.
+
+`GET /api/notifications?include_agent=1` lists the `agent` items too, for the Helpers and Tasks
+pages. Each item carries its `audience`. Push never sends an `agent` item, even with
+`web_push.push_all`.

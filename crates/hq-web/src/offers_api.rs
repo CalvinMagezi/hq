@@ -479,7 +479,8 @@ mod tests {
 
         // The inbox offers `open` ("Bring it back") and dismiss, and nothing else.
         let listed =
-            crate::notifications_api::aggregate_notifications(&state.db, None, None, 10).unwrap();
+            crate::notifications_api::aggregate_notifications(&state.db, None, None, 10, true)
+                .unwrap();
         let n = listed
             .notifications
             .iter()
