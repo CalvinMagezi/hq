@@ -94,6 +94,14 @@ pub enum SuiteCommand {
         #[arg(long, value_name = "FILE")]
         out: Option<PathBuf>,
     },
+    /// Write a slides note as a PowerPoint file: the level 1 heading is the deck title, each level 2 heading a card
+    Pptx {
+        /// The note, in the vault
+        note: PathBuf,
+        /// Where to write it (default: beside the note; an existing file is never replaced)
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
     /// How often the formula engine gives the answer a workbook has saved (counts only, shareable)
     CalcCheck { file: PathBuf },
     /// Check that a Word file survives the suite: read it, render it, read the render, compare
@@ -186,6 +194,11 @@ pub async fn run(config: &HqConfig, command: SuiteCommand) -> Result<()> {
         SuiteCommand::Docx { note, out } => {
             let target = hq_suite_adapter::docs::render(vault, &note, out.as_deref())?;
             println!("Wrote {}", target.display());
+            Ok(())
+        }
+        SuiteCommand::Pptx { note, out } => {
+            let made = hq_suite_adapter::docs::render_slides(vault, &note, out.as_deref())?;
+            print!("{}", hq_suite_adapter::docs::slides_text(&made));
             Ok(())
         }
         SuiteCommand::CalcCheck { file } => {

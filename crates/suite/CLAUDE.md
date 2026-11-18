@@ -40,6 +40,7 @@ to delete the guard first and say why in review.
 | `hq-suite-governor` | Storage report in plain words, orphan media, originals that left the trash, the budget and its eviction order. The clock and budget come in as values | `hq-suite-md`, `hq-suite-store`, `hq-suite-shrink`, `chrono` |
 | `hq-suite-docs` | Docs: render a record as a Word file (`hq-export`) and the regenerate check that the render reads back as the same record | `hq-convert`, `hq-export`, `hq-suite-ingest`, `hq-suite-md` |
 | `hq-suite-sinks` | Cold storage: a folder the owner keeps, originals sealed one at a time under a recovery code, read back before they count as stored, and the restore drill | `hq-backup` (the sealing), `hq-suite-store`, `serde*`, `sha2`, `hex` |
+| `hq-suite-slides` | Slides: a slides note as cards (title, bullets, numbered, paragraphs, code, tables, a two-column layout) and a native `.pptx` writer with no template and no tool | `hq-export` (its markdown reader), `zip`, `thiserror` |
 | `hq-suite-calc` | Sheets: a spreadsheet formula engine (parse, evaluate, cycles, errors). Pure computation | `thiserror` |
 | `hq-suite-adapter` | The only crate that knows HQ: config, tools, CLI glue, daemon task, device actions, REST | everything |
 

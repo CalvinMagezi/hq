@@ -21,11 +21,13 @@ hq-suite-docs = { workspace = true }
 hq-suite-governor = { workspace = true }
 hq-suite-md = { workspace = true }
 hq-suite-sinks = { workspace = true }
+hq-suite-slides = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+hq-convert = { workspace = true }
 sha2 = { workspace = true }
 tempfile = { workspace = true }
 toml = { workspace = true }

@@ -36,6 +36,7 @@ members = [
     "crates/suite/hq-suite-governor",
     "crates/suite/hq-suite-calc",
     "crates/suite/hq-suite-docs",
+    "crates/suite/hq-suite-slides",
     "crates/suite/hq-suite-sinks",
     "crates/suite/hq-suite-adapter",
 ]
@@ -186,6 +187,7 @@ hq-suite-shrink = { path = "crates/suite/hq-suite-shrink" }
 hq-suite-governor = { path = "crates/suite/hq-suite-governor" }
 hq-suite-calc = { path = "crates/suite/hq-suite-calc" }
 hq-suite-docs = { path = "crates/suite/hq-suite-docs" }
+hq-suite-slides = { path = "crates/suite/hq-suite-slides" }
 hq-suite-sinks = { path = "crates/suite/hq-suite-sinks" }
 hq-suite-adapter = { path = "crates/suite/hq-suite-adapter" }
 
