@@ -18,6 +18,7 @@ members = [
     "crates/hq-tools",
     "crates/hq-tool-api",
     "crates/hq-tools-web",
+    "crates/hq-tools-coding",
     "crates/hq-web",
 
     "crates/hq-memory",
@@ -172,6 +173,7 @@ hq-mcp = { path = "crates/hq-mcp" }
 hq-tools = { path = "crates/hq-tools" }
 hq-tool-api = { path = "crates/hq-tool-api" }
 hq-tools-web = { path = "crates/hq-tools-web" }
+hq-tools-coding = { path = "crates/hq-tools-coding" }
 hq-web = { path = "crates/hq-web" }
 
 hq-memory = { path = "crates/hq-memory" }

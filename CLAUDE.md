@@ -395,6 +395,7 @@ a document.
 | `hq-tools` | HQ tools (vault, tasks, skills, agents, harness sessions, web, git), registered in `crates/hq-mcp/src/registry.rs::create_default_registry()`. Its modules are layered: `crates/hq-tools/layers.toml` gives each top-level module a layer and `tests/layering.rs` fails when one reaches up to a higher layer outside `allowed_back_edges`, a list that only shrinks (a new module needs a layer; measure with `python3 -I scripts/ci/module-graph.py`) |
 | `hq-tool-api` | The `HqTool` trait and `ToolRegistry` (`registry`), shared helpers (`util`) and the family gates (`family_guest`, `family_confirm`). Depends only on `hq-core`; `hq-tools` re-exports every module, so `hq_tools::registry::...` still works |
 | `hq-tools-web` | The web tools (`web`: search, fetch, the engine pool), the remote MCP bridge (`remote_mcp`) and `imagegen`, split out of `hq-tools`; `hq-tools` re-exports all three so `hq_tools::web::...` still works |
+| `hq-tools-coding` | The coding tools (`coding`: read, write, edit, search, git, shell) and the file-edit engine under them (`file_edit`), split out of `hq-tools`; `hq-tools` re-exports both so `hq_tools::coding::...` still works |
 | `hq-mcp` | MCP stdio server (2-tool gateway) |
 | `hq-daemon` | Agent worker, value bus, memory cycle, email triage (recurring prompts are `/watch`, not a daemon task) |
 | `hq-memory` | Consolidator, ingester, querier, forgetter, entity graph |

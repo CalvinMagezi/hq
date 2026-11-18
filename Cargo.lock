@@ -4006,6 +4006,7 @@ dependencies = [
  "hq-memory",
  "hq-suite-adapter",
  "hq-tool-api",
+ "hq-tools-coding",
  "hq-tools-web",
  "hq-vault",
  "html2text",
@@ -4031,6 +4032,25 @@ dependencies = [
  "which",
  "wiremock",
  "zip 9.0.5",
+]
+
+[[package]]
+name = "hq-tools-coding"
+version = "0.9.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "dirs",
+ "filetime",
+ "hq-core",
+ "hq-host",
+ "hq-tool-api",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
