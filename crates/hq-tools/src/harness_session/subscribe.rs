@@ -27,7 +27,7 @@ fn observer_of(args: &Value) -> Result<String> {
 
 /// Whether `observer` may watch `target`: its own team, or a session working on the same task.
 fn may_watch(c: &rusqlite::Connection, observer: &str, target: &str, task: &str) -> Result<()> {
-    if crate::a2a::check_session_access(c, Some(observer), target).is_ok() {
+    if crate::session_policy::check_session_access(c, Some(observer), target).is_ok() {
         return Ok(());
     }
     let shares_task = registry::get(c, target)?
