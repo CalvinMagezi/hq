@@ -8,5 +8,7 @@
 
 pub mod family_confirm;
 pub mod family_guest;
+pub mod files;
+pub mod office;
 pub mod registry;
 pub mod util;
