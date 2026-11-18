@@ -87,6 +87,43 @@ pub(super) fn plan(cfg: &AgentHostConfig) -> Value {
     })
 }
 
+/// The plan a launch under `strict_paths` gets: the same allowlist, always the strict profile.
+pub(super) fn strict_plan(cfg: &AgentHostConfig) -> Value {
+    let mut strict = cfg.clone();
+    strict.sandbox.mode = SandboxMode::Process;
+    strict.sandbox.profile = SandboxProfile::Strict;
+    plan(&strict)
+}
+
+/// Whether `cwd` lies under one of the configured strict paths. An entry is a path or a glob
+/// whose `*` matches inside one path component; everything below a match counts.
+pub(super) fn is_strict_path(entries: &[String], cwd: &str) -> bool {
+    let cwd = std::path::PathBuf::from(cwd);
+    let cwd: Vec<_> = cwd.components().collect();
+    entries.iter().any(|entry| {
+        let entry = super::expand_home(entry);
+        let pat: Vec<_> = entry.components().collect();
+        !pat.is_empty()
+            && pat.len() <= cwd.len()
+            && pat.iter().zip(&cwd).all(|(p, c)| {
+                wild_match(
+                    &p.as_os_str().to_string_lossy(),
+                    &c.as_os_str().to_string_lossy(),
+                )
+            })
+    })
+}
+
+fn wild_match(pat: &str, text: &str) -> bool {
+    let Some((head, tail)) = pat.split_once('*') else {
+        return pat == text;
+    };
+    let Some(rest) = text.strip_prefix(head) else {
+        return false;
+    };
+    (0..=rest.len()).any(|i| rest.is_char_boundary(i) && wild_match(tail, &rest[i..]))
+}
+
 /// The configured loopback ports without port 0 or repeats.
 fn loopback_ports(configured: &[u16]) -> Vec<u16> {
     let mut ports: Vec<u16> = configured.iter().copied().filter(|p| *p != 0).collect();
@@ -101,6 +138,26 @@ mod tests {
 
     fn cfg() -> AgentHostConfig {
         AgentHostConfig::default()
+    }
+
+    #[test]
+    fn a_working_directory_under_a_strict_path_is_strict() {
+        let paths = vec!["/work/clients/*".to_string(), "/secret".to_string()];
+        assert!(is_strict_path(&paths, "/work/clients/acme/app"));
+        assert!(is_strict_path(&paths, "/secret"));
+        assert!(!is_strict_path(&paths, "/work/clients"));
+        assert!(!is_strict_path(&paths, "/work/own/app"));
+        assert!(!is_strict_path(&paths, "/secretive"));
+        assert!(!is_strict_path(&[], "/anything"));
+    }
+
+    #[test]
+    fn the_strict_plan_is_strict_even_when_the_default_is_open_or_off() {
+        let mut c = cfg();
+        c.sandbox.mode = SandboxMode::None;
+        let p = strict_plan(&c);
+        assert_eq!(p["mode"], "process");
+        assert_eq!(p["profile"], "strict");
     }
 
     #[test]

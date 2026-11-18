@@ -9,6 +9,7 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     issues += report_install();
     issues += report_skill_issues(config);
     report_bash_sandbox(config);
+    report_agent_sandbox(config);
     report_machine_profile(config);
     report_search_index(config);
     report_agent_hosts(config);
@@ -352,6 +353,24 @@ async fn report_web_search(config: &HqConfig) {
 }
 
 /// Whether model-written shell commands are isolated, refused or running bare.
+fn report_agent_sandbox(config: &HqConfig) {
+    let sb = &config.agent_host.sandbox;
+    println!("\nCoding-agent sandbox");
+    println!("  --  default profile: {:?}", sb.profile);
+    if sb.strict_paths.is_empty() {
+        println!("  --  no strict_paths: every folder runs under the default profile");
+        return;
+    }
+    println!(
+        "  ok  strict (egress allowlist, no credentials) under: {}",
+        sb.strict_paths.join(", ")
+    );
+    let mut allowed = vec!["api.anthropic.com".to_string()];
+    allowed.extend(config.agent_host.agent_mcp_url.clone());
+    allowed.extend(sb.allow_domains.clone());
+    println!("  --  network allowlist in force: {}", allowed.join(", "));
+}
+
 fn report_bash_sandbox(config: &HqConfig) {
     use hq_agent::bash_sandbox::{BashSettings, host_sandbox_status};
 
