@@ -448,7 +448,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt, spoken = m.spoken, offer = m.offer, clientId = m.clientId)
+    private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt, spoken = m.spoken, offer = m.offer, clientId = m.clientId, replyFiles = m.files.map { Attachment(it.name, it.path, it.mime, it.size) })
 
     /**
      * Collapses the offer to its result line at once and tells HQ. Yes acts after HQ has taken the answer (or has no route for it),

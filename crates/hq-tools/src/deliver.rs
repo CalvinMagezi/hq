@@ -48,6 +48,8 @@ pub const FILE_TOOLS: &[&str] = &[
     "vault_export",
     "vault_export_pdf",
 ];
+/// Longest fidelity sentence kept on a card.
+const MAX_FIDELITY_CHARS: usize = 300;
 /// Most files one reply may show.
 pub const MAX_FILES_PER_REPLY: usize = 10;
 
@@ -66,11 +68,26 @@ pub fn files_from_tool_result(vault: &Path, tool: &str, result: &str) -> Vec<Val
     };
     entries
         .iter()
-        .filter_map(|e| e.get("path").and_then(Value::as_str))
-        .filter(|rel| vault_file_is_shareable(vault, rel))
+        .filter_map(|e| {
+            let rel = e.get("path").and_then(Value::as_str)?;
+            vault_file_is_shareable(vault, rel).then(|| described(vault, rel, e))
+        })
         .take(MAX_FILES_PER_REPLY)
-        .map(|rel| file_entry(vault, rel))
         .collect()
+}
+
+/// The entry for a checked file, with the source note and the one-line statement of what the
+/// export kept when the tool gave them and the note is a real vault note.
+fn described(vault: &Path, rel: &str, given: &Value) -> Value {
+    let mut entry = file_entry(vault, rel);
+    let note = given.get("note").and_then(Value::as_str);
+    if let Some(note) = note.filter(|n| n.ends_with(".md") && vault_file_is_shareable(vault, n)) {
+        entry["note"] = json!(note);
+    }
+    if let Some(line) = given.get("fidelity").and_then(Value::as_str) {
+        entry["fidelity"] = json!(line.chars().take(MAX_FIDELITY_CHARS).collect::<String>());
+    }
+    entry
 }
 
 fn vault_file_is_shareable(vault: &Path, rel: &str) -> bool {
@@ -360,6 +377,13 @@ mod tests {
         assert_eq!(kept.len(), 1, "{kept:?}");
         assert_eq!(kept[0]["name"], "a.xlsx", "name comes from the file");
         assert_eq!(kept[0]["kind"], "sheet");
+        let with_note = json!({"files": [{"path": "Exports/2026-11/a.xlsx", "note": "_system/SOUL.md", "fidelity": "Kept."}]}).to_string();
+        let kept = files_from_tool_result(vault.path(), "office_export", &with_note);
+        assert!(
+            kept[0].get("note").is_none(),
+            "a note outside the allowlist is dropped"
+        );
+        assert_eq!(kept[0]["fidelity"], "Kept.");
         assert!(files_from_tool_result(vault.path(), "web_fetch", &result).is_empty());
         assert!(files_from_tool_result(vault.path(), "office_export", "not json").is_empty());
     }

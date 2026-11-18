@@ -4,6 +4,7 @@ import { splitAttachments } from './chatUploads'
 import type { DriverMeta } from './sessionsApi'
 import { parseStepCredits } from './stepCredits'
 import { toOffer, type ApiOffer } from './offersApi'
+import { toReplyFiles } from './replyFiles'
 
 /** A list preview without the attachment marker; a files-only message reads as its file count. */
 function cleanPreview(preview: string | undefined): string | undefined {
@@ -68,6 +69,7 @@ interface ApiMessageMeta {
   driver?: ApiDriverMeta | null
   source?: ApiSource | null
   offer?: ApiOffer | null
+  files?: unknown
 }
 
 type ApiSource = ApiSourceMeta | string
@@ -138,6 +140,7 @@ export function toThreadMessage(m: ApiMessage): ThreadMessage {
     viaMcp: toViaMcp(m.meta?.source),
     spoken: toSpoken(m.meta?.source) || undefined,
     offer: toOffer(m.meta?.offer),
+    files: toReplyFiles(m.meta?.files),
   }
 }
 
