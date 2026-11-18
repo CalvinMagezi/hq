@@ -75,8 +75,10 @@ task history.
 
 Once the session has read outside text, a few more calls ask, in every permission mode but bypass
 (`tainted_reason` in `crates/hq-agent/src/governance/tainted_calls.rs`): `harness_session_send`,
-`web_fetch` of a host the owner did not name in this chat or of an address carrying more than 200
-bytes of path and query, and `web_search` with a query over 150 characters. A tainted turn may type
+and the calls the zones list. `web_fetch` and `web_search` no longer ask: once the chat has read
+outside text a fetch runs for an address HQ saw come from outside and is refused for one the model
+composed, and a search is refused above 300 characters (`web_refusal`, `PROMPT_INJECTION.md` rule 4).
+A tainted turn may type
 into or answer only a coding agent its own web chat watches. The reasoning is in
 `PROMPT_INJECTION.md`, rules 4 and 5. This list is narrower than the claude.ai connector's (`CONNECTOR_CONFIRM_TOOLS` in
 `crates/hq-mcp/src/gateway.rs`), which also guards reads because its caller is remote.

@@ -505,6 +505,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "139_owner_prefs",
         include_str!("../sql/139_owner_prefs.sql"),
     ),
+    (
+        "140_thread_seen_urls",
+        include_str!("../sql/140_thread_seen_urls.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

@@ -82,19 +82,17 @@ normal and the `BypassPermissions` paths.
    to another agent once the session is tainted. In a chat the owner drives
    (one with an approval store, `OWNER_APPROVAL.md`) they wait for the owner's
    approval in any permission mode but bypass:
-   - `web_fetch` of a host the owner has not named in their own messages in
-     this session (a URL or a bare `docs.example.com`; subdomains of a named
-     host count), or of an address whose path, query and fragment pass 200
-     bytes. An article address with a few tracking parameters fits under 200
-     bytes; a paragraph of notes or a key encoded into the URL does not. A host
-     also stops asking once the owner allows the whole site, approves three
-     fetches of it in the chat, or has approved it in three chats (the exact
-     host only, recorded only from the owner's answers, removable in Settings,
-     `hq_db::fetch_sites`). A long address still asks in every case. The
-     owner's words are the turn's prompt and the user messages in its history,
-     never a tool result or a prompt HQ wrote itself (a Drive or follow-up turn);
-   - `web_search` with a query over 150 characters, longer than people type
-     into a search box;
+   - the web is not asked about at all: it is decided by code (`web_refusal`). Once the chat has
+     read outside text, `web_fetch` runs for exactly an address HQ saw arrive from outside the
+     model (a search result, a page it fetched, the owner's own message; compared after
+     normalizing, never by prefix, so an added query or a new host label is a different
+     address), for a short address on a host the owner named in their own words, and for a site
+     the owner allowed. Any other address, one the model composed, is refused with a message that
+     says to search for it or ask the owner to paste the link. A refusal never creates an inbox
+     item. `web_search` is refused above 300 characters. The seen set is kept per chat thread
+     for seven days (`hq_db::thread_seen_urls`, 2,000 addresses); sub-agents share it. Left
+     open: a handful of bits can still leave by choosing among seen addresses, and hiding done
+     through an external style sheet is invisible to HQ;
    - `harness_session_send`, which types into a running coding agent. A
      tainted turn may also type into or answer (`harness_session_answer`) only a
      session its own web chat watches; a relay chat or an MCP client has none. A tainted
