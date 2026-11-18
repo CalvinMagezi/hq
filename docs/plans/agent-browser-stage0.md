@@ -1,6 +1,6 @@
 # Agent browser, Stage 0: measured result
 
-Date: 2026-10-07. Method: `bench_web_fetch_vs_jina` in `crates/hq-tools/src/web/fetch_tests.rs`
+Date: 2026-10-07. Method: `bench_web_fetch_vs_jina` in `crates/hq-tools-web/src/web/fetch_tests.rs`
 (ignored; run with `cargo test -p hq-tools bench_web_fetch_vs_jina -- --ignored --nocapture`)
 over `src/web/fixtures/browser-corpus.txt`, 64 URLs from a home connection. For each
 page it runs HQ's native `web_fetch` path (Jina off) and the Jina Reader, and calls a
