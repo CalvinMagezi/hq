@@ -145,3 +145,9 @@ opened on it.
 - **Chat replies:** a finished chat reply still alerts only while the page is running
   (`apps/hq-web/src/lib/replyAlerts.ts`). Ask HQ to `notify_owner` when a long job is done
   if you want it on a closed phone.
+
+## Who a push is for
+
+A push is sent only for items whose audience is the owner (`hq_db::inbox_prefs::audience`, see
+`docs/security/OWNER_APPROVAL.md`). Helper and agent traffic is never pushed, including when
+`push_all` is on.
