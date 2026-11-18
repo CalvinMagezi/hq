@@ -1098,7 +1098,7 @@ impl HqTool for VaultInventoryTool {
         json!({
             "type": "object",
             "properties": {
-                "directory": { "type": "string", "description": "Vault-relative folder to look in (default: the whole vault). Searches subfolders; skips HQ's own folders and Exports." },
+                "directory": { "type": "string", "description": "Vault-relative folder to look in (default: the whole vault). Searches subfolders; skips HQ's own folders and Exports unless you name Exports itself." },
                 "status": { "type": "array", "items": { "type": "string", "enum": ["pending", "imported", "changed", "blocked"] }, "description": "Only these statuses (default: all)" },
                 "format": { "type": "array", "items": { "type": "string" }, "description": "Only these formats, such as pdf or docx" },
                 "limit": { "type": "integer", "description": "Most entries to list (default 100, at most 500). Counts always cover everything found." }
@@ -1681,6 +1681,16 @@ mod tests {
         );
         assert_eq!(inv["by_status"]["pending"], 3);
         assert_eq!(inv["other_files_not_listed"], 1);
+
+        // Naming Exports itself lists what was delivered there.
+        let exports = VaultInventoryTool::new(imp.clone())
+            .execute(json!({"directory": "Exports"}))
+            .await
+            .unwrap();
+        assert_eq!(
+            exports["entries"][0]["path"], "Exports/out.pdf",
+            "{exports}"
+        );
 
         run(&imp, json!({"path": "Notebooks/Projects/b.xlsx"})).await;
         let after = VaultInventoryTool::new(imp.clone())

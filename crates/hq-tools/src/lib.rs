@@ -25,6 +25,7 @@ pub mod contacts;
 pub mod context_gateway;
 pub mod convert;
 pub mod copilot_credits;
+pub mod deliver;
 pub mod device_actions;
 pub mod external_runner;
 pub mod family_confirm;

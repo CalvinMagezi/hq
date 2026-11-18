@@ -4013,6 +4013,7 @@ dependencies = [
  "uuid",
  "which",
  "wiremock",
+ "zip 9.0.5",
 ]
 
 [[package]]
