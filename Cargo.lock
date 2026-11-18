@@ -3741,6 +3741,7 @@ dependencies = [
  "hq-core",
  "hq-db",
  "hq-tools",
+ "hq-tools-office",
  "hq-vault",
  "rmcp",
  "serde",
@@ -4004,7 +4005,6 @@ dependencies = [
  "hq-host",
  "hq-llm",
  "hq-memory",
- "hq-suite-adapter",
  "hq-tool-api",
  "hq-tools-coding",
  "hq-tools-web",
@@ -4049,6 +4049,19 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "hq-tools-office"
+version = "0.9.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "hq-suite-adapter",
+ "hq-tool-api",
+ "serde_json",
  "tempfile",
  "tokio",
 ]
