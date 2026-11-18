@@ -118,10 +118,6 @@ pub fn create_vault_tools(
         Box::new(VaultInventoryTool::new(importer.clone())),
         Box::new(VaultImportTool::new(importer)),
     ];
-    tools.extend(crate::vault_reorg::create_vault_reorg_tools(
-        vault.clone(),
-        db.clone(),
-    ));
 
     if let Some(db) = db {
         tools.push(Box::new(NoteReviewTool::new(vault.clone(), db.clone())));
