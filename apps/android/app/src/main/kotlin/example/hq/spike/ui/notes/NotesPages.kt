@@ -199,6 +199,7 @@ private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions, onAsk: 
     androidx.compose.runtime.CompositionLocalProvider(
         example.hq.spike.ui.chat.blocks.LocalNoteFolder provides note.path.substringBeforeLast('/', ""),
         example.hq.spike.ui.chat.blocks.LocalNotePath provides note.path,
+        example.hq.spike.ui.chat.blocks.LocalBlocksRevision provides androidx.compose.runtime.remember(note.path) { androidx.compose.runtime.mutableIntStateOf(0) },
     ) {
     Column(Modifier.fillMaxSize()) {
         TopBar(note.title, listOf(note.trail, phase.edited).filter { it.isNotBlank() }.joinToString(" · "), actions.onBack) {

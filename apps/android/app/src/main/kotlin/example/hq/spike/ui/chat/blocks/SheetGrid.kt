@@ -3,6 +3,7 @@ package example.hq.spike.ui.chat.blocks
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +44,9 @@ import example.hq.spike.data.TileView
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 
+/** Counts the sheet edits made in the note being read, so its tiles and plots ask hq again. Null where nothing can be edited. */
+val LocalBlocksRevision = compositionLocalOf<androidx.compose.runtime.MutableIntState?> { null }
+
 /** The vault path of the note being read, so a `sheet` block can ask hq for its cells. Null in chat, where a sheet stays a code block. */
 val LocalNotePath = compositionLocalOf<String?> { null }
 
@@ -81,23 +85,27 @@ fun SheetBlockView(block: Block.Sheet, onCopied: () -> Unit) {
     var edited by remember(path, block.index) { mutableStateOf<SheetView?>(null) }
     var editing by remember { mutableStateOf<EditTarget?>(null) }
     val scope = rememberCoroutineScope()
+    val revision = LocalBlocksRevision.current
     when (val r = loaded) {
         null -> BlockFrame { Text(stringResource(R.string.suite_sheet_drawing), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(12.dp)) }
         else -> r.fold({
             val canEdit = path != null && fixed == null
             SheetGrid(edited ?: it, canEdit) { row, col, cell -> editing = EditTarget(row, col, cell.raw) }
+            // The note reader's text selection reaches into a dialog (a different window), and its sorting then fails; selection is off for it.
             editing?.let { target ->
+                DisableSelection {
                 CellEditDialog(
                     target,
                     onDismiss = { editing = null },
                     onSave = { text, failed ->
                         scope.launch {
                             runCatching { client.suiteEditCell(path!!, block.index, target.row, target.col, target.raw, text) }
-                                .onSuccess { fresh -> edited = fresh; editing = null }
+                                .onSuccess { fresh -> edited = fresh; editing = null; revision?.let { it.intValue++ } }
                                 .onFailure { failed() }
                         }
                     },
                 )
+                }
             }
         }, { CodeBlockView("sheet", block.source, onCopied) })
     }
@@ -180,12 +188,15 @@ private fun SheetGrid(view: SheetView, editable: Boolean, onEdit: (row: Int, col
 private fun GridCell(cell: SheetCell, header: Boolean, modifier: Modifier, onLongPress: (() -> Unit)?) {
     val press = if (onLongPress == null) Modifier else Modifier.combinedClickable(onLongClickLabel = stringResource(R.string.suite_sheet_edit_label), onLongClick = onLongPress, onClick = {})
     Box(modifier.then(press).fillMaxWidth().widthIn(min = CellMinWidth, max = CellMaxWidth).heightIn(min = 40.dp).padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = if (cell.number && !header) Alignment.CenterEnd else Alignment.CenterStart) {
-        Text(
-            cell.text,
-            style = if (header) HqType.BodySmBold else HqType.BodySm,
-            color = if (cell.error) Mts.Amber else Mts.Ink,
-            maxLines = 2, overflow = TextOverflow.Ellipsis,
-        )
+        // A press and hold on a cell edits it, so the cell's text is not selectable.
+        DisableSelection {
+            Text(
+                cell.text,
+                style = if (header) HqType.BodySmBold else HqType.BodySm,
+                color = if (cell.error) Mts.Amber else Mts.Ink,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -196,7 +207,8 @@ fun TileBlockView(block: Block.Tile) {
     val fixed = SheetFixture.tile
     if (path == null && fixed == null) return
     val client = HqServices.get(LocalContext.current).client
-    val loaded by produceState<TileView?>(fixed, path, block.index) {
+    val revision = LocalBlocksRevision.current?.intValue
+    val loaded by produceState<TileView?>(fixed, path, block.index, revision) {
         if (fixed == null && path != null) value = runCatching { client.suiteTile(path, block.index) }.getOrNull()
     }
     val tile = loaded ?: return
@@ -218,7 +230,8 @@ fun PlotBlockView(block: Block.Plot, onOpen: (ChartSpec) -> Unit) {
     val fixed = SheetFixture.plot
     if (path == null && fixed == null) return
     val client = HqServices.get(LocalContext.current).client
-    val loaded by produceState<Result<String>?>(fixed?.let { Result.success(it) }, path, block.index) {
+    val revision = LocalBlocksRevision.current?.intValue
+    val loaded by produceState<Result<String>?>(fixed?.let { Result.success(it) }, path, block.index, revision) {
         if (fixed == null && path != null) value = runCatching { client.suitePlot(path, block.index) }
     }
     val json = loaded ?: return
