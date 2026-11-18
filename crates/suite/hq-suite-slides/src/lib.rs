@@ -144,4 +144,53 @@ mod tests {
             .map(|i| String::from_utf8_lossy(zip.by_index(i).unwrap().name_raw()).into_owned())
             .collect()
     }
+
+    #[test]
+    fn speaker_notes_make_a_notes_master_and_a_notes_page_per_card_with_notes_and_well_formed_parts()
+     {
+        let md = "# T\n\n## One\n<!-- notes: Say <this> & that. -->\n\n- a\n\n## Two\n\n- b\n\n## Three\n<!-- notes: Last one. -->\n\n- c\n";
+        let (_, bytes, _) = pptx_from_markdown("t", md, &|_| None).unwrap();
+        let all = parts(&bytes);
+        let names: Vec<&str> = all.iter().map(|(n, _)| n.as_str()).collect();
+        for wanted in [
+            "ppt/notesMasters/notesMaster1.xml",
+            "ppt/theme/theme2.xml",
+            "ppt/notesSlides/notesSlide2.xml",
+            "ppt/notesSlides/notesSlide4.xml",
+        ] {
+            assert!(names.contains(&wanted), "{wanted} is missing");
+        }
+        assert!(
+            !names.contains(&"ppt/notesSlides/notesSlide3.xml"),
+            "a card with no notes has no notes page"
+        );
+        for (name, xml) in &all {
+            roxmltree::Document::parse(xml).unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+        let page = &all
+            .iter()
+            .find(|(n, _)| n == "ppt/notesSlides/notesSlide2.xml")
+            .unwrap()
+            .1;
+        assert!(page.contains("Say &lt;this&gt; &amp; that."));
+        let slide_rels = &all
+            .iter()
+            .find(|(n, _)| n == "ppt/slides/_rels/slide2.xml.rels")
+            .unwrap()
+            .1;
+        assert!(slide_rels.contains("../notesSlides/notesSlide2.xml"));
+        let pres = &all
+            .iter()
+            .find(|(n, _)| n == "ppt/presentation.xml")
+            .unwrap()
+            .1;
+        assert!(pres.contains("<p:notesMasterIdLst>"));
+        let none = pptx_from_markdown("t", "# T\n\n## A\n\ntext\n", &|_| None)
+            .unwrap()
+            .1;
+        assert!(
+            !parts(&none).iter().any(|(n, _)| n.contains("notes")),
+            "a deck without notes has no notes parts"
+        );
+    }
 }

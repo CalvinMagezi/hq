@@ -65,6 +65,8 @@ pub struct Card {
     pub layout: Layout,
     /// One column, or two when the layout is `two-column` (split at the first rule).
     pub columns: Vec<Vec<Item>>,
+    /// Speaker notes, one paragraph each: `<!-- notes: ... -->` under the card's heading.
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -197,28 +199,92 @@ fn blocks_to_items(blocks: &[Block], out: &mut Vec<Item>, pictures: &mut Vec<(St
     }
 }
 
-/// The layout comment under a card's heading, and the markdown without it.
-fn take_layout(lines: &[&str]) -> (Option<String>, String) {
-    let mut name = None;
+/// What a card's comments say: the layout name, the speaker notes and the markdown without them.
+struct CardComments {
+    layout: Option<String>,
+    notes: Vec<String>,
+    markdown: String,
+}
+
+/// The layout and notes comments of a card (`<!-- layout: NAME -->`, `<!-- notes: text -->`, or a notes
+/// comment that runs over several lines), and the markdown without them. Comments inside a code
+/// fence are code, not comments.
+fn take_comments(lines: &[&str]) -> CardComments {
+    let mut out = CardComments {
+        layout: None,
+        notes: Vec::new(),
+        markdown: String::new(),
+    };
     let mut kept = Vec::new();
     let mut in_fence = false;
+    // The lines of a notes comment that has not closed yet.
+    let mut open_notes: Option<Vec<String>> = None;
     for line in lines {
         let t = line.trim();
+        if let Some(buf) = open_notes.as_mut() {
+            match t.strip_suffix("-->") {
+                Some(last) => {
+                    buf.push(last.trim().to_string());
+                    out.notes.extend(paragraphs(buf));
+                    open_notes = None;
+                }
+                None => buf.push(t.to_string()),
+            }
+            continue;
+        }
         if t.starts_with("```") || t.starts_with("~~~") {
             in_fence = !in_fence;
         }
-        let comment = (!in_fence)
-            .then(|| t.strip_prefix("<!--").and_then(|r| r.strip_suffix("-->")))
+        let inner = (!in_fence)
+            .then(|| t.strip_prefix("<!--"))
             .flatten()
+            .map(str::trim);
+        let Some(inner) = inner else {
+            kept.push(*line);
+            continue;
+        };
+        if let Some(rest) = inner.strip_prefix("notes:") {
+            match rest.strip_suffix("-->") {
+                Some(done) => out.notes.extend(paragraphs(&[done.trim().to_string()])),
+                None => open_notes = Some(vec![rest.trim().to_string()]),
+            }
+            continue;
+        }
+        let layout = inner
+            .strip_suffix("-->")
             .map(str::trim)
-            .and_then(|c| c.strip_prefix("layout:"))
-            .map(|n| n.trim().to_string());
-        match comment {
-            Some(n) if name.is_none() => name = Some(n),
+            .and_then(|c| c.strip_prefix("layout:"));
+        match layout {
+            Some(n) if out.layout.is_none() => out.layout = Some(n.trim().to_string()),
             _ => kept.push(*line),
         }
     }
-    (name, kept.join("\n"))
+    // A notes comment that never closes is text the person wrote; it is not lost.
+    if let Some(buf) = open_notes {
+        out.notes.extend(paragraphs(&buf));
+    }
+    out.markdown = kept.join("\n");
+    out
+}
+
+/// Notes lines as paragraphs: blank lines separate them, and a paragraph's lines are joined.
+fn paragraphs(lines: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current: Vec<&str> = Vec::new();
+    for l in lines.iter().map(|l| l.trim()) {
+        if l.is_empty() {
+            if !current.is_empty() {
+                out.push(current.join(" "));
+                current.clear();
+            }
+        } else {
+            current.push(l);
+        }
+    }
+    if !current.is_empty() {
+        out.push(current.join(" "));
+    }
+    out
 }
 
 /// Splits markdown into the title section and one section per level 2 heading, outside code fences.
@@ -278,7 +344,8 @@ impl Deck {
             })
             .collect();
         for (title, body) in card_sections.into_iter().take(MAX_CARDS) {
-            let (layout_name, md) = take_layout(&body);
+            let comments = take_comments(&body);
+            let (layout_name, md, notes) = (comments.layout, comments.markdown, comments.notes);
             let layout = match layout_name.as_deref() {
                 None => Layout::Content,
                 Some(n) => Layout::named(n).unwrap_or_else(|| {
@@ -304,6 +371,7 @@ impl Deck {
                 title,
                 layout,
                 columns,
+                notes,
             });
         }
         deck
@@ -350,6 +418,27 @@ mod tests {
         assert_eq!(d.unknown_layouts, ["carousel"]);
         assert_eq!(d.cards[3].layout, Layout::Content);
         assert!(matches!(&d.cards[3].columns[0][1], Item::Picture { src, .. } if src == "x.png"));
+    }
+
+    #[test]
+    fn speaker_notes_are_read_from_one_or_several_lines_and_a_fenced_comment_is_code() {
+        let md = "# T\n\n## A\n<!-- notes: Say this first. -->\n\n- point\n\n<!-- notes:\nThen this,\nover two lines.\n\nA second paragraph.\n-->\n\n## B\n\n```\n<!-- notes: not a note -->\n```\n\n## C\n<!-- notes: never closed\nstill kept\n";
+        let d = Deck::from_markdown("x", md);
+        assert_eq!(
+            d.cards[0].notes,
+            [
+                "Say this first.",
+                "Then this, over two lines.",
+                "A second paragraph."
+            ]
+        );
+        assert!(d.cards[1].notes.is_empty());
+        assert!(matches!(&d.cards[1].columns[0][0], Item::Code(c) if c.contains("not a note")));
+        assert_eq!(d.cards[2].notes, ["never closed still kept"]);
+        assert!(
+            matches!(&d.cards[0].columns[0][0], Item::Bullet { .. }),
+            "the comments are not slide text"
+        );
     }
 
     #[test]
