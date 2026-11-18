@@ -2,514 +2,10 @@ use anyhow::Result;
 use rusqlite::{Connection, TransactionBehavior};
 use tracing::info;
 
-const MIGRATIONS: &[(&str, &str)] = &[
-    ("001_initial", include_str!("../sql/001_initial.sql")),
-    (
-        "002_graph_links",
-        include_str!("../sql/002_graph_links.sql"),
-    ),
-    (
-        "003_memory_system",
-        include_str!("../sql/003_memory_system.sql"),
-    ),
-    (
-        "004_harness_quotas",
-        include_str!("../sql/004_harness_quotas.sql"),
-    ),
-    (
-        "005_research_lessons",
-        include_str!("../sql/005_research_lessons.sql"),
-    ),
-    (
-        "007_codegraph_v2",
-        include_str!("../sql/007_codegraph_v2.sql"),
-    ),
-    (
-        "008_wa_signal_state",
-        include_str!("../sql/008_wa_signal_state.sql"),
-    ),
-    (
-        "009_earn_system",
-        include_str!("../sql/009_earn_system.sql"),
-    ),
-    (
-        "010_vault_cache",
-        include_str!("../sql/010_vault_cache.sql"),
-    ),
-    (
-        "011_vector_cache",
-        include_str!("../sql/011_vector_cache.sql"),
-    ),
-    (
-        "012_skill_invocations",
-        include_str!("../sql/012_skill_invocations.sql"),
-    ),
-    (
-        "012_task_outcomes",
-        include_str!("../sql/012_task_outcomes.sql"),
-    ),
-    (
-        "013_chat_threads",
-        include_str!("../sql/013_chat_threads.sql"),
-    ),
-    (
-        "014_coding_agent_discovery",
-        include_str!("../sql/014_coding_agent_discovery.sql"),
-    ),
-    ("015_tool_usage", include_str!("../sql/015_tool_usage.sql")),
-    (
-        "016_proxy_calls",
-        include_str!("../sql/016_proxy_calls.sql"),
-    ),
-    (
-        "017_proxy_task_type",
-        include_str!("../sql/017_proxy_task_type.sql"),
-    ),
-    (
-        "018_vault_cache_token_count",
-        include_str!("../sql/018_vault_cache_token_count.sql"),
-    ),
-    (
-        "019_vault_cache_content",
-        include_str!("../sql/019_vault_cache_content.sql"),
-    ),
-    (
-        "020_identity_columns",
-        include_str!("../sql/020_identity_columns.sql"),
-    ),
-    (
-        "021_company_spend",
-        include_str!("../sql/021_company_spend.sql"),
-    ),
-    (
-        "022_workflow_runs",
-        include_str!("../sql/022_workflow_runs.sql"),
-    ),
-    (
-        "023_thread_note_path",
-        include_str!("../sql/023_thread_note_path.sql"),
-    ),
-    ("024_calendar", include_str!("../sql/024_calendar.sql")),
-    (
-        "025_value_items",
-        include_str!("../sql/025_value_items.sql"),
-    ),
-    (
-        "026_proxy_turn_id",
-        include_str!("../sql/026_proxy_turn_id.sql"),
-    ),
-    (
-        "027_dispatch_governance",
-        include_str!("../sql/027_dispatch_governance.sql"),
-    ),
-    (
-        "028_hermes_sessions",
-        include_str!("../sql/028_hermes_sessions.sql"),
-    ),
-    (
-        "029_proxy_calls_quality",
-        include_str!("../sql/029_proxy_calls_quality.sql"),
-    ),
-    (
-        "030_self_update",
-        include_str!("../sql/030_self_update.sql"),
-    ),
-    (
-        "031_harness_sessions",
-        include_str!("../sql/031_harness_sessions.sql"),
-    ),
-    ("032_missions", include_str!("../sql/032_missions.sql")),
-    (
-        "033_missions_teamlead",
-        include_str!("../sql/033_missions_teamlead.sql"),
-    ),
-    (
-        "034_background_turns",
-        include_str!("../sql/034_background_turns.sql"),
-    ),
-    (
-        "035_background_turn_watches",
-        include_str!("../sql/035_background_turn_watches.sql"),
-    ),
-    (
-        "036_harness_session_snapshot",
-        include_str!("../sql/036_harness_session_snapshot.sql"),
-    ),
-    (
-        "037_factory_proposals",
-        include_str!("../sql/037_factory_proposals.sql"),
-    ),
-    (
-        "038_factory_proposals_verify_block",
-        include_str!("../sql/038_factory_proposals_verify_block.sql"),
-    ),
-    (
-        "039_background_turns_blocked_on",
-        include_str!("../sql/039_background_turns_blocked_on.sql"),
-    ),
-    (
-        "040_factory_proposals_backoff",
-        include_str!("../sql/040_factory_proposals_backoff.sql"),
-    ),
-    (
-        "041_platform_threads",
-        include_str!("../sql/041_platform_threads.sql"),
-    ),
-    (
-        "042_missions_category",
-        include_str!("../sql/042_missions_category.sql"),
-    ),
-    (
-        "043_harness_sessions_herdr",
-        include_str!("../sql/043_harness_sessions_herdr.sql"),
-    ),
-    ("044_tasks", include_str!("../sql/044_tasks.sql")),
-    (
-        "045_drop_missions_factory",
-        include_str!("../sql/045_drop_missions_factory.sql"),
-    ),
-    (
-        "046_drop_proxy_calls",
-        include_str!("../sql/046_drop_proxy_calls.sql"),
-    ),
-    (
-        "047_task_folders",
-        include_str!("../sql/047_task_folders.sql"),
-    ),
-    (
-        "048_drop_coding_agent_registry",
-        include_str!("../sql/048_drop_coding_agent_registry.sql"),
-    ),
-    ("049_drop_plans", include_str!("../sql/049_drop_plans.sql")),
-    (
-        "050_drop_dead_memory_tables",
-        include_str!("../sql/050_drop_dead_memory_tables.sql"),
-    ),
-    ("051_drop_facts", include_str!("../sql/051_drop_facts.sql")),
-    (
-        "052_purge_cognition_memories",
-        include_str!("../sql/052_purge_cognition_memories.sql"),
-    ),
-    (
-        "053_task_hierarchy_and_dependencies",
-        include_str!("../sql/053_task_hierarchy_and_dependencies.sql"),
-    ),
-    (
-        "054_drop_whatsapp_tables",
-        include_str!("../sql/054_drop_whatsapp_tables.sql"),
-    ),
-    (
-        "055_drop_calendar_tables",
-        include_str!("../sql/055_drop_calendar_tables.sql"),
-    ),
-    (
-        "056_drop_codegraph_tables",
-        include_str!("../sql/056_drop_codegraph_tables.sql"),
-    ),
-    (
-        "057_drop_dead_tables",
-        include_str!("../sql/057_drop_dead_tables.sql"),
-    ),
-    (
-        MEMORY_SCHEMA_MIGRATION,
-        include_str!("../sql/058_memory_schema.sql"),
-    ),
-    (
-        "059_drop_wikilink_graph_links",
-        include_str!("../sql/059_drop_wikilink_graph_links.sql"),
-    ),
-    (
-        "060_chat_message_meta",
-        include_str!("../sql/060_chat_message_meta.sql"),
-    ),
-    (
-        "061_harness_session_driver",
-        include_str!("../sql/061_harness_session_driver.sql"),
-    ),
-    (
-        "062_task_lifecycle_events",
-        include_str!("../sql/062_task_lifecycle_events.sql"),
-    ),
-    ("063_task_graph", include_str!("../sql/063_task_graph.sql")),
-    (
-        "064_harness_session_goal",
-        include_str!("../sql/064_harness_session_goal.sql"),
-    ),
-    (
-        "065_graph_provenance",
-        include_str!("../sql/065_graph_provenance.sql"),
-    ),
-    (
-        "066_copilot_usage_samples",
-        include_str!("../sql/066_copilot_usage_samples.sql"),
-    ),
-    (
-        "067_subagent_runs",
-        include_str!("../sql/067_subagent_runs.sql"),
-    ),
-    (
-        "068_task_external_id",
-        include_str!("../sql/068_task_external_id.sql"),
-    ),
-    ("069_hq_asks", include_str!("../sql/069_hq_asks.sql")),
-    (
-        "070_harness_session_drive_guards",
-        include_str!("../sql/070_harness_session_drive_guards.sql"),
-    ),
-    (
-        "071_harness_session_dismissals",
-        include_str!("../sql/071_harness_session_dismissals.sql"),
-    ),
-    (
-        "072_harness_session_dismiss_tail",
-        include_str!("../sql/072_harness_session_dismiss_tail.sql"),
-    ),
-    (
-        "073_approval_binding",
-        include_str!("../sql/073_approval_binding.sql"),
-    ),
-    (
-        "074_harness_session_tokens",
-        include_str!("../sql/074_harness_session_tokens.sql"),
-    ),
-    (
-        "075_task_messages",
-        include_str!("../sql/075_task_messages.sql"),
-    ),
-    (
-        "076_session_parent",
-        include_str!("../sql/076_session_parent.sql"),
-    ),
-    (
-        "077_session_archive",
-        include_str!("../sql/077_session_archive.sql"),
-    ),
-    (
-        "078_ledger_cost_attribution",
-        include_str!("../sql/078_ledger_cost_attribution.sql"),
-    ),
-    (
-        "079_harness_usage",
-        include_str!("../sql/079_harness_usage.sql"),
-    ),
-    (
-        "080_task_event_log",
-        include_str!("../sql/080_task_event_log.sql"),
-    ),
-    (
-        "081_task_work_sessions",
-        include_str!("../sql/081_task_work_sessions.sql"),
-    ),
-    (
-        "082_task_estimate",
-        include_str!("../sql/082_task_estimate.sql"),
-    ),
-    ("083_task_links", include_str!("../sql/083_task_links.sql")),
-    (
-        "084_task_durability",
-        include_str!("../sql/084_task_durability.sql"),
-    ),
-    (
-        "085_task_assignees",
-        include_str!("../sql/085_task_assignees.sql"),
-    ),
-    (
-        "086_harness_session_purpose",
-        include_str!("../sql/086_harness_session_purpose.sql"),
-    ),
-    (
-        "087_mcp_connector",
-        include_str!("../sql/087_mcp_connector.sql"),
-    ),
-    ("088_web_push", include_str!("../sql/088_web_push.sql")),
-    (
-        "089_mcp_connector_audit",
-        include_str!("../sql/089_mcp_connector_audit.sql"),
-    ),
-    (
-        "090_web_device_tokens",
-        include_str!("../sql/090_web_device_tokens.sql"),
-    ),
-    (
-        "091_embedding_content_hash",
-        include_str!("../sql/091_embedding_content_hash.sql"),
-    ),
-    (
-        "092_note_provenance",
-        include_str!("../sql/092_note_provenance.sql"),
-    ),
-    (
-        "093_skill_invocation_evidence",
-        include_str!("../sql/093_skill_invocation_evidence.sql"),
-    ),
-    (
-        "094_skill_invocation_rollups",
-        include_str!("../sql/094_skill_invocation_rollups.sql"),
-    ),
-    (
-        "095_task_verification",
-        include_str!("../sql/095_task_verification.sql"),
-    ),
-    (
-        "096_task_calibration",
-        include_str!("../sql/096_task_calibration.sql"),
-    ),
-    (
-        "097_task_sweeps",
-        include_str!("../sql/097_task_sweeps.sql"),
-    ),
-    (
-        "098_bridge_pairing",
-        include_str!("../sql/098_bridge_pairing.sql"),
-    ),
-    (
-        "099_bridge_edge",
-        include_str!("../sql/099_bridge_edge.sql"),
-    ),
-    (
-        "100_harness_session_model",
-        include_str!("../sql/100_harness_session_model.sql"),
-    ),
-    (
-        "101_session_folder_grants",
-        include_str!("../sql/101_session_folder_grants.sql"),
-    ),
-    (
-        "102_dialog_alerts",
-        include_str!("../sql/102_dialog_alerts.sql"),
-    ),
-    (
-        "103_host_outages",
-        include_str!("../sql/103_host_outages.sql"),
-    ),
-    (
-        "104_session_checkouts",
-        include_str!("../sql/104_session_checkouts.sql"),
-    ),
-    (
-        "105_session_policies",
-        include_str!("../sql/105_session_policies.sql"),
-    ),
-    (
-        "106_bridge_setup",
-        include_str!("../sql/106_bridge_setup.sql"),
-    ),
-    (
-        "107_session_checkout_start",
-        include_str!("../sql/107_session_checkout_start.sql"),
-    ),
-    (
-        "108_session_subscriptions",
-        include_str!("../sql/108_session_subscriptions.sql"),
-    ),
-    ("109_offer_log", include_str!("../sql/109_offer_log.sql")),
-    (
-        "110_bridge_shared_model",
-        include_str!("../sql/110_bridge_shared_model.sql"),
-    ),
-    ("111_push_kinds", include_str!("../sql/111_push_kinds.sql")),
-    ("112_client_ids", include_str!("../sql/112_client_ids.sql")),
-    (
-        "113_owner_approvals",
-        include_str!("../sql/113_owner_approvals.sql"),
-    ),
-    (
-        "114_device_names",
-        include_str!("../sql/114_device_names.sql"),
-    ),
-    (
-        "115_thread_folds",
-        include_str!("../sql/115_thread_folds.sql"),
-    ),
-    (
-        "116_chat_search",
-        include_str!("../sql/116_chat_search.sql"),
-    ),
-    (
-        "117_link_captures",
-        include_str!("../sql/117_link_captures.sql"),
-    ),
-    (
-        "118_collection_tips",
-        include_str!("../sql/118_collection_tips.sql"),
-    ),
-    ("119_coder_jobs", include_str!("../sql/119_coder_jobs.sql")),
-    (
-        "120_fetch_site_grants",
-        include_str!("../sql/120_fetch_site_grants.sql"),
-    ),
-    (
-        "121_offer_schedule",
-        include_str!("../sql/121_offer_schedule.sql"),
-    ),
-    (
-        "122_inbox_read_and_silence",
-        include_str!("../sql/122_inbox_read_and_silence.sql"),
-    ),
-    (
-        "123_thread_taint",
-        include_str!("../sql/123_thread_taint.sql"),
-    ),
-    (
-        "124_checkpoint_suggested_skills",
-        include_str!("../sql/124_checkpoint_suggested_skills.sql"),
-    ),
-    (
-        "125_quiet_fleet",
-        include_str!("../sql/125_quiet_fleet.sql"),
-    ),
-    ("126_note_seen", include_str!("../sql/126_note_seen.sql")),
-    (
-        "127_site_allowed_once",
-        include_str!("../sql/127_site_allowed_once.sql"),
-    ),
-    (
-        "128_offer_memory",
-        include_str!("../sql/128_offer_memory.sql"),
-    ),
-    (
-        "129_lane_quota_samples",
-        include_str!("../sql/129_lane_quota_samples.sql"),
-    ),
-    (
-        "130_context_gateway",
-        include_str!("../sql/130_context_gateway.sql"),
-    ),
-    (
-        "131_lane_quota_alerts",
-        include_str!("../sql/131_lane_quota_alerts.sql"),
-    ),
-    (
-        "132_context_gateway_audit",
-        include_str!("../sql/132_context_gateway_audit.sql"),
-    ),
-    ("133_note_keep", include_str!("../sql/133_note_keep.sql")),
-    (
-        "134_context_gateway_trail",
-        include_str!("../sql/134_context_gateway_trail.sql"),
-    ),
-    (
-        "135_trusted_domains",
-        include_str!("../sql/135_trusted_domains.sql"),
-    ),
-    ("136_task_shelf", include_str!("../sql/136_task_shelf.sql")),
-    (
-        "137_owner_folder_grants",
-        include_str!("../sql/137_owner_folder_grants.sql"),
-    ),
-    (
-        "138_helper_setup",
-        include_str!("../sql/138_helper_setup.sql"),
-    ),
-    (
-        "139_owner_prefs",
-        include_str!("../sql/139_owner_prefs.sql"),
-    ),
-    (
-        "140_thread_seen_urls",
-        include_str!("../sql/140_thread_seen_urls.sql"),
-    ),
-];
+/// Every migration, in the order it runs: (name, SQL). The list is written by `build.rs` from the
+/// files in `sql/` in file name order, so adding a migration is adding a file. The name is the
+/// file name without `.sql` and is what `schema_version` records.
+const MIGRATIONS: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/migrations_list.rs"));
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
 
@@ -687,6 +183,148 @@ mod tests {
             assert!(ident(table) && ident(col), "{table}.{col}");
             assert!(typedef(def), "{table}.{col}: {def}");
         }
+    }
+
+    /// Numbers that two migrations share, because the history has them: `012_skill_invocations`
+    /// and `012_task_outcomes` were added on two branches. Nothing new belongs here.
+    const KNOWN_SHARED_NUMBERS: &[u32] = &[12];
+    /// Numbers no migration has, because none was ever written under them. Nothing new belongs
+    /// here either: a gap is a mistake unless someone says why.
+    const KNOWN_MISSING_NUMBERS: &[u32] = &[6];
+
+    /// What is wrong with a list of migration names, in words a person can act on. Empty means
+    /// the list is fine. The names are the file names without `.sql`.
+    fn migration_number_problems(names: &[&str], shared: &[u32], missing: &[u32]) -> Vec<String> {
+        let mut problems = Vec::new();
+        let mut numbers: Vec<(u32, &str)> = Vec::new();
+        for name in names {
+            let (digits, rest) = name.split_at(name.len().min(3));
+            let well_formed = digits.len() == 3
+                && digits.bytes().all(|b| b.is_ascii_digit())
+                && rest.starts_with('_')
+                && rest.len() > 1
+                && rest[1..]
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+            if well_formed {
+                numbers.push((digits.parse().unwrap(), name));
+            } else {
+                problems.push(format!(
+                    "`{name}.sql` is not named NNN_snake_case_description.sql (three digits, then lowercase words)"
+                ));
+            }
+        }
+        for pair in names.windows(2) {
+            if pair[0] >= pair[1] {
+                problems.push(format!("`{}` and `{}` are not in order", pair[0], pair[1]));
+            }
+        }
+        let mut seen: std::collections::BTreeMap<u32, Vec<&str>> = Default::default();
+        for (n, name) in &numbers {
+            seen.entry(*n).or_default().push(name);
+        }
+        for (n, group) in &seen {
+            if group.len() > 1 && !shared.contains(n) {
+                problems.push(format!(
+                    "{} share the number {n:03}: if neither has been released rename the later one to the next free number; if one has, rename it and add the old name to RENAMED so databases that ran it do not run it twice",
+                    group.join(" and ")
+                ));
+            }
+        }
+        if let Some(&max) = seen.keys().next_back() {
+            for n in 1..max {
+                if !seen.contains_key(&n) && !missing.contains(&n) {
+                    problems.push(format!(
+                        "no migration is numbered {n:03}: numbers must be consecutive (renumber, or list {n} in KNOWN_MISSING_NUMBERS with the reason)"
+                    ));
+                }
+            }
+        }
+        problems
+    }
+
+    #[test]
+    fn migration_numbers_are_unique_and_in_order() {
+        // build.rs lists sql/ in file name order, so a migration is just a new file; the price is
+        // that two branches adding `140_*.sql` merge cleanly in git. This is what catches that.
+        let names: Vec<&str> = super::MIGRATIONS.iter().map(|(name, _)| *name).collect();
+        let problems =
+            migration_number_problems(&names, KNOWN_SHARED_NUMBERS, KNOWN_MISSING_NUMBERS);
+        assert!(
+            problems.is_empty(),
+            "migrations:\n  {}",
+            problems.join("\n  ")
+        );
+        assert!(
+            names.contains(&super::MEMORY_SCHEMA_MIGRATION),
+            "the memory schema migration is named in the list"
+        );
+        // Every number the allowlists excuse is really still in that state, so they cannot rot.
+        for n in KNOWN_SHARED_NUMBERS {
+            let count = names
+                .iter()
+                .filter(|name| name.starts_with(&format!("{n:03}_")))
+                .count();
+            assert!(
+                count > 1,
+                "{n:03} is no longer shared: delete it from KNOWN_SHARED_NUMBERS"
+            );
+        }
+        for n in KNOWN_MISSING_NUMBERS {
+            let count = names
+                .iter()
+                .filter(|name| name.starts_with(&format!("{n:03}_")))
+                .count();
+            assert_eq!(
+                count, 0,
+                "{n:03} exists now: delete it from KNOWN_MISSING_NUMBERS"
+            );
+        }
+    }
+
+    #[test]
+    fn the_number_check_catches_what_it_is_for() {
+        let clean = ["001_a", "002_b", "003_c"];
+        assert!(migration_number_problems(&clean, &[], &[]).is_empty());
+
+        // Two branches each added number 004: merges cleanly in git, must fail here.
+        let two = ["001_a", "002_b", "003_c", "004_x", "004_y"];
+        let found = migration_number_problems(&two, &[], &[]);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0].contains("004_x and 004_y share the number 004"),
+            "{found:?}"
+        );
+        // ...unless history says it is fine.
+        assert!(migration_number_problems(&two, &[4], &[]).is_empty());
+
+        // A gap.
+        let gap = ["001_a", "003_c"];
+        let found = migration_number_problems(&gap, &[], &[]);
+        assert!(
+            found[0].contains("no migration is numbered 002"),
+            "{found:?}"
+        );
+        assert!(migration_number_problems(&gap, &[], &[2]).is_empty());
+
+        // A bad name, and a list out of order.
+        let bad = ["001_a", "002-b", "3_c"];
+        let found = migration_number_problems(&bad, &[], &[]);
+        assert_eq!(
+            found.len(),
+            2,
+            "the two badly named files and nothing else: {found:?}"
+        );
+        assert!(
+            found.iter().all(|p| p.contains("is not named NNN_")),
+            "{found:?}"
+        );
+        let unordered = ["002_b", "001_a"];
+        assert!(
+            migration_number_problems(&unordered, &[], &[])
+                .iter()
+                .any(|p| p.contains("not in order"))
+        );
     }
 
     #[test]
