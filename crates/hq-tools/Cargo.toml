@@ -4,7 +4,6 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-hq-suite-adapter = { workspace = true, optional = true }
 hq-host = { workspace = true }
 hq-core = { workspace = true }
 hq-tool-api = { workspace = true }
@@ -54,8 +53,6 @@ default = [
 # default-on today, matching every build that exists; a future non-default
 # build is what would actually exercise turning one off.
 gws = []
-# The `office_file` tool, over the HQ Suite (`hq-suite-adapter`).
-suite = ["dep:hq-suite-adapter"]
 # Test doubles other crates' tests use (a scripted host).
 test-support = []
 

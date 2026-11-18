@@ -8,11 +8,12 @@ default = [
     "gws",
 ]
 gws = ["hq-tools/gws"]
-suite = ["hq-tools/suite"]
+suite = ["dep:hq-tools-office"]
 
 [dependencies]
 hq-core = { workspace = true }
 hq-tools = { workspace = true }
+hq-tools-office = { workspace = true, optional = true }
 hq-vault = { workspace = true }
 hq-db = { workspace = true }
 rmcp = { workspace = true }
