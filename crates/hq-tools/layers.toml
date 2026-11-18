@@ -8,9 +8,10 @@
 # deletes its line here in the same PR. A module missing from [layers], or listed here and not in
 # src/, fails the test too: give a new module a layer when you add it.
 #
-# Layer 0 depends on nothing inside hq-tools. Layer 1 is free of the tangle (no path into it). Layers
-# 2 to 18 are the tangle, ordered by `module-graph.py` to have the fewest upward references. Layer 19
-# depends on the tangle and nothing depends back on it.
+# Layer 0 is empty: the foundation (`registry`, `util`, `family_guest`, `family_confirm`) moved to the
+# hq-tool-api crate, which hq-tools re-exports, so those are no longer modules of this crate. Layer 1
+# is free of the tangle (no path into it). Layers 2 to 18 are the tangle, ordered by `module-graph.py`
+# to have the fewest upward references. Layer 19 depends on the tangle and nothing depends back on it.
 
 allowed_back_edges = [
   "harness_session -> a2a",
@@ -29,12 +30,6 @@ allowed_back_edges = [
 ]
 
 [layers]
-# 0: the foundation (the HqTool trait and registry, shared helpers, family gates)
-family_confirm = 0
-family_guest = 0
-registry = 0
-util = 0
-
 # 1: free of the tangle
 agent_comm = 1
 agents = 1
