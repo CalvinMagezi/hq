@@ -36,9 +36,9 @@ the compiler or a test instead of by reading:
 | `hq-db/src/chat.rs:160,169` | `{base}` | a string literal local to `list_threads` | const |
 | `hq-db/src/harness_sessions_registry.rs:188,203,209,228,684,700` | `{COLS}` | module const | const |
 | `hq-db/src/harness_sessions_registry.rs:573,585` | `{column}` | `nudge_column(keys: bool)`, two literals | static |
-| `hq-db/src/migrations.rs:300` | `{table} {col} {typedef}` | `MEMORY_COLUMNS` const table, shape checked by `memory_columns_are_plain_identifiers_and_types` | const |
-| `hq-db/src/migrations.rs:517` | same | test-only copy of the loop above | const |
-| `hq-db/src/migrations.rs:338` | `sql` passed to `execute_batch` | `include_str!` migration files | const |
+| `hq-db/src/migrations.rs:41` | `{table} {col} {typedef}` | `MEMORY_COLUMNS` const table, shape checked by `memory_columns_are_plain_identifiers_and_types` | const |
+| `hq-db/src/migrations.rs:578` | same | test-only copy of the loop above | const |
+| `hq-db/src/migrations.rs:105` | `sql` passed to `execute_batch` | the migration files in `sql/`, listed by `hq-db/build.rs` and read with `include_str!` | const |
 | `hq-db/src/self_update_runs.rs:63,75,108` | `{COLS}` | module const | const |
 | `hq-db/src/self_update_runs.rs:93` | `{installed_at_sql}` | `if status == STATUS_INSTALLED { literal } else { "" }` | static |
 | `hq-db/src/subagent_runs.rs:352,385,406,434,504` | `{RUN_COLS}` | module const | const |
