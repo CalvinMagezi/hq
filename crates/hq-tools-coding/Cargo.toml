@@ -2,6 +2,7 @@
 name = "hq-tools-coding"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "HQ's coding tools (read, write, edit, search, git, shell) and the file-edit engine under them, split out of hq-tools."
 
 [dependencies]
