@@ -61,6 +61,7 @@ pub mod tasks;
 pub mod usage_forecast;
 pub mod vault;
 pub mod vault_reorg;
+pub mod write_policy;
 
 // These modules now live in `hq-tool-api` (they depend only on `hq-core`). Re-exported under the
 // same names so `hq_tools::registry::...` and `crate::registry::...` keep resolving.

@@ -19,7 +19,6 @@ allowed_back_edges = [
   "agent_host -> lane_quotas",
   "agent_host -> harness_session",
   "harness_session -> tasks",
-  "provenance -> vault",
   "agent_host -> helper_setup",
   "github -> tasks",
   "harness_session -> helper_setup",
@@ -32,6 +31,7 @@ allowed_back_edges = [
 [layers]
 # 1: free of the tangle
 agent_comm = 1
+write_policy = 1
 agents = 1
 background_turns = 1
 brand = 1

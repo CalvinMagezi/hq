@@ -484,7 +484,7 @@ impl Recorder {
     fn read_for_keeping(&self, rel: &str) -> Kept {
         use std::io::Read;
         if !rel.ends_with(".md")
-            || crate::vault::validate_write_path(&self.vault_path, rel).is_err()
+            || crate::write_policy::validate_write_path(&self.vault_path, rel).is_err()
         {
             return Kept::Nothing;
         }
