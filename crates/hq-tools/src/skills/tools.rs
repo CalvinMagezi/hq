@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
-use super::parse::*;
 use crate::registry::HqTool;
+use crate::skill_model::parse::*;
 
 pub struct ListSkillsTool {
     skills_dir: PathBuf,

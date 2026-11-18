@@ -1,5 +1,6 @@
 use super::*;
 use crate::skills::{list_skills, parse_skill, security_flags, validate_skill, validate_skills};
+use hq_core::config::HqConfig;
 
 const NAME: &str = "edge-coding-worker";
 const ACTIVE_NOW: &[&str] = &[NAME];

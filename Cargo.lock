@@ -4006,6 +4006,7 @@ dependencies = [
  "hq-memory",
  "hq-suite-adapter",
  "hq-tool-api",
+ "hq-tools-web",
  "hq-vault",
  "html2text",
  "libc",
@@ -4030,6 +4031,37 @@ dependencies = [
  "which",
  "wiremock",
  "zip 9.0.5",
+]
+
+[[package]]
+name = "hq-tools-web"
+version = "0.9.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "hex",
+ "hq-convert",
+ "hq-core",
+ "hq-llm",
+ "hq-tool-api",
+ "html2text",
+ "regex",
+ "reqwest 0.12.28",
+ "ring",
+ "rusqlite",
+ "scraper",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "wiremock",
 ]
 
 [[package]]

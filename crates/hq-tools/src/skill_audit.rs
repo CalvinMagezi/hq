@@ -7,7 +7,8 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::skills::{Severity, parse_skill, validate_skill, validate_skill_name};
+use crate::skill_model::parse::parse_skill;
+use crate::skill_model::validate::{Severity, validate_skill, validate_skill_name};
 
 /// One JSON line per adoption, hold, rejection, revert or delete, at the skills root.
 pub const AUDIT_FILE: &str = "_audit.jsonl";
@@ -67,8 +68,8 @@ impl AuditEntry {
 pub fn live_hash(skills_dir: &Path, name: &str) -> Option<String> {
     validate_skill_name(name).ok()?;
     // A session loads a built-in's embedded text, so that is what its records must name.
-    if crate::skills::builtin::is_active(name) {
-        return crate::skills::builtin::shipped_hash(name);
+    if crate::skill_model::shipped::is_active(name) {
+        return crate::skill_model::shipped::shipped_hash(name);
     }
     let content = std::fs::read_to_string(skills_dir.join(name).join(SKILL_FILE)).ok()?;
     Some(hex::encode(Sha256::digest(content.as_bytes())))

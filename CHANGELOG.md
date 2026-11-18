@@ -5,6 +5,7 @@ All notable changes to Agent-HQ will be documented in this file.
 ## [Unreleased]
 
 - Agent host: `agent_host.sandbox.strict_paths` runs any session whose working directory lies under a listed folder under the `strict` profile, whatever the default profile is. `hq doctor` lists the strict paths and the network allowlist in force.
+- Inbox: one audience function (`hq_db::inbox_prefs::audience`) decides whether an item is for the owner or the agents. The default list, the badge and web push hold only the owner's items; `?include_agent=1` lists the rest.
 
 ### Added
 
