@@ -79,7 +79,9 @@ Notes:
   one call site a bug report names.
 - Follow the surrounding code style. Named constants instead of magic numbers,
   error paths before happy paths, no new abstraction for a single call site.
-- Update docs and `CHANGELOG.md` when behavior, config or CLI output changes.
+- Update docs when behavior, config or CLI output changes, and add a changelog fragment: one file
+  `changelog.d/<slug>.<kind>.md` (see `changelog.d/README.md`). Do not edit `CHANGELOG.md` itself; the
+  fragments are folded into it when a release is cut.
 - A shortcut you knowingly leave is a file `docs/techdebt/<slug>.md` (see `docs/techdebt/README.md`),
   not a new row in `TECHDEBT.md`, which is frozen.
 - Security-relevant changes (auth, sandbox, governance, updater, anything that

@@ -371,6 +371,7 @@ Agent-HQ is a Cargo workspace of 17 crates and about 143,000 lines of Rust (556 
 | `hq-agent` | Session loop, sub-agents (`AgentService`), coding tools, governance rules, 5-layer context engine |
 | `hq-tools` | About 100 tools (vault, tasks, skills, harness sessions, GWS, remote MCP, etc.); `hq_discover` lists them live |
 | `hq-tool-api` | The `HqTool` trait and `ToolRegistry`, plus the helpers every tool uses; depends only on `hq-core` |
+| `hq-tools-web` | The web tools (search, fetch), the remote MCP bridge and image generation, split out of `hq-tools` |
 | `hq-mcp` | MCP stdio server: 2-tool gateway (`hq_discover` + `hq_call`) |
 | `hq-daemon` | Agent worker, value bus, memory cycle, email triage |
 | `hq-memory` | Memory consolidator, ingester, querier, forgetter, entity graph |
