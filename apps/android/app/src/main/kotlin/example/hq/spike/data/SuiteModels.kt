@@ -91,3 +91,15 @@ internal object SinkWire {
         }
     }
 }
+
+/** One block of a note as the block editor lists it: its place, the hash hq checks an edit against, its kind and its markdown. */
+data class BlockRow(val index: Int, val hash: String, val kind: String, val src: String)
+
+internal object BlocksWire {
+    fun list(o: JSONObject): List<BlockRow> {
+        val a = o.optJSONArray("blocks") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map {
+            BlockRow(it.optInt("index", 0), it.optString("hash", ""), it.optString("kind", ""), it.optString("src", ""))
+        }
+    }
+}
