@@ -76,3 +76,18 @@ internal object SheetWire {
 data class TileView(val label: String, val text: String)
 
 internal fun tileView(o: JSONObject) = TileView(o.optString("label", ""), o.optString("text", ""))
+
+/** A cold-storage sink as the phone lists it. */
+data class SinkInfo(val id: String, val kind: String, val place: String, val reachable: Boolean)
+
+/** What checking a sink found: the words hq wrote, and how many stored originals could not be restored. */
+data class SinkCheck(val text: String, val failed: Int)
+
+internal object SinkWire {
+    fun list(o: JSONObject): List<SinkInfo> {
+        val a = o.optJSONArray("sinks") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map {
+            SinkInfo(it.optString("id", ""), it.optString("kind", "folder"), it.optString("place", ""), it.optBoolean("reachable", false))
+        }
+    }
+}

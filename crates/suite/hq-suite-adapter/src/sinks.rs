@@ -96,14 +96,19 @@ fn read_code() -> Result<String> {
 }
 
 fn open(paths: &SuitePaths, id: &str) -> Result<Box<dyn Sink>> {
+    open_with_code(paths, id, &read_code()?)
+}
+
+/// The sink `id`, opened with a recovery code the caller already has (the phone asks the person and
+/// sends it for this one call; nothing keeps it).
+fn open_with_code(paths: &SuitePaths, id: &str, code: &str) -> Result<Box<dyn Sink>> {
     let e = entry(paths, id)?;
-    let code = read_code()?;
     if let Some(peer) = e.peer {
         let addr = parse_addr(&peer.addr).map_err(|e| anyhow::anyhow!("{e}"))?;
-        let sink = PeerSink::open(&peer.meta, &code, addr).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let sink = PeerSink::open(&peer.meta, code, addr).map_err(|e| anyhow::anyhow!("{e}"))?;
         return Ok(Box::new(sink));
     }
-    let sink = FolderSink::open(&e.path, &code).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let sink = FolderSink::open(&e.path, code).map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(Box::new(sink))
 }
 
@@ -261,6 +266,16 @@ pub fn drill(vault: &Path, sink: &str, sample: Option<usize>) -> Result<()> {
 /// `hq suite sink add-peer <id> <addr>`: a sink kept by a paired machine, reached through a
 /// loopback forward to that machine's `hq suite sink peer-serve`. Shows the recovery code once.
 pub fn add_peer(vault: &Path, id: &str, addr: &str) -> Result<()> {
+    let code = make_peer(vault, id, addr)?;
+    print!(
+        "{}",
+        text::sink_made(id, &format!("the peer at {addr}"), &code)
+    );
+    Ok(())
+}
+
+/// Makes a peer sink and returns its recovery code, which is shown once and kept nowhere.
+pub fn make_peer(vault: &Path, id: &str, addr: &str) -> Result<String> {
     let paths = SuitePaths::new(vault);
     let mut reg = load(&paths)?;
     if reg.sinks.iter().any(|e| e.id == id) {
@@ -283,11 +298,54 @@ pub fn add_peer(vault: &Path, id: &str, addr: &str) -> Result<()> {
         }),
     });
     save(&paths, &reg)?;
-    print!(
-        "{}",
-        text::sink_made(id, &format!("the peer at {addr}"), &code)
-    );
-    Ok(())
+    Ok(code)
+}
+
+/// A sink as a screen shows it.
+#[derive(Debug, Clone, Serialize)]
+pub struct SinkInfo {
+    pub id: String,
+    /// `folder` or `peer`.
+    pub kind: &'static str,
+    /// Where it is, in words: a folder path or the peer's forwarded address.
+    pub place: String,
+    pub reachable: bool,
+}
+
+/// Every sink this vault knows and whether it answers now.
+pub fn infos(vault: &Path) -> Result<Vec<SinkInfo>> {
+    let paths = SuitePaths::new(vault);
+    Ok(load(&paths)?
+        .sinks
+        .into_iter()
+        .map(|e| match &e.peer {
+            Some(p) => SinkInfo {
+                id: e.id.clone(),
+                kind: "peer",
+                place: p.addr.clone(),
+                reachable: parse_addr(&p.addr).is_ok_and(PeerSink::reachable),
+            },
+            None => SinkInfo {
+                id: e.id.clone(),
+                kind: "folder",
+                place: e.path.display().to_string(),
+                reachable: e.path.join("suite-sink.json").is_file(),
+            },
+        })
+        .collect())
+}
+
+/// Fetches a spread of the sink's originals and checks each opens and matches, with a recovery
+/// code the caller gives. A wrong code is refused before anything is read.
+pub fn drill_with_code(
+    vault: &Path,
+    id: &str,
+    code: &str,
+    sample: Option<usize>,
+) -> Result<hq_suite_sinks::Drill> {
+    let paths = SuitePaths::new(vault);
+    let store = open_with_code(&paths, id, code)?;
+    Ok(restore_drill(&*store, sample.unwrap_or(DEFAULT_SAMPLE)))
 }
 
 /// `hq suite sink register-peer <addr>`: adds a peer sink that already exists (this phone was
@@ -328,4 +386,55 @@ pub fn peer_serve(dir: &Path, port: u16) -> Result<()> {
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     crate::peer::serve(dir, listener, stop)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod screen_tests {
+    use super::*;
+    use std::net::TcpListener;
+    use std::sync::{Arc, atomic::AtomicBool};
+
+    #[test]
+    fn a_peer_sink_is_made_listed_and_checked_with_its_code_and_a_wrong_code_is_refused() {
+        let vault = tempfile::tempdir().unwrap();
+        let store = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let stop = Arc::new(AtomicBool::new(false));
+        let (dir, s2) = (store.path().to_path_buf(), Arc::clone(&stop));
+        let server = std::thread::spawn(move || crate::peer::serve(&dir, listener, s2).unwrap());
+        let code = make_peer(vault.path(), "phone-backup", &addr).unwrap();
+        assert!(
+            make_peer(vault.path(), "phone-backup", &addr).is_err(),
+            "a name is used once"
+        );
+        let listed = infos(vault.path()).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(
+            (listed[0].id.as_str(), listed[0].kind, listed[0].reachable),
+            ("phone-backup", "peer", true)
+        );
+        let drill = drill_with_code(vault.path(), "phone-backup", &code, None).unwrap();
+        assert_eq!(
+            (drill.checked, drill.failed.len()),
+            (0, 0),
+            "nothing is stored yet"
+        );
+        assert!(
+            drill_with_code(
+                vault.path(),
+                "phone-backup",
+                "AAAA-BBBB-CCCC-DDDD-EEEE",
+                None
+            )
+            .is_err()
+        );
+        assert!(drill_with_code(vault.path(), "nope", &code, None).is_err());
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        server.join().unwrap();
+        assert!(
+            !infos(vault.path()).unwrap()[0].reachable,
+            "a stopped peer is not reachable now"
+        );
+    }
 }

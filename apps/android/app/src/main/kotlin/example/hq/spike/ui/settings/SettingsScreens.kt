@@ -1481,6 +1481,7 @@ private fun CaptureWidgets(ui: SettingsUi, actions: SettingsActions) {
 private fun About(ui: SettingsUi, actions: SettingsActions) {
     Page {
         BackupCard(ui, actions)
+        ColdStorageCard()
         MovingCard()
         StorageGroup(ui, actions)
     }
