@@ -24,6 +24,16 @@ pub struct WebPushConfig {
     #[serde(default = "default_max_agent_per_hour")]
     pub max_agent_per_hour: u32,
 
+    /// Hours when nothing is pushed, as `HH:MM-HH:MM` in UTC (`22:00-07:00` wraps midnight).
+    /// What waits is pushed when the period ends. Unset: no quiet hours.
+    #[serde(default)]
+    pub quiet_hours_utc: Option<String>,
+
+    /// Pushes a day for items that are not approvals, `notify_owner` messages or reminders.
+    /// Those also fold into at most one push an hour; the rest stay in the inbox.
+    #[serde(default = "default_non_urgent_per_day")]
+    pub non_urgent_per_day: u32,
+
     /// Push services to accept subscriptions for besides the built-in ones (Google, Apple,
     /// Mozilla, Microsoft). A host name; its subdomains are allowed too.
     #[serde(default)]
@@ -34,6 +44,10 @@ fn default_max_agent_per_hour() -> u32 {
     20
 }
 
+fn default_non_urgent_per_day() -> u32 {
+    5
+}
+
 impl Default for WebPushConfig {
     fn default() -> Self {
         Self {
@@ -41,6 +55,8 @@ impl Default for WebPushConfig {
             subject: None,
             push_all: false,
             max_agent_per_hour: default_max_agent_per_hour(),
+            quiet_hours_utc: None,
+            non_urgent_per_day: default_non_urgent_per_day(),
             extra_push_hosts: Vec::new(),
         }
     }
