@@ -122,8 +122,9 @@ fun DocBlocksEditor(path: String, onClose: (changed: Boolean) -> Unit) {
                     },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FormatToolbar { field = it(field); failed = false }
                             OutlinedTextField(field, { field = it; failed = false }, minLines = 3, maxLines = 12, modifier = Modifier.fillMaxWidth())
+                            // Below the field: the selection's Cut and Copy bar floats above the text and would cover it.
+                            FormatToolbar { field = it(field); failed = false }
                             if (failed) Text(stringResource(R.string.docblocks_failed), style = HqType.BodySm, color = Mts.InkMuted)
                         }
                     },
