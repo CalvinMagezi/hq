@@ -92,6 +92,28 @@ pub fn source_group(source: &str, owner_only: bool) -> &'static str {
     }
 }
 
+/// Whom an inbox item is for. One function decides it, so the list, the badge and push can not
+/// disagree: only `Owner` items are listed by default, counted on the badge or pushed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Audience {
+    Owner,
+    /// Helper and agent traffic nobody has to answer: finished turns, exits, digests.
+    Agent,
+}
+
+/// Whom the item written by `source` is for. `needs_answer` is true for an item the owner can
+/// approve, reject or answer (a proposal or an action-needed item). An item the owner must answer
+/// is never `Agent`, whatever its source.
+pub fn audience(source: &str, owner_only: bool, needs_answer: bool) -> Audience {
+    if owner_only || needs_answer {
+        return Audience::Owner;
+    }
+    match Topic::of_source(source) {
+        Topic::Helpers => Audience::Agent,
+        Topic::Hq | Topic::Tasks | Topic::Tips | Topic::Upkeep | Topic::Email => Audience::Owner,
+    }
+}
+
 /// One silenced topic, or the pause (`topic` is `all`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Silence {
@@ -341,5 +363,20 @@ mod tests {
             })
             .unwrap();
         assert_eq!(hidden, 0, "a restored update is listed again");
+    }
+
+    #[test]
+    fn only_unanswered_helper_traffic_is_for_agents() {
+        use super::{Audience, audience};
+        assert_eq!(audience("harness-sessions", false, false), Audience::Agent);
+        assert_eq!(audience("fleet-digest", false, false), Audience::Agent);
+        assert_eq!(audience("subagent_runs", false, true), Audience::Owner);
+        assert_eq!(audience("session-supervisor", true, false), Audience::Owner);
+        assert_eq!(audience("task_review", false, false), Audience::Owner);
+        assert_eq!(audience("notify_owner", false, false), Audience::Owner);
+        assert_eq!(
+            audience("never-listed-source", false, false),
+            Audience::Owner
+        );
     }
 }

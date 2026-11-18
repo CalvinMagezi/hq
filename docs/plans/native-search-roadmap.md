@@ -7,7 +7,7 @@ using what only an in-process Rust implementation inside HQ can do.
 
 ## Where we are
 
-Native search recreates SearxNG's keyless pipeline (`crates/hq-tools/src/web/native*`):
+Native search recreates SearxNG's keyless pipeline (`crates/hq-tools-web/src/web/native*`):
 parallel fan-out, SearxNG's ranking formula, flat per-class suspensions, cleaned
 and deduplicated results. Measured against a captured SearxNG baseline it
 reaches overlap@10 0.60 and top-3 recall 0.80, which is close to the ceiling

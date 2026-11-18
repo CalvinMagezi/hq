@@ -59,11 +59,11 @@ pub struct SkillMeta {
 }
 
 /// Cap for the SKILL.md fallback when an autoLoad skill has no SUMMARY.md.
-pub(super) const SUMMARY_FALLBACK_CHARS: usize = 1200;
+pub(crate) const SUMMARY_FALLBACK_CHARS: usize = 1200;
 
 // ─── Parsing ────────────────────────────────────────────────────
 
-pub(super) fn bundles_dir(skills_dir: &Path) -> PathBuf {
+pub(crate) fn bundles_dir(skills_dir: &Path) -> PathBuf {
     skills_dir.join("skill-bundles")
 }
 
@@ -80,7 +80,7 @@ fn find_bundle_path(skills_dir: &Path, name: &str) -> Option<PathBuf> {
     None
 }
 
-pub(super) fn is_bundle_skill(skills_dir: &Path, name: &str) -> bool {
+pub(crate) fn is_bundle_skill(skills_dir: &Path, name: &str) -> bool {
     find_bundle_path(skills_dir, name).is_some()
 }
 
@@ -101,7 +101,7 @@ fn load_bundle_skill(skills_dir: &Path, name: &str) -> Option<SkillDefinition> {
 
     for member in &bundle.skills {
         // A bundle file named like a built-in cannot stand in for it as a member either.
-        if !super::builtin::is_active(member) && is_bundle_skill(skills_dir, member) {
+        if !super::shipped::is_active(member) && is_bundle_skill(skills_dir, member) {
             // Do not recurse into nested bundles.
             continue;
         }
@@ -142,7 +142,7 @@ pub fn parse_skill(skills_dir: &Path, name: &str) -> Option<SkillDefinition> {
     }
 
     // Checked before bundles too, so nothing written into the vault can stand in for a built-in.
-    if super::builtin::is_active(name) {
+    if super::shipped::is_active(name) {
         return parse_builtin(name);
     }
 
@@ -158,13 +158,13 @@ pub fn parse_skill(skills_dir: &Path, name: &str) -> Option<SkillDefinition> {
 /// A built-in is always HQ's own embedded text, under its own spelling; the vault copy is never
 /// read, and the owner's `skills.builtin.off` alone decides whether it is there.
 fn parse_builtin(name: &str) -> Option<SkillDefinition> {
-    if !super::builtin::is_active(name) {
+    if !super::shipped::is_active(name) {
         return None;
     }
-    let canonical = super::builtin::canonical_name(name)?;
+    let canonical = super::shipped::canonical_name(name)?;
     parse_skill_text(
         canonical,
-        super::builtin::shipped_file(canonical, "SKILL.md")?,
+        super::shipped::shipped_file(canonical, "SKILL.md")?,
     )
 }
 
@@ -351,7 +351,7 @@ fn required_bins(data: &gray_matter::Pod) -> Vec<String> {
 /// List all skills in the skills directory.
 pub fn list_skills(skills_dir: &Path) -> Vec<SkillMeta> {
     // Built-ins come from the binary; a vault folder or bundle claiming one's name is skipped.
-    let mut out: Vec<SkillMeta> = super::builtin::active_builtins()
+    let mut out: Vec<SkillMeta> = super::shipped::active_builtins()
         .filter_map(|b| parse_skill(skills_dir, b.name))
         .map(|skill| SkillMeta {
             name: skill.name,
@@ -374,7 +374,7 @@ pub fn list_skills(skills_dir: &Path) -> Vec<SkillMeta> {
                 .to_string();
             // Proposed (auto-minted, pending user approval) skills are hidden from
             // the active catalog — user must move them out of _proposed/ to apply.
-            if name.starts_with('_') || super::builtin::is_active(&name) {
+            if name.starts_with('_') || super::shipped::is_active(&name) {
                 continue;
             }
             if let Some(skill) = parse_skill(skills_dir, &name) {
@@ -398,7 +398,7 @@ pub fn list_skills(skills_dir: &Path) -> Vec<SkillMeta> {
 
     let bundles_dir = bundles_dir(skills_dir);
     for bundle in load_skill_bundles(&bundles_dir) {
-        if super::builtin::is_active(&bundle.name) {
+        if super::shipped::is_active(&bundle.name) {
             continue;
         }
         out.push(SkillMeta {
