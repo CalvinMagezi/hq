@@ -208,6 +208,11 @@ private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions, onAsk: 
         }
         if (VaultRules.markOf(note.review) == ReviewMark.Changed) ChangedBar(actions.onKeep)
         suiteSourceOf(note.body)?.let { SuiteBar(it, actions.onNotice, actions.onReload) }
+        var blocksOpen by remember(note.path) { mutableStateOf(false) }
+        androidx.compose.material3.TextButton({ blocksOpen = true }, Modifier.padding(horizontal = 8.dp).heightIn(min = 40.dp)) {
+            Text(stringResource(R.string.docblocks_open), style = HqType.BodySm, color = Mts.BrandBlue)
+        }
+        if (blocksOpen) DocBlocksEditor(note.path) { changed -> blocksOpen = false; if (changed) actions.onReload() }
         ReaderHeader(note, onAsk)
         // Lazy, so a long note opens by drawing the screenful in view, not every block of it.
         SelectionContainer(Modifier.weight(1f)) { NoteBody(note.path, blocks, handlers, note.truncated, actions) }

@@ -768,6 +768,21 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     suspend fun suiteEditCell(path: String, index: Int, row: Int, col: Int, expected: String, text: String): SheetView =
         SheetWire.view(postJson("/api/suite/sheet/cell", JSONObject().put("path", path).put("index", index).put("row", row).put("col", col).put("expected", expected).put("text", text)))
 
+    /** The blocks of the note at [path], in order, for the block editor. */
+    suspend fun suiteBlocks(path: String): List<BlockRow> =
+        send(authed("/api/suite/blocks?path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()) { BlocksWire.list(JSONObject(it)) }
+
+    /** Replaces one block with [markdown]. hq refuses it if the block no longer hashes to [hash]; the blocks come back as they are now. */
+    suspend fun suiteEditBlock(path: String, index: Int, hash: String, markdown: String): List<BlockRow> =
+        BlocksWire.list(postJson("/api/suite/blocks/edit", JSONObject().put("path", path).put("index", index).put("hash", hash).put("markdown", markdown)))
+
+    /** Adds [markdown] after the block at [afterIndex] (which must still hash to [afterHash]), or at the top when [afterIndex] is null. */
+    suspend fun suiteInsertBlock(path: String, afterIndex: Int?, afterHash: String?, markdown: String): List<BlockRow> =
+        BlocksWire.list(postJson("/api/suite/blocks/insert", JSONObject().put("path", path).put("markdown", markdown).also { if (afterIndex != null) it.put("index", afterIndex).put("hash", afterHash ?: "") }))
+
+    suspend fun suiteDeleteBlock(path: String, index: Int, hash: String): List<BlockRow> =
+        BlocksWire.list(postJson("/api/suite/blocks/delete", JSONObject().put("path", path).put("index", index).put("hash", hash)))
+
     /** The sinks this phone keeps sealed originals in, and whether each answers now. */
     suspend fun suiteSinks(): List<SinkInfo> = send(authed("/api/suite/sinks").build()) { SinkWire.list(JSONObject(it)) }
 
