@@ -4006,6 +4006,7 @@ dependencies = [
  "hq-llm",
  "hq-memory",
  "hq-tool-api",
+ "hq-tools-web",
  "hq-vault",
  "html2text",
  "libc",
@@ -4043,6 +4044,37 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "hq-tools-web"
+version = "0.9.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "hex",
+ "hq-convert",
+ "hq-core",
+ "hq-llm",
+ "hq-tool-api",
+ "html2text",
+ "regex",
+ "reqwest 0.12.28",
+ "ring",
+ "rusqlite",
+ "scraper",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "wiremock",
 ]
 
 [[package]]
