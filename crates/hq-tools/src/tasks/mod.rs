@@ -15,7 +15,7 @@ use crate::registry::HqTool;
 pub mod activity;
 mod from_note;
 mod json;
-mod placement;
+use crate::task_placement as placement;
 mod scoped;
 mod tools_bulk;
 mod tools_graph;

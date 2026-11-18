@@ -21,28 +21,6 @@ fn arg_dry_run(args: &Value) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) fn reindex_moved_note(
-    db: Option<&Arc<Database>>,
-    vault: &VaultClient,
-    from: &str,
-    to: &str,
-) {
-    let Some(db) = db else { return };
-    let from = from.to_string();
-    let to = to.to_string();
-    let note = vault.read_note(&to).ok();
-    let _ = db.with_conn(move |conn| {
-        let _ = hq_db::search::remove_note(conn, &from);
-        // Its links belong to the note, not the old path.
-        let _ = hq_db::search::move_graph_links(conn, &from, &to);
-        if let Some(note) = note {
-            let tags = note.tags.join(" ");
-            let _ = hq_db::search::index_note(conn, &to, &note.title, &note.content, &tags);
-        }
-        Ok(())
-    });
-}
-
 fn remove_from_index(db: Option<&Arc<Database>>, path: &str) {
     let Some(db) = db else { return };
     let path = path.to_string();
@@ -147,7 +125,12 @@ impl HqTool for VaultMoveTool {
             tokio::task::spawn_blocking(move || vault.move_note(&f, &t, dry_run)).await??;
         if !dry_run {
             // The report carries both paths in their one spelling, the key the index uses.
-            reindex_moved_note(self.db.as_ref(), &self.vault, &report.from, &report.to);
+            crate::note_index::reindex_moved_note(
+                self.db.as_ref(),
+                &self.vault,
+                &report.from,
+                &report.to,
+            );
             if let (Some(recorder), Some(before)) = (recorder, before) {
                 let (referrers, args, from, to) = (
                     report.referrers.clone(),
@@ -417,7 +400,7 @@ pub async fn move_folder_value(
         let (old_root, new_root) = (report.from.clone(), report.to.clone());
         for old in &report.notes {
             let new = format!("{new_root}{}", &old[old_root.len()..]);
-            reindex_moved_note(db.as_ref(), &vault, old, &new);
+            crate::note_index::reindex_moved_note(db.as_ref(), &vault, old, &new);
             if let Some(db) = &db {
                 let (o, n) = (old.clone(), new.clone());
                 let _ = db.with_conn(move |c| hq_db::provenance::move_path(c, &o, &n).map(|_| ()));
@@ -425,6 +408,20 @@ pub async fn move_folder_value(
         }
     }
     Ok(serde_json::to_value(&report)?)
+}
+
+/// The vault tools together with the move, delete and frontmatter tools of this module. Callers use
+/// this instead of `vault::create_vault_tools` so the vault module does not reach up into this one.
+pub fn create_vault_tools_with_reorg(
+    vault_path: std::path::PathBuf,
+    db: Option<Arc<Database>>,
+) -> Vec<Box<dyn HqTool>> {
+    let mut tools = crate::vault::create_vault_tools(vault_path.clone(), db.clone());
+    match VaultClient::new(vault_path) {
+        Ok(vault) => tools.extend(create_vault_reorg_tools(Arc::new(vault), db)),
+        Err(e) => tracing::warn!("create_vault_tools_with_reorg: could not open VaultClient: {e}"),
+    }
+    tools
 }
 
 /// The reorg tools, sharing one client and optional index DB.
@@ -528,7 +525,12 @@ mod tests {
         })
         .unwrap();
 
-        reindex_moved_note(Some(&db), &vault, "Notebooks/old.md", "Notebooks/new.md");
+        crate::note_index::reindex_moved_note(
+            Some(&db),
+            &vault,
+            "Notebooks/old.md",
+            "Notebooks/new.md",
+        );
 
         let (hits, related_new, related_old) = db
             .with_conn(|c| {
