@@ -28,6 +28,9 @@ pub enum LossKind {
     ExtensionMismatch,
     FormulasShownAsValues,
     NumberFormatsNotApplied,
+    MergedRangesUnmerged,
+    ConditionalFormatsDropped,
+    ValidationRulesDropped,
     Other,
 }
 
@@ -44,7 +47,6 @@ impl LossKind {
                 | LossKind::ScriptsRemoved
                 | LossKind::LegacyConverted
                 | LossKind::ExtensionMismatch
-                | LossKind::FormulasShownAsValues
                 | LossKind::NumberFormatsNotApplied
         )
     }
@@ -63,6 +65,18 @@ impl LossKind {
             LossKind::EmbeddedObjectsOmitted => format!("{n} embedded object{s} omitted"),
             LossKind::HiddenContentSkipped => format!("{n} hidden or deleted item{s} skipped"),
             LossKind::ScriptsRemoved => format!("{n} script or style element{s} removed"),
+            LossKind::FormulasShownAsValues => {
+                format!("{n} formula{s} kept only as the last value shown, not as a formula")
+            }
+            LossKind::MergedRangesUnmerged => {
+                format!("{n} merged range{s} shown as separate cells")
+            }
+            LossKind::ConditionalFormatsDropped => {
+                format!("{n} conditional format rule{s} not carried over")
+            }
+            LossKind::ValidationRulesDropped => {
+                format!("{n} data validation rule{s} not carried over")
+            }
             _ => format!("{n} occurrence{s}"),
         }
     }
@@ -239,6 +253,8 @@ mod tests {
         assert!(!LossKind::ImagesOmitted.is_loss());
         assert!(LossKind::OcrDerived.is_loss());
         assert!(LossKind::LayoutNotPreserved.is_loss());
+        assert!(LossKind::FormulasShownAsValues.is_loss());
+        assert!(LossKind::ChartsOmitted.is_loss());
     }
 
     #[test]

@@ -335,6 +335,22 @@ async fn refusals_are_specific_and_touch_nothing() {
         s.prepare("Notebooks/photo.jpg", DAY).await,
         Err(ShrinkError::Refused(Refusal::NeedsOcr))
     ));
+    // A workbook keeps its formulas only in the original, so it is never offered for shrinking.
+    let mut buf = Cursor::new(Vec::new());
+    {
+        let mut z = zip::ZipWriter::new(&mut buf);
+        let o = zip::write::SimpleFileOptions::default();
+        z.start_file("[Content_Types].xml", o).unwrap();
+        z.write_all(TYPES).unwrap();
+        z.start_file("xl/workbook.xml", o).unwrap();
+        z.write_all(b"<workbook/>").unwrap();
+        z.finish().unwrap();
+    }
+    std::fs::write(d.path().join("Notebooks/book.xlsx"), buf.into_inner()).unwrap();
+    assert!(matches!(
+        s.prepare("Notebooks/book.xlsx", DAY).await,
+        Err(ShrinkError::Refused(Refusal::SpreadsheetKeepsFormulas))
+    ));
     // A file whose record would be bigger.
     std::fs::write(d.path().join("Notebooks/tiny.csv"), "a,b\n1,2\n").unwrap();
     assert!(matches!(
