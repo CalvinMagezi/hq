@@ -45,6 +45,8 @@ pub struct FileStatus {
     /// More lines for the sheet that asks for a decision.
     pub details: Vec<String>,
     pub actions: Actions,
+    /// The original is sealed in a sink, so bringing it back needs that sink's recovery code.
+    pub original_in_sink: bool,
 }
 
 fn actions(state: State) -> Actions {
@@ -79,6 +81,7 @@ fn status_of(s: &Shrinker<'_>, path: &str, job: Option<Job>) -> FileStatus {
             headline: format!("{name} can be made smaller."),
             details: vec![],
             actions: actions(State::Ready),
+            original_in_sink: false,
         };
     };
     let preview: Preview = s
@@ -95,7 +98,7 @@ fn status_of(s: &Shrinker<'_>, path: &str, job: Option<Job>) -> FileStatus {
         (Step::Done, OriginalAt::Sink) => (
             State::Shrunk,
             format!(
-                "{name} was made smaller. {} saved; the original is sealed in your sink and comes back with hq suite undo.",
+                "{name} was made smaller. {} saved; the original is sealed in your sink and comes back with Undo.",
                 text::size(preview.saved_bytes.max(0) as u64)
             ),
         ),
@@ -130,6 +133,7 @@ fn status_of(s: &Shrinker<'_>, path: &str, job: Option<Job>) -> FileStatus {
         headline,
         details,
         actions: actions(state),
+        original_in_sink: preview.original_at == OriginalAt::Sink,
     }
 }
 
@@ -215,6 +219,13 @@ pub fn offload(vault: &Path, job: &str, sink: &str, code: &str) -> Result<FileSt
 /// The person said no: the new note is removed and nothing moved.
 pub fn abandon(vault: &Path, job: &str) -> Result<FileStatus> {
     after(vault, job, |s| s.abandon(job).map_err(friendly))
+}
+
+/// Brings the original back from the sink it was sealed into, with that sink's recovery code.
+pub fn undo_from_sink(vault: &Path, job: &str, code: &str) -> Result<FileStatus> {
+    after(vault, job, |_| {
+        crate::sinks::undo_with_code(vault, job, code)
+    })
 }
 
 /// Brings the original back from the trash.

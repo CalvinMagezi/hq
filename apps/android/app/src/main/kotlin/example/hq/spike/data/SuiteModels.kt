@@ -19,6 +19,8 @@ data class SuiteFile(
     val canConfirm: Boolean,
     val canAbandon: Boolean,
     val canUndo: Boolean,
+    /** The original is sealed in a sink: bringing it back needs that sink's recovery code. */
+    val originalInSink: Boolean = false,
 )
 
 /** hq looked at the file and said no, or could not do it; [message] is a sentence for the person. */
@@ -40,6 +42,7 @@ internal object SuiteWire {
             canConfirm = actions.optBoolean("confirm", false),
             canAbandon = actions.optBoolean("abandon", false),
             canUndo = actions.optBoolean("undo", false),
+            originalInSink = o.optBoolean("original_in_sink", false),
         )
     }
 
