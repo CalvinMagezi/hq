@@ -8,6 +8,7 @@
 
 pub(crate) mod api;
 pub(crate) mod encrypt;
+mod gate;
 pub(crate) mod vapid;
 
 use anyhow::{Context, Result};
@@ -51,6 +52,7 @@ pub(crate) struct WebPush {
     subject: String,
     pub(crate) config: WebPushConfig,
     http: reqwest::Client,
+    gate: gate::Gate,
 }
 
 /// What one push to one subscription came to.
@@ -78,6 +80,7 @@ impl WebPush {
             subject: config.effective_subject(web_allowed_origins),
             config: config.clone(),
             http,
+            gate: gate::Gate::new(config.quiet_hours_utc.as_deref(), config.non_urgent_per_day),
         })
     }
 
@@ -172,11 +175,27 @@ impl WebPush {
 
     /// One pass of the dispatcher: claims each new item it wants and pushes it.
     pub(crate) async fn dispatch_once(&self, db: &hq_db::Database) -> Result<usize> {
-        let since = Utc::now() - chrono::Duration::minutes(PUSH_WINDOW_MINUTES);
+        let since = Utc::now()
+            - chrono::Duration::minutes(PUSH_WINDOW_MINUTES)
+            - self.gate.extra_lookback();
         let mut pushed = 0;
         for item in hq_db::value_items::list_unpushed(db, &since)? {
             // Claimed even when unwanted, so it is not looked at again.
-            if !hq_db::value_items::claim_push(db, &item.id)? || !self.wants(&item) {
+            if !self.wants(&item) {
+                hq_db::value_items::claim_push(db, &item.id)?;
+                continue;
+            }
+            match self.gate.decide(Utc::now(), is_urgent(&item)) {
+                // Left unclaimed: a later pass sends it when quiet hours end.
+                gate::Decision::Hold => continue,
+                gate::Decision::Fold => {
+                    hq_db::value_items::claim_push(db, &item.id)?;
+                    tracing::debug!(id = %item.id, "web push: folded or over budget, left in the inbox");
+                    continue;
+                }
+                gate::Decision::Send => {}
+            }
+            if !hq_db::value_items::claim_push(db, &item.id)? {
                 continue;
             }
             // A silenced topic waits in the inbox without a push. Read per item: the owner
@@ -254,6 +273,12 @@ impl WebPush {
         }
         Ok(sent)
     }
+}
+
+/// Approvals, `notify_owner` messages and due reminders: never held by the budget or the hourly fold.
+fn is_urgent(item: &ValueItem) -> bool {
+    PushKind::of(item) == PushKind::Needs
+        || ALWAYS_PUSHED_SOURCES.contains(&item.source_task.as_str())
 }
 
 /// Which notification switch an item belongs to (`push_subscriptions.kinds`).
