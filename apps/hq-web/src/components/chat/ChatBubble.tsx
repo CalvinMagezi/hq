@@ -88,7 +88,7 @@ export function ChatBubble({ message, live = false, startedAt, onEdit, onRegener
       )}
       {!isUser && message.driver && <DriverLabel driver={message.driver} />}
       {!isUser && message.reasoning && <ThinkingPanel content={message.reasoning} live={live} />}
-      {!isUser && live && <LiveLine steps={steps} startedAt={startedAt} writing={message.content !== ''} onStop={onStop} />}
+      {!isUser && live && <LiveLine steps={steps} startedAt={startedAt} writing={message.content !== ''} thinking={!!message.reasoning} onStop={onStop} />}
       {message.attachments && <MessageAttachments attachments={message.attachments} />}
 
       {message.content && (isUser ? <p className="hq-msg-text">{message.content}</p> : <MarkdownViewer content={message.content} bare />)}

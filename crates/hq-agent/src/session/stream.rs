@@ -301,6 +301,16 @@ impl AgentSession {
                         builder.name = name;
                     }
                     builder.arguments.push_str(&arguments_delta);
+                    if !builder.announced && !builder.id.is_empty() && !builder.name.is_empty() {
+                        builder.announced = true;
+                        self.emit_from(
+                            EventSource::Backend(active_backend.clone()),
+                            SessionEvent::ToolPreparing {
+                                tool_name: builder.name.clone(),
+                                tool_call_id: builder.id.clone(),
+                            },
+                        );
+                    }
                 }
                 Ok(BackendEvent::Progress(note)) => {
                     // A buffered/CLI lifecycle note — visible progress, not

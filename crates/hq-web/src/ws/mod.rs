@@ -1145,6 +1145,12 @@ fn session_event_json(event: &SessionEvent, tid: &Option<String>) -> Option<Stri
             let args = record::args_preview(arguments, LIVE_ARGS_CHARS);
             serde_json::json!({"type": "tool_start", "thread_id": tid, "tool_name": tool_name, "tool_call_id": tool_call_id, "args": args})
         }
+        SessionEvent::ToolPreparing {
+            tool_name,
+            tool_call_id,
+        } => {
+            serde_json::json!({"type": "tool_preparing", "thread_id": tid, "tool_call_id": tool_call_id, "tool_name": tool_name})
+        }
         SessionEvent::ToolProgress {
             tool_call_id,
             message,

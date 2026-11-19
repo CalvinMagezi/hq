@@ -31,6 +31,11 @@ export interface Thread {
   unreadCount: number
 }
 
+export interface NextStep {
+  label: string
+  prompt: string
+}
+
 /** One thing HQ offers to do under a reply, chosen on this device; the model never sees it. */
 export interface ChatOffer {
   kind: string
@@ -60,6 +65,8 @@ export interface ThreadMessage {
   /** Asked by an outside MCP client (hq_ask) rather than typed here: the name it gave itself. */
   viaMcp?: string
   offer?: ChatOffer
+  /** Two to four next steps HQ chose on this device from what the reply did; a tap sends the request. */
+  nextSteps?: NextStep[]
   /** Files this reply made, checked by the server. */
   files?: ReplyFile[]
 }
@@ -252,10 +259,13 @@ export const useThreadStore = create<ThreadState>()(
         markGap: () => set((s) => ({ live: Object.fromEntries(Object.entries(s.live).map(([id, t]) => [id, { ...t, gap: true }])) })),
         startToolStep: (threadId, toolCallId, toolName, inputArgs) =>
           patchLive(threadId, (t) => ({
-            // A repeated id (a resend after a reconnect) must not add a second row with the same key.
-            toolSteps: t.toolSteps.some((step) => step.toolCallId === toolCallId) ? t.toolSteps : [...t.toolSteps, {
-              toolCallId, toolName, status: 'running', startedAt: Date.now(), progressMessages: [], inputArgs,
-            }],
+            // A repeated id (a resend after a reconnect, or the start that follows a prepared step) must not
+            // add a second row with the same key; it only supplies the arguments the first one lacked.
+            toolSteps: t.toolSteps.some((step) => step.toolCallId === toolCallId)
+              ? t.toolSteps.map((step) => (step.toolCallId === toolCallId && !step.inputArgs && inputArgs ? { ...step, inputArgs } : step))
+              : [...t.toolSteps, {
+                  toolCallId, toolName, status: 'running', startedAt: Date.now(), progressMessages: [], inputArgs,
+                }],
           })),
         updateToolStepProgress: (threadId, toolCallId, message) =>
           patchLive(threadId, (t) => ({

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Square } from 'lucide-react'
 import { t } from '~/strings'
 import type { ToolStep } from '~/store/threadStore'
-import { liveSentence, liveText, secondsRunning, stopOffered } from '~/lib/liveLine'
+import { idleLine, liveSentence, liveText, secondsRunning, stopOffered } from '~/lib/liveLine'
 
 /** A clock that ticks once a second while the component is on screen. */
 function useNow(everyMs: number): number {
@@ -19,6 +19,8 @@ interface Props {
   startedAt?: number
   /** Words of the answer have started to arrive. */
   writing: boolean
+  /** The model's reasoning is arriving but no answer words yet. */
+  thinking?: boolean
   onStop?: () => void
 }
 
@@ -26,10 +28,11 @@ interface Props {
  * The one line above a streaming reply: the step running now as a sentence, replaced by the next step
  * and never stacked. The answer's own words arrive below it. After ten seconds Stop sits on the line.
  */
-export function LiveLine({ steps, startedAt, writing, onStop }: Props) {
+export function LiveLine({ steps, startedAt, writing, thinking = false, onStop }: Props) {
   const now = useNow(1000)
   const sentence = liveSentence(steps)
-  const text = liveText(sentence) ?? (writing ? t('chat_live_writing') : t('chat_working'))
+  const idle = idleLine(steps, thinking)
+  const text = liveText(sentence) ?? (writing ? t('chat_live_writing') : t(idle.key, idle.params))
   const seconds = secondsRunning(startedAt, now)
   return (
     <p className="hq-live" role="status">

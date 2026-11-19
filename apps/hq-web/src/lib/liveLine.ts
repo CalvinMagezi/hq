@@ -1,7 +1,7 @@
 // The one live line above a streaming reply: what HQ is doing now, as a sentence, replaced by the next
 // step and never stacked. After ten seconds the line offers Stop, so a slow reply always has a way out.
 import { t, type StringKey } from '~/strings'
-import { stepLine, type StepLine } from './stepWords'
+import { stepLine, unwrap, type StepLine } from './stepWords'
 
 /** How long a reply runs before its line offers Stop. */
 export const STOP_AFTER_MS = 10_000
@@ -16,6 +16,21 @@ interface StepLike {
 export function liveSentence(steps: StepLike[]): StepLine | null {
   const running = [...steps].reverse().find((s) => s.status === 'running')
   return running ? stepLine(running.toolName, running.inputArgs) : null
+}
+
+const HELPER_TOOLS = new Set(['spawn_subagents', 'agent_delegate', 'harness_session_spawn'])
+
+/**
+ * What the line says when no step is running: HQ is waiting on the model, which is never idle time.
+ * It names the phase, the steps done so far and the helpers that have reported back.
+ */
+export function idleLine(steps: StepLike[], thinking: boolean): { key: StringKey; params?: Record<string, string> } {
+  if (thinking) return { key: 'chat_live_thinking' }
+  const done = steps.filter((s) => s.status === 'done')
+  if (done.length === 0) return { key: 'chat_live_reading' }
+  const helpers = done.filter((s) => HELPER_TOOLS.has(unwrap(s.toolName, s.inputArgs)[0])).length
+  if (helpers > 0) return { key: 'chat_live_after_helpers', params: { n: String(done.length) } }
+  return { key: 'chat_live_next_step', params: { n: String(done.length) } }
 }
 
 /** Whole seconds a turn has run; never negative, so a clock set back does not show "-3 s". */

@@ -14,6 +14,12 @@ pub enum SessionEvent {
         /// that shows or stores them must scrub secrets first.
         arguments: serde_json::Value,
     },
+    /// The model has named a tool call and is still writing its arguments. A long document or note
+    /// takes minutes to write and sends nothing else, so this is how a screen knows what is happening.
+    ToolPreparing {
+        tool_name: String,
+        tool_call_id: String,
+    },
     /// Mid-execution progress update from a long-running tool.
     ///
     /// Distilled from claude-code's `Tool.onProgress` callback pattern.
