@@ -1,0 +1,1 @@
+**The public site uses the names the apps use.** The notes area is called the Vault on the Home, Install and `llms.txt` pages, and the Mac app is called HQ Hub instead of AgentHQ. The web app line no longer says it only runs on your own server.

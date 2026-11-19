@@ -22,7 +22,7 @@ const hosts = [
   {
     name: 'An Android phone',
     where: 'Download the app (Android 8+)',
-    body: 'The home base. The daemon, chat, tasks, notes, inbox and both chat relays run on it, with a data saver for metered plans. Keep it on a charger. Coding agents run on your laptop or server, and the phone supervises them.',
+    body: 'The home base. The daemon, chat, tasks, Vault, inbox and both chat relays run on it, with a data saver for metered plans. Keep it on a charger. Coding agents run on your laptop or server, and the phone supervises them.',
     href: '#phone-h',
     tone: 'green',
     preview: true,
@@ -30,14 +30,14 @@ const hosts = [
   {
     name: 'Your laptop or desktop',
     where: 'macOS (Apple Silicon and Intel) or Linux',
-    body: 'Joins your phone with a QR code and runs your coding agents. One command installs a signed binary and the web app. On a Mac, the AgentHQ desktop app starts HQ, shows the pairing code and opens HQ in its own window, and hq service install keeps the daemon running at login.',
+    body: 'Joins your phone with a QR code and runs your coding agents. One command installs a signed binary and the web app. On a Mac, the HQ Hub app starts HQ, shows the pairing code and opens HQ in its own window, and hq service install keeps the daemon running at login.',
     cmd: 'curl -fsSL https://agent-hq.online/install.sh | bash',
     tone: 'blue',
   },
   {
     name: 'Windows',
     where: 'Full HQ in WSL2, or HQ Lite with no admin rights',
-    body: 'The PowerShell installer asks which one you want. Lite keeps your notes, tasks and web app, and never makes a network call it does not list.',
+    body: 'The PowerShell installer asks which one you want. Lite keeps your Vault, tasks and web app, and never makes a network call it does not list.',
     cmd: 'irm https://agent-hq.online/install.ps1 | iex',
     tone: 'blue',
   },
@@ -205,7 +205,7 @@ const phoneShots = [
         <p class="eyebrow reveal">Android app</p>
         <h2 id="phone-h" class="reveal">Your phone is home base</h2>
         <p class="lede reveal">
-          The Android app runs HQ itself as a foreground service. Chat, tasks, notes and an inbox of things
+          The Android app runs HQ itself as a foreground service. Chat, tasks, your Vault and an inbox of things
           that need your OK all live there, and so does the vault. Your laptop and servers join it, and the
           coding agents running on them report back to your phone.
         </p>
@@ -225,12 +225,12 @@ const phoneShots = [
         <div class="gcard">
           <h3>Works today</h3>
           <ul class="facts list-plain">
-            <li>Full HQ on a phone with the <code>mobile</code> profile: daemon, chat, tasks, notes, inbox, web app, Telegram and Discord relays (chat only)</li>
+            <li>Full HQ on a phone with the <code>mobile</code> profile: daemon, chat, tasks, Vault, inbox, web app, Telegram and Discord relays (chat only)</li>
             <li>A data saver for people who pay for every megabyte, and keys held in the Android Keystore</li>
             <li>Pairing a laptop or server with a QR code and six digits, and revoking a device closes its connections at once</li>
             <li>Over the link, the phone reaches your laptop's coding agents and your laptop opens the phone's web app and HQ tools</li>
             <li>Claude Code, Claude Desktop and Claude Code Remote Control reach HQ through your laptop while it is on</li>
-            <li>The phone can borrow your laptop's model: switch on Share this computer's model in the desktop app, and HQ on the phone uses it while the laptop is reachable. Off by default</li>
+            <li>The phone can borrow your laptop's model: switch on Share this computer's model in HQ Hub, and HQ on the phone uses it while the laptop is reachable. Off by default</li>
           </ul>
         </div>
         <div class="gcard">
@@ -294,10 +294,10 @@ const phoneShots = [
     <span class="orb orb-b o-bl" aria-hidden="true"></span>
     <div class="container stack">
       <div class="head">
-        <p class="eyebrow reveal">macOS desktop app</p>
+        <p class="eyebrow reveal">HQ Hub, the Mac app</p>
         <h2 id="hub-h" class="reveal">One app on your laptop</h2>
         <p class="lede reveal">
-          AgentHQ is a small Mac app. Its HQ Hub window starts HQ on the laptop, pairs your phone and other
+          HQ Hub is a small Mac app. Its window starts HQ on the laptop, pairs your phone and other
           computers, and lists the coding helpers that need you. Open HQ shows the web app in its own window,
           and when your phone is the hub it shows the phone's HQ and says so: "HQ on your phone".
         </p>
@@ -389,7 +389,7 @@ const phoneShots = [
           <li class="gcard reveal reveal-3">
             <span class="step-dot dot-sky" aria-hidden="true"></span>
             <h3>Everything lands in your vault</h3>
-            <p class="body">Notes, memory, skills and threads are plain markdown on your disk, plus one SQLite database for search.</p>
+            <p class="body">Your Vault, memory, skills and threads are plain markdown on your disk, plus one SQLite database for search.</p>
           </li>
         </ol>
       </div>
@@ -449,7 +449,7 @@ const phoneShots = [
             <span class="mbar w60"><span class="fill-green"></span></span>
           </div>
           <h3>A vault you can read</h3>
-          <p class="body">Notes, memory, skills and threads are plain markdown files on your disk, plus one SQLite database for full-text search and embeddings. Nothing is locked inside a service.</p>
+          <p class="body">Your Vault, memory, skills and threads are plain markdown files on your disk, plus one SQLite database for full-text search and embeddings. Nothing is locked inside a service.</p>
         </article>
 
         <article class="gcard reveal">
@@ -542,7 +542,7 @@ const phoneShots = [
         <div class="head">
           <p class="eyebrow reveal">See it</p>
           <h2 id="see-h" class="reveal">The web app looks like the phone</h2>
-          <p class="lede reveal">The same places, words and colours as the Android app, from a phone-sized window up to a wide screen. It installs as an app, prints cleanly, and runs on your own server.</p>
+          <p class="lede reveal">The same places, words and colours as the Android app, from a phone-sized window up to a wide screen. It installs as an app, prints cleanly, and runs on your phone, your computer or your own server.</p>
         </div>
         <div class="seg glass-heavy" role="group" aria-label="Choose a screen" data-tablist hidden>
           <span class="seg-ind" aria-hidden="true"></span>
@@ -585,7 +585,7 @@ const phoneShots = [
         <p class="eyebrow reveal">Local first</p>
         <h2 id="local-h" class="reveal">Your data is a folder you can open</h2>
         <p class="lede reveal">
-          Notes, memory, skills and threads are plain markdown files on your disk, plus one SQLite database
+          Your Vault, memory, skills and threads are plain markdown files on your disk, plus one SQLite database
           for full-text search and embeddings. Nothing is locked inside a service.
         </p>
         <div class="tags reveal">
