@@ -15,9 +15,7 @@
 # to have the fewest upward references. Layer 19 depends on the tangle and nothing depends back on it.
 
 allowed_back_edges = [
-  "harness_session -> a2a",
   "agent_host -> harness_session",
-  "harness_session -> tasks",
   "harness_session -> lane_quotas",
 ]
 
