@@ -313,18 +313,7 @@ pub fn category_in(cfg: &AgentHostConfig, name: &str) -> Option<HarnessCategory>
     resolve_in(cfg, name).ok().map(|h| h.spec.category)
 }
 
-/// Aliases accepted in addition to each spec's canonical `harness` name
-/// (relay/dispatch paths already map "agy"/"jetski" etc.; sessions match).
-const ALIASES: &[(&str, &str)] = &[("agy", "antigravity")];
-
-/// Map an alias to its canonical harness name; unknown names pass through.
-pub fn canonical_name(harness: &str) -> &str {
-    ALIASES
-        .iter()
-        .find(|(alias, _)| *alias == harness)
-        .map(|(_, canonical)| *canonical)
-        .unwrap_or(harness)
-}
+pub use crate::harness_alias::canonical_name;
 
 pub fn spec_for(harness: &str) -> Option<&'static HarnessSessionSpec> {
     let name = canonical_name(harness);
