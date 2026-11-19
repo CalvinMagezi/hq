@@ -4,9 +4,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ## [Unreleased]
 
-- Inbox: a daily "Your day" card lists the next step of each focus lane (`hq focus`). Device-only, silent when there are no lanes; off with `daemon.daily_brief: false`.
-
-- CLI: `hq focus list|add|park|remove` keeps the few lanes of work you chose to move forward (3 by default, up to 5). Stays on this device.
+- Vault: `vault_backlinks` now finds notes that link by bare title (`[[Plan]]`), with or without `.md`, a heading or an alias.
 - CLI: `hq focus list|add|park|remove` keeps the few lanes of work you chose to move forward (3 by default, up to 5). Stays on this device.
 - Approvals: an owner approval nobody has answered is pushed a second time after 15 minutes, and one that expires unanswered says so in the chat that asked ("nothing ran"), once each.
 - Web: after a chat has read outside text, a session may fetch at most 30 pages; the next is refused with a message.

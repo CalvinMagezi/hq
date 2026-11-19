@@ -1,6 +1,6 @@
 ---
 import '../styles/global.css';
-import { SITE_URL, links, nav } from '../data/site';
+import { SITE_URL, latestBuild, links, nav } from '../data/site';
 
 interface Props {
   title: string;
@@ -16,6 +16,7 @@ const ogImage = `${SITE_URL}/og.png`;
 const fullTitle = title.includes('Agent HQ') ? title : `${title} | Agent HQ`;
 const current = path;
 const INSTALL_PATH = '/install/';
+const build = await latestBuild();
 // Home is the brand link and Install is the call to action, so the text links are the rest.
 const textLinks = nav.filter((n) => n.href !== '/' && n.href !== INSTALL_PATH);
 
@@ -59,12 +60,12 @@ const csp = [
     <meta property="og:image" content={ogImage} />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Agent HQ: a local-first AI agent hub. One Rust binary, a markdown vault, your machine." />
+    <meta property="og:image:alt" content="Agent HQ: an open-source AI assistant that lives on your phone and works with your computers." />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={fullTitle} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
-    <meta name="twitter:image:alt" content="Agent HQ: a local-first AI agent hub. One Rust binary, a markdown vault, your machine." />
+    <meta name="twitter:image:alt" content="Agent HQ: an open-source AI assistant that lives on your phone and works with your computers." />
     {jsonLd && <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
   </head>
   <body>
@@ -105,34 +106,48 @@ const csp = [
             ))
           }
         </div>
-        <div class="foot-grid">
-          <div class="stack-sm">
-            <p class="foot-title">Connect every channel to one agent.</p>
-            <p class="body">Agent HQ is open source under the MIT license.</p>
-            <div class="actions"><a class="btn btn-primary" href={links.repo}>View on GitHub</a></div>
+        <div class="foot-cta glass">
+          <p class="foot-title">Pick your device. Add more later.</p>
+          <div class="toc">
+            {['Android phone', 'Mac', 'Windows', 'Linux', 'Server'].map((d) => <a href={INSTALL_PATH}>{d}</a>)}
           </div>
-          <nav class="foot-nav glass" aria-label="Site">
-            <p class="eyebrow">Site</p>
+          <a class="btn btn-primary" href={INSTALL_PATH}>Install Agent HQ</a>
+        </div>
+        <p class="body foot-statement">An AI assistant that lives on your phone and works with your computers. Open source under the MIT license.</p>
+        <div class="foot-grid">
+          <nav class="foot-nav glass" aria-label="Learn">
+            <p class="eyebrow">Learn</p>
             <ul class="foot-links">
-              {nav.map((item) => <li><a href={item.href}>{item.label}</a></li>)}
+              {nav.filter((n) => n.href !== '/' && n.href !== '/security/').map((item) => <li><a href={item.href}>{item.label}</a></li>)}
+              <li><a href={links.firstRunDocs}>First run</a></li>
+              <li><a href={links.changelog}>Changelog</a></li>
             </ul>
           </nav>
-          <nav class="foot-nav glass" aria-label="Project">
-            <p class="eyebrow">Project</p>
+          <nav class="foot-nav glass" aria-label="Trust">
+            <p class="eyebrow">Trust</p>
             <ul class="foot-links">
-              <li><a href={links.releases}>Releases</a></li>
-              <li><a href={links.changelog}>Changelog</a></li>
-              <li><a href={links.license}>MIT license</a></li>
+              <li><a href="/security/">Security</a></li>
               <li><a href={links.securityPolicy}>Security policy</a></li>
+              <li><a href={links.license}>MIT license</a></li>
+              <li><a href={links.releases}>Releases</a></li>
+            </ul>
+          </nav>
+          <nav class="foot-nav glass" aria-label="Stuck">
+            <p class="eyebrow">Stuck</p>
+            <ul class="foot-links">
+              <li class="foot-hint">Run <code>hq doctor</code> first</li>
+              <li><a href={links.issues}>Ask on GitHub</a></li>
+              <li><a href={links.reportVulnerability}>Report a security problem</a></li>
+              <li><a href={links.repo}>Source code</a></li>
             </ul>
           </nav>
         </div>
-        <div class="foot-note">
+        <div class="foot-note foot-status">
           <p class="small">
-            Agent HQ is an independent open-source project, released under the MIT license. It is not
-            affiliated with the other projects named on the comparison page.
+            Build {build.tag}, checked {build.date}. MIT. No cookies, no analytics, nothing loaded from other origins.
+            Not affiliated with the projects named on the comparison page.
           </p>
-          <p class="small">This site sets no cookies, runs no analytics and loads nothing from other origins.</p>
+          <a class="small" href="#main">Back to top</a>
         </div>
       </div>
     </footer>

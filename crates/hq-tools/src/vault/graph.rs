@@ -346,6 +346,29 @@ impl VaultBacklinksTool {
     }
 }
 
+/// What a link points at, for comparing with a note: lowercase, without a `.md` ending, a
+/// `#heading` or a `|alias`.
+fn link_target(link: &str) -> String {
+    let base = link
+        .split(['#', '|'])
+        .next()
+        .unwrap_or(link)
+        .trim()
+        .to_lowercase();
+    base.strip_suffix(".md").map(str::to_string).unwrap_or(base)
+}
+
+/// Whether `link` names the note at `path`: by its full path, or by its bare title (the file
+/// name without folders), which is how most wikilinks are written.
+fn link_names_note(link: &str, path: &str) -> bool {
+    let target = link_target(link);
+    let full = link_target(path);
+    let stem = full.rsplit('/').next().unwrap_or(&full);
+    target == full
+        || target == stem
+        || target.ends_with(&format!("/{stem}")) && full.ends_with(&target)
+}
+
 #[async_trait]
 impl HqTool for VaultBacklinksTool {
     fn is_read_only(&self) -> bool {
@@ -383,7 +406,12 @@ impl HqTool for VaultBacklinksTool {
         validate_path_in_vault(self.vault.vault_path(), path)?;
 
         let title_query = path.strip_suffix(".md").unwrap_or(path);
-        let title_lower = title_query.to_lowercase();
+        // Search by the bare title: that is what most notes link by.
+        let title_lower = title_query
+            .rsplit('/')
+            .next()
+            .unwrap_or(title_query)
+            .to_lowercase();
 
         let vault = self.vault.clone();
         let db = self.db.clone();
@@ -397,9 +425,7 @@ impl HqTool for VaultBacklinksTool {
                 for r in fts_results {
                     if r.note_path != path_owned
                         && let Ok(links) = vault.extract_links(&r.note_path)
-                        && links.iter().any(|l| {
-                            l.to_lowercase() == title_lower || l.eq_ignore_ascii_case(&path_owned)
-                        })
+                        && links.iter().any(|l| link_names_note(l, &path_owned))
                     {
                         matches.push(json!({
                             "path": r.note_path,
@@ -413,9 +439,7 @@ impl HqTool for VaultBacklinksTool {
                 for n_path in all_notes {
                     if n_path != path_owned
                         && let Ok(links) = vault.extract_links(&n_path)
-                        && links.iter().any(|l| {
-                            l.to_lowercase() == title_lower || l.eq_ignore_ascii_case(&path_owned)
-                        })
+                        && links.iter().any(|l| link_names_note(l, &path_owned))
                     {
                         matches.push(json!({ "path": n_path }));
                     }
@@ -693,5 +717,29 @@ impl HqTool for VaultReindexTool {
         .await??;
 
         Ok(json!({ "indexed": indexed, "errors": errors }))
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::link_names_note;
+
+    #[test]
+    fn a_bare_title_a_path_and_an_alias_all_name_the_note() {
+        let path = "Notebooks/Projects/Alpha/Plan.md";
+        assert!(link_names_note("Plan", path));
+        assert!(link_names_note("plan.md", path));
+        assert!(link_names_note("Plan#Goals", path));
+        assert!(link_names_note("Plan|the plan", path));
+        assert!(link_names_note("Alpha/Plan", path));
+        assert!(link_names_note("Notebooks/Projects/Alpha/Plan.md", path));
+    }
+
+    #[test]
+    fn another_note_with_a_similar_name_does_not_match() {
+        let path = "Notebooks/Projects/Alpha/Plan.md";
+        assert!(!link_names_note("Plans", path));
+        assert!(!link_names_note("Beta/Plan", path));
+        assert!(!link_names_note("Master Plan", path));
     }
 }

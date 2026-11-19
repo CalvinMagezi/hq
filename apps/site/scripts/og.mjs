@@ -23,7 +23,7 @@ const html = `<!doctype html><meta charset="utf-8"><style>
 <div>
   <div class="top"><img src="data:image/png;base64,${icon}" alt=""><h1>Agent HQ</h1></div>
   <div class="rule"></div>
-  <p>A local-first AI agent hub. One Rust binary, a markdown vault, your machine, and your coding agents under watch.</p>
+  <p>An open-source AI assistant that lives on your phone and works with your computers.</p>
 </div>
 <div class="foot"><span>agent-hq.online</span><span>Open source, MIT, version 0.9.x</span></div>`;
 
