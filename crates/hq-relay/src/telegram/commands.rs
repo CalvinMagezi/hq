@@ -124,7 +124,10 @@ pub async fn handle_focus(ctx: &CommandContext<'_>) -> anyhow::Result<bool> {
         return Ok(false);
     };
     let reply = crate::chat_commands::focus(&ctx.threads, ctx.chat_key, topic).await;
-    ctx.bot.send_message(ctx.msg.chat.id, reply).await?;
+    ctx.bot
+        .send_message(ctx.msg.chat.id, reply)
+        .link_preview_options(super::send::no_link_preview())
+        .await?;
     Ok(true)
 }
 
@@ -275,7 +278,10 @@ pub async fn handle_help(ctx: &CommandContext<'_>) -> anyhow::Result<bool> {
             "/help — Show this help",
         ]
         .join("\n");
-        ctx.bot.send_message(ctx.msg.chat.id, help).await?;
+        ctx.bot
+            .send_message(ctx.msg.chat.id, help)
+            .link_preview_options(super::send::no_link_preview())
+            .await?;
         return Ok(true);
     }
     Ok(false)
@@ -307,13 +313,7 @@ pub async fn handle_login(ctx: &CommandContext<'_>) -> anyhow::Result<bool> {
     // No parse mode, so nothing in the token is read as markup.
     ctx.bot
         .send_message(ctx.msg.chat.id, reply)
-        .link_preview_options(teloxide::types::LinkPreviewOptions {
-            is_disabled: true,
-            url: None,
-            prefer_small_media: false,
-            prefer_large_media: false,
-            show_above_text: false,
-        })
+        .link_preview_options(super::send::no_link_preview())
         .await?;
     Ok(true)
 }
@@ -336,7 +336,10 @@ pub async fn handle_cancel(ctx: &CommandContext<'_>) -> anyhow::Result<bool> {
         return Ok(false);
     }
     let reply = crate::chat_commands::cancel(&ctx.threads, ctx.chat_key).await;
-    ctx.bot.send_message(ctx.msg.chat.id, reply).await?;
+    ctx.bot
+        .send_message(ctx.msg.chat.id, reply)
+        .link_preview_options(super::send::no_link_preview())
+        .await?;
     Ok(true)
 }
 
@@ -352,6 +355,9 @@ pub async fn handle_permission_pin(ctx: &CommandContext<'_>) -> anyhow::Result<b
     let arg = crate::chat_commands::permission_arg(ctx.text_clean);
     let reply =
         crate::chat_commands::permission(&ctx.threads, ctx.chat_key, arg, "/permission").await;
-    ctx.bot.send_message(ctx.msg.chat.id, reply).await?;
+    ctx.bot
+        .send_message(ctx.msg.chat.id, reply)
+        .link_preview_options(super::send::no_link_preview())
+        .await?;
     Ok(true)
 }
