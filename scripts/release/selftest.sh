@@ -59,9 +59,14 @@ openssl ecparam -name prime256v1 -genkey -noout -out "$t/fb.pem"
 openssl ec -in "$t/fb.pem" -pubout -out "$t/fb/fallback-signing.pub" 2> /dev/null
 FALLBACK_SIGNING_KEY=$(cat "$t/fb.pem") bash "$here/sign.sh" "$rel/manifest.json"
 [ -f "$rel/manifest.json.ecdsa" ] || { echo "selftest: sign.sh wrote no .ecdsa with a fallback key" >&2; exit 1; }
+bash "$here/verify.sh" --dir "$rel" --pubkey "$t/fb/pub" --require-fallback
+cp "$rel/manifest.json.ecdsa" "$t/ecdsa.keep"
+printf 'x' >> "$rel/manifest.json.ecdsa"
+bash "$here/verify.sh" --dir "$rel" --pubkey "$t/fb/pub" 2> /dev/null && { echo "selftest: verify.sh accepted a bad .ecdsa" >&2; exit 1; }
+rm "$rel/manifest.json.ecdsa"
+# An older release has none: fine by default, refused when the release job requires one.
 bash "$here/verify.sh" --dir "$rel" --pubkey "$t/fb/pub"
-mv "$rel/manifest.json.ecdsa" "$t/ecdsa.keep"
-bash "$here/verify.sh" --dir "$rel" --pubkey "$t/fb/pub" 2> /dev/null && { echo "selftest: verify.sh accepted a release with no .ecdsa" >&2; exit 1; }
+bash "$here/verify.sh" --dir "$rel" --pubkey "$t/fb/pub" --require-fallback 2> /dev/null && { echo "selftest: --require-fallback accepted a release with no .ecdsa" >&2; exit 1; }
 rm -f "$t/ecdsa.keep"
 
 # The linux-x86_64 name is frozen (installed updaters look for exactly this string).

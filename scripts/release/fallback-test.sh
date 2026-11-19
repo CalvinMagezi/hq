@@ -12,7 +12,7 @@ fail() { echo "fallback-test: $*" >&2; exit 1; }
 mkdir "$t/repo" && cd "$t/repo" && git init -q && mkdir release
 bash "$here/fallback-key.sh" "$t/private.pem" > "$t/ceremony.txt"
 [ -f release/fallback-signing.pub ] || fail "no public key written"
-[ "$(stat -f %Lp "$t/private.pem" 2>/dev/null || stat -c %a "$t/private.pem")" = 600 ] || fail "private key is not mode 600"
+[ "$(stat -c %a "$t/private.pem" 2>/dev/null || stat -f %Lp "$t/private.pem")" = 600 ] || fail "private key is not mode 600"
 bash "$here/fallback-key.sh" "$t/private.pem" 2>/dev/null && fail "overwrote an existing key"
 bash "$here/fallback-key.sh" "$t/repo/leak.pem" 2>/dev/null && fail "wrote a key inside the repository"
 [ ! -e "$t/repo/leak.pem" ] || fail "left a key inside the repository"

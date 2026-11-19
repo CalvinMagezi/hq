@@ -215,7 +215,7 @@ checks it with the system `openssl`. The fallback key is embedded in `install.sh
 `FALLBACK_PUBKEY`; `scripts/check-site-install-scripts.sh` fails the site build if that differs from
 the committed key. It is only used when the stronger check is unavailable, and `hq update` never
 uses it. The key ceremony is `scripts/release/fallback-key.sh`; the secret is `FALLBACK_SIGNING_KEY`.
-Until the key is made, `FALLBACK_PUBKEY` is empty and `install.sh` behaves as before.
+The release job requires the second signature on the build it makes (`verify.sh --require-fallback`); older releases have none and are still verified by minisign alone. Until the key is made, `FALLBACK_PUBKEY` is empty and `install.sh` behaves as before.
 
 The public key is resolved in this order:
 

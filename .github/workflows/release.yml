@@ -442,7 +442,7 @@ jobs:
         run: bash scripts/release/sign.sh dist-release/manifest.json
 
       - name: Verify
-        run: bash scripts/release/verify.sh --dir dist-release --pubkey release/minisign.pub
+        run: bash scripts/release/verify.sh --dir dist-release --pubkey release/minisign.pub --require-fallback
 
       # Draft first, publish after every asset is attached, so a consumer never
       # sees a new manifest next to a missing or old tarball.

@@ -8,7 +8,13 @@
 # default) over HTTPS. Exit status is 0 only if everything verifies.
 set -euo pipefail
 
-repo="" tag="" dir="" pubkey="release/minisign.pub"
+repo="" tag="" dir="" pubkey="release/minisign.pub" require_fallback=0
+# A flag with no value, so it is taken out before the key and value pairs are read.
+rest=()
+for a in "$@"; do
+    if [ "$a" = --require-fallback ]; then require_fallback=1; else rest+=("$a"); fi
+done
+set -- ${rest[@]+"${rest[@]}"}
 while [ $# -gt 0 ]; do
     [ $# -ge 2 ] || { echo "verify.sh: missing value for $1" >&2; exit 2; }
     case "$1" in
@@ -40,7 +46,8 @@ if [ -n "$repo" ] || [ -n "$tag" ]; then
     base="https://github.com/$repo/releases/download/$tag"
     get "$base/manifest.json" "$dir/manifest.json"
     get "$base/manifest.json.minisig" "$dir/manifest.json.minisig"
-    [ ! -f "$(dirname "$pubkey")/fallback-signing.pub" ] || get "$base/manifest.json.ecdsa" "$dir/manifest.json.ecdsa"
+    # Best effort: a release made before the fallback key existed has none, and is still a good release.
+    [ ! -f "$(dirname "$pubkey")/fallback-signing.pub" ] || get "$base/manifest.json.ecdsa" "$dir/manifest.json.ecdsa" 2> /dev/null || true
     # Nothing the manifest names is fetched until its signature verifies.
     minisign -V -p "$pubkey" -m "$dir/manifest.json" -x "$dir/manifest.json.minisig" -q ||
         fail "manifest signature does not verify"
@@ -56,12 +63,16 @@ fi
 minisign -V -p "$pubkey" -m "$dir/manifest.json" -x "$dir/manifest.json.minisig" -q ||
     fail "manifest signature does not verify"
 
-# Once the fallback key is committed, every release must carry a valid second signature too.
+# A second signature that is present must verify. --require-fallback (the release job, for the build
+# it just made) also demands one, once the fallback key is committed. Older releases have none.
 fallback_pub=$(dirname "$pubkey")/fallback-signing.pub
 if [ -f "$fallback_pub" ]; then
-    [ -f "$dir/manifest.json.ecdsa" ] || fail "manifest.json.ecdsa is missing"
-    openssl dgst -sha256 -verify "$fallback_pub" -signature "$dir/manifest.json.ecdsa" "$dir/manifest.json" > /dev/null ||
-        fail "manifest fallback signature does not verify"
+    if [ -f "$dir/manifest.json.ecdsa" ]; then
+        openssl dgst -sha256 -verify "$fallback_pub" -signature "$dir/manifest.json.ecdsa" "$dir/manifest.json" > /dev/null ||
+            fail "manifest fallback signature does not verify"
+    elif [ "$require_fallback" -eq 1 ]; then
+        fail "manifest.json.ecdsa is missing"
+    fi
 fi
 
 count=$(jq '.artifacts | length' "$dir/manifest.json")
