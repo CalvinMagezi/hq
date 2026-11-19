@@ -3,6 +3,15 @@ import Layout from '../layouts/Layout.astro';
 import Media from '../components/Media.astro';
 import manifest from '../data/media.json';
 import { links, SITE_URL } from '../data/site';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+// The Watch first band shows the clips named here once their files are committed, and nothing before.
+const WATCH_IDS = ['guide-install-android', 'guide-ai-key', 'guide-connect-computer'];
+const watchClips = WATCH_IDS.filter((id) => {
+  const m = manifest.find((x) => x.id === id);
+  return m && existsSync(join(process.cwd(), 'public', m.src));
+});
 
 const installCmd = 'curl -fsSL https://agent-hq.online/install.sh | bash';
 
@@ -197,6 +206,23 @@ const phoneShots = [
       </div>
     </div>
   </section>
+
+  {
+    watchClips.length > 0 && (
+      <section class="sec" aria-labelledby="watch-h" id="watch">
+        <div class="container stack">
+          <div class="head">
+            <p class="eyebrow reveal">Watch first</p>
+            <h2 id="watch-h" class="reveal">Short clips for the steps people stop at</h2>
+            <p class="lede reveal">No sound needed. Captions are on, and the size is shown so you can choose with your data in mind.</p>
+          </div>
+          <div class="bento">
+            {watchClips.map((id) => <div class="gcard reveal"><Media id={id} /></div>)}
+          </div>
+        </div>
+      </section>
+    )
+  }
 
   <section class="sec" aria-labelledby="door-h">
     <div class="container stack">
