@@ -10,6 +10,8 @@ pub mod agent_comm;
 pub mod agents;
 pub mod ask;
 pub mod background_turns;
+pub mod harness_alias;
+pub mod lane_gate;
 pub mod lane_quotas;
 pub mod subagent_runs;
 

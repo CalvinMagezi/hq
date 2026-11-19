@@ -10,7 +10,7 @@ use hq_db::Database;
 use hq_db::lane_quota_samples as store;
 use serde_json::{Value, json};
 
-use crate::lane_quotas::gate::{self, Verdict};
+use crate::lane_gate::{self as gate, Verdict};
 
 /// The lanes a start may use, in order, and what the stored readings say about each.
 pub(super) struct Plan {
