@@ -1,0 +1,14 @@
+# Rust files that are over 1,500 production lines today, each capped at its current size.
+# scripts/ci/file-size.py fails when a file grows past its cap, when a cap is above the file's real
+# size (lower it), when a file is no longer over 1,500 (delete the line) and when a path is not a
+# measured file. This list can only shrink: raising a cap or adding a file is a deliberate edit.
+#
+# A "production line" excludes `#[cfg(test)]` items, so a file with a big inline test module is
+# measured without it (`hq-net/src/store.rs` is 1,734 lines long but 838 production lines).
+[allow]
+# The built-in coding-agent host: one cohesive file; whether and where to split it is Phase 2 row
+# P2-13 (read it, split only along sections that already exist).
+"crates/hq-host/src/host.rs" = 2000
+# Archive create, verify and restore with every check. Cold (one commit in 400); splitting it buys
+# nothing, the cap only stops it growing.
+"crates/hq-backup/src/archive.rs" = 1503

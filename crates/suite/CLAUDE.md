@@ -29,6 +29,11 @@ programs), 3 and 4. It also checks that every suite crate is listed below and is
 member, and that its own scanner still sees planted breaches. A later change that needs to cross a line has
 to delete the guard first and say why in review.
 
+The test also guards the other direction. Only the crates in `MAY_DEPEND_ON_SUITE` (`hq-cli`,
+`hq-tools-office`, `hq-web`) may depend on a suite crate, and only the files in `MAY_NAME_SUITE` may
+name one, so `hq-core`, `hq-db`, `hq-tool-api` and `hq-tools` stay free of it and a suite change
+never rebuilds them. A stale entry fails too: the lists only shrink or change with a reason.
+
 ## Crates
 
 | Crate | Job | May depend on |
