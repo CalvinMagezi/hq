@@ -25,7 +25,7 @@ export const guides: Guide[] = [
     wrong: [
       { symptom: 'My browser says the file may be harmful', fix: 'Every app that does not come from a store gets this message. Tap Keep.' },
       { symptom: 'Install is greyed out', fix: "Open the browser's install setting and turn on Allow from this source, then go back and try again." },
-      { symptom: 'Play Protect blocked it', fix: 'Tap More details, then Install anyway. The file is signed, and the Get HQ page shows how to check it.' },
+      { symptom: 'Play Protect says App scan recommended', fix: 'Tap Scan app, wait for This app looks safe, then tap Install. You can also tap More details and choose Install without scanning, which asks for your PIN or fingerprint. The file is signed.' },
     ],
     doc: { href: '/docs/hq-mobile/', text: 'The Android guide in full' },
   },

@@ -1,0 +1,1 @@
+**The install guide shows the real Android and Play Protect screens.** A new clip records the update prompt, Google Play Protect asking to scan the app, and what to tap, and the text now uses the words Android shows (Scan app, This app looks safe, Install without scanning) instead of "Install anyway".

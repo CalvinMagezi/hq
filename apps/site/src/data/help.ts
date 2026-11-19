@@ -15,7 +15,7 @@ export const helpGroups: HelpGroup[] = [
     title: 'Installing on Android',
     items: [
       { symptom: 'My browser says the file may be harmful', fix: 'Every app that does not come from a store gets this message. Tap Keep.' },
-      { symptom: 'Play Protect blocked it', fix: 'Tap More details, then Install anyway. It shows because HQ is not on the Play Store yet. The file is signed.', link: { href: '/guides/install-android/', text: 'The install guide' } },
+      { symptom: 'Play Protect says App scan recommended', fix: 'Tap Scan app, wait a few seconds for This app looks safe, then tap Install. It shows because HQ is not on the Play Store yet. The file is signed. More details also offers Install without scanning, which asks for your PIN or fingerprint.', link: { href: '/guides/install-android/', text: 'The install guide' } },
       { symptom: 'HQ stops answering when my phone sleeps', fix: 'Android can pause apps that run in the background. Leave the phone on a charger if you want HQ to reply while you sleep, and follow the app\'s Keep running screen, which lists what to change.', link: { href: '/docs/hq-mobile/', text: 'The phone guide' } },
     ],
   },

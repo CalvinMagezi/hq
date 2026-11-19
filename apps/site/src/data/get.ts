@@ -36,7 +36,7 @@ export const android = {
   steps: [
     { title: 'Download the app', body: 'Tap Download for Android. Your browser may say this type of file can harm your device. That message appears for every app that does not come from a store. Tap Keep.' },
     { title: 'Let your browser install it', body: 'Android asks once whether your browser may install apps. Turn on Allow from this source, then press back.' },
-    { title: 'Tap Install, and tap through the warning', body: 'If Play Protect says it does not know the developer, tap More details, then Install anyway. It shows because HQ is not on the Play Store yet. The file is signed, and you can check it yourself below.' },
+    { title: 'Confirm the install, and let Play Protect scan it', body: 'Android asks you to confirm; on an update the button says Update. Google Play Protect may then say App scan recommended, because HQ is not on the Play Store yet. Tap Scan app, wait a few seconds for This app looks safe, then tap Install. More details also offers Install without scanning, which asks for your PIN or fingerprint. The file is signed, and you can check it yourself below.' },
     { title: 'Open HQ and answer three short screens', body: 'Welcome, your AI service, then Start. If you are moving from another phone, you can restore a backup from here.' },
     { title: 'Paste your AI key', body: 'Choose OpenRouter, Anthropic or another service, and paste the key. Tap Check key to make sure it works. HQ keeps it sealed on the phone and never writes it to a file.' },
   ] satisfies Step[],
