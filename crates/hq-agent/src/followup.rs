@@ -204,20 +204,32 @@ pub fn failed(db: &Database, f: &Followup, error: &str) {
     }
 }
 
+/// What the owner reads: no run ids, role words or tool names, which mean nothing to them.
+const ESCALATION_TITLE: &str = "A background task did not finish";
+const ESCALATION_BODY: &str =
+    "A background task did not finish. Open the chat to see what is missing.";
+
 fn escalate(db: &Database, run: &RunRow, why: &str) {
-    let item = ValueItem::new(
+    tracing::info!(run = %run.run_id, why, "subagent followup: escalating unfinished run");
+    let mut item = ValueItem::new(
         FOLLOWUP_SOURCE,
         ValueKind::ActionNeeded,
-        "Delegated work needs attention",
-        format!(
-            "Sub-agent run {} ({}) is {} and {}: {why}. Details: subagent_run_status.",
-            short(&run.run_id),
-            run.role,
-            run.accept_status,
-            run.exec_status
-        ),
+        ESCALATION_TITLE,
+        ESCALATION_BODY,
     )
     .with_dedup_key(format!("subagent-run-{}", run.run_id));
+    // The card is as old as the failure, not as old as this sweep.
+    if let Some(settled) = run
+        .settled_at
+        .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+    {
+        item.created_at = settled;
+    }
+    if run.platform.as_deref() == Some("web")
+        && let Some(thread) = run.thread_id.as_deref()
+    {
+        item = item.with_link(format!("/chat?thread={thread}"));
+    }
     match hq_db::value_items::emit(db, &item) {
         Ok(()) => {
             let _ = db.with_conn(|c| runs::mark_escalated(c, &run.run_id, now()));

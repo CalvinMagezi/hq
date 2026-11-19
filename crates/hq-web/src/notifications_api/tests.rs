@@ -996,3 +996,28 @@ async fn a_silenced_topic_is_listed_but_not_counted_and_hq_is_never_silenced() {
     let list = aggregate_notifications(&state.db, Some("pending"), None, 50, true).unwrap();
     assert_eq!(list.pending_approvals_count, 2);
 }
+
+#[test]
+fn a_background_task_notice_does_not_count_as_needs_you() {
+    let db = hq_db::Database::open_memory().unwrap();
+    let put = |source: &str, key: &str, owner_only: bool| {
+        let item = hq_core::types::ValueItem::new(
+            source,
+            hq_core::types::ValueKind::ActionNeeded,
+            "t",
+            "b",
+        )
+        .with_dedup_key(key)
+        .owner_only(owner_only);
+        hq_db::value_items::insert(&db, &item).unwrap();
+    };
+    put("subagent_runs", "subagent-run-abc", false);
+    put("device-sign-in", "sign-in-1", true);
+    put("cron:triage", "triage-1", false);
+
+    let res = aggregate_notifications(&db, None, None, 50, true).unwrap();
+    assert_eq!(res.notifications.len(), 3, "the notice is still listed");
+    assert_eq!(res.pending_approvals_count, 2);
+    assert_eq!(res.needs_you_owner_only, 1);
+    assert_eq!(res.needs_you_helpers, 1);
+}

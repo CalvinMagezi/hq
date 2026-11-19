@@ -1,0 +1,1 @@
+**Fewer false "task did not finish" alerts.** A background task the chat already reviewed no longer raises an alert, the alert reads in plain words with a link to the chat and carries the time the task stopped, and these notices no longer inflate the Needs you count. Helpers a chat waits on and uses inline are now closed out when the chat takes their result.

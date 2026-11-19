@@ -268,6 +268,18 @@ impl AgentService {
         self.execute_with_runs(plan, ctx).await.0
     }
 
+    /// The parent turn is handing these children's results back inline, so they are consumed:
+    /// record that, or each would stay `unverified` after the chat ends.
+    pub fn close_consumed(&self, run_ids: &[(String, String)]) {
+        let Some(db) = &self.db else { return };
+        let at = chrono::Utc::now().timestamp();
+        for (_, run_id) in run_ids {
+            if let Err(e) = db.with_conn(|c| hq_db::subagent_runs::close_consumed(c, run_id, at)) {
+                tracing::warn!(error = %e, run = %run_id, "could not close a consumed run");
+            }
+        }
+    }
+
     /// Like [`execute`](Self::execute), also returning each child's registry
     /// run id (child id to run id) so a caller can name them in an ack.
     pub async fn execute_with_runs(

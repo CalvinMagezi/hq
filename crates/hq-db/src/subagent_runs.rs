@@ -91,6 +91,7 @@ pub struct RunRow {
     pub deadline_at: Option<i64>,
     pub settled_at: Option<i64>,
     pub escalated_at: Option<i64>,
+    pub reviewed_at: Option<i64>,
 }
 
 /// How fresh a run's evidence is. `Unknown` means no telemetry ever arrived,
@@ -126,7 +127,7 @@ impl RunRow {
     }
 }
 
-const RUN_COLS: &str = "run_id, parent_run_id, parent_turn_id, platform, chat_id, thread_id, identity, task_id, child_id, role, goal, success_criteria, required_tools, detached, owner_pid, followup_depth, exec_status, accept_status, missing_deliverables, blocker_reason, next_action, output_full, output_preview, error, resolved_backend, telemetry_seen, started_at, last_activity_at, deadline_at, settled_at, escalated_at";
+const RUN_COLS: &str = "run_id, parent_run_id, parent_turn_id, platform, chat_id, thread_id, identity, task_id, child_id, role, goal, success_criteria, required_tools, detached, owner_pid, followup_depth, exec_status, accept_status, missing_deliverables, blocker_reason, next_action, output_full, output_preview, error, resolved_backend, telemetry_seen, started_at, last_activity_at, deadline_at, settled_at, escalated_at, reviewed_at";
 
 fn json_list(row: &Row, idx: usize) -> rusqlite::Result<Vec<String>> {
     let raw: String = row.get(idx)?;
@@ -166,6 +167,7 @@ fn row_to_run(row: &Row) -> rusqlite::Result<RunRow> {
         deadline_at: row.get(28)?,
         settled_at: row.get(29)?,
         escalated_at: row.get(30)?,
+        reviewed_at: row.get(31)?,
     })
 }
 
@@ -425,7 +427,8 @@ pub fn list(conn: &Connection, f: &ListFilter) -> Result<Vec<RunRow>> {
 }
 
 /// Settled runs still `partial` or `blocked` after the parent had time to
-/// review them: work that is not done and has no one on it.
+/// review them, and that the parent never gave a verdict: work that is not
+/// done and has no one on it.
 pub fn list_unresolved(
     conn: &Connection,
     settled_after: i64,
@@ -435,7 +438,7 @@ pub fn list_unresolved(
         "SELECT {RUN_COLS} FROM subagent_runs
          WHERE settled_at IS NOT NULL AND settled_at >= ?1 AND settled_at <= ?2
            AND (accept_status IN ('partial','blocked') OR exec_status = 'interrupted')
-           AND exec_status != 'cancelled' AND escalated_at IS NULL
+           AND exec_status != 'cancelled' AND escalated_at IS NULL AND reviewed_at IS NULL
          ORDER BY settled_at LIMIT 100"
     ))?;
     let rows = stmt
@@ -472,7 +475,7 @@ pub fn review(
     let changed = conn.execute(
         "UPDATE subagent_runs SET accept_status = ?2, missing_deliverables = ?3, next_action = ?4,
              blocker_reason = CASE WHEN ?2 = 'accepted' THEN NULL ELSE blocker_reason END,
-             last_activity_at = ?5
+             last_activity_at = ?5, reviewed_at = ?5
          WHERE run_id = ?1 AND settled_at IS NOT NULL AND exec_status != 'cancelled'
            AND (?2 != 'accepted' OR exec_status = 'completed')",
         params![run_id, accept, serde_json::to_string(missing)?, note, now],
@@ -482,6 +485,29 @@ pub fn review(
             "run `{run_id}` cannot take this verdict: it is unsettled, cancelled, missing, or (for accepted) did not complete"
         );
     }
+    Ok(())
+}
+
+/// Note left on a run the parent read inline but never gave a verdict.
+pub const CONSUMED_NOTE: &str =
+    "the parent turn used this result; no separate verdict was recorded";
+
+/// The parent turn consumed a settled run's output (it came back inline). Without a recorded
+/// verdict the run would stay `unverified` for good, so a clean completion is accepted here and
+/// any other outcome is only marked reviewed, keeping its `partial` or `blocked` status. A run
+/// with a verdict already is left alone, so an explicit review always wins.
+pub fn close_consumed(conn: &Connection, run_id: &str, now: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE subagent_runs SET
+             accept_status = CASE WHEN accept_status = 'unverified' AND exec_status = 'completed'
+                                  THEN 'accepted' ELSE accept_status END,
+             next_action = CASE WHEN accept_status = 'unverified' AND exec_status = 'completed'
+                                THEN ?3 ELSE next_action END,
+             reviewed_at = ?2
+         WHERE run_id = ?1 AND settled_at IS NOT NULL AND reviewed_at IS NULL
+           AND exec_status != 'cancelled'",
+        params![run_id, now, CONSUMED_NOTE],
+    )?;
     Ok(())
 }
 
