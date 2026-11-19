@@ -152,8 +152,10 @@ impl SessionBuilder {
         shared_db: Option<Arc<hq_db::Database>>,
     ) -> Vec<Box<dyn hq_tools::HqTool>> {
         // Vault + memory tools — direct vault access without subagent overhead
-        let mut tools =
-            hq_tools::vault::create_vault_tools(vault_path.to_path_buf(), shared_db.clone());
+        let mut tools = hq_tools::vault_reorg::create_vault_tools_with_reorg(
+            vault_path.to_path_buf(),
+            shared_db.clone(),
+        );
         // Restricted audiences (FR-072) only see vault context labelled for them.
         if let (Some(id), Ok(vault)) = (
             self.identity.as_ref(),

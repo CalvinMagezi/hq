@@ -2,7 +2,7 @@
 # this file and fails when a module reaches UP to a higher layer (a reference `crate::<module>` in
 # non-test source), unless the edge is listed in `allowed_back_edges`.
 #
-# Same layer or lower is always fine. The list below is not a wish list: it is the 13 back edges that
+# Same layer or lower is always fine. The list below is not a wish list: it is the back edges that
 # existed when the test was added (`python3 -I scripts/ci/module-graph.py` prints them). It can only
 # shrink. An entry that is no longer a back edge fails the test, so the fix that removes an edge
 # deletes its line here in the same PR. A module missing from [layers], or listed here and not in
@@ -21,17 +21,15 @@ allowed_back_edges = [
   "harness_session -> tasks",
   "provenance -> vault",
   "agent_host -> helper_setup",
-  "github -> tasks",
   "harness_session -> helper_setup",
   "harness_session -> lane_quotas",
-  "link_capture -> vault_reorg",
-  "provenance -> shortcuts",
-  "vault -> vault_reorg",
 ]
 
 [layers]
 # 1: free of the tangle
 agent_comm = 1
+note_index = 1
+task_placement = 1
 agents = 1
 background_turns = 1
 brand = 1

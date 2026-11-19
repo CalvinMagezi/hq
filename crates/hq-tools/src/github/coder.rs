@@ -117,7 +117,7 @@ fn task_of(conn: &rusqlite::Connection, reference: &str) -> Result<t::Task> {
 /// A new task for the job, in the owner's usual list.
 fn new_task(conn: &rusqlite::Connection, repo: &str, job: &str) -> Result<t::Task> {
     let initiative =
-        crate::tasks::find_or_create_initiative(conn, DEFAULT_SPACE, None, DEFAULT_LIST)?;
+        crate::task_placement::find_or_create_initiative(conn, DEFAULT_SPACE, None, DEFAULT_LIST)?;
     let title: String = job
         .lines()
         .next()

@@ -6,7 +6,7 @@ use hq_tool_api::registry::{HqTool, ToolRegistry};
 use hq_tools::{
     a2a, agent_comm, agent_host, agents, ask, background_turns, brand, budget_status, convert,
     github, harness_session, notify, prose_lint, self_update, session_search, shortcuts,
-    skill_manage_tool, skills, slash_commands, subagent_runs, system_info, tasks, vault,
+    skill_manage_tool, skills, slash_commands, subagent_runs, system_info, tasks,
 };
 use hq_tools_coding::coding;
 use hq_tools_web::{imagegen, remote_mcp, web};
@@ -30,7 +30,7 @@ pub fn create_default_registry(
     let vault_path = vault_client.vault_path().to_path_buf();
     let mut tools: Vec<Box<dyn HqTool>> = Vec::new();
 
-    tools.extend(vault::create_vault_tools(
+    tools.extend(hq_tools::vault_reorg::create_vault_tools_with_reorg(
         vault_path.clone(),
         Some(db.clone()),
     ));
