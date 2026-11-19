@@ -1,0 +1,1 @@
+**The public site says what HQ is now.** The share card, 404 page, comparison row and Security page describe HQ as an assistant on your phone that works with your computers, the stale "Android only" and "build the APK yourself" lines are gone, and the footer is rebuilt around three questions (learn, trust, stuck) with the current build number.

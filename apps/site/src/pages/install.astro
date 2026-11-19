@@ -36,7 +36,7 @@ const scriptFlags = 'curl -fsSL https://agent-hq.online/install.sh | bash -s -- 
 const androidHq = '# hq for the phone, with the pairing and tunnel features the app uses\n# (the recipe CI runs is .github/workflows/android.yml)\ncargo build -p hq-cli --profile release-small --target aarch64-linux-android --features tunnel,bridge --locked';
 const androidApk = 'cd apps/android\n./gradlew :app:assembleDebug \\\n  -Phq.bin=<hq aarch64-linux-android> -Phq.caddy=<caddy linux arm64> \\\n  -Phq.web=<apps/hq-web/dist/client> -Phq.keystore=<your signing key>';
 const androidInstall = 'adb install -r app/build/outputs/apk/debug/app-debug.apk';
-const androidActive = '# hq starts in standby: the web app only. For the full daemon and relays:\nadb shell "run-as example.hq.spike sh -c \'echo active > files/mode\'"\nadb shell "run-as example.hq.spike sh -c \'kill \\$(pidof libhq.so)\'"   # the app restarts hq';
+const androidActive = '# hq starts in standby: the web app only. For the full daemon and relays:\nadb shell "run-as online.agenthq.app sh -c \'echo active > files/mode\'"\nadb shell "run-as online.agenthq.app sh -c \'kill \\$(pidof libhq.so)\'"   # the app restarts hq';
 
 // The picker offers only the channels install-channels.ts marks available.
 const pickerOptions = [
@@ -507,7 +507,7 @@ const pickerOptions = [
             <li>Code-signed Windows builds, and coding agents on native Windows (they need WSL2 today).</li>
             <li>A Google Play Store listing. The Android app is a signed download for now.</li>
             <li>Proof that a sleeping, unplugged phone always answers in time. Keep a hosting phone on a charger.</li>
-            <li>QR pairing in the standard downloads. <code>hq bridge</code> is built into the Android app only, for now.</li>
+            <li>QR pairing on Windows. <code>hq bridge</code> ships in the Android app and in the Linux and macOS downloads; the Windows build leaves it out.</li>
             <li>A signed macOS desktop app. The Tauri app in the repo builds and runs, unsigned.</li>
           </ul>
         </div>
