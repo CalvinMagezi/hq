@@ -24,7 +24,7 @@ The export result has a `fidelity` line saying what was kept. Pass that line on 
 
 ## Data you gathered
 
-- When the figures come from the web, add a `source` column and an `as of` date column to every row, and fill them with what you actually read.
+- When the figures come from the web, add a `source` column, an `as of` date column, a `retail or wholesale` column and a `confidence` column to every row, and fill them with what you actually read. For price comparisons, `local-price-research` has the rules.
 - Write a blank where you could not verify a figure. Never fill a gap with a guess or a number from memory.
 - Say in your reply which figures are missing and why.
 
