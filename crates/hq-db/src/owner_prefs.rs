@@ -13,14 +13,18 @@ pub const CHAT_AUTO_TITLE: &str = "chat.auto_title";
 /// Which helper requests reach the owner: `nothing`, `loses_work` or `everything`.
 pub const HELPERS_ASK_LEVEL: &str = "helpers.ask_level";
 
+/// How many focus lanes may be active at once, 1 to 5 (`crate::focus_lanes`).
+pub const FOCUS_MAX_LANES: &str = "focus.max_lanes";
+
 /// Every key that may be stored.
-pub const KNOWN: [&str; 2] = [CHAT_AUTO_TITLE, HELPERS_ASK_LEVEL];
+pub const KNOWN: [&str; 3] = [CHAT_AUTO_TITLE, HELPERS_ASK_LEVEL, FOCUS_MAX_LANES];
 
 /// Whether `value` is one this key accepts.
 pub fn valid(key: &str, value: &str) -> bool {
     match key {
         CHAT_AUTO_TITLE => matches!(value, "true" | "false"),
         HELPERS_ASK_LEVEL => matches!(value, "nothing" | "loses_work" | "everything"),
+        FOCUS_MAX_LANES => matches!(value, "1" | "2" | "3" | "4" | "5"),
         _ => false,
     }
 }
