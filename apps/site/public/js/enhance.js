@@ -61,6 +61,13 @@
     });
   }
 
+  // A tap ends the opening screen early. It also hides itself when its animation finishes.
+  function setupIntro() {
+    var intro = document.querySelector('.intro');
+    if (!intro) return;
+    intro.addEventListener('click', function () { document.documentElement.classList.add('intro-done'); });
+  }
+
   // A best guess at the visitor's device from the user agent. Wrong guesses cost one tap, and
   // nothing leaves the browser.
   function detectDevice(buttons) {
@@ -188,6 +195,7 @@
   setupCopy();
   setupAnimations();
   setupMarqueePause();
+  setupIntro();
   setupTabs();
   setupFocusSwitch();
   setupSpotlight();

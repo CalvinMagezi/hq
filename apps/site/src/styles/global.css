@@ -765,6 +765,61 @@ pre {
   }
 }
 
+/* Header menu and nav-end group. The menu only shows on a phone once the page is scrolled. */
+.nav-end {
+  display: contents;
+}
+.menu {
+  display: none;
+  position: relative;
+}
+.menu summary {
+  list-style: none;
+  min-height: 44px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+}
+.menu summary::-webkit-details-marker {
+  display: none;
+}
+.menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 200px;
+  padding: 8px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+}
+.menu-list a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: none;
+}
+@media (max-height: 480px) {
+  .site-header {
+    position: static;
+  }
+}
+@media (max-width: 760px) {
+  .nav-end {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+}
+
 /* Footer */
 .site-footer {
   position: relative;
@@ -1607,12 +1662,13 @@ tbody th {
 @media (prefers-reduced-motion: no-preference) {
   .hl > span {
     animation: rise 0.9s var(--ease-out) both;
+    animation-delay: var(--intro-wait, 0s);
   }
   .hl:nth-child(2) > span {
-    animation-delay: 0.12s;
+    animation-delay: calc(var(--intro-wait, 0s) + 0.12s);
   }
   .hl:nth-child(3) > span {
-    animation-delay: 0.24s;
+    animation-delay: calc(var(--intro-wait, 0s) + 0.24s);
   }
   .rule-in {
     animation: grow 1.1s 0.45s var(--ease-out) both;
@@ -1688,6 +1744,161 @@ tbody th {
   border-radius: 2px;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  /* The browser's own cross-document transition: no router, no script. */
+  @view-transition {
+    navigation: auto;
+  }
+  .site-header {
+    view-transition-name: site-header;
+  }
+  ::view-transition-old(root) {
+    animation: vtOut 0.12s ease both;
+  }
+  ::view-transition-new(root) {
+    animation: vtIn 0.22s var(--ease-out) both;
+  }
+}
+@keyframes vtOut {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes vtIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+/* Header shrinks once scrolled; where scroll timelines are missing it stays full size. */
+@keyframes compact {
+  to {
+    padding-top: 3px;
+    padding-bottom: 3px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  }
+}
+@keyframes navFold {
+  to {
+    opacity: 0;
+    max-height: 0;
+    padding-block: 0;
+    visibility: hidden;
+  }
+}
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    visibility: hidden;
+  }
+  to {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .navshell {
+      animation: compact linear both;
+      animation-timeline: scroll(root);
+      animation-range: 0 140px;
+    }
+    @media (max-width: 760px) {
+      .site-nav {
+        max-height: 48px;
+        animation: navFold linear both;
+        animation-timeline: scroll(root);
+        animation-range: 100px 140px;
+      }
+      .menu {
+        display: block;
+        animation: menuIn linear both;
+        animation-timeline: scroll(root);
+        animation-range: 100px 140px;
+      }
+    }
+  }
+}
+
+/* Opening screen: Home, first visit of a session, set up by /js/intro.js. About 1.4 seconds. */
+.intro {
+  display: none;
+}
+.intro-play .intro {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: #000000;
+  animation: introLift 0.45s var(--ease-out) 1s both;
+}
+.intro-done .intro {
+  display: none;
+}
+.intro-in {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+.intro-pair {
+  width: 96px;
+  height: 60px;
+  animation: hop 0.4s var(--ease-out) 0.45s both;
+}
+.intro-c1 {
+  animation: introLeft 0.45s var(--ease-out) both;
+}
+.intro-c2 {
+  animation: introRight 0.45s var(--ease-out) both;
+}
+.intro-word {
+  margin: 0;
+  overflow: hidden;
+  padding-bottom: 8px;
+  font-size: 40px;
+  line-height: 48px;
+  font-weight: 700;
+}
+.intro-word span {
+  display: block;
+  animation: rise 0.5s var(--ease-out) 0.4s both;
+}
+.intro-rule {
+  height: 3px;
+  width: 160px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--brand-blue), var(--brand-green));
+  transform-origin: left center;
+  animation: grow 0.4s ease 0.6s both;
+}
+.intro-play {
+  --intro-wait: 0.9s;
+}
+@keyframes introLeft {
+  from {
+    transform: translateX(-26px);
+  }
+}
+@keyframes introRight {
+  from {
+    transform: translateX(26px);
+  }
+}
+@keyframes introLift {
+  to {
+    transform: translateY(-100%);
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro {
+    display: none !important;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
