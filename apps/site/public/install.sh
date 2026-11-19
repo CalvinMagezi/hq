@@ -14,6 +14,10 @@ REPO="CalvinMagezi/hq"
 BASE_URL="https://github.com"
 # Must match release/minisign.pub in the repository.
 PUBKEY_LINE="RWTSi05PPMb9UVVnGilhLWT7h/mjQ1VjfAEXszxJB/Er8UEsCXFc3o1/"
+# The second signature, for a machine with neither minisign nor an OpenSSL that can check Ed25519 (a Mac
+# with no Homebrew). The release also signs each file with ECDSA P-256, which the system openssl checks.
+# Base64 of the DER public key in release/fallback-signing.pub. Empty until that key exists.
+FALLBACK_PUBKEY=""
 
 CHANNEL="stable"
 PREFIX="${HQ_PREFIX:-$HOME/.local/bin}"
@@ -21,6 +25,7 @@ WEB=1
 WEB_ONLY=0
 PAIR=0
 WORK=""
+USE_FALLBACK=0
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/agent-hq"
 
 die() { echo "install: $*" >&2; exit 1; }
@@ -39,8 +44,8 @@ usage: install.sh [--channel stable|main] [--prefix DIR] [--no-web | --web-only]
               the web UI, then run `hq bridge pair --setup`, which shows a code for the phone to scan
 
 The first download is verified with the minisign tool when it is installed, otherwise with
-OpenSSL 1.1.1 or newer. On macOS the system OpenSSL cannot do this, so install minisign
-(brew install minisign) or OpenSSL (brew install openssl).
+OpenSSL 1.1.1 or newer, otherwise (on a Mac with neither) with the release's second, ECDSA
+signature and the system openssl. Whichever runs, nothing is installed until it verifies.
 USAGE
 }
 
@@ -144,8 +149,30 @@ find_openssl() {
     return 1
 }
 
+# A release made before the second signature existed has no .ecdsa file.
+fetch_fallback_signature() {
+    curl --proto '=https' --tlsv1.2 -fsSL --max-time 600 -o "$2" "$1" ||
+        die "this release has no second signature, and nothing else here can verify it: install minisign (brew install minisign) and run this again"
+}
+
+# Verifies the release's ECDSA P-256 signature (<file>.ecdsa, DER) with any openssl, LibreSSL included.
+verify_fallback() {
+    local msg="$1" sigfile="$2" w ok=1
+    w="$(mktemp -d)"
+    {
+        echo '-----BEGIN PUBLIC KEY-----'
+        printf '%s\n' "$FALLBACK_PUBKEY" | fold -w 64
+        echo '-----END PUBLIC KEY-----'
+    } > "$w/pub.pem"
+    openssl dgst -sha256 -verify "$w/pub.pem" -signature "$sigfile" "$msg" >/dev/null 2>&1 && ok=0
+    rm -rf "$w"
+    return "$ok"
+}
+
 verify_signature() {
-    if command -v minisign >/dev/null 2>&1; then
+    if [ "$USE_FALLBACK" -eq 1 ]; then
+        verify_fallback "$1" "${2%.minisig}.ecdsa"
+    elif command -v minisign >/dev/null 2>&1; then
         minisign -V -P "$PUBKEY_LINE" -m "$1" -x "$2" >/dev/null 2>&1
     else
         verify_openssl "$1" "$2"
@@ -155,6 +182,10 @@ verify_signature() {
 check_can_verify() {
     command -v minisign >/dev/null 2>&1 && return 0
     find_openssl >/dev/null 2>&1 && return 0
+    if [ -n "$FALLBACK_PUBKEY" ] && command -v openssl >/dev/null 2>&1 && command -v fold >/dev/null 2>&1; then
+        USE_FALLBACK=1
+        return 0
+    fi
     die "cannot verify the download: install minisign (brew install minisign) or OpenSSL (apt install openssl, brew install openssl), then run this again"
 }
 
@@ -217,6 +248,7 @@ main() {
     say "Looking up the $CHANNEL release for $plat"
     fetch "$release/channel-$CHANNEL/channel-$CHANNEL.json" "$WORK/channel.json"
     fetch "$release/channel-$CHANNEL/channel-$CHANNEL.json.minisig" "$WORK/channel.json.minisig"
+    [ "$USE_FALLBACK" -eq 0 ] || fetch_fallback_signature "$release/channel-$CHANNEL/channel-$CHANNEL.json.ecdsa" "$WORK/channel.json.ecdsa"
     verify_signature "$WORK/channel.json" "$WORK/channel.json.minisig" || die "the channel pointer signature does not verify"
     [ "$(json_string channel "$WORK/channel.json")" = "$CHANNEL" ] || die "the channel pointer is for a different channel"
 
@@ -231,6 +263,7 @@ main() {
 
     fetch "$manifest_url" "$WORK/manifest.json"
     fetch "$manifest_url.minisig" "$WORK/manifest.json.minisig"
+    [ "$USE_FALLBACK" -eq 0 ] || fetch_fallback_signature "$manifest_url.ecdsa" "$WORK/manifest.json.ecdsa"
     [ "$(sha256_of "$WORK/manifest.json")" = "$(json_string manifest_sha256 "$WORK/channel.json")" ] \
         || die "the manifest does not match the channel pointer"
     verify_signature "$WORK/manifest.json" "$WORK/manifest.json.minisig" || die "the manifest signature does not verify"

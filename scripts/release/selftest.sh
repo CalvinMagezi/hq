@@ -52,6 +52,23 @@ bash "$here/package.sh" --version "$version" --git-sha "$sha" --channel main \
 bash "$here/sign.sh" "$rel/manifest.json"
 bash "$here/verify.sh" --dir "$rel" --pubkey "$t/pub"
 
+# The fallback signature rides along once its key exists, and verify.sh then requires it.
+mkdir "$t/fb"
+cp "$t/pub" "$t/fb/pub"
+openssl ecparam -name prime256v1 -genkey -noout -out "$t/fb.pem"
+openssl ec -in "$t/fb.pem" -pubout -out "$t/fb/fallback-signing.pub" 2> /dev/null
+FALLBACK_SIGNING_KEY=$(cat "$t/fb.pem") bash "$here/sign.sh" "$rel/manifest.json"
+[ -f "$rel/manifest.json.ecdsa" ] || { echo "selftest: sign.sh wrote no .ecdsa with a fallback key" >&2; exit 1; }
+bash "$here/verify.sh" --dir "$rel" --pubkey "$t/fb/pub" --require-fallback
+cp "$rel/manifest.json.ecdsa" "$t/ecdsa.keep"
+printf 'x' >> "$rel/manifest.json.ecdsa"
+bash "$here/verify.sh" --dir "$rel" --pubkey "$t/fb/pub" 2> /dev/null && { echo "selftest: verify.sh accepted a bad .ecdsa" >&2; exit 1; }
+rm "$rel/manifest.json.ecdsa"
+# An older release has none: fine by default, refused when the release job requires one.
+bash "$here/verify.sh" --dir "$rel" --pubkey "$t/fb/pub"
+bash "$here/verify.sh" --dir "$rel" --pubkey "$t/fb/pub" --require-fallback 2> /dev/null && { echo "selftest: --require-fallback accepted a release with no .ecdsa" >&2; exit 1; }
+rm -f "$t/ecdsa.keep"
+
 # The linux-x86_64 name is frozen (installed updaters look for exactly this string).
 [ -f "$rel/hq-$version-linux-x86_64.tar.gz" ] || { echo "selftest: legacy linux-x86_64 artifact name changed" >&2; exit 1; }
 for p in $platforms; do
