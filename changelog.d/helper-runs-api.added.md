@@ -1,0 +1,1 @@
+**Helper runs are readable by the web app.** `GET /api/threads/{id}/helper-runs` lists a chat's helpers with their real state and a link to the note they wrote, `GET /api/helper-runs?q=` searches them, and the chat socket sends `subagent_start` and `subagent_end` so a background helper's finish is no longer guessed from the tool step.

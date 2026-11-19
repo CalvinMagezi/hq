@@ -474,6 +474,14 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             get(edge_worker_api::edge_worker_handler),
         )
         .route(
+            "/api/threads/{thread_id}/helper-runs",
+            get(helper_runs_api::list_thread_runs_handler),
+        )
+        .route(
+            "/api/helper-runs",
+            get(helper_runs_api::search_runs_handler),
+        )
+        .route(
             "/api/threads/{thread_id}/sessions",
             get(sessions_api::list_thread_sessions_handler),
         )

@@ -556,6 +556,37 @@ impl ChildRunSummary {
     }
 }
 
+/// Run ids a `spawn_subagents` result names, in order and without repeats: the `Run ids: task=run, ...`
+/// line of a background dispatch and the `run <id> accept=...` line of each blocking child. Lives
+/// beside the formatting above so the two change together; a surface that wants structured child
+/// info reads the registry rows for these ids rather than the text.
+pub fn run_ids_in_result(text: &str) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    let mut push = |id: &str| {
+        let id = id.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-');
+        if uuid::Uuid::parse_str(id).is_ok() && !ids.iter().any(|i| i == id) {
+            ids.push(id.to_string());
+        }
+    };
+    for line in text.lines() {
+        if let Some(rest) = line.split("Run ids: ").nth(1) {
+            for pair in rest.split(", ") {
+                push(
+                    pair.rsplit('=')
+                        .next()
+                        .unwrap_or(pair)
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or(""),
+                );
+            }
+        } else if let Some(rest) = line.trim_start().strip_prefix("run ") {
+            push(rest.split_whitespace().next().unwrap_or(""));
+        }
+    }
+    ids
+}
+
 /// One bounded line per child naming its run, verdict, blocker and missing
 /// deliverables, so they reach the model even when the preview cuts the output.
 fn write_run_line(
@@ -686,6 +717,21 @@ impl std::fmt::Display for ChildRunSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_ids_come_out_of_both_result_shapes() {
+        let a = "11111111-1111-4111-8111-111111111111";
+        let b = "22222222-2222-4222-8222-222222222222";
+        let bg = format!(
+            "Dispatched 2 child task(s): t1, t2. Run ids: t1={a}, t2={b}. Results arrive later."
+        );
+        assert_eq!(run_ids_in_result(&bg), vec![a, b]);
+        let blocking = format!(
+            "## Sub-agent Run Summary\n    run {a} accept=unverified (full result: x)\n    run {b} accept=blocked BLOCKER: no"
+        );
+        assert_eq!(run_ids_in_result(&blocking), vec![a, b]);
+        assert!(run_ids_in_result("nothing to see: run now").is_empty());
+    }
 
     #[test]
     fn a_child_can_be_confined_to_a_folder() {

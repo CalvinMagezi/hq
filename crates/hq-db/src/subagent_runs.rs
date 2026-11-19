@@ -426,6 +426,32 @@ pub fn list(conn: &Connection, f: &ListFilter) -> Result<Vec<RunRow>> {
     Ok(rows)
 }
 
+/// Runs started from one platform whose goal, role or result preview contains `needle`
+/// (case-insensitive, literal), newest first. Feeds global search.
+pub fn search(conn: &Connection, platform: &str, needle: &str, limit: i64) -> Result<Vec<RunRow>> {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+    let like = format!(
+        "%{}%",
+        needle
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_")
+    );
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {RUN_COLS} FROM subagent_runs
+         WHERE platform = ?1
+           AND (goal LIKE ?2 ESCAPE '\\' OR role LIKE ?2 ESCAPE '\\' OR output_preview LIKE ?2 ESCAPE '\\')
+         ORDER BY started_at DESC LIMIT ?3"
+    ))?;
+    let rows = stmt
+        .query_map(params![platform, like, limit.clamp(1, 100)], row_to_run)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 /// Settled runs still `partial` or `blocked` after the parent had time to
 /// review them, and that the parent never gave a verdict: work that is not
 /// done and has no one on it.
