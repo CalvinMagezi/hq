@@ -13,8 +13,11 @@ export function getStaticPaths() {
 
 const { guide, next } = Astro.props;
 // A clip or screenshot shows only once its file is committed, so no guide ships a placeholder tile.
-const clip = manifest.find((m) => m.id === `guide-${guide.id}`);
-const hasClip = Boolean(clip?.src) && existsSync(join(process.cwd(), 'public', clip!.src));
+// The main clip is guide-<id>; a second one, guide-<id>-2, shows after it.
+const clipIds = [`guide-${guide.id}`, `guide-${guide.id}-2`].filter((id) => {
+  const m = manifest.find((x) => x.id === id);
+  return Boolean(m?.src) && existsSync(join(process.cwd(), 'public', m!.src));
+});
 ---
 
 <Layout title={guide.title} description={`${guide.summary} About ${guide.time}.`} path={`/guides/${guide.id}/`}>
@@ -24,7 +27,7 @@ const hasClip = Boolean(clip?.src) && existsSync(join(process.cwd(), 'public', c
       <h1 class="doc-title">{guide.title}</h1>
       <p class="lede">{guide.intro}</p>
       <p class="small doc-meta">About {guide.time}.</p>
-      {hasClip && <Media id={`guide-${guide.id}`} />}
+      {clipIds.map((id) => <Media id={id} />)}
       <StepList steps={guide.steps} prefix={`g-${guide.id}`} level={2} />
       <div class="stack">
         <h2 class="h3-like">If it went wrong</h2>

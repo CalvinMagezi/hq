@@ -108,10 +108,10 @@
     "captions": "/media/guide-backup.vtt"
   },
   {
-    "id": "guide-install-android",
+    "id": "guide-install-android-2",
     "kind": "video",
-    "src": "/media/guide-install-android.mp4",
-    "poster": "/media/guide-install-android-poster.jpg",
+    "src": "/media/guide-install-android-2.mp4",
+    "poster": "/media/guide-install-android-2-poster.jpg",
     "alt": "Screen recording of HQ opening for the first time on a phone: Set up a new HQ, paste and check an AI key, Start HQ, then the Chat screen.",
     "caption": "The three first-run screens, after the app is installed.",
     "width": 480,
@@ -119,7 +119,7 @@
     "recordedWith": "v0.9.1-main.606",
     "bytes": 143320,
     "duration": 38,
-    "captions": "/media/guide-install-android.vtt"
+    "captions": "/media/guide-install-android-2.vtt"
   },
   {
     "id": "guide-ai-key",
@@ -148,5 +148,19 @@
     "bytes": 150961,
     "duration": 19,
     "captions": "/media/guide-first-question.vtt"
+  },
+  {
+    "id": "guide-install-android",
+    "kind": "video",
+    "src": "/media/guide-install-android.mp4",
+    "poster": "/media/guide-install-android-poster.jpg",
+    "alt": "Screen recording of the Android update: Settings, Updates, Download and install, the Update prompt, then Google Play Protect asking to scan the app, Scan app, and This app looks safe with an Install button.",
+    "caption": "What Android and Play Protect ask when you install or update HQ.",
+    "width": 480,
+    "height": 1066,
+    "recordedWith": "v0.9.1-main.606",
+    "bytes": 420468,
+    "duration": 54,
+    "captions": "/media/guide-install-android.vtt"
   }
 ]
