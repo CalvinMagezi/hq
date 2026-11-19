@@ -15,6 +15,7 @@ pub mod copilot_usage_samples;
 pub mod dialog_alerts;
 pub mod fetch_sites;
 pub mod fleet_digest;
+pub mod focus_lanes;
 pub mod folder_grants;
 pub mod harness_drive_gate;
 pub mod harness_sessions_registry;

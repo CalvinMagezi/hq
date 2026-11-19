@@ -11,6 +11,7 @@ pub mod decisions;
 pub mod doctor;
 pub mod edge;
 pub mod env;
+pub mod focus;
 pub mod health;
 #[cfg(unix)]
 pub mod host;

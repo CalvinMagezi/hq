@@ -408,6 +408,7 @@ pub(crate) async fn dispatch(command: Commands, config: &HqConfig) -> Result<()>
         Commands::Bridge(action) => commands::bridge::run(config, action).await,
         #[cfg(all(unix, feature = "bridge"))]
         Commands::Claude(action) => commands::claude::run(config, action),
+        Commands::Focus(action) => commands::focus::run(config, action),
         Commands::Inbox(action) => commands::inbox::run(config, action),
         Commands::Trust(action) => commands::trust::run(config, action),
         Commands::Adoption { json } => commands::adoption::run_adoption(config, json),
