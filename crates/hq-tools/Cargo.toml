@@ -8,6 +8,7 @@ hq-host = { workspace = true }
 hq-core = { workspace = true }
 hq-tool-api = { workspace = true }
 hq-tools-web = { workspace = true }
+hq-tools-coding = { workspace = true }
 hq-vault = { workspace = true }
 hq-db = { workspace = true }
 hq-llm = { workspace = true }
