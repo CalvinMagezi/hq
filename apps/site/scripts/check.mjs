@@ -202,6 +202,17 @@ for (const f of files.filter((p) => /\.(css|js|mjs)$/.test(p))) {
   if (f.endsWith('.css') && /animation:[^;}]*\b(scroll|view)\(/.test(text)) fail(rel(f), 'animation shorthand carries a scroll or view timeline');
 }
 
+// Recorded clips: each needs captions, the build it was recorded on and a size inside its budget.
+const CLIP_BUDGET_BYTES = 3 * 1024 * 1024;
+const manifest = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'src', 'data', 'media.json'), 'utf8'));
+for (const m of manifest.filter((x) => x.kind === 'video' && existsSync(join(DIST, x.src.slice(1))))) {
+  if (m.recordedWith === undefined) continue; // the older terminal clip predates the recording rules
+  if (!/^v\d+\.\d+\.\d+-main\.\d+$/.test(m.recordedWith)) fail(`media ${m.id}`, 'recordedWith is not a build tag');
+  if (!m.captions || !existsSync(join(DIST, m.captions.slice(1)))) fail(`media ${m.id}`, 'a clip needs a captions file');
+  if (!m.alt || m.alt.length < 15) fail(`media ${m.id}`, 'a clip needs alt text');
+  if (statSync(join(DIST, m.src.slice(1))).size > CLIP_BUDGET_BYTES) fail(`media ${m.id}`, 'clip is over the 3 MB budget');
+}
+
 // Site-level files.
 const need = (cond, what) => cond || fail('site', what);
 need(existsSync(join(DIST, 'CNAME')) && readFileSync(join(DIST, 'CNAME'), 'utf8').trim() === 'agent-hq.online', 'CNAME must contain agent-hq.online');

@@ -1,0 +1,1 @@
+**Tools for recording the site's guide clips.** Scripts to seed a demo Vault with invented notes, record the phone, a browser flow or a terminal, and encode each clip under its size budget with a poster and captions, tied to the build it was recorded on. The site check fails a clip with no captions or over 3 MB.

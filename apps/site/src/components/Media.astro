@@ -24,6 +24,9 @@ const KIND_LABEL: Record<string, string> = {
 };
 const PH_WIDTH = 640;
 const phHeight = Math.round((PH_WIDTH * item.height) / item.width);
+const clipMeta = item as { captions?: string; bytes?: number; duration?: number; recordedWith?: string };
+const sizeLabel = clipMeta.bytes ? `${(clipMeta.bytes / (1024 * 1024)).toFixed(1)} MB` : '';
+const hasCaptions = onDisk(clipMeta.captions);
 const showGif = item.kind === 'gif' && hasFile && hasPoster;
 ---
 
@@ -67,6 +70,7 @@ const showGif = item.kind === 'gif' && hasFile && hasPoster;
           aria-label={item.alt}
         >
           <source src={item.src} type="video/mp4" />
+          {hasCaptions && <track kind="captions" src={clipMeta.captions} srclang="en" label="English" default />}
           <p>
             Your browser cannot play this video. <a href={item.src}>Download it</a>.
           </p>
@@ -91,6 +95,7 @@ const showGif = item.kind === 'gif' && hasFile && hasPoster;
   <figcaption>
     {!(hasFile && (item.kind !== 'gif' || hasPoster)) && <span class="tag">Coming soon</span>}
     {' '}{item.caption}
+    {item.kind === 'video' && hasFile && sizeLabel && <span class="small"> ({sizeLabel}, <a href={item.src} download>save to share</a>)</span>}
   </figcaption>
   {
     showGif && (
