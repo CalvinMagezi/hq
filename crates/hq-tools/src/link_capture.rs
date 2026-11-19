@@ -228,7 +228,7 @@ fn name_after_page(
             return unchanged;
         }
     };
-    crate::vault_reorg::reindex_moved_note(Some(db), vault, &report.from, &report.to);
+    crate::note_index::reindex_moved_note(Some(db), vault, &report.from, &report.to);
     let (from, moved) = (report.from.clone(), report.to.clone());
     if let Err(e) = db.with_conn(move |c| hq_db::provenance::move_path(c, &from, &moved)) {
         tracing::warn!(error = %e, "link capture: could not move the note's provenance");

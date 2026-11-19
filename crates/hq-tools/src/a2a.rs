@@ -36,7 +36,16 @@ pub const MAX_LIVE_CHILDREN: usize = hq_core::config::TEAM_MAX_LIVE_CHILDREN_CEI
 /// The most output quoted to a parent when a child reports in.
 const REPORT_TAIL_CHARS: usize = 1500;
 
+/// Lets `harness_session_spawn` called from inside a session delegate through this module without
+/// `harness_session` naming it. Idempotent; call wherever the harness session tools are made.
+pub fn install_delegation() {
+    crate::harness_session::install_delegator(|db, from, args| {
+        Box::pin(async move { delegate_from_spawn(db, from, &args).await })
+    });
+}
+
 pub fn create_a2a_tools(db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
+    install_delegation();
     vec![
         Box::new(AgentMessageSendTool { db: db.clone() }),
         Box::new(AgentDelegateTool { db: db.clone() }),
