@@ -15,13 +15,15 @@ When you make a key, set a spending cap or an expiry on it if the service lets y
 
 ## Inside HQ
 
-Open **Settings**, then **Spending limits**. A limit has three parts:
+Open the **Spending** page in the web app. A limit has three parts:
 
 - **What it covers.** All AI spending, one service only, one model only, or spending from one place, such as a particular chat app.
 - **How often.** Each day, each week or each month. Limits reset at midnight UTC, and the page shows what time that is where you are.
 - **What happens at the limit.** HQ either stops using AI until the limit resets, or it tells you and carries on. You can also set a warning point before the limit.
 
-A small chip in the app shows how much of your limit is used, for example "Spending limit: $0.40 of $1.00 today". Opening it takes you to the Spending page, which shows what you have spent so far and how far along you are: within the limit, past your warning point, or limit reached, with the time until it resets.
+A small chip in the app shows how much of your limit is used, for example "Spending limit: $0.40 of $1.00 today". The Spending page shows what you have spent so far and how far along you are: within the limit, past your warning point, or limit reached, with the time until it resets.
+
+On the phone, **Settings**, then **Spending limits**, shows your budgets, a forecast for the month and how much mobile data HQ has used. Changing a limit is in the web app for now.
 
 ## Chats are not capped per message
 

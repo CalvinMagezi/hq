@@ -112,7 +112,7 @@ GitHub Releases page and open it. Android asks once to allow "Install unknown ap
 file manager you used. Check the signing certificate with `apksigner verify --print-certs`; its SHA-256
 must be the one in `apps/android/README.md` and `docs/security/RELEASE_CHECKLIST.md`.
 
-After that the app updates itself: Settings, Backup and about, "Check for updates" (and once a day while
+After that the app updates itself: Settings, Updates, "Check for updates" (and once a day while
 the hub service runs, and on opening the app once the last check is six hours old) reads the signed
 `android-channel.json` of the stable channel, or of every main build if you turn on "Follow every build of
 main". A version that is ready shows as a line under the top bar on every screen, "AgentHQ 1.4.2 is ready to

@@ -67,11 +67,11 @@ const hosts = [
 ];
 
 const phoneShots = [
-  { id: 'chat-working', label: 'Chat', alt: 'Phone screen: a chat where HQ answers a question, then lists the steps it is taking: checked your tasks, read a note, writing the steps.' },
-  { id: 'tasks-today', label: 'Tasks', alt: 'Phone screen: the Today tab of Tasks, with a stuck task and one ready to check under Waiting on you, two in progress and one due today.' },
-  { id: 'inbox-needs-you', label: 'Inbox', alt: 'Phone screen: the Inbox, where a task HQ says is finished waits with Check it and Not now.' },
-  { id: 'helper-working', label: 'Helpers', alt: 'Phone screen: a coding agent on a Mac mini building an app, with what it has done so far and a field to tell it something.' },
-  { id: 'note-reading', label: 'Notes', alt: 'Phone screen: a garden planner note open for reading, with Edit, Ask HQ, Make a task, Pin and Share.' },
+  { id: 'chat-empty', label: 'Chat', alt: 'Phone screen: an empty Chat that says What would you like to do, with three suggestions and the Message HQ box.' },
+  { id: 'vault-list', label: 'Vault', alt: 'Phone screen: the Vault, listing four recent notes, with a search box, an Inbox folder and a New button.' },
+  { id: 'inbox', label: 'Inbox', alt: 'Phone screen: the Inbox with nothing waiting, under the words You are all caught up, and an offer to turn on notifications.' },
+  { id: 'helpers-start', label: 'Helpers', alt: 'Phone screen: the Start a helper sheet, showing the one line to paste on a computer and the Copy and Scan the code buttons.' },
+  { id: 'vault-note', label: 'A note', alt: 'Phone screen: a garden planner note open for reading, with Edit, Edit by block and Ask HQ.' },
   { id: 'keep-running', label: 'Keep running', alt: 'Phone screen: Keep running, listing three Android settings to fix so HQ stays on: battery use, unused-app permissions and notifications.' },
 ];
 ---
@@ -390,13 +390,13 @@ const phoneShots = [
         {
           phoneShots.map((p, i) => (
             <li class={`phone-shot reveal reveal-${(i % 3) + 1}`}>
-              <img src={`/media/phone/${p.id}.jpg`} alt={p.alt} width="519" height="1124" loading="lazy" decoding="async" />
+              <img src={`/media/phone/${p.id}.jpg`} alt={p.alt} width="519" height="1153" loading="lazy" decoding="async" />
               <span class="small">{p.label}</span>
             </li>
           ))
         }
       </ul>
-      <p class="small phone-note">Tasks, Inbox, Notes and Keep running are the app itself on a fresh install with demo data. Chat and Helpers are from the app's design, which the app, the web app and the desktop app follow.</p>
+      <p class="small phone-note">Every screen here is the app, release build 0.9.1-main.606, on a fresh install with invented demo notes.</p>
       <div class="phone-facts">
         <div class="gcard">
           <h3>Works today</h3>

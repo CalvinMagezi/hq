@@ -39,7 +39,7 @@ export const guides: Guide[] = [
       { title: 'Pick a service and make a key', body: 'OpenRouter reaches many models with one key. Anthropic gives you Claude directly. Google AI gives you Gemini directly. Each service has a page where you create a key, and the account needs a little credit.', link: { href: '/docs/first-run/', text: 'The links to each service' } },
       { title: 'Cap the key where you made it', body: 'Most services let you set a spending cap or an expiry on the key itself. Do that first: it is the limit that works even if something goes wrong on your side.' },
       { title: 'Paste it into HQ', body: 'On the first run HQ asks for the key. Paste it and tap Check key. If you skipped it, open Settings, then AI service and keys.' },
-      { title: 'Set a limit inside HQ too', body: 'Open Settings, then Spending limits. You can set daily, monthly and per-model limits, and a small chip shows how much of your limit is used.' },
+      { title: 'Set a limit inside HQ too', body: 'In the web app, open Spending to set daily, weekly or monthly limits, for all AI use or for one service or model. On the phone, Settings then Spending limits shows your budgets and a forecast for the month. Changing a limit is in the web app for now.' },
     ],
     wrong: [
       { symptom: 'It says auth error (401)', fix: 'The service refused the key. Look for a stray space or character, an expired key, or a key from a different service.' },
@@ -56,10 +56,10 @@ export const guides: Guide[] = [
     intro: 'The Vault is where HQ keeps what you save: notes, memory and chat history, as ordinary text files on your device.',
     steps: [
       { title: 'Open the Vault', body: 'Tap Vault in the bar at the bottom.' },
-      { title: 'Tap New note', body: 'Give it a title and write a line or two. HQ saves as you go.' },
-      { title: 'Find it again', body: 'Your note is in the folder you were in. To move it, use the Move button on the note.' },
+      { title: 'Tap New note', body: 'Give it a title and write a line or two, then tap Save. It saves to your Inbox folder unless you pick another.' },
+      { title: 'Find it again', body: 'Your note is listed under Recent in the Vault. Tap it to read it, or tap Edit to change it.' },
     ],
-    wrong: [{ symptom: 'I do not see my note', fix: 'Check the folder you are in. New notes go where the folder bar says, unless you pick another.' }],
+    wrong: [{ symptom: 'I do not see my note', fix: 'Look in the Inbox folder, which is where a new note is saved unless you pick another folder.' }],
     doc: { href: '/docs/hq-mobile/', text: 'More about the Vault on the phone' },
   },
   {
@@ -99,8 +99,8 @@ export const guides: Guide[] = [
     summary: 'One file that brings your notes and tasks back if the phone is lost.',
     intro: 'The Vault is your notes and tasks. If the only copy lives on one device, losing it loses them, so make a copy somewhere else.',
     steps: [
-      { title: 'Open Settings, then Backup and about', body: 'It shows when your last backup was made.' },
-      { title: 'Tap Save a copy of my Vault', body: 'Choose a place that is not this phone, such as a cloud drive folder or a computer.' },
+      { title: 'Open Settings, then Backup and moving phones', body: 'Scroll down to the Your data and this app group. The page says plainly that your Vault is only on this phone until you save a copy.' },
+      { title: 'Tap Save a copy now', body: 'Choose a place that is not this phone, such as a cloud drive folder, then tap Save. The copy is not locked with a password, so anyone with the file can read your Vault. Your keys are not in it.' },
       { title: "Restore on a new phone", body: "On the new phone's first screen choose Restore from a backup or a copy, and pick the file." },
     ],
     wrong: [

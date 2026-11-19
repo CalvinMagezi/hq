@@ -70,7 +70,7 @@ const showGif = item.kind === 'gif' && hasFile && hasPoster;
           aria-label={item.alt}
         >
           <source src={item.src} type="video/mp4" />
-          {hasCaptions && <track kind="captions" src={clipMeta.captions} srclang="en" label="English" default />}
+          {hasCaptions && <track kind="captions" src={clipMeta.captions} srclang="en" label="English" />}
           <p>
             Your browser cannot play this video. <a href={item.src}>Download it</a>.
           </p>
