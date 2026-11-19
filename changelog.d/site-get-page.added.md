@@ -1,0 +1,1 @@
+**A "Get HQ" page on the public site.** Pick your device (Android, iPhone, Mac, Windows, Linux or a server) and see the time, download size, what you need and the cost before you download anything. The page guesses your device, offers a QR code so a computer visitor can open it on a phone, and the header button now reads Get HQ.

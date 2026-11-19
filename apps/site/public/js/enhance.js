@@ -61,6 +61,27 @@
     });
   }
 
+  // A best guess at the visitor's device from the user agent. Wrong guesses cost one tap, and
+  // nothing leaves the browser.
+  function detectDevice(buttons) {
+    var ua = navigator.userAgent || '';
+    var id = /android/i.test(ua) ? 'android'
+      : /iphone|ipad|ipod/i.test(ua) ? 'iphone'
+      : /windows/i.test(ua) ? 'windows'
+      : /mac/i.test(ua) ? 'mac'
+      : /linux|x11/i.test(ua) ? 'linux'
+      : null;
+    return buttons.filter(function (b) { return b.getAttribute('data-tab') === id; })[0] || null;
+  }
+
+  function showDetected(button) {
+    var strip = document.getElementById('detect-strip');
+    var text = document.querySelector('[data-detect-text]');
+    if (!strip || !text) return;
+    text.textContent = button.getAttribute('data-detected') || button.textContent;
+    strip.hidden = false;
+  }
+
   // Without this script every panel shows in sequence. With it, a row of
   // toggle buttons shows one panel at a time.
   function setupTabs() {
@@ -111,7 +132,11 @@
         return true;
       }
       var first = buttons.filter(function (b) { return b.getAttribute('aria-pressed') === 'true'; })[0] || buttons[0];
-      if (!openFromHash()) show(first.getAttribute('data-tab'));
+      if (!openFromHash()) {
+        var guess = root.hasAttribute('data-detect') ? detectDevice(buttons) : null;
+        show((guess || first).getAttribute('data-tab'));
+        if (guess) showDetected(guess);
+      }
       window.addEventListener('hashchange', openFromHash);
     });
   }

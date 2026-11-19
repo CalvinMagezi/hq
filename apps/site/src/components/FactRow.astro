@@ -1,0 +1,21 @@
+---
+import type { Fact } from '../data/get';
+
+interface Props {
+  facts: Fact[];
+}
+
+const { facts } = Astro.props;
+---
+
+<div class={`fact5 cols-${facts.length}`}>
+  {
+    facts.map((f) => (
+      <div class={`fact glass${f.alert ? ' fact-alert' : ''}`}>
+        <span class="label">{f.label}</span>
+        <b>{f.value}</b>
+        <span class="small">{f.note}</span>
+      </div>
+    ))
+  }
+</div>

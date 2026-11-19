@@ -15,10 +15,10 @@ const canonical = new URL(path, SITE_URL).href;
 const ogImage = `${SITE_URL}/og.png`;
 const fullTitle = title.includes('Agent HQ') ? title : `${title} | Agent HQ`;
 const current = path;
-const INSTALL_PATH = '/install/';
+const GET_PATH = '/get/';
 const build = await latestBuild();
-// Home is the brand link and Install is the call to action, so the text links are the rest.
-const textLinks = nav.filter((n) => n.href !== '/' && n.href !== INSTALL_PATH);
+// Home is the brand link and Get HQ is the call to action, so the text links are the rest.
+const textLinks = nav.filter((n) => n.href !== '/' && n.href !== GET_PATH);
 
 // Scripts and styles are all same-origin files, so no inline hashes are needed.
 const csp = [
@@ -83,8 +83,8 @@ const csp = [
           }
           <a href={links.repo}>GitHub</a>
         </nav>
-        <a class="btn btn-primary btn-sm nav-cta" href={INSTALL_PATH} aria-current={current === INSTALL_PATH ? 'page' : undefined}>
-          Install
+        <a class="btn btn-primary btn-sm nav-cta" href={GET_PATH} aria-current={current === GET_PATH ? 'page' : undefined}>
+          Get HQ
         </a>
         <span class="progress" aria-hidden="true"></span>
       </div>
@@ -109,9 +109,9 @@ const csp = [
         <div class="foot-cta glass">
           <p class="foot-title">Pick your device. Add more later.</p>
           <div class="toc">
-            {['Android phone', 'Mac', 'Windows', 'Linux', 'Server'].map((d) => <a href={INSTALL_PATH}>{d}</a>)}
+            {['Android phone', 'Mac', 'Windows', 'Linux', 'Server'].map((d) => <a href={GET_PATH}>{d}</a>)}
           </div>
-          <a class="btn btn-primary" href={INSTALL_PATH}>Install Agent HQ</a>
+          <a class="btn btn-primary" href={GET_PATH}>Get Agent HQ</a>
         </div>
         <p class="body foot-statement">An AI assistant that lives on your phone and works with your computers. Open source under the MIT license.</p>
         <div class="foot-grid">

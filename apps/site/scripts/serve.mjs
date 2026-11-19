@@ -39,4 +39,4 @@ export function serve() {
   });
 }
 
-export const PAGES = ['/', '/architecture/', '/compare/', '/install/', '/security/', '/404/'];
+export const PAGES = ['/', '/architecture/', '/compare/', '/get/', '/install/', '/security/', '/404/'];

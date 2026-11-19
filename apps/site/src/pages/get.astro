@@ -1,0 +1,202 @@
+---
+import Layout from '../layouts/Layout.astro';
+import CodeBlock from '../components/CodeBlock.astro';
+import FactRow from '../components/FactRow.astro';
+import StepList from '../components/StepList.astro';
+import { links, latestBuild } from '../data/site';
+import { DEVICES, android, linux, mac, server, windows, windowsEditions } from '../data/get';
+
+const build = await latestBuild();
+const first = DEVICES[0];
+---
+
+<Layout
+  title="Get HQ"
+  description="Pick your device and see what you need, how long it takes and what it costs before you download anything. Android phone first, then Mac, Windows, Linux or a server."
+  path="/get/"
+>
+  <section class="sec sec-hero get-hero" aria-labelledby="get-h" data-spotlight>
+    <span class="orb orb-b o-tl" aria-hidden="true"></span>
+    <span class="orb orb-g o-br slow" aria-hidden="true"></span>
+    <span class="orb orb-i o-c" aria-hidden="true"></span>
+    <span class="spot" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="tags">
+        <span class="tag tag-green">Free</span>
+        <span class="tag tag-blue">Signed downloads</span>
+        <span class="tag glass-light">Version 0.9.x</span>
+      </div>
+      <h1 id="get-h" class="display">
+        <span class="hl"><span>Pick your device.</span></span>
+        <span class="hl"><span class="accent">Add more later.</span></span>
+      </h1>
+      <div class="rule rule-in" aria-hidden="true"></div>
+      <p class="lede fade-in get-lede">
+        HQ starts on an Android phone. A laptop or a server can join it later with a QR code. Choose your device to see
+        what you need, how long it takes and what it costs, before you download anything.
+      </p>
+      <div class="facts-strip fade-in" id="detect-strip" hidden>
+        <span class="glass-light">We think you are on</span>
+        <span class="glass-light detected" id="detect-label"><span class="dot dot-green" aria-hidden="true"></span><span data-detect-text>{first.detected}</span></span>
+        <span class="glass-light muted">Not right? Pick yours below.</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec get-body" aria-label="Your device">
+    <span class="orb orb-b o-tr slow" aria-hidden="true"></span>
+    <span class="orb orb-g o-bl" aria-hidden="true"></span>
+    <div class="container stack get-stack" data-tabs data-detect>
+      <div class="seg seg-6 glass-heavy" role="group" aria-label="Choose your device" data-tablist hidden>
+        <span class="seg-ind" aria-hidden="true"></span>
+        {DEVICES.map((d, i) => <button type="button" data-tab={d.id} data-detected={d.detected} aria-pressed={i === 0 ? 'true' : 'false'}>{d.label}</button>)}
+      </div>
+
+      <div id="android" data-panel="android" class="stack get-stack">
+        <div class="split-grid">
+          <div class="stack">
+            <div class="tags"><span class="tag tag-green">Recommended</span><span class="tag tag-blue">Preview</span></div>
+            <h2>HQ for Android phones</h2>
+            <p class="lede">HQ lives on your phone. This is the quickest way to start, and the way the rest of this site assumes you did.</p>
+            <div class="actions">
+              <a class="btn btn-primary btn-lg" href={links.androidApk}>Download for Android</a>
+              <a class="btn btn-lg" href={links.hqMobile}>Read the phone guide</a>
+            </div>
+          </div>
+          <div class="qr-panel glass-heavy shine">
+            <p class="eyebrow">On a computer right now?</p>
+            <div class="qr"><img src="/icons/get-qr.svg" alt="QR code for agent-hq.online/get" width="176" height="176" /></div>
+            <p class="body">Scan this with your phone's camera. It opens this page on the phone, so the download starts there, not here.</p>
+            <p class="small">Or type <code>agent-hq.online/get</code> into the phone.</p>
+          </div>
+        </div>
+        <FactRow facts={android.facts} />
+        <StepList steps={android.steps} prefix="and" />
+        <div class="bento">
+          <article class="gcard">
+            <h3>Check the file</h3>
+            <p class="body">The release page lists a <code>.sha256</code> file next to the APK. Compare it with the checksum of what you downloaded if you want to be sure it is untouched.</p>
+            <a href={links.releases}>Open the releases page</a>
+          </article>
+          <article class="gcard">
+            <h3>Update later</h3>
+            <p class="body">Open Settings, then Backup and about, then Check for updates. HQ also tells you when a new version is ready.</p>
+          </article>
+          <article class="gcard">
+            <h3>Keep it answering</h3>
+            <p class="body">Android can pause apps that run in the background. If you want HQ to reply while you sleep, leave the phone on a charger.</p>
+          </article>
+        </div>
+      </div>
+
+      <div id="iphone" data-panel="iphone" class="stack get-stack">
+        <div class="split-grid">
+          <div class="stack">
+            <div class="tags"><span class="tag">Not yet</span></div>
+            <h2>There is no iPhone app yet</h2>
+            <p class="lede">HQ's phone app is Android only for now. We would rather say that here than let you find out after a download.</p>
+          </div>
+          <div class="gcard gcard-indigo panel">
+            <h3>What you can do today</h3>
+            <p class="body">Set HQ up on an Android phone, a computer or a server you own, then open its web app from your iPhone's browser. We have not tested every iPhone browser yet.</p>
+            <div class="actions">
+              <a class="btn btn-primary" href="#server">Set up a server</a>
+              <a class="btn" href={links.issues}>Tell us you want an iPhone app</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="mac" data-panel="mac" class="stack get-stack">
+        <div class="head">
+          <div class="tags"><span class="tag tag-blue">Adds to your phone</span></div>
+          <h2>HQ on a Mac</h2>
+          <p class="lede">Apple Silicon and Intel both work. Today this takes a few lines in Terminal. We show you where to click and what a good result looks like.</p>
+        </div>
+        <div class="gcard gcard-indigo">
+          <h3>The easy way in</h3>
+          <p class="body">If HQ is already on your phone, it shows you the exact line to paste. On the phone: Helpers, Start a helper, Copy.</p>
+        </div>
+        <FactRow facts={mac.facts} />
+        <StepList steps={mac.steps} prefix="mac" />
+      </div>
+
+      <div id="windows" data-panel="windows" class="stack get-stack">
+        <div class="head">
+          <div class="tags"><span class="tag tag-blue">Adds to your phone</span></div>
+          <h2>HQ on Windows</h2>
+          <p class="lede">There are two editions. The installer looks at your computer and suggests one, and you can read this first to know what it will ask.</p>
+        </div>
+        <div class="bento bento-2">
+          {
+            windowsEditions.map((e) => (
+              <article class={`gcard edition${e.green ? ' edition-green' : ''}`}>
+                <span class={`tag${e.green ? ' tag-green' : ''}`}>{e.tag}</span>
+                <h3>{e.title}</h3>
+                <p class="body">{e.body}</p>
+                <p class="small">Time: {e.time}</p>
+              </article>
+            ))
+          }
+        </div>
+        <FactRow facts={windows.facts} />
+        <StepList steps={windows.steps} prefix="win" />
+      </div>
+
+      <div id="linux" data-panel="linux" class="stack get-stack">
+        <div class="head">
+          <div class="tags"><span class="tag tag-blue">Adds to your phone</span></div>
+          <h2>HQ on Linux</h2>
+          <p class="lede">One line installs a signed build for 64-bit Intel or ARM. It lives in your home folder and needs no administrator rights.</p>
+        </div>
+        <div class="stack">
+          {linux.commands.map((c, i) => <CodeBlock id={`lin-${i + 1}`} label={`${i + 1}. ${c.title}`} code={c.code} />)}
+        </div>
+        <FactRow facts={linux.facts} />
+      </div>
+
+      <div id="server" data-panel="server" class="stack get-stack">
+        <div class="head">
+          <div class="tags"><span class="tag">Always on</span></div>
+          <h2>HQ on a server</h2>
+          <p class="lede">A server keeps HQ awake all day, so it can reply when your phone is asleep. Most people choose the Hetzner form. It is the one a non-developer can finish.</p>
+        </div>
+        <div class="bento bento-2">
+          <article class="gcard edition edition-green">
+            <span class="tag tag-green">Guided</span>
+            <h3>One form on Hetzner</h3>
+            <p class="body">You fill in one form and the server sets itself up in 3 to 5 minutes. It updates itself from signed releases and rolls back if a check fails.</p>
+            <p class="small">Cost: you pay Hetzner by the hour. A 4 GB server was about 6.50 a month when the guide was written.</p>
+            <a href="https://deploy.agent-hq.online">Open the deploy form</a>
+          </article>
+          <article class="gcard edition">
+            <span class="tag">If you know Docker</span>
+            <h3>Docker</h3>
+            <p class="body">Runs on Intel and ARM. Add your model key as the Docker guide shows. The first run prints a one-time link with a token: run <code>docker logs hq</code> to see it.</p>
+            <CodeBlock id="docker-cmd" code={server.docker} />
+            <a href={links.docker}>The Docker guide</a>
+          </article>
+        </div>
+        <FactRow facts={server.facts} />
+        <StepList steps={server.steps} prefix="srv" />
+        <p class="small">Longer guide: <a href={links.hetznerDocs}>Hetzner in detail</a>. Other ways in: <a href="/install/">every install option</a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec sec-top0" aria-labelledby="after-h">
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">After you install</p>
+        <h2 id="after-h" class="reveal">Your first hour</h2>
+        <div class="rule rule-sm sweep" aria-hidden="true"></div>
+      </div>
+      <div class="bento">
+        <article class="gcard reveal"><span class="tag">2 minutes</span><h3>Add your AI key</h3><p class="body">Pick a service, paste the key, set a spending limit.</p><a href={links.firstRunDocs}>First run guide</a></article>
+        <article class="gcard reveal"><span class="tag">3 minutes</span><h3>Save a note, ask a question</h3><p class="body">See your first answer and keep it in your Vault.</p><a href={links.firstRunDocs}>First run guide</a></article>
+        <article class="gcard reveal"><span class="tag">3 minutes</span><h3>Make a backup</h3><p class="body">One encrypted file that brings everything back if the phone is lost.</p><a href={`${links.repo}/blob/main/docs/BACKUP.md`}>Backup guide</a></article>
+      </div>
+      <p class="small">Newest build: <code>{build.tag}</code>. Every download is signed, and the installers check the signature.</p>
+    </div>
+  </section>
+</Layout>

@@ -50,6 +50,7 @@ export const nav = [
   { href: '/', label: 'Home' },
   { href: '/architecture/', label: 'Architecture' },
   { href: '/compare/', label: 'Compare' },
+  { href: '/get/', label: 'Get HQ' },
   { href: '/install/', label: 'Install' },
   { href: '/security/', label: 'Security' },
 ] as const;
@@ -59,7 +60,13 @@ const BUILD_LOOKUP_MS = 4000;
 
 // Read once at build time so the footer never carries a typed build number. The site is built
 // in CI with network; a local build offline falls back to the version note instead of failing.
-export async function latestBuild(): Promise<{ tag: string; date: string }> {
+let buildLookup: Promise<{ tag: string; date: string }> | undefined;
+export function latestBuild(): Promise<{ tag: string; date: string }> {
+  buildLookup ??= lookupBuild();
+  return buildLookup;
+}
+
+async function lookupBuild(): Promise<{ tag: string; date: string }> {
   const today = new Date().toISOString().slice(0, 10);
   try {
     const res = await fetch(RELEASES_API, { signal: AbortSignal.timeout(BUILD_LOOKUP_MS) });
