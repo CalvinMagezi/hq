@@ -4,6 +4,8 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ## [Unreleased]
 
+- Inbox: a daily "Your day" card lists the next step of each focus lane (`hq focus`). Device-only, silent when there are no lanes; off with `daemon.daily_brief: false`.
+
 - CLI: `hq focus list|add|park|remove` keeps the few lanes of work you chose to move forward (3 by default, up to 5). Stays on this device.
 
 - Helpers: starting, handing off to or delegating to a helper no longer waits for approval. After the chat has read outside text the helper starts narrowed: strict sandbox and a brief built from the task's stored text. The approval list is now a zone table (A never asked, B asked at the edge, C asked for HQ itself).
