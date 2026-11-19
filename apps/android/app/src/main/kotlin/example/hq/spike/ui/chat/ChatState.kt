@@ -34,9 +34,9 @@ data class UiMessage(
 ) {
     companion object {
         /** A saved message: the attachment marker the server appends is split off into [files]. */
-        fun saved(id: String, speaker: Speaker, content: String, tools: List<ToolStep> = emptyList(), createdAt: String = "", spoken: Boolean = false, offer: Offer? = null, clientId: String? = null): UiMessage {
+        fun saved(id: String, speaker: Speaker, content: String, tools: List<ToolStep> = emptyList(), createdAt: String = "", spoken: Boolean = false, offer: Offer? = null, clientId: String? = null, replyFiles: List<Attachment> = emptyList()): UiMessage {
             // Only the user's own messages carry the marker; a model reply that contains one is just text.
-            if (speaker != Speaker.User) return UiMessage(id, speaker, content, tools, createdAt = createdAt, offer = offer, clientId = clientId)
+            if (speaker != Speaker.User) return UiMessage(id, speaker, content, tools, createdAt = createdAt, files = replyFiles, offer = offer, clientId = clientId)
             val (text, files) = Attachments.split(content)
             return UiMessage(id, speaker, text, tools, createdAt = createdAt, files = files, spoken = spoken, clientId = clientId)
         }

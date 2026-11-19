@@ -39,6 +39,23 @@ data class Offer(val kind: String, val line: String, val reply: String, val send
     }
 }
 
+/** A file a reply made, as the server saved it: [path] is vault-relative and was checked there. */
+data class ReplyFile(val name: String, val path: String, val mime: String, val size: Long) {
+    companion object {
+        /** The entries that name a plain vault-relative path; anything else is dropped. */
+        fun listFrom(a: JSONArray?): List<ReplyFile> {
+            if (a == null) return emptyList()
+            return (0 until a.length()).mapNotNull { i ->
+                val o = a.optJSONObject(i) ?: return@mapNotNull null
+                val path = o.optString("path", "")
+                val name = o.optString("name", "").ifBlank { path.substringAfterLast('/') }
+                if (path.isBlank() || path.startsWith("/") || path.contains("..") || name.isBlank()) null
+                else ReplyFile(name, path, o.optString("mime", ""), o.optLong("size", 0))
+            }
+        }
+    }
+}
+
 /** A saved message. `meta` is present on replies that did more than talk. */
 data class StoredMessage(
     val id: String,
@@ -52,6 +69,8 @@ data class StoredMessage(
     val source: String? = null,
     val clientId: String? = null,
     val offer: Offer? = null,
+    /** Files this reply made, which the server checked against the vault (`meta.files`). */
+    val files: List<ReplyFile> = emptyList(),
 ) {
     val spoken: Boolean get() = role == "user" && source == SPOKEN
 
@@ -71,6 +90,7 @@ data class StoredMessage(
                 source = meta?.optString("source", "")?.ifBlank { null },
                 clientId = meta?.optString("client_id", "")?.ifBlank { null },
                 offer = Offer.from(meta?.optJSONObject("offer")),
+                files = ReplyFile.listFrom(meta?.optJSONArray("files")),
             )
         }
     }

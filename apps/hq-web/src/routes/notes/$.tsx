@@ -40,9 +40,9 @@ const MD_ZOOM_STEP = 0.1
 // Lazy-load heavy viewer components to reduce initial bundle
 const PdfViewer = lazy(() => import('~/components/PdfViewer').then(m => ({ default: m.PdfViewer })))
 const CodeViewer = lazy(() => import('~/components/CodeViewer').then(m => ({ default: m.CodeViewer })))
-const DocxViewer = lazy(() => import('~/components/DocxViewer').then(m => ({ default: m.DocxViewer })))
-const SpreadsheetViewer = lazy(() => import('~/components/SpreadsheetViewer').then(m => ({ default: m.SpreadsheetViewer })))
-const OfficeFileCard = lazy(() => import('~/components/OfficeFileCard').then(m => ({ default: m.OfficeFileCard })))
+/** Files the server reads into a preview, so no browser parses an untrusted workbook or document. */
+const OFFICE_EXTENSIONS = ['docx', 'xlsx', 'xls', 'pptx']
+const OfficePreview = lazy(() => import('~/components/OfficePreview').then(m => ({ default: m.OfficePreview })))
 const HtmlViewer = lazy(() => import('~/components/HtmlViewer').then(m => ({ default: m.HtmlViewer })))
 
 export const Route = createFileRoute('/notes/$')({
@@ -378,12 +378,8 @@ ${safeHtml}
                 </>
             )
         }
-    } else if (ext === 'docx') {
-        viewer = <DocxViewer path={filePath} />
-    } else if (ext === 'xlsx' || ext === 'xls') {
-        viewer = <SpreadsheetViewer path={filePath} />
-    } else if (ext === 'pptx') {
-        viewer = <OfficeFileCard path={filePath} />
+    } else if (OFFICE_EXTENSIONS.includes(ext)) {
+        viewer = <OfficePreview path={filePath} />
     } else if (ext === 'html' || ext === 'htm') {
         viewer = <HtmlViewer content={content} path={filePath} />
     } else {

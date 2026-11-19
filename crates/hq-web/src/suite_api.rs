@@ -24,6 +24,7 @@ static SHRINK_SLOTS: Semaphore = Semaphore::const_new(CONCURRENT_SHRINKS);
 pub(crate) fn routes() -> Router<Arc<WsState>> {
     Router::new()
         .route("/api/suite/file", get(file_handler))
+        .route("/api/suite/preview", get(preview_handler))
         .route("/api/suite/shrink", post(shrink_handler))
         .route("/api/suite/confirm", post(confirm_handler))
         .route("/api/suite/offload", post(offload_handler))
@@ -123,6 +124,20 @@ pub(crate) async fn file_handler(
     let vault = state.vault_path.clone();
     let status = blocking(move || hq_suite_adapter::api::status(&vault, &q.path)).await?;
     Ok(Json(status))
+}
+
+/// One record view of a note or an office file, for every app to draw (content, not layout).
+pub(crate) async fn preview_handler(
+    State(state): State<Arc<WsState>>,
+    Query(q): Query<PathQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    if !state.path_allowed(&q.path) {
+        return Err(ApiError::not_found());
+    }
+    let p = hq_suite_adapter::preview::preview(&state.vault_path, &q.path)
+        .await
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    Ok(Json(p))
 }
 
 pub(crate) async fn shrink_handler(

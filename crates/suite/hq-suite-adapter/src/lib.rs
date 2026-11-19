@@ -15,6 +15,7 @@ pub mod filter;
 pub mod governor;
 pub mod measure;
 pub mod peer;
+pub mod preview;
 pub mod restore;
 pub mod sheets;
 pub mod shrink;

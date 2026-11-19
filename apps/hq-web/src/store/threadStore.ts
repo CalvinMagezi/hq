@@ -4,6 +4,7 @@ import { idbStateStorage } from '~/lib/offlineCache'
 import type { ChatAttachment } from '~/lib/chatUploads'
 import type { DriverMeta } from '~/lib/sessionsApi'
 import { firstUnclaimedStep, type StepCredit } from '~/lib/stepCredits'
+import type { ReplyFile } from '~/lib/replyFiles'
 
 // What survives on the device for instant chat loads: recent threads and their latest messages.
 const SAVED_THREADS = 20
@@ -59,6 +60,8 @@ export interface ThreadMessage {
   /** Asked by an outside MCP client (hq_ask) rather than typed here: the name it gave itself. */
   viaMcp?: string
   offer?: ChatOffer
+  /** Files this reply made, checked by the server. */
+  files?: ReplyFile[]
 }
 
 /** A reply still streaming in one chat. Every chat has its own, so several run at once. */

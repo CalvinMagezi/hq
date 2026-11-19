@@ -60,13 +60,7 @@ export interface DirEntry {
   isDir: boolean
 }
 
-export interface SheetData {
-  name: string
-  data: string[][]
-}
-
 const SEARCH_LIMIT = 30
-const SHEET_ROW_CAP = 500
 
 /** URL for a raw vault file. With a web token set, load it through useAssetUrl. */
 export function assetUrl(path: string): string {
@@ -262,34 +256,19 @@ export function getFolderList(): Promise<{ folders: string[] }> {
   return hqJson('/api/vault/folders')
 }
 
-async function fetchBytes(path: string): Promise<ArrayBuffer> {
-  const res = await hqFetch(`/api/vault-asset?path=${encodeURIComponent(path)}`)
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.arrayBuffer()
+/** One record view of a note or an office file: its content, never its layout. */
+export interface FilePreview {
+  path: string
+  name: string
+  kind: 'sheet' | 'doc' | 'slides' | 'file'
+  title: string
+  markdown: string
+  /** What the preview leaves out, one plain line each. */
+  notes: string[]
+  /** Set when the preview is not the file's own look. */
+  banner: string | null
 }
 
-export async function getDocxAsHtml(path: string): Promise<{ html: string; messages: string[] }> {
-  try {
-    const mammoth = await import('mammoth')
-    const result = await mammoth.convertToHtml({ arrayBuffer: await fetchBytes(path) })
-    return { html: result.value, messages: result.messages.map((m: any) => m.message) }
-  } catch (err: any) {
-    return { html: `<p>Failed to convert document: ${err.message}</p>`, messages: [] }
-  }
-}
-
-export async function getSpreadsheetData(path: string): Promise<{ sheets: SheetData[]; truncated: boolean }> {
-  try {
-    const XLSX = await import('xlsx')
-    const workbook = XLSX.read(await fetchBytes(path), { type: 'array' })
-    let truncated = false
-    const sheets = workbook.SheetNames.map((name: string) => {
-      const rows: string[][] = XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '' })
-      if (rows.length > SHEET_ROW_CAP) truncated = true
-      return { name, data: rows.slice(0, SHEET_ROW_CAP) }
-    })
-    return { sheets, truncated }
-  } catch {
-    return { sheets: [], truncated: false }
-  }
+export function getPreview(path: string): Promise<FilePreview> {
+  return hqJson(`/api/suite/preview?path=${encodeURIComponent(path)}`)
 }

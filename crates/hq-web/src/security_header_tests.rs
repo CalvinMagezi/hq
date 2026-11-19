@@ -242,6 +242,25 @@ async fn office_files_download_with_their_own_type_and_a_safe_name() {
     );
 }
 
+#[cfg(feature = "suite")]
+#[tokio::test]
+async fn the_preview_route_reads_a_note_and_refuses_private_folders_and_missing_files() {
+    let (app, _v, _w) =
+        app_with_vault(&[("n.md", "---\ntitle: \"Plan\"\n---\n\n# Plan\n\nhello\n")]);
+    let ok = get(&app, "/api/suite/preview?path=n.md").await;
+    assert_eq!(ok.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(ok.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["title"], "Plan");
+    assert!(json["markdown"].as_str().unwrap().contains("hello"));
+    for bad in ["_system/x.md", "missing.xlsx", "../n.md"] {
+        let res = get(&app, &format!("/api/suite/preview?path={bad}")).await;
+        assert!(res.status().is_client_error(), "{bad}: {}", res.status());
+    }
+}
+
 #[tokio::test]
 async fn vault_status_says_how_many_notes_are_indexed() {
     let (app, _v, _w) = app_with_vault(&[]);
