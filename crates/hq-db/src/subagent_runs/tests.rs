@@ -600,3 +600,26 @@ fn escalation_is_raised_once_and_interrupted_runs_count() {
     mark_escalated(&c, "run-es8888", 300).unwrap();
     assert!(list_unresolved(&c, 0, 1000).unwrap().is_empty());
 }
+
+#[test]
+fn search_matches_goal_literally_and_stays_on_its_platform() {
+    let c = conn();
+    let mut a = new_run("run-se1111", "t1");
+    a.goal = "audit the 100%_done export".into();
+    insert_run(&c, &a, 100).unwrap();
+    let mut b = new_run("run-se2222", "t1");
+    b.goal = "write notes".into();
+    insert_run(&c, &b, 101).unwrap();
+    let mut cli = new_run("run-se3333", "t1");
+    cli.origin = None;
+    cli.goal = "audit from the cli".into();
+    insert_run(&c, &cli, 102).unwrap();
+
+    let hits = search(&c, "web", "AUDIT", 10).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].run_id, "run-se1111");
+    // `%` and `_` are literal, not wildcards.
+    assert_eq!(search(&c, "web", "100%_done", 10).unwrap().len(), 1);
+    assert!(search(&c, "web", "%", 10).unwrap().len() == 1);
+    assert!(search(&c, "web", "  ", 10).unwrap().is_empty());
+}

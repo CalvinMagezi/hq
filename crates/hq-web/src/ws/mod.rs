@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::info;
 
 mod ask;
+mod helpers;
 mod record;
 use record::{SharedRecord, TurnRecord};
 
@@ -966,6 +967,7 @@ impl ChatTurn {
         streamed: Arc<AtomicBool>,
     ) -> Box<dyn Fn(SessionEvent) + Send + Sync + 'static> {
         let (tx, tid, record) = (self.tx.clone(), self.tid.clone(), self.record.clone());
+        let db = self.db.clone();
         Box::new(move |event| {
             if matches!(event, SessionEvent::TextDelta(_)) {
                 streamed.store(true, Ordering::Relaxed);
@@ -974,7 +976,18 @@ impl ChatTurn {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .observe(&event);
-            if let Some(msg) = session_event_json(&event, &tid) {
+            // A delegation names its runs: the step carries them structured, and each gets its
+            // own start (and end, when it already settled) so the client need not read text.
+            let runs = match &event {
+                SessionEvent::ToolEnd {
+                    tool_name, result, ..
+                } if tool_name == helpers::SPAWN_TOOL => helpers::runs_in_result(&db, result),
+                _ => Vec::new(),
+            };
+            if let Some(msg) = session_event_json(&event, &tid, &runs) {
+                let _ = tx.send(msg);
+            }
+            for msg in helpers::start_messages(&tid, &runs) {
                 let _ = tx.send(msg);
             }
         })
@@ -986,6 +999,14 @@ impl ChatTurn {
     fn child_sink(&self) -> hq_agent::agents::CompletionSink {
         let (db, tx, tid) = (self.db.clone(), self.tx.clone(), self.tid.clone());
         Arc::new(move |event| {
+            // The socket hears every settled child, follow-up or not.
+            if let Some(msg) = event
+                .run_id
+                .as_deref()
+                .and_then(|id| helpers::settled_message(&db, &tid, id))
+            {
+                let _ = tx.send(msg);
+            }
             let followup_on = hq_core::config::HqConfig::load()
                 .map(|c| c.collaboration.supervision_followup)
                 .unwrap_or(false);
@@ -1129,7 +1150,11 @@ const LIVE_ARGS_CHARS: usize = 4_000;
 
 /// Map a session event to the web chat wire format. `TurnEnd` is per agent-loop
 /// iteration, so it is not forwarded: the driver sends one `turn_end` per reply.
-fn session_event_json(event: &SessionEvent, tid: &Option<String>) -> Option<String> {
+fn session_event_json(
+    event: &SessionEvent,
+    tid: &Option<String>,
+    helpers: &[serde_json::Value],
+) -> Option<String> {
     let v = match event {
         SessionEvent::TextDelta(s) => {
             serde_json::json!({"type": "text_delta", "thread_id": tid, "content": s, "thinking": false})
@@ -1164,7 +1189,7 @@ fn session_event_json(event: &SessionEvent, tid: &Option<String>) -> Option<Stri
             result,
         } => {
             let preview = record::result_preview(result, record::LIVE_RESULT_CHARS);
-            serde_json::json!({"type": "tool_end", "thread_id": tid, "tool_call_id": tool_call_id, "tool_name": tool_name, "result": preview})
+            serde_json::json!({"type": "tool_end", "thread_id": tid, "tool_call_id": tool_call_id, "tool_name": tool_name, "result": preview, "helpers": helpers})
         }
         SessionEvent::StepCredits { turn, delta, .. } => {
             serde_json::json!({"type": "step_credits", "thread_id": tid, "turn": turn, "delta": delta})

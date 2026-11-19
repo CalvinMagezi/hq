@@ -14,7 +14,7 @@ pub mod types;
 
 pub use model_select::{EffectiveModel, ModelSource, OnModelUnavailable};
 pub use service::{AgentService, INPROCESS_BACKEND};
-pub use tool::{ChildRunSummary, ReportProgressTool, SpawnSubagentsTool};
+pub use tool::{ChildRunSummary, ReportProgressTool, SpawnSubagentsTool, run_ids_in_result};
 pub use types::{
     ChildCompletionEvent, ChildExecContext, ChildMode, ChildOutcome, ChildPlan, ChildRequest,
     ChildStatus, CompletionSink, EnvelopeSink, RunInfo,

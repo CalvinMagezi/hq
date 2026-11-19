@@ -25,6 +25,7 @@ mod error;
 mod fetch_sites_api;
 pub mod github_connect_api;
 pub mod gmail_ingest;
+mod helper_runs_api;
 mod helper_setup_api;
 mod lane_quotas_api;
 mod mcp_http;
