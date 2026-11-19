@@ -26,6 +26,7 @@ import { SavedStrip } from '~/components/SavedStrip'
 import { ConnectionSheet } from '~/components/ConnectionSheet'
 import { useConnection, type ConnectionState } from '~/lib/connection'
 import { ToastHost } from '~/components/ui/Toast'
+import { listenForDesktopDownloads } from '~/lib/desktopDownload'
 import { AppRail } from '~/components/AppRail'
 import { BottomNav } from '~/components/BottomNav'
 import { useNeedsYouCount } from '~/components/sessions/useNeedsYouCount'
@@ -235,6 +236,8 @@ const refetchBudgetQueries = () => {
 
 function VaultShell({ embedded }: { embedded: boolean }) {
   useEffect(() => startDataCounter(), [])
+  // The desktop app saves downloads itself and reports how each ended; say it once, at the root.
+  useEffect(() => listenForDesktopDownloads(), [])
   useRefreshOn(['budget:change', 'settings:change'], refetchBudgetQueries)
   const wsConnected = useHQStore((s) => s.wsConnected)
   useNeedsYouCount()
