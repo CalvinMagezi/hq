@@ -3985,3 +3985,20 @@ fn a_general_purpose_queue_leaves_out_code_shaped_tasks() {
     move_to(&db, "plain", STATUS_COMPLETE).unwrap();
     assert!(db.with_conn(|c| next_task(c, &no_code)).unwrap().is_none());
 }
+
+#[test]
+fn a_task_marked_as_written_from_outside_text_stays_marked() {
+    let (db, initiative_id) = setup();
+    let a = make(&db, "tk-a", &initiative_id, None).unwrap();
+    let b = make(&db, "tk-b", &initiative_id, None).unwrap();
+    db.with_conn(|c| {
+        assert!(!is_origin_tainted(c, &a.id)?);
+        mark_origin_tainted(c, &a.id)?;
+        assert!(is_origin_tainted(c, &a.id)?);
+        assert!(is_origin_tainted(c, &a.display_id)?, "by display id too");
+        assert!(!is_origin_tainted(c, &b.id)?);
+        assert!(!is_origin_tainted(c, "no-such-task")?);
+        Ok(())
+    })
+    .unwrap();
+}

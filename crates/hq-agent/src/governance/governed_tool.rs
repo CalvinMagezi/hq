@@ -498,6 +498,12 @@ impl GovernedTool {
             return Ok(text_result(waiting));
         }
 
+        if self.taint.is_tainted()
+            && TASK_WRITE_TOOLS.contains(&tool_name)
+            && let Some(map) = args.as_object_mut()
+        {
+            map.insert(hq_tools::tasks::TAINTED_SESSION_ARG.into(), true.into());
+        }
         if self.narrows_helper_start() {
             return hq_tools::harness_session::narrow::scoped(self.run_tracked(id, args)).await;
         }
@@ -525,6 +531,15 @@ impl GovernedTool {
 
 /// Tools whose results list addresses HQ itself saw arrive from outside.
 const SEEN_URL_SOURCES: &[&str] = &["web_search", "web_fetch"];
+
+/// Tools that write a task's text. A tainted session's writes mark the task `origin_tainted`.
+const TASK_WRITE_TOOLS: &[&str] = &[
+    "task_create",
+    "task_create_many",
+    "task_create_from_note",
+    "task_update",
+    "task_update_many",
+];
 
 /// Tools that start, brief or delegate to another agent.
 const NARROWED_START_TOOLS: &[&str] = &[

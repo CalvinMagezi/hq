@@ -40,6 +40,14 @@ fn check_scoped_text(args: &Value) -> Result<()> {
     scoped_len(args, "body", SCOPED_TEXT_MAX)
 }
 
+/// Set by the governance layer, and only by it, when the session writing the task has read
+/// outside text. A model cannot set it: a native session strips every `_hq_*` argument first.
+pub const TAINTED_SESSION_ARG: &str = "_hq_tainted_session";
+
+fn from_tainted_session(args: &Value) -> bool {
+    args.get(TAINTED_SESSION_ARG).and_then(Value::as_bool) == Some(true)
+}
+
 pub(super) struct TaskCreateTool {
     pub(super) settings: TasksConfig,
     /// The web chat thread this toolset serves, recorded as the origin of tasks it creates.
@@ -166,6 +174,7 @@ impl HqTool for TaskCreateTool {
         }
         let origin_thread = self.origin_thread.clone();
         let caller_session = crate::harness_session::caller_session(&args).map(str::to_string);
+        let tainted_write = from_tainted_session(&args);
         let (task, created) = self.db.with_conn(move |c| {
             t::in_write_tx(c, |c| {
                 // Bad links are refused before the task exists.
@@ -198,6 +207,9 @@ impl HqTool for TaskCreateTool {
                 )?;
                 if !created {
                     return Ok((task, false));
+                }
+                if tainted_write {
+                    t::mark_origin_tainted(c, &task.id)?;
                 }
                 if !depends_on.is_empty() {
                     apply_dependency_changes(c, &task.id, &depends_on, &[], &created_by)?;
@@ -861,6 +873,9 @@ impl HqTool for TaskUpdateTool {
                     expected_status.as_deref(),
                     &actor.ctx(),
                 )?;
+                if edits_text && from_tainted_session(&scope_args) {
+                    t::mark_origin_tainted(c, &task.id)?;
+                }
                 if !add_deps.is_empty() || !remove_deps.is_empty() {
                     apply_dependency_changes(c, &task.id, &add_deps, &remove_deps, &actor.name)?;
                     task = t::get_task(c, &task.id)?

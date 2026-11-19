@@ -5206,3 +5206,40 @@ async fn the_sweep_defaults_to_a_dry_run_and_a_launched_agent_cannot_use_it() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_task_written_by_a_tainted_session_is_marked_and_an_ordinary_one_is_not() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.path().to_path_buf();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let tools = create_task_tools(vault_path.clone(), vault, db.clone());
+    let create = tools.iter().find(|t| t.name() == "task_create").unwrap();
+    let update = tools.iter().find(|t| t.name() == "task_update").unwrap();
+    let clean = create.execute(json!({ "title": "clean" })).await.unwrap();
+    let dirty = create
+        .execute(json!({ "title": "dirty", crate::tasks::TAINTED_SESSION_ARG: true }))
+        .await
+        .unwrap();
+    let edited = create
+        .execute(json!({ "title": "edited later" }))
+        .await
+        .unwrap();
+    update
+        .execute(json!({
+            "id": edited["id"], "description": "text from a page",
+            crate::tasks::TAINTED_SESSION_ARG: true
+        }))
+        .await
+        .unwrap();
+    let marked = |task: &serde_json::Value| {
+        db.with_conn(|c| hq_db::tasks::is_origin_tainted(c, task["id"].as_str().unwrap()))
+            .unwrap()
+    };
+    assert!(!marked(&clean));
+    assert!(marked(&dirty));
+    assert!(
+        marked(&edited),
+        "editing the text from a tainted session marks it"
+    );
+}

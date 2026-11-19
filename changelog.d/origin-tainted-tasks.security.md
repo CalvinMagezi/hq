@@ -1,0 +1,1 @@
+**A task written from outside text starts helpers narrowed.** A task created or edited by a chat that had read a web page, mail or another outside source is flagged. A helper started from it runs under the strict sandbox with a brief built from the task, even when the chat starting it is clean.

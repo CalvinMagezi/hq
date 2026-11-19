@@ -391,10 +391,21 @@ pub(super) async fn run_launch(
     launched
 }
 
+/// A launch is narrowed when the calling chat read outside text, or when the task it starts from
+/// was written by a session that had (`origin_tainted`), so a clean chat cannot be used to start a
+/// wide helper from text an injected page wrote.
+fn launch_is_narrowed(db: &Arc<Database>, l: &Launch<'_>) -> bool {
+    super::narrow::active()
+        || l.mission_id.is_some_and(|t| {
+            db.with_conn(|c| hq_db::tasks::is_origin_tainted(c, t))
+                .unwrap_or(true)
+        })
+}
+
 /// What a narrowed launch is told instead of the caller's prompt, or `None` when the launch is not
 /// narrowed. A narrowed session must work on a task: its brief is that task's stored text.
 fn narrowed_prompt(db: &Arc<Database>, l: &Launch<'_>) -> Result<Option<String>> {
-    if !super::narrow::active() {
+    if !launch_is_narrowed(db, l) {
         return Ok(None);
     }
     let Some(task) = l.mission_id else {
@@ -460,7 +471,7 @@ async fn launch_with(
         policy: l.policy.and_then(|p| serde_json::to_value(p).ok()),
         acp_argv,
         acp_model: harness.model.clone(),
-        strict: narrow::active(),
+        strict: launch_is_narrowed(db, &l),
     };
     let began = std::time::Instant::now();
     let host = l.host.clone();
