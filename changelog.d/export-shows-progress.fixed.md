@@ -1,0 +1,1 @@
+**Exporting a note now tells you what is happening.** Picking a format shows a "Making your file" message straight away, the Export button stays busy while it works, and the finished message names the file. If the browser blocks the print window for a PDF, you now get a message instead of nothing.
