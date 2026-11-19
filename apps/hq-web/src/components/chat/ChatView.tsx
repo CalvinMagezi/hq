@@ -472,11 +472,12 @@ export function ChatView({ active, threadId }: Props) {
   const offerOn = !liveTurn && messages.length > 0 && messages[messages.length - 1].offer ? messages[messages.length - 1] : null
   const last = messages.length > 0 ? messages[messages.length - 1] : null
   const stepsOn = !liveTurn && last?.role === 'assistant' && !offerOn ? last.nextSteps : undefined
+  const slotSteps = stepsOn ? <NextSteps steps={stepsOn} onPick={(step) => pickNextStep(step.prompt)} /> : null
   const slotOffer = offerOn?.offer ? (
     <OfferLine offer={offerOn.offer} onAnswer={(yes) => answerOfferOn(offerOn, yes)} onSchedule={(at) => scheduleOfferOn(offerOn, at)} />
-  ) : stepsOn ? (
-    <NextSteps steps={stepsOn} onPick={(step) => pickNextStep(step.prompt)} />
-  ) : null
+  ) : (
+    slotSteps
+  )
   const detail = (
     <div className="hq-chat-detail" {...drop.handlers}>
       {drop.dragging && (
