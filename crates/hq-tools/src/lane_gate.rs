@@ -30,7 +30,7 @@ fn lane_of_kind(kind: &str) -> Option<&'static str> {
 pub fn lane_for(cfg: &AgentHostConfig, harness: &str) -> Option<String> {
     let profile = cfg.harness_profiles.get(harness).or_else(|| {
         cfg.harness_profiles
-            .get(crate::harness_session::spec::canonical_name(harness))
+            .get(crate::harness_alias::canonical_name(harness))
     });
     match profile {
         Some(p) if p.quota.is_some() => Some(harness.to_string()),

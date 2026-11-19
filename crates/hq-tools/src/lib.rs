@@ -10,6 +10,8 @@ pub mod agent_comm;
 pub mod agents;
 pub mod ask;
 pub mod background_turns;
+pub mod harness_alias;
+pub mod lane_gate;
 pub mod lane_quotas;
 pub mod subagent_runs;
 
@@ -34,9 +36,12 @@ pub mod harness_chunk;
 pub mod harness_session;
 pub mod harness_usage;
 pub mod harness_usage_collect;
+pub mod helper_catalog;
 pub mod helper_setup;
+pub mod host_overview;
 pub mod link_capture;
 pub mod model_control;
+pub mod note_index;
 pub mod notify;
 pub mod office;
 pub mod prose_lint;
@@ -52,21 +57,20 @@ pub mod skill_manage_tool;
 pub mod skill_model;
 pub mod skills;
 pub mod slash_commands;
+pub mod spawned_marker;
 pub mod spill;
 pub mod system_info;
 pub mod task_classifier;
+pub mod task_placement;
 pub mod tasks;
 pub mod usage_forecast;
 pub mod vault;
 pub mod vault_reorg;
+pub mod write_policy;
 
 // These modules now live in `hq-tool-api` (they depend only on `hq-core`). Re-exported under the
 // same names so `hq_tools::registry::...` and `crate::registry::...` keep resolving.
 pub use hq_tool_api::{family_confirm, family_guest, registry, util};
-// `web`, `remote_mcp` and `imagegen` now live in `hq-tools-web`; same names here.
-pub use hq_tools_web::{imagegen, remote_mcp, web};
-// `coding` and `file_edit` now live in `hq-tools-coding`; same names here.
-pub use hq_tools_coding::{coding, file_edit};
 
 pub use external_runner::run_external_cli_harness_strict;
 pub use registry::{HqTool, ToolRegistry, ToolSummary};
