@@ -1,0 +1,1 @@
+**The public Home page leads with a front door.** The main button now opens Get HQ, where you pick your device, instead of downloading an Android package. Pick your door and Your first hour come right after the opening, ahead of the long list of what HQ does.

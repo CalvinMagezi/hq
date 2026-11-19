@@ -5,9 +5,11 @@ import CodeBlock from './CodeBlock.astro';
 interface Props {
   steps: Step[];
   prefix: string;
+  level?: 2 | 3;
 }
 
-const { steps, prefix } = Astro.props;
+const { steps, prefix, level = 3 } = Astro.props;
+const Heading = `h${level}`;
 const DOTS = ['dot-blue', 'dot-green', 'dot-sky'];
 ---
 
@@ -18,7 +20,7 @@ const DOTS = ['dot-blue', 'dot-green', 'dot-sky'];
       <li class="gcard reveal">
         <span class={`step-dot ${DOTS[i % DOTS.length]}`} aria-hidden="true"></span>
         <div class="stack-sm">
-          <h3>{s.title}</h3>
+          <Heading>{s.title}</Heading>
           <p class="body">{s.body}</p>
           {s.code && <CodeBlock id={`${prefix}-${i + 1}`} code={s.code} />}
           {s.link && <a href={s.link.href}>{s.link.text}</a>}

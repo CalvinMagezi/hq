@@ -42,6 +42,20 @@ await Promise.all(
   })
 );
 
+// A clip recorded long before the newest build probably shows screens that have changed.
+const STALE_BUILDS = 40;
+const buildNumber = (tag) => Number(/main\.(\d+)$/.exec(tag ?? '')?.[1]);
+try {
+  const manifest = JSON.parse(readFileSync(new URL('../src/data/media.json', import.meta.url), 'utf8'));
+  const res = await fetch('https://api.github.com/repos/CalvinMagezi/hq/releases?per_page=1', { headers: { 'user-agent': 'agent-hq-site-link-check' } });
+  const newest = buildNumber((await res.json())[0]?.tag_name);
+  for (const m of manifest.filter((x) => x.recordedWith)) {
+    if (newest - buildNumber(m.recordedWith) > STALE_BUILDS) console.warn(`stale clip ${m.id}: recorded on ${m.recordedWith}, newest build is main.${newest}. Re-record it.`);
+  }
+} catch (e) {
+  console.warn(`clip freshness not checked: ${e.message}`);
+}
+
 console.log(`checked ${urls.size} outbound links`);
 if (bad.length) {
   console.error('dead or unreachable links:\n  ' + bad.sort().join('\n  '));

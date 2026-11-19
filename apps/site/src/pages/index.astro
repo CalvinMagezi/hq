@@ -117,7 +117,7 @@ const phoneShots = [
           <button type="button" class="btn btn-accent btn-sm" data-copy="hero-install" data-label="Copy" aria-label="Copy install command" hidden>Copy</button>
         </div>
         <div class="actions fade-in">
-          <a class="btn btn-primary btn-lg" href={links.androidApk}>Download for Android</a>
+          <a class="btn btn-primary btn-lg" href="/get/">Get HQ</a>
           <a class="btn btn-lg" href="/architecture/">How it works</a>
           <a class="btn btn-lg" href={links.repo}>View on GitHub</a>
         </div>
@@ -194,6 +194,155 @@ const phoneShots = [
             }
           </div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="door-h">
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">Get started</p>
+        <h2 id="door-h" class="reveal">Pick your door</h2>
+        <p class="lede reveal">Start on a phone. A laptop or a server can join it later.</p>
+      </div>
+      <div class="bento">
+        <article class="gcard reveal"><span class="tag tag-green">Recommended</span><h3>An Android phone</h3><p class="body">About 10 minutes. HQ lives here, and the rest of the site assumes you started here.</p><a href="/get/#android">Get HQ for Android</a></article>
+        <article class="gcard reveal reveal-2"><span class="tag">Adds to your phone</span><h3>A Mac, Windows PC or Linux computer</h3><p class="body">Runs the coding helpers your phone starts. One line and a QR code.</p><a href="/get/#mac">Pick your computer</a></article>
+        <article class="gcard reveal reveal-3"><span class="tag">Always on</span><h3>A server</h3><p class="body">Keeps HQ awake all day. One form on Hetzner, or Docker if you know it.</p><a href="/get/#server">Set up a server</a></article>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec sec-top0" aria-labelledby="hour-h">
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">After you install</p>
+        <h2 id="hour-h" class="reveal">Your first hour</h2>
+      </div>
+      <div class="bento">
+        <article class="gcard reveal"><span class="tag">5 minutes</span><h3>Add your AI key</h3><p class="body">Pick a service, paste the key, set a spending limit.</p><a href="/guides/ai-key/">Open the guide</a></article>
+        <article class="gcard reveal reveal-2"><span class="tag">5 minutes</span><h3>Save a note, ask a question</h3><p class="body">See your first answer and keep it in your Vault.</p><a href="/guides/first-question/">Open the guide</a></article>
+        <article class="gcard reveal reveal-3"><span class="tag">3 minutes</span><h3>Make a backup</h3><p class="body">One file that brings everything back if the phone is lost.</p><a href="/guides/backup/">Open the guide</a></article>
+      </div>
+    </div>
+  </section>
+
+
+  <section class="sec sec-top0" aria-labelledby="cap-h">
+    <span class="orb orb-i o-ml slow" aria-hidden="true"></span>
+    <span class="orb orb-b o-mr" aria-hidden="true"></span>
+    <span class="orb orb-g o-bl slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">What it does</p>
+        <h2 id="cap-h" class="reveal">What HQ is built around</h2>
+        <div class="rule rule-sm sweep" aria-hidden="true"></div>
+      </div>
+      <div class="bento">
+        <article class="gcard span2 reveal">
+          <div class="stage" aria-hidden="true">
+            <span class="ring"></span>
+            <span class="orbit"><i class="od1"></i><i class="od2"></i><i class="od3"></i><i class="od4"></i></span>
+            <svg class="stage-pair" viewBox="0 0 56 36" aria-hidden="true" focusable="false"><circle class="c-blue" cx="18" cy="18" r="18" /><circle class="c-green" cx="38" cy="18" r="18" /></svg>
+            <span class="mini glass-light m1">Discord</span>
+            <span class="mini glass-light m2">Telegram</span>
+            <span class="mini glass-light m3">Web app</span>
+            <span class="mini glass-light m4">Terminal</span>
+          </div>
+          <h3>One agent on every channel</h3>
+          <p class="body">Discord, Telegram, a web app that installs as a PWA, and your terminal share one conversation history and one memory. Start a thread on your phone and finish it at your desk.</p>
+        </article>
+
+        <article class="gcard reveal reveal-2">
+          <div class="stage stage-bars" aria-hidden="true">
+            <span class="mbar"><span class="fill-blue"></span></span>
+            <span class="mbar w82"><span class="fill-green"></span></span>
+            <span class="mbar w92"><span class="fill-blue"></span></span>
+            <span class="mbar w60"><span class="fill-green"></span></span>
+          </div>
+          <h3>A vault you can read</h3>
+          <p class="body">Your Vault, memory, skills and threads are plain markdown files on your disk, plus one SQLite database for full-text search and embeddings. Nothing is locked inside a service.</p>
+        </article>
+
+        <article class="gcard reveal">
+          <div class="stage" aria-hidden="true">
+            <div class="term-mini glass-light">
+              <span class="tline w70"></span>
+              <span class="tline w46"></span>
+              <span class="tline w62"></span>
+              <span class="tprompt"><span>$</span><span class="cursor"></span></span>
+            </div>
+            <span class="chip">Blocked</span>
+          </div>
+          <h3>Coding agents under supervision</h3>
+          <p class="body">Start, watch, steer and resume Claude Code, Codex, OpenCode and others inside the built-in host, on this machine or a paired one. Personal agents such as Hermes and OpenClaw run there too, sandboxed and kept to research, review and monitoring. HQ tells you when one blocks. It never answers a trust prompt for you.</p>
+        </article>
+
+        <article class="gcard reveal reveal-2">
+          <div class="stage" aria-hidden="true">
+            <div class="cols"><span class="col">To do</span><span class="col">In progress</span><span class="col">Complete</span></div>
+            <span class="mover"><i class="w80"></i><i class="w50"></i></span>
+          </div>
+          <h3>Tasks and sub-agents</h3>
+          <p class="body">Spaces, initiatives, tasks and comments are built in, with list, board and timeline views. Start a coding helper on a task and its work stays tied to it. Sub-agents run single, parallel, race or graph. Long turns detach and report back, and /watch schedules recurring ones.</p>
+        </article>
+
+        <article class="gcard reveal reveal-3">
+          <div class="stage" aria-hidden="true">
+            <div class="lines"><i class="w88"></i><i class="w64 hit"></i><i class="w76"></i><i class="w52"></i></div>
+            <span class="lens"></span>
+          </div>
+          <h3>Web search with nothing to set up</h3>
+          <p class="body">web_search queries Google, DuckDuckGo, Brave, Mojeek and engines for news, science, images and code, all inside the hq process. No key, no Docker. Blocked engines are suspended and remembered, and a server on a blocked address can ask a peer HQ.</p>
+        </article>
+
+        <article class="gcard reveal">
+          <div class="stage" aria-hidden="true">
+            <span class="node glass-light"></span>
+            <span class="label node-l">Client</span>
+            <span class="link"></span>
+            <span class="packet"></span>
+            <svg class="node-hq" viewBox="0 0 64 44" aria-hidden="true" focusable="false"><circle class="c-blue" cx="22" cy="22" r="22" /><circle class="c-green" cx="42" cy="22" r="22" /></svg>
+            <span class="label node-r">HQ</span>
+          </div>
+          <h3>An MCP server for your tools</h3>
+          <p class="body">Two tools, hq_discover and hq_call, open the whole registry to Claude Code, Cursor, VS Code, Copilot and other MCP clients. Remote MCP servers can be bridged in the other direction.</p>
+        </article>
+
+        <article class="gcard gcard-indigo span2 reveal reveal-2">
+          <div class="stage stage-safe" aria-hidden="true">
+            <span class="scan"></span>
+            <svg class="shield" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z M9 12l2 2 4-4"></path></svg>
+            <span class="safe-tags">
+              <span class="tag tag-green">Bash sandbox</span>
+              <span class="tag tag-blue">Env allowlist</span>
+              <span class="tag tag-light">Signed releases</span>
+            </span>
+          </div>
+          <h3>Safe by default</h3>
+          <p class="body">Agent shell commands run in a sandbox with an environment allowlist. Untrusted content taints a session and cuts off secrets and outbound network. Servers update from signed releases and roll back on a failed health check.</p>
+        </article>
+
+        <article class="gcard reveal">
+          <div class="stage" aria-hidden="true">
+            <div class="term-mini glass-light">
+              <span class="tline w62"></span>
+              <span class="tline w46"></span>
+              <span class="tline w70"></span>
+            </div>
+            <span class="chip">Allow once</span>
+          </div>
+          <h3>Asks before it acts</h3>
+          <p class="body">In a chat you drive, a call that changes things outside your notes and tasks waits for your OK in the Inbox, for exactly that tool with exactly those arguments. A finished task waits for you to check it.</p>
+        </article>
+
+        <article class="gcard span2 reveal reveal-2">
+          <div class="stage" aria-hidden="true">
+            <div class="lines"><i class="w76"></i><i class="w52 hit"></i><i class="w88"></i><i class="w64"></i></div>
+          </div>
+          <h3>Shows what it can do</h3>
+          <p class="body">An empty chat offers what HQ can do on your install, in plain words. After a reply it may offer one more thing it could do for you, and to-dos made in chat get a reminder when they are due. What you use HQ for stays on your device: it never goes to a model provider, a push service or anyone else.</p>
+        </article>
       </div>
     </div>
   </section>
@@ -413,125 +562,6 @@ const phoneShots = [
             <li class="dchip dchip-room">One room: your agent</li>
           </ul>
         </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="sec sec-top0" aria-labelledby="cap-h">
-    <span class="orb orb-i o-ml slow" aria-hidden="true"></span>
-    <span class="orb orb-b o-mr" aria-hidden="true"></span>
-    <span class="orb orb-g o-bl slow" aria-hidden="true"></span>
-    <div class="container stack">
-      <div class="head">
-        <p class="eyebrow reveal">What it does</p>
-        <h2 id="cap-h" class="reveal">What HQ is built around</h2>
-        <div class="rule rule-sm sweep" aria-hidden="true"></div>
-      </div>
-      <div class="bento">
-        <article class="gcard span2 reveal">
-          <div class="stage" aria-hidden="true">
-            <span class="ring"></span>
-            <span class="orbit"><i class="od1"></i><i class="od2"></i><i class="od3"></i><i class="od4"></i></span>
-            <svg class="stage-pair" viewBox="0 0 56 36" aria-hidden="true" focusable="false"><circle class="c-blue" cx="18" cy="18" r="18" /><circle class="c-green" cx="38" cy="18" r="18" /></svg>
-            <span class="mini glass-light m1">Discord</span>
-            <span class="mini glass-light m2">Telegram</span>
-            <span class="mini glass-light m3">Web app</span>
-            <span class="mini glass-light m4">Terminal</span>
-          </div>
-          <h3>One agent on every channel</h3>
-          <p class="body">Discord, Telegram, a web app that installs as a PWA, and your terminal share one conversation history and one memory. Start a thread on your phone and finish it at your desk.</p>
-        </article>
-
-        <article class="gcard reveal reveal-2">
-          <div class="stage stage-bars" aria-hidden="true">
-            <span class="mbar"><span class="fill-blue"></span></span>
-            <span class="mbar w82"><span class="fill-green"></span></span>
-            <span class="mbar w92"><span class="fill-blue"></span></span>
-            <span class="mbar w60"><span class="fill-green"></span></span>
-          </div>
-          <h3>A vault you can read</h3>
-          <p class="body">Your Vault, memory, skills and threads are plain markdown files on your disk, plus one SQLite database for full-text search and embeddings. Nothing is locked inside a service.</p>
-        </article>
-
-        <article class="gcard reveal">
-          <div class="stage" aria-hidden="true">
-            <div class="term-mini glass-light">
-              <span class="tline w70"></span>
-              <span class="tline w46"></span>
-              <span class="tline w62"></span>
-              <span class="tprompt"><span>$</span><span class="cursor"></span></span>
-            </div>
-            <span class="chip">Blocked</span>
-          </div>
-          <h3>Coding agents under supervision</h3>
-          <p class="body">Start, watch, steer and resume Claude Code, Codex, OpenCode and others inside the built-in host, on this machine or a paired one. Personal agents such as Hermes and OpenClaw run there too, sandboxed and kept to research, review and monitoring. HQ tells you when one blocks. It never answers a trust prompt for you.</p>
-        </article>
-
-        <article class="gcard reveal reveal-2">
-          <div class="stage" aria-hidden="true">
-            <div class="cols"><span class="col">To do</span><span class="col">In progress</span><span class="col">Complete</span></div>
-            <span class="mover"><i class="w80"></i><i class="w50"></i></span>
-          </div>
-          <h3>Tasks and sub-agents</h3>
-          <p class="body">Spaces, initiatives, tasks and comments are built in, with list, board and timeline views. Start a coding helper on a task and its work stays tied to it. Sub-agents run single, parallel, race or graph. Long turns detach and report back, and /watch schedules recurring ones.</p>
-        </article>
-
-        <article class="gcard reveal reveal-3">
-          <div class="stage" aria-hidden="true">
-            <div class="lines"><i class="w88"></i><i class="w64 hit"></i><i class="w76"></i><i class="w52"></i></div>
-            <span class="lens"></span>
-          </div>
-          <h3>Web search with nothing to set up</h3>
-          <p class="body">web_search queries Google, DuckDuckGo, Brave, Mojeek and engines for news, science, images and code, all inside the hq process. No key, no Docker. Blocked engines are suspended and remembered, and a server on a blocked address can ask a peer HQ.</p>
-        </article>
-
-        <article class="gcard reveal">
-          <div class="stage" aria-hidden="true">
-            <span class="node glass-light"></span>
-            <span class="label node-l">Client</span>
-            <span class="link"></span>
-            <span class="packet"></span>
-            <svg class="node-hq" viewBox="0 0 64 44" aria-hidden="true" focusable="false"><circle class="c-blue" cx="22" cy="22" r="22" /><circle class="c-green" cx="42" cy="22" r="22" /></svg>
-            <span class="label node-r">HQ</span>
-          </div>
-          <h3>An MCP server for your tools</h3>
-          <p class="body">Two tools, hq_discover and hq_call, open the whole registry to Claude Code, Cursor, VS Code, Copilot and other MCP clients. Remote MCP servers can be bridged in the other direction.</p>
-        </article>
-
-        <article class="gcard gcard-indigo span2 reveal reveal-2">
-          <div class="stage stage-safe" aria-hidden="true">
-            <span class="scan"></span>
-            <svg class="shield" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z M9 12l2 2 4-4"></path></svg>
-            <span class="safe-tags">
-              <span class="tag tag-green">Bash sandbox</span>
-              <span class="tag tag-blue">Env allowlist</span>
-              <span class="tag tag-light">Signed releases</span>
-            </span>
-          </div>
-          <h3>Safe by default</h3>
-          <p class="body">Agent shell commands run in a sandbox with an environment allowlist. Untrusted content taints a session and cuts off secrets and outbound network. Servers update from signed releases and roll back on a failed health check.</p>
-        </article>
-
-        <article class="gcard reveal">
-          <div class="stage" aria-hidden="true">
-            <div class="term-mini glass-light">
-              <span class="tline w62"></span>
-              <span class="tline w46"></span>
-              <span class="tline w70"></span>
-            </div>
-            <span class="chip">Allow once</span>
-          </div>
-          <h3>Asks before it acts</h3>
-          <p class="body">In a chat you drive, a call that changes things outside your notes and tasks waits for your OK in the Inbox, for exactly that tool with exactly those arguments. A finished task waits for you to check it.</p>
-        </article>
-
-        <article class="gcard span2 reveal reveal-2">
-          <div class="stage" aria-hidden="true">
-            <div class="lines"><i class="w76"></i><i class="w52 hit"></i><i class="w88"></i><i class="w64"></i></div>
-          </div>
-          <h3>Shows what it can do</h3>
-          <p class="body">An empty chat offers what HQ can do on your install, in plain words. After a reply it may offer one more thing it could do for you, and to-dos made in chat get a reminder when they are due. What you use HQ for stays on your device: it never goes to a model provider, a push service or anyone else.</p>
-        </article>
       </div>
     </div>
   </section>
