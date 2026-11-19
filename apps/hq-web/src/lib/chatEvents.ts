@@ -13,6 +13,7 @@ const CHAT_EVENTS = new Set([
   'error',
   'turn_end',
   'thread_title',
+  'tool_preparing',
   'tool_start',
   'tool_progress',
   'tool_end',
@@ -129,6 +130,12 @@ function applyEvent(type: string, msg: ChatEvent, tid: string) {
     case 'thread_title':
       store.updateThread(tid, { title: str(msg.title) ?? '' })
       break
+    case 'tool_preparing': {
+      // The model is still writing this call's arguments, which can take minutes for a long document.
+      const callId = str(msg.tool_call_id)
+      if (callId) store.startToolStep(tid, callId, str(msg.tool_name) ?? 'tool')
+      break
+    }
     case 'tool_start':
       store.startToolStep(
         tid,

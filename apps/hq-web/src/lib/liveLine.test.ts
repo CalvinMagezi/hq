@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { liveSentence, liveText, secondsRunning, stopOffered, STOP_AFTER_MS } from './liveLine'
+import { idleLine, liveSentence, liveText, secondsRunning, stopOffered, STOP_AFTER_MS } from './liveLine'
 
 const step = (toolName: string, status: 'running' | 'done', inputArgs?: Record<string, unknown>) => ({ toolName, status, inputArgs })
 
@@ -27,5 +27,11 @@ describe('the live line', () => {
     expect(stopOffered(0, STOP_AFTER_MS - 1)).toBe(false)
     expect(stopOffered(0, STOP_AFTER_MS)).toBe(true)
     expect(stopOffered(undefined, 99_999)).toBe(false)
+  })
+  test('between steps it still says what is happening', () => {
+    expect(idleLine([], false).key).toBe('chat_live_reading')
+    expect(idleLine([], true).key).toBe('chat_live_thinking')
+    expect(idleLine([step('web_search', 'done')], false)).toEqual({ key: 'chat_live_next_step', params: { n: '1' } })
+    expect(idleLine([step('spawn_subagents', 'done')], false).key).toBe('chat_live_after_helpers')
   })
 })

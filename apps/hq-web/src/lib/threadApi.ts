@@ -1,5 +1,5 @@
 import { hqJson } from './hqAuth'
-import { useThreadStore, type Thread, type ThreadMessage, type ToolStep } from '~/store/threadStore'
+import { useThreadStore, type NextStep, type Thread, type ThreadMessage, type ToolStep } from '~/store/threadStore'
 import { splitAttachments } from './chatUploads'
 import type { DriverMeta } from './sessionsApi'
 import { parseStepCredits } from './stepCredits'
@@ -69,6 +69,7 @@ interface ApiMessageMeta {
   driver?: ApiDriverMeta | null
   source?: ApiSource | null
   offer?: ApiOffer | null
+  next_steps?: unknown
   files?: unknown
 }
 
@@ -122,6 +123,15 @@ function toDriver(d: ApiDriverMeta | null | undefined): DriverMeta | undefined {
 }
 
 /** A saved message in the store's shape: attachments split out, tool steps and reasoning from its meta. */
+/** Keeps the well-formed steps of `meta.next_steps`; anything else is dropped, so a bad row shows nothing. */
+export function toNextSteps(raw: unknown): NextStep[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const steps = raw.flatMap((r): NextStep[] =>
+    r && typeof r.label === 'string' && typeof r.prompt === 'string' && r.label && r.prompt ? [{ label: r.label, prompt: r.prompt }] : [],
+  )
+  return steps.length > 0 ? steps : undefined
+}
+
 export function toThreadMessage(m: ApiMessage): ThreadMessage {
   const { text, attachments } = splitAttachments(m.content)
   const steps = m.meta?.tool_steps ?? []
@@ -140,6 +150,7 @@ export function toThreadMessage(m: ApiMessage): ThreadMessage {
     viaMcp: toViaMcp(m.meta?.source),
     spoken: toSpoken(m.meta?.source) || undefined,
     offer: toOffer(m.meta?.offer),
+    nextSteps: toNextSteps(m.meta?.next_steps),
     files: toReplyFiles(m.meta?.files),
   }
 }

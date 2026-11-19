@@ -16,6 +16,7 @@
 //! `docs/security/ADOPTION_DATA.md`.
 
 pub mod adoption;
+pub mod follow_ups;
 pub mod next_step;
 pub mod offers;
 

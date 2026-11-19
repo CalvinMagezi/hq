@@ -145,6 +145,8 @@ pub(super) struct ToolCallBuilder {
     pub id: String,
     pub name: String,
     pub arguments: String,
+    /// A `ToolPreparing` event went out for this call.
+    pub announced: bool,
 }
 
 /// Accumulated stats for a session.

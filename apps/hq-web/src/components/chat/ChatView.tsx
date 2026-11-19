@@ -17,6 +17,7 @@ import { bannerKey, savedBannerLine, sendFailureKey, stopFailureKey, stopReply }
 import { threadApi, refreshThreads, loadMessages, newThread } from '~/lib/threadApi'
 import { rejectSend } from '~/lib/chatEvents'
 import { answerOffer } from '~/lib/offersApi'
+import { NextSteps } from './NextSteps'
 import { MAX_ATTACHMENTS, type ChatAttachment } from '~/lib/chatUploads'
 import { parseSlashCommand, isSlashInput } from './SlashCommandPalette'
 import { ChatList, NewChatButton } from './ChatList'
@@ -342,6 +343,17 @@ export function ChatView({ active, threadId }: Props) {
     focusInput()
   }
 
+  /** A next step sends its request, or fills the composer when the socket is busy or down. */
+  const pickNextStep = (prompt: string) => {
+    if (!activeThreadId) return
+    if (connected && !liveTurn) {
+      sendChat(activeThreadId, prompt, [])
+      return
+    }
+    draft.setText(prompt)
+    focusInput()
+  }
+
   /** The line goes at once; the person is told whether it was scheduled. */
   const scheduleOfferOn = (m: ThreadMessage, at: number) => {
     if (!m.offer || !activeThreadId) return
@@ -465,9 +477,14 @@ export function ChatView({ active, threadId }: Props) {
   const title = activeThread?.title ?? t('chat_new_chat')
   // The one slot above the box: an approval wins it, then an offer. Nothing offers anything while a reply streams.
   const offerOn = !liveTurn && messages.length > 0 && messages[messages.length - 1].offer ? messages[messages.length - 1] : null
+  const last = messages.length > 0 ? messages[messages.length - 1] : null
+  const stepsOn = !liveTurn && last?.role === 'assistant' && !offerOn ? last.nextSteps : undefined
+  const slotSteps = stepsOn ? <NextSteps steps={stepsOn} onPick={(step) => pickNextStep(step.prompt)} /> : null
   const slotOffer = offerOn?.offer ? (
     <OfferLine offer={offerOn.offer} onAnswer={(yes) => answerOfferOn(offerOn, yes)} onSchedule={(at) => scheduleOfferOn(offerOn, at)} />
-  ) : null
+  ) : (
+    slotSteps
+  )
   const detail = (
     <div className="hq-chat-detail" {...drop.handlers}>
       {drop.dragging && (

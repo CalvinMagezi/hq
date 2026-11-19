@@ -28,6 +28,7 @@ fn builders_into_tool_calls_defaults_unparseable_arguments_to_an_empty_object() 
         id: "call_1".to_string(),
         name: "no_arg_tool".to_string(),
         arguments: String::new(),
+        announced: false,
     }];
 
     let calls = builders_into_tool_calls(builders);
@@ -42,6 +43,7 @@ fn builders_into_tool_calls_parses_well_formed_arguments() {
         id: "call_2".to_string(),
         name: "search".to_string(),
         arguments: r#"{"query":"rust"}"#.to_string(),
+        announced: false,
     }];
 
     let calls = builders_into_tool_calls(builders);
@@ -374,6 +376,7 @@ fn event_names(events: &[SessionEvent]) -> Vec<&'static str> {
             SessionEvent::Reasoning(_) => "reasoning",
             SessionEvent::TextDone(_) => "text_done",
             SessionEvent::ToolStart { .. } => "tool_start",
+            SessionEvent::ToolPreparing { .. } => "tool_preparing",
             SessionEvent::ToolProgress { .. } => "tool_progress",
             SessionEvent::ToolEnd { .. } => "tool_end",
             SessionEvent::TurnEnd { .. } => "turn_end",
@@ -562,7 +565,8 @@ async fn buffered_session_continues_after_tool_result() {
     assert_eq!(
         event_names(&events.lock().unwrap()),
         vec![
-            // Turn 0: tool call (no answer text) → cost, then tool lifecycle.
+            // Turn 0: the call is named while its arguments arrive, then cost and the tool lifecycle.
+            "tool_preparing",
             "cost_update",
             "tool_start",
             "tool_progress",

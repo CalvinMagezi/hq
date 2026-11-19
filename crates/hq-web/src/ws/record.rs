@@ -212,6 +212,18 @@ impl TurnRecord {
         let offer = self.offer.take().filter(|_| !stopped);
         let offer_kind = offer.as_ref().map(|o| o.kind);
         let mut meta = self.meta(stopped);
+        if !stopped {
+            let kinds: Vec<&str> = self
+                .files
+                .iter()
+                .filter_map(|f| f["kind"].as_str())
+                .collect();
+            let steps = hq_tools::capabilities::follow_ups::follow_ups(&self.tool_names(), &kinds);
+            if !steps.is_empty() {
+                let obj = meta.get_or_insert_with(|| Value::Object(Map::new()));
+                obj["next_steps"] = serde_json::to_value(steps).unwrap_or(Value::Null);
+            }
+        }
         if let Some(offer) = offer {
             let obj = meta.get_or_insert_with(|| Value::Object(Map::new()));
             obj["offer"] = serde_json::to_value(offer).unwrap_or(Value::Null);

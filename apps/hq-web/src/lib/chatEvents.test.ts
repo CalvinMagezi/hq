@@ -110,3 +110,13 @@ test('a rejected send removes the local copy and clears the busy turn', () => {
   expect(live('t')).toBeUndefined()
   expect(useThreadStore.getState().threadMessages.t).toHaveLength(0)
 })
+
+test('a tool being prepared shows as a running step and its start fills in the arguments', () => {
+  handleChatEvent({ type: 'turn_start', thread_id: 't' })
+  handleChatEvent({ type: 'tool_preparing', thread_id: 't', tool_call_id: 'c1', tool_name: 'vault_write_note' })
+  expect(live('t').toolSteps).toHaveLength(1)
+  expect(live('t').toolSteps[0].status).toBe('running')
+  handleChatEvent({ type: 'tool_start', thread_id: 't', tool_call_id: 'c1', tool_name: 'vault_write_note', args: '{"path":"A.md"}' })
+  expect(live('t').toolSteps).toHaveLength(1)
+  expect(live('t').toolSteps[0].inputArgs).toEqual({ path: 'A.md' })
+})
