@@ -9,7 +9,7 @@ use tracing::debug;
 use crate::tools::AgentTool;
 
 use super::text_result;
-use hq_tools::file_edit::{FileHistory, FileStateCache};
+use hq_tools_coding::file_edit::{FileHistory, FileStateCache};
 use std::path::Path;
 
 /// Rollback a file to its state before the most recent edit.
