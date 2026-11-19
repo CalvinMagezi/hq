@@ -8,8 +8,8 @@ interface WorkPaneStore {
   toggle: (threadId: string) => void
   close: (threadId: string) => void
   showTab: (threadId: string, tab: PaneTab) => void
-  /** Opens the Result tab on a note. */
-  showNote: (threadId: string, path: string) => void
+  /** Opens the Result tab on a note, or returns to the chat's results list when null. */
+  showNote: (threadId: string, path: string | null) => void
   /** Opens the Context tab on a source. */
   showSource: (threadId: string, ref: string | null) => void
 }

@@ -124,8 +124,10 @@ export function ExportMenu({
     if (narrow) return <Sheet title={t('notes_export_as')} onClose={onClose}>{list}</Sheet>
 
     const height = 40 + groups.length * 32 + options.length * ITEM_H
-    const left = Math.max(8, Math.min(menu.x, window.innerWidth - MENU_W - 8))
-    const top = Math.max(8, Math.min(menu.y, window.innerHeight - height - 8))
+    const winW = typeof window === 'undefined' ? 1024 : window.innerWidth
+    const winH = typeof window === 'undefined' ? 768 : window.innerHeight
+    const left = Math.max(8, Math.min(menu.x, winW - MENU_W - 8))
+    const top = Math.max(8, Math.min(menu.y, winH - height - 8))
 
     return (
         <div

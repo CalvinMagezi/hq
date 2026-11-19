@@ -5,7 +5,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ChatRow, rowLine } from './ChatList'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { RouterProvider, createMemoryHistory, createRootRoute, createRouter } from '@tanstack/react-router'
 import { ChatBubble } from './ChatBubble'
+import { WorkPane } from './WorkPane'
 
 const read = (p: string) => readFileSync(join(import.meta.dir, p), 'utf8')
 
@@ -140,5 +142,56 @@ describe('the composer', () => {
     expect(comp).toContain('triggerAt(value, caret)')
     expect(comp).toContain('referenceBefore(value')
     expect(comp).toContain('<TriggerMenu')
+  })
+})
+
+describe('WorkPane Result and Helpers tabs', () => {
+  async function renderPane(tab: 'result' | 'helpers') {
+    const view = createElement(
+      QueryClientProvider,
+      { client: new QueryClient() },
+      createElement(WorkPane, {
+        pane: { open: true, tab, note: null, source: null },
+        onTab: () => {},
+        onClose: () => {},
+        steps: [],
+        running: false,
+        onSelectSource: () => {},
+        onAsk: () => {},
+        onTask: () => {},
+        madeNotes: [{ title: 'Report.html', path: 'Notebooks/Report.html' }],
+        madeFiles: [{ path: 'Exports/2026-11/Sheet.xlsx', name: 'Sheet.xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', kind: 'sheet', size: 1024 }],
+        chatHelpers: [
+          { id: 'h1', name: 'explorer', goal: 'Check Q3 revenue', status: 'working', background: false },
+          { id: 'h2', name: 'coder', goal: 'Draft HTML summary', status: 'done', background: true },
+        ],
+        helpers: createElement('div', null, 'watched'),
+      }),
+    )
+    const router = createRouter({
+      routeTree: createRootRoute({ component: () => view }),
+      history: createMemoryHistory({ initialEntries: ['/'] }),
+    })
+    await router.load()
+    return renderToStaticMarkup(createElement(RouterProvider, { router }))
+  }
+
+  test('Result tab lists notes and files made in the chat instead of Nothing made yet', async () => {
+    const html = await renderPane('result')
+    expect(html).not.toContain('Nothing made yet')
+    expect(html).toContain('Report.html')
+    expect(html).toContain('Sheet.xlsx')
+  })
+
+  test('Helpers tab lists this chat’s sub-agent helpers with role, goal and status', async () => {
+    const html = await renderPane('helpers')
+    expect(html).toContain('In this chat')
+    expect(html).toContain('explorer')
+    expect(html).toContain('Check Q3 revenue')
+    expect(html).toContain('Working')
+    expect(html).toContain('coder')
+    expect(html).toContain('Draft HTML summary')
+    expect(html).toContain('Done')
+    expect(html).toContain('Sent to run in the background')
   })
 })

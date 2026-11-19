@@ -1,6 +1,7 @@
 // What a reply read and what it made, taken from the tool calls the chat socket already sends.
 // Nothing here asks the server for more: a tool whose arguments name no path or address adds nothing.
 import { unwrap } from './stepWords'
+import type { ReplyFile } from './replyFiles'
 
 export type SourceKind = 'note' | 'file' | 'web'
 
@@ -89,9 +90,33 @@ export function madeNotes(steps: StepLike[]): MadeNote[] {
     const [name, args] = unwrap(step.toolName, step.inputArgs)
     if (!NOTE_WRITES.has(name)) continue
     const path = text(args, 'path')
-    if (!path || !path.startsWith('Notebooks/') || !path.endsWith('.md')) continue
+    if (!path || !path.startsWith('Notebooks/')) continue
     if (out.some((m) => m.path === path)) continue
     out.push({ title: baseName(path), path })
   }
   return out
+}
+
+/** All unique notes and files made across a chat's messages and live turn. */
+export function chatMadeItems(
+  messages: { role: string; toolSteps?: StepLike[]; files?: ReplyFile[] }[],
+  liveSteps: StepLike[] = [],
+): { notes: MadeNote[]; files: ReplyFile[] } {
+  const notes: MadeNote[] = []
+  const files: ReplyFile[] = []
+  const addSteps = (steps: StepLike[] | undefined) => {
+    if (!steps) return
+    for (const n of madeNotes(steps)) {
+      if (!notes.some((x) => x.path === n.path)) notes.push(n)
+    }
+  }
+  for (const m of messages) {
+    if (m.role !== 'assistant') continue
+    addSteps(m.toolSteps)
+    for (const f of m.files ?? []) {
+      if (!files.some((x) => x.path === f.path)) files.push(f)
+    }
+  }
+  addSteps(liveSteps)
+  return { notes, files }
 }
