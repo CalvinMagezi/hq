@@ -29,6 +29,7 @@ pub mod handoff;
 mod launch;
 pub mod merge;
 pub mod mission;
+pub mod narrow;
 mod origin;
 pub mod policy;
 mod preflight;

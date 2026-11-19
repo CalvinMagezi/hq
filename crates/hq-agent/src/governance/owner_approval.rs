@@ -10,12 +10,23 @@ use hq_db::Database;
 use hq_db::value_items::{self, ApprovalGate, RequestState};
 use serde_json::Value;
 
-/// Tools that change things the owner cannot simply undo from their notes and tasks: files and
-/// commands on the machine, git and GitHub, HQ's config and updates, other machines and agents
-/// (starting a coding agent is as strong as `bash`), and the owner's other accounts. Narrower than the connector's list (`CONNECTOR_CONFIRM_TOOLS`
-/// in hq-mcp), which also guards reads from a remote caller; here the caller is the owner's own
-/// chat, so reading is never asked about.
-const OWNER_CONFIRM_TOOLS: &[&str] = &[
+/// How much a tool call matters to the owner. A call in zone A never waits for them: notes,
+/// tasks, research, web reads, and starting, briefing or delegating to a helper (a helper that
+/// starts after the chat read outside text is narrowed instead, see `harness_session::narrow`).
+/// Zone B is where work leaves HQ or changes the machine: files and commands, git and GitHub,
+/// mail and messages, other agents' input. Zone C is HQ itself: updates, config, hosts, skills,
+/// unattended watches. Both B and C wait for the owner's approval of exactly that call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Zone {
+    A,
+    B,
+    C,
+}
+
+/// Zone B tools. Narrower than the connector's list (`CONNECTOR_CONFIRM_TOOLS` in hq-mcp), which
+/// also guards reads from a remote caller; here the caller is the owner's own chat, so reading is
+/// never asked about.
+const ZONE_B_TOOLS: &[&str] = &[
     "bash",
     "write_file",
     "edit_file",
@@ -25,20 +36,33 @@ const OWNER_CONFIRM_TOOLS: &[&str] = &[
     "git_pr",
     "github_write",
     "task_delete",
-    "self_update_install",
-    "self_update_rollback",
-    "host_add",
     "host_send",
     "agent_send_message",
     "google_workspace",
+];
+
+/// Zone C tools: they change HQ itself. A watch fires unattended on an interval with no owner to
+/// ask, so creating one is asked.
+const ZONE_C_TOOLS: &[&str] = &[
+    "self_update_install",
+    "self_update_rollback",
+    "host_add",
     "skill_manage",
     "slash_command_manage",
-    // A watch fires unattended on an interval with no owner to ask, so creating one is asked.
     "watch_create",
-    "harness_session_spawn",
-    "harness_session_handoff",
-    "agent_delegate",
 ];
+
+/// The zone of a tool by name. A tool in neither list is zone A; `needs_owner` adds the calls
+/// that are zone B or C only for some arguments.
+pub fn zone_of(tool: &str) -> Zone {
+    if ZONE_C_TOOLS.contains(&tool) {
+        Zone::C
+    } else if ZONE_B_TOOLS.contains(&tool) {
+        Zone::B
+    } else {
+        Zone::A
+    }
+}
 
 /// Exports write a file anywhere the HQ user can when they are given an `output` path.
 const EXPORT_TOOLS: &[&str] = &["convert_from_markdown", "vault_export", "vault_export_pdf"];
@@ -109,7 +133,7 @@ pub fn needs_owner(tool: &str, category: &str, args: &Value) -> bool {
             args,
         );
     }
-    OWNER_CONFIRM_TOOLS.contains(&tool)
+    zone_of(tool) != Zone::A
 }
 
 /// How a folder allow covers one call.

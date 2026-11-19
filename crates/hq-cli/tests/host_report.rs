@@ -206,6 +206,7 @@ fn a_remote_native_host_works_through_the_gate() {
         policy: None,
         acp_argv: None,
         acp_model: None,
+        strict: false,
     };
     assert!(b.launch(&req).unwrap().ready);
     b.send_text("hs-remote", "over-ssh").unwrap();

@@ -103,6 +103,8 @@ struct Recorder {
     read_only: bool,
     output: &'static str,
     ran: Arc<AtomicBool>,
+    /// Set when the call ran inside a narrowed helper start.
+    narrowed: Arc<AtomicBool>,
 }
 
 #[async_trait]
@@ -124,6 +126,10 @@ impl AgentTool for Recorder {
     }
     async fn execute(&self, _id: &str, _args: Value) -> Result<ToolResult> {
         self.ran.store(true, Ordering::SeqCst);
+        self.narrowed.store(
+            hq_tools::harness_session::narrow::active(),
+            Ordering::SeqCst,
+        );
         Ok(crate::coding::text_result(self.output))
     }
 }
@@ -204,6 +210,7 @@ async fn call(guardian: &ToolGuardian, tool: &str, read_only: bool, args: Value)
         read_only,
         output: POISON,
         ran: ran.clone(),
+        narrowed: Arc::new(AtomicBool::new(false)),
     };
     let result = guardian
         .govern(Box::new(inner))
@@ -378,7 +385,7 @@ fn cases() -> Vec<Case> {
             "spawn in turn 3",
             "harness_session_spawn",
             spawn.clone(),
-            Asked,
+            Allowed,
         )
         .turns(2),
         // Starting or briefing another agent.
@@ -386,7 +393,7 @@ fn cases() -> Vec<Case> {
             "spawn, owner chat",
             "harness_session_spawn",
             spawn.clone(),
-            Asked,
+            Allowed,
         ),
         Case::new(
             "spawn, terminal",
@@ -407,7 +414,7 @@ fn cases() -> Vec<Case> {
             "handoff, owner chat",
             "harness_session_handoff",
             json!({"session_id": "hs-1"}),
-            Asked,
+            Allowed,
         ),
         Case::new(
             "start a coding job",
@@ -678,7 +685,7 @@ fn held_out_cases() -> Vec<Case> {
             "held: vault search then delegate",
             "agent_delegate",
             json!({"goal": "y"}),
-            Asked,
+            Allowed,
         )
         .from("vault_search"),
         Case::new(
@@ -774,4 +781,53 @@ async fn held_out_cases_hold() {
         held.len() - bad.len()
     );
     assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_helper_started_after_outside_text_is_narrowed_and_a_clean_one_is_not() {
+    for (source, expect_narrowed) in [(None, false), (Some("web_fetch"), true)] {
+        let mut case = Case::new(
+            "start a helper",
+            "harness_session_spawn",
+            json!({"harness": "pi"}),
+            Outcome::Allowed,
+        );
+        case.source = source;
+        isolate_config();
+        let guardian = guardian_for(&case);
+        if let Some(source) = case.source {
+            call(
+                &guardian,
+                source,
+                true,
+                json!({"url": "https://blog.example/p"}),
+            )
+            .await;
+        }
+        let narrowed = Arc::new(AtomicBool::new(false));
+        let inner = Recorder {
+            name: case.tool.to_string(),
+            category: category_of(case.tool),
+            read_only: false,
+            output: "started",
+            ran: Arc::new(AtomicBool::new(false)),
+            narrowed: narrowed.clone(),
+        };
+        guardian
+            .govern(Box::new(inner))
+            .execute("id", case.args.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            narrowed.load(Ordering::SeqCst),
+            expect_narrowed,
+            "{source:?}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "known gap: a task written by a tainted session is not flagged origin_tainted, so a later narrowed start briefs from text the injected page may have written"]
+fn known_gap_a_task_written_by_a_tainted_session_launders_a_start() {
+    unimplemented!("tasks need an origin_tainted bit set by the writing session");
 }

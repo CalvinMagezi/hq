@@ -445,6 +445,9 @@ pub struct LaunchRequest {
     pub acp_argv: Option<Vec<String>>,
     /// The model an ACP agent is switched to once its session is open.
     pub acp_model: Option<String>,
+    /// Run under the strict sandbox whatever the host's default profile is. Set for a session
+    /// started after the chat read outside text.
+    pub strict: bool,
 }
 
 /// The HQ endpoint and the session's own token.

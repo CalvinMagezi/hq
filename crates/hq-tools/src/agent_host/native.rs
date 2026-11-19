@@ -176,14 +176,16 @@ impl NativeBackend {
 
     /// Launches whose working directory lies under `paths` get `plan` in place of the default one.
     pub fn with_strict_paths(mut self, paths: Vec<String>, plan: Value) -> Self {
-        self.strict = (!paths.is_empty()).then_some((paths, plan));
+        self.strict = Some((paths, plan));
         self
     }
 
     /// The sandbox request for a launch in `cwd`.
-    fn sandbox_for(&self, cwd: &str) -> Option<Value> {
+    fn sandbox_for(&self, cwd: &str, force_strict: bool) -> Option<Value> {
         match &self.strict {
-            Some((paths, plan)) if super::sandbox::is_strict_path(paths, cwd) => Some(plan.clone()),
+            Some((paths, plan)) if force_strict || super::sandbox::is_strict_path(paths, cwd) => {
+                Some(plan.clone())
+            }
             _ => self.sandbox.clone(),
         }
     }
@@ -318,7 +320,12 @@ impl NativeBackend {
     /// Starts an agent over ACP. The host completes the handshake and opens the session before
     /// it answers, so a started agent is ready: there is no screen to wait for.
     fn launch_acp(&self, req: &LaunchRequest, argv: &[String]) -> Result<Launched, AgentHostError> {
-        let params = acp_spawn_params(req, argv, &self.sandbox_for(&req.cwd), self.idle_ttl_secs);
+        let params = acp_spawn_params(
+            req,
+            argv,
+            &self.sandbox_for(&req.cwd, req.strict),
+            self.idle_ttl_secs,
+        );
         let within = req.start_timeout + self.command_timeout;
         self.call_within("agent.spawn", params, within)
             .map_err(|e| older_host_hint(e, self.name().to_string()))?;
@@ -661,7 +668,7 @@ impl HostBackend for NativeBackend {
         let params = json!({
             "name": req.name, "argv": argv_for(req), "cwd": req.cwd,
             "agent": req.kind, "resume_argv": resume, "env": env,
-            "sandbox": self.sandbox_for(&req.cwd),
+            "sandbox": self.sandbox_for(&req.cwd, req.strict),
             "idle_ttl_secs": self.idle_ttl_secs,
         });
         let spawned = self.call("agent.spawn", params)?;
@@ -1073,6 +1080,7 @@ mod tests {
             policy: None,
             acp_argv: None,
             acp_model: None,
+            strict: false,
         }
     }
 

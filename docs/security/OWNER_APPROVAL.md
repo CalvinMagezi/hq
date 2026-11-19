@@ -171,6 +171,25 @@ card, and can list and stop each allowed folder in the chat's details.
   It is display only: the apps offer "Allow all for this site" once it reaches two, but the
   server accepts `approve_site` at any count.
 
+## Zones
+
+`governance::owner_approval::zone_of` sorts every tool into a zone:
+
+- **A, never asked:** notes, tasks, research and web reads, and starting, briefing or delegating
+  to a helper (`harness_session_spawn`, `harness_session_handoff`, `agent_delegate`).
+- **B, asked and pushed:** where work leaves HQ or changes the machine: shell and file edits
+  (unless a folder allow covers them), git and GitHub, mail and messages, input to another
+  agent, deleting tasks, the owner's other accounts.
+- **C, asked, rare:** HQ itself: self-update, `config_manage` set, `host_add`, skills and slash
+  commands, creating an unattended watch, helper-setup installs.
+
+A helper start in a chat that has read outside text is not asked about but **narrowed**
+(`harness_session::narrow`): the strict sandbox (no credentials, the egress allowlist), and a
+brief built from the stored task text, so the start needs a `task_id` and no free text from the
+chat reaches the helper. Unattended sessions still never start helpers. Known gap: a task written
+by a tainted session is not yet flagged, so its text can reach a later narrowed brief
+(`known_gap_a_task_written_by_a_tainted_session_launders_a_start`). Pairing this with
+`agent_host.sandbox.strict_paths` keeps client folders on a bounded network.
 ## Audience: what reaches the owner
 
 One function, `hq_db::inbox_prefs::audience`, decides whether an inbox item is for the owner or
