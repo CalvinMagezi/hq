@@ -1,3 +1,10 @@
+---
+audience: archive
+order: 900
+summary: "Retired: multi-harness dispatch."
+updated: 2026-11-19
+---
+
 # Multi-harness dispatch / sub-task fleet — Retired 2026-09-21
 
 **Status: fully removed from the codebase.** This is a historical record,

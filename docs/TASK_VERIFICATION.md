@@ -1,3 +1,10 @@
+---
+audience: build
+order: 50
+summary: "How HQ checks a finished task from evidence before it counts as done."
+updated: 2026-11-19
+---
+
 # Task verification
 
 Agents finish tasks faster than one person can read what they did. Without this, finished work piles up in

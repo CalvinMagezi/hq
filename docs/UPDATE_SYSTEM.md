@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 20
+summary: "How HQ updates itself from signed releases, and how to update by hand."
+updated: 2026-11-19
+---
+
 # Update system
 
 Instances pull signed releases. The build side publishes artifacts and holds no

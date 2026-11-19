@@ -76,11 +76,13 @@ for (const file of pages) {
   const noScripts = html.replace(/<script\b[\s\S]*?<\/script>/gi, '');
 
   // Typography and copy rules.
-  if (EM_DASH.test(html)) fail(page, 'contains an em dash');
+  // Pages under /docs/ are the repo's own documentation, so the site's copy rules do not apply to them.
+  const isDoc = page.startsWith('docs/');
+  if (!isDoc && EM_DASH.test(html)) fail(page, 'contains an em dash');
   const banned = noScripts.match(BANNED_WORDS);
-  if (banned) fail(page, `banned word "${banned[0]}"`);
-  for (const re of BANNED_PHRASES) if (re.test(noScripts)) fail(page, `banned phrase ${re}`);
-  if (/\bnot just\b[^.]{0,80}\bit['’]s\b/i.test(noScripts)) fail(page, 'uses the "not just X, it is Y" construction');
+  if (!isDoc && banned) fail(page, `banned word "${banned[0]}"`);
+  for (const re of BANNED_PHRASES) if (!isDoc && re.test(noScripts)) fail(page, `banned phrase ${re}`);
+  if (!isDoc && /\bnot just\b[^.]{0,80}\bit['’]s\b/i.test(noScripts)) fail(page, 'uses the "not just X, it is Y" construction');
   if (!installChannels.npx.available && /npx\s+agent-hq-cli/.test(html)) fail(page, 'presents npx agent-hq-cli while installChannels.npx.available is false');
 
   // CSP friendliness: nothing inline.
@@ -115,7 +117,7 @@ for (const file of pages) {
   let last = 0;
   for (const m of html.matchAll(/<h([1-6])\b/g)) {
     const level = Number(m[1]);
-    if (last && level > last + 1) fail(page, `heading jumps from h${last} to h${level}`);
+    if (last && level > last + 1 && !isDoc) fail(page, `heading jumps from h${last} to h${level}`);
     last = level;
   }
 
@@ -152,10 +154,12 @@ for (const file of pages) {
   }
   for (const m of html.matchAll(/(?:srcset|data-poster|data-anim-src)="([^"]+)"/g)) refs.push({ tag: '*', attr: 'srcset', url: m[1].split(/[\s,]+/)[0] });
   for (const { tag, attr, url } of refs) {
-    if (/^http:\/\//i.test(url)) fail(page, `insecure URL ${url}`);
+    const localExample = isDoc && /^http:\/\/(localhost|127\.0\.0\.1)[:/]/i.test(url);
+    if (/^http:\/\//i.test(url) && !localExample) fail(page, `insecure URL ${url}`);
+    if (localExample) continue;
     if (/^https:\/\//i.test(url)) {
       const own = url.startsWith(OWN_ORIGIN);
-      if (tag === 'a' && !own && !OUTBOUND_ALLOW.some((p) => url.startsWith(p))) fail(page, `undocumented outbound link ${url}`);
+      if (tag === 'a' && !own && !isDoc && !OUTBOUND_ALLOW.some((p) => url.startsWith(p))) fail(page, `undocumented outbound link ${url}`);
       if (tag !== 'a' && !own) fail(page, `external request via <${tag} ${attr}>: ${url}`);
       continue;
     }

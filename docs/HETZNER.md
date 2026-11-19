@@ -1,3 +1,10 @@
+---
+audience: server
+order: 10
+summary: "Deploy HQ on a Hetzner server from one form."
+updated: 2026-11-19
+---
+
 # Deploying HQ on Hetzner
 
 This sets up a private, self-updating HQ on a Hetzner Cloud server. It never stores a secret in the server's user-data, and the web UI is reachable only from your tailnet. The hosted form (`apps/deploy`, at <https://deploy.agent-hq.online>) and `deploy/hetzner/hcloud.sh` both use the same `cloud-init.yaml`, and a test keeps the form's copy identical to the file.

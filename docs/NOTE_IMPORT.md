@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 50
+summary: "Bring PDF, Word, Excel and other files into your Vault as notes."
+updated: 2026-11-19
+---
+
 # Importing files as notes
 
 Most vaults collect files that are not Markdown: PDFs, Word documents,

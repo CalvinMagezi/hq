@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 160
+summary: "Run Hermes and OpenClaw under HQ as personal agents."
+updated: 2026-11-19
+---
+
 # Personal agents: running Hermes and OpenClaw under HQ
 
 Hermes Agent and OpenClaw are personal assistants with their own tools, skills and memory.

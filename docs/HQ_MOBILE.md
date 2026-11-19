@@ -1,3 +1,10 @@
+---
+audience: start
+order: 20
+summary: "Run HQ on an Android phone: install, first run, pairing and what to expect."
+updated: 2026-11-19
+---
+
 # HQ Mobile
 
 The `mobile` profile is the edition of HQ for an instance that lives on a phone. It is Full HQ for

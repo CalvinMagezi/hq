@@ -1,3 +1,10 @@
+---
+audience: archive
+order: 920
+summary: "Retired: the n8n integration."
+updated: 2026-11-19
+---
+
 # n8n Integration — Retired 2026-08-10
 
 **Status: fully removed from the codebase.** This is a historical record, not

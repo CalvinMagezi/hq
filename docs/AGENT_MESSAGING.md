@@ -1,3 +1,10 @@
+---
+audience: build
+order: 30
+summary: "How agents hand text to each other through vault mailboxes."
+updated: 2026-11-19
+---
+
 # Agent messaging
 
 Agent sessions in one team (every session reachable through delegation from one

@@ -1,3 +1,10 @@
+---
+audience: start
+order: 40
+summary: "Pair a computer with your phone using a QR code and six typed digits."
+updated: 2026-11-19
+---
+
 # Pairing machines with a QR code
 
 Native Bridge pairing connects two machines of one person with no hub, no account and no VPN. One

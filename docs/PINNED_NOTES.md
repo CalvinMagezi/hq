@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 70
+summary: "Pin notes so HQ always has them in mind."
+updated: 2026-11-19
+---
+
 # Pinned notes
 
 A note is pinned when its frontmatter has `pinned: true` (or `yes`). The words

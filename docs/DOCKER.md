@@ -1,3 +1,10 @@
+---
+audience: server
+order: 20
+summary: "Run HQ in Docker on Intel or ARM."
+updated: 2026-11-19
+---
+
 # Running HQ in Docker
 
 The official image is `ghcr.io/calvinmagezi/hq`, for `linux/amd64` and `linux/arm64`.

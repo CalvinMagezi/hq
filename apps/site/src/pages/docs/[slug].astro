@@ -1,0 +1,46 @@
+---
+import { getCollection, render } from 'astro:content';
+import Layout from '../../layouts/Layout.astro';
+import { REPO_BLOB, latestBuild } from '../../data/site';
+import { AUDIENCES } from '../../data/docs';
+
+export async function getStaticPaths() {
+  const docs = (await getCollection('docs')).filter((d) => d.data.audience !== 'archive');
+  return docs.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+
+const { entry } = Astro.props;
+const { Content, headings } = await render(entry);
+const title = entry.data.title;
+const build = await latestBuild();
+const group = AUDIENCES.find((a) => a.id === entry.data.audience);
+const checked = entry.data.updated.toISOString().slice(0, 10);
+const edit = `${REPO_BLOB}/docs/${entry.data.file}`;
+const toc = headings.filter((h) => h.depth === 2);
+---
+
+<Layout title={title} description={`${entry.data.summary} Part of the Agent HQ docs.`} path={`/docs/${entry.id}/`}>
+  <section class="sec sec-top0 doc-page">
+    <div class="container doc-wrap">
+      <nav class="crumbs small" aria-label="Breadcrumb">
+        <a href="/docs/">Docs</a> <span aria-hidden="true">/</span> <span>{group?.title}</span>
+      </nav>
+      <h1 class="doc-title">{title}</h1>
+      <p class="lede">{entry.data.summary}</p>
+      <p class="small doc-meta">Checked on {checked} against build <code>{build.tag}</code>. <a href={edit}>See this page on GitHub</a>.</p>
+      <div class="doc-cols">
+        <article class="doc-body"><Content /></article>
+        {
+          toc.length > 1 && (
+            <nav class="doc-toc glass" aria-label="On this page">
+              <p class="eyebrow">On this page</p>
+              <ul class="foot-links">
+                {toc.map((h) => <li><a href={`#${h.slug}`}>{h.text}</a></li>)}
+              </ul>
+            </nav>
+          )
+        }
+      </div>
+    </div>
+  </section>
+</Layout>

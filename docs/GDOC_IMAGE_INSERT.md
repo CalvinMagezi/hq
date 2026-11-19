@@ -1,3 +1,10 @@
+---
+audience: build
+order: 110
+summary: "Insert private Drive images into Google Docs."
+updated: 2026-11-19
+---
+
 # Private Drive images in Google Docs (FR-058)
 
 Inserting a private Drive image into a Doc with `documents.batchUpdate insertInlineImage` fails,

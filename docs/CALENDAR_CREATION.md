@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 120
+summary: "How HQ reads and changes calendar events on your phone."
+updated: 2026-11-19
+---
+
 # Creating, reading, changing and deleting calendar events on the phone
 
 The calendar is the first domain on the shared device-action platform (the store, the link to the

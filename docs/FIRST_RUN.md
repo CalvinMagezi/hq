@@ -1,3 +1,10 @@
+---
+audience: start
+order: 10
+summary: "Connect HQ to an AI service with one key, from the web app, with no terminal."
+updated: 2026-11-19
+---
+
 # First run: connecting a model
 
 A new HQ server needs one model API key before it can chat. If you set HQ up on a server you cannot easily type into (the [Hetzner deploy](HETZNER.md), a VPS you only reach through the browser), the web app asks for that key itself, so you never need a terminal for it.

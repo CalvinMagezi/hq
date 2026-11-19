@@ -1,3 +1,10 @@
+---
+audience: build
+order: 60
+summary: "How skills improve from evidence, and the tests that gate each edit."
+updated: 2026-11-19
+---
+
 # Improving skills from evidence
 
 How HQ records what happened when a skill was used, turns that into outcomes you can trust,

@@ -50,11 +50,13 @@ check() {
 
 T=true F=false
 #     rust web_app android site installer workflows
-check "$F,$F,$F,$F,$F,$F" docs/ARCHITECTURE.md                      # docs only: nothing runs
+check "$F,$F,$F,$F,$F,$F" docs/plans/architecture.md                      # docs only: nothing runs
 check "$F,$F,$F,$F,$F,$F" CHANGELOG.md LICENSE NOTICE               # root prose
 check "$F,$F,$F,$F,$F,$F" changelog.d/a-change.added.md              # a changelog fragment
 check "$T,$F,$F,$F,$F,$F" README.md                                 # a Rust test reads it
-check "$T,$F,$F,$F,$F,$F" docs/DESKTOP.md                           # a Rust test reads it
+check "$T,$F,$F,$T,$F,$F" docs/DESKTOP.md                           # a Rust test reads it, and the site renders it
+check "$F,$F,$F,$T,$F,$F" docs/BACKUP.md docs/media/first-run-screen.png   # the site renders docs and their media
+check "$F,$F,$F,$F,$F,$F" docs/plans/a-plan.md docs/security/EDGE.md        # nested docs are prose nobody builds
 check "$T,$F,$T,$F,$F,$F" crates/hq-core/src/lib.rs                 # Rust, and the Android build
 check "$T,$F,$T,$F,$F,$F" Cargo.lock
 check "$T,$F,$F,$F,$F,$F" deny.toml .cargo/config.toml .config/nextest.toml
@@ -70,8 +72,8 @@ check "$F,$F,$F,$F,$F,$F" .github/CODEOWNERS
 check "$T,$T,$T,$T,$T,$T" .github/workflows/ci.yml                  # a CI change runs all of CI
 check "$T,$T,$T,$T,$T,$T" some/unlisted/path.txt                    # unknown path: fail open
 check "$T,$T,$T,$T,$T,$T" weird-root-file                           # unknown root file
-check "$T,$T,$T,$T,$T,$T" docs/ARCHITECTURE.md some/unlisted/x      # one unknown path wins
-check "$T,$F,$T,$F,$F,$F" docs/ARCHITECTURE.md crates/hq-db/x.rs    # a mixed change takes the union
+check "$T,$T,$T,$T,$T,$T" docs/plans/architecture.md some/unlisted/x      # one unknown path wins
+check "$T,$F,$T,$F,$F,$F" docs/plans/architecture.md crates/hq-db/x.rs    # a mixed change takes the union
 
 # A deleted file counts, and so does the old name of a renamed one.
 git rm -q seed

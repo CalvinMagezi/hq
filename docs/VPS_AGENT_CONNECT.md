@@ -1,3 +1,10 @@
+---
+audience: server
+order: 50
+summary: "Connect an agent to the HQ MCP endpoint on a server."
+updated: 2026-11-19
+---
+
 # Connecting an Agent to HQ's MCP Endpoint
 
 HQ serves its MCP gateway (`hq_discover`, `hq_call`) at `POST /mcp` over

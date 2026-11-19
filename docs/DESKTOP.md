@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 30
+summary: "HQ Hub, the Mac app that starts HQ, pairs your phone and lists your helpers."
+updated: 2026-11-19
+---
+
 # The desktop app
 
 The first desktop in the Native Bridge sprint ([plan](plans/native-bridge-sprint.md), workstream
@@ -35,7 +42,7 @@ is shown as "Running elsewhere" and cannot be stopped from the app.
 ## The phone as the hub
 
 When HQ lives on a paired phone, the laptop's config (`~/.hq/config.yaml`) says so with the
-services and forwards from [PAIRING.md](PAIRING.md#services-and-forwards):
+services and forwards from [PAIRING.md](PAIRING.md#services-and-forwards-by-hand):
 
 ```yaml
 bridge:

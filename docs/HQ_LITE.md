@@ -1,3 +1,10 @@
+---
+audience: start
+order: 60
+summary: "HQ Lite, the Windows edition that needs no administrator rights."
+updated: 2026-11-19
+---
+
 # HQ Lite
 
 HQ Lite is a profile of HQ for a machine you do not fully control, such as a work laptop. It

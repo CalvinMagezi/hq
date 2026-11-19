@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 110
+summary: "Choose who can talk to HQ on Discord."
+updated: 2026-11-19
+---
+
 # Discord authorization
 
 HQ's Discord relay supports one **owner** via an explicit allowlist, or via a

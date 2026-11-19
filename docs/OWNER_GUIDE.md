@@ -1,3 +1,10 @@
+---
+audience: start
+order: 80
+summary: "A guide for the person who owns an HQ: what it keeps, who can reach it and how to look after it."
+updated: 2026-11-19
+---
+
 # Your HQ: a guide for owners
 
 Someone set up an HQ server for you. This page covers what you do on your side. You won't need a

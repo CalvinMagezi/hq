@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 80
+summary: "Get phone and browser notifications from HQ."
+updated: 2026-11-19
+---
+
 # Web Push
 
 HQ can send push notifications to the web app on a phone or desktop, so they arrive even

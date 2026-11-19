@@ -1,0 +1,65 @@
+---
+import { getCollection } from 'astro:content';
+import { render } from 'astro:content';
+import Layout from '../../layouts/Layout.astro';
+import { AUDIENCES } from '../../data/docs';
+
+const all = (await getCollection('docs')).filter((d) => d.data.audience !== 'archive');
+const entries = await Promise.all(
+  all.map(async (d) => {
+    const { headings } = await render(d);
+    const words = headings.map((h) => h.text).join(' ');
+    return { id: d.id, title: d.data.title, summary: d.data.summary, audience: d.data.audience, order: d.data.order, words };
+  }),
+);
+const groups = AUDIENCES.map((a) => ({ ...a, docs: entries.filter((e) => e.audience === a.id).sort((x, y) => x.order - y.order) }));
+---
+
+<Layout
+  title="Docs"
+  description="Guides for starting with Agent HQ, looking after it, running it on a server and building on it. Every page is the project's own documentation, checked against the latest build."
+  path="/docs/"
+>
+  <section class="sec sec-hero get-hero" aria-labelledby="docs-h">
+    <span class="orb orb-b o-tl" aria-hidden="true"></span>
+    <span class="orb orb-g o-br slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <h1 id="docs-h" class="display">
+        <span class="hl"><span>Docs, in order</span></span>
+        <span class="hl"><span class="accent">of who you are.</span></span>
+      </h1>
+      <p class="lede get-lede">Start at the top if HQ is new to you. The last group is for people who change HQ itself.</p>
+      <form class="doc-search glass-heavy" role="search" data-doc-filter hidden>
+        <label for="doc-filter">Search the docs</label>
+        <input id="doc-filter" type="search" autocomplete="off" placeholder="Try backup, Windows or pairing" />
+        <p class="small" id="doc-count" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+  </section>
+
+  <section class="sec sec-top0" aria-label="All docs">
+    <div class="container stack get-stack">
+      {
+        groups.map((g) => (
+          <div class="stack doc-group" data-doc-group>
+            <div class="head">
+              <h2>{g.title}</h2>
+              <p class="lede">{g.blurb}</p>
+            </div>
+            <ul class="doc-list list-plain">
+              {
+                g.docs.map((d) => (
+                  <li class="gcard" data-doc-text={`${d.title} ${d.summary} ${d.words}`.toLowerCase()}>
+                    <h3><a href={`/docs/${d.id}/`}>{d.title}</a></h3>
+                    <p class="body">{d.summary}</p>
+                  </li>
+                ))
+              }
+            </ul>
+          </div>
+        ))
+      }
+      <p class="small">Longer plans and threat models live in the repository: <a href="https://github.com/CalvinMagezi/hq/tree/main/docs">docs on GitHub</a>.</p>
+    </div>
+  </section>
+</Layout>

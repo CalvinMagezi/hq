@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 60
+summary: "Take a note out of your Vault as a PDF, Word file, web page and other formats."
+updated: 2026-11-19
+---
+
 # Exporting notes
 
 A vault note can be turned into a file you can send to someone who has never

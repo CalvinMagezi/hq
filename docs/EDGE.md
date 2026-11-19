@@ -1,3 +1,10 @@
+---
+audience: server
+order: 30
+summary: "Reach a phone from the internet through a forwarder that never decrypts."
+updated: 2026-11-19
+---
+
 # hq edge: reaching a phone from the internet
 
 `hq edge` is a small public forwarder. It lets a device that cannot be reached from the internet (a

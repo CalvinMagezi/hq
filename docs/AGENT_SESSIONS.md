@@ -1,3 +1,10 @@
+---
+audience: build
+order: 10
+summary: "How HQ starts, watches and drives coding agent sessions."
+updated: 2026-11-19
+---
+
 # Agent sessions
 
 Agent HQ runs and monitors two kinds of agent in its built-in host (`hq host`, see

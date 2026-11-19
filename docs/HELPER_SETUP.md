@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 40
+summary: "Install the free coding helpers on a connected computer and see which are ready."
+updated: 2026-11-19
+---
+
 # Helper setup
 
 A person who has just installed HQ usually has no coding helper (Cursor, Codex, Antigravity and
