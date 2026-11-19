@@ -65,7 +65,7 @@ holds queries or results. `HQ_SEARCH_STATE=off` keeps everything in memory.
 
 Reads a page in this order: main-content extraction, recovery from the page's own
 embedded data (JSON-LD, `__NEXT_DATA__`, OpenGraph), and, only if both give nothing, the
-Jina Reader (`r.jina.ai`), which receives the URL. `HQ_WEB_FETCH_JINA=0` never sends a
+Jina Reader (`r.jina.ai`), which receives the URL. The fallback is off by default; `HQ_WEB_FETCH_JINA=1` turns it on, and until then HQ never sends a
 URL to it. PDFs use their text layer, and scanned PDFs use `pdftoppm` and `tesseract`
 when installed. Measured on 64 real pages, the native path returned a useful page for
 78%; most of the rest were sites that refuse non-browser clients, not pages that need

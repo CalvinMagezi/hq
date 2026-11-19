@@ -224,7 +224,10 @@ impl TgRelay {
                 return;
             }
             ChatGate::PairingHelp(reply) => {
-                let _ = bot.send_message(msg.chat.id, reply).await;
+                let _ = bot
+                    .send_message(msg.chat.id, reply)
+                    .link_preview_options(super::send::no_link_preview())
+                    .await;
                 return;
             }
         }
@@ -402,7 +405,10 @@ impl TgRelay {
         let Some(reply) = busy else {
             return false;
         };
-        let _ = bot.send_message(msg.chat.id, reply).await;
+        let _ = bot
+            .send_message(msg.chat.id, reply)
+            .link_preview_options(super::send::no_link_preview())
+            .await;
         true
     }
 
@@ -427,7 +433,10 @@ impl TgRelay {
         );
         match reply {
             Some(CommandReply::Done(reply)) => {
-                let _ = bot.send_message(msg.chat.id, reply).await;
+                let _ = bot
+                    .send_message(msg.chat.id, reply)
+                    .link_preview_options(super::send::no_link_preview())
+                    .await;
                 ControlFlow::Break(())
             }
             Some(CommandReply::Redispatch { ack, prompt }) => {
@@ -451,13 +460,19 @@ impl TgRelay {
         if let Some((action, token, revision)) = hq_daemon::parse_email_command(raw_text) {
             if is_guest {
                 let reply = format!("Email approvals are for {} only.", caller.owner_name);
-                let _ = bot.send_message(msg.chat.id, reply).await;
+                let _ = bot
+                    .send_message(msg.chat.id, reply)
+                    .link_preview_options(super::send::no_link_preview())
+                    .await;
                 return true;
             }
             let resolved =
                 hq_daemon::resolve_email_action(&self.vault_path, &token, action, revision).await;
             if let Some(reply) = resolved {
-                let _ = bot.send_message(msg.chat.id, reply).await;
+                let _ = bot
+                    .send_message(msg.chat.id, reply)
+                    .link_preview_options(super::send::no_link_preview())
+                    .await;
                 return true;
             }
         }
@@ -515,7 +530,10 @@ impl TgRelay {
         if let Err(reply) = claimed {
             typing.abort();
             let _ = bot.delete_message(msg.chat.id, placeholder_id).await;
-            let _ = bot.send_message(msg.chat.id, reply).await;
+            let _ = bot
+                .send_message(msg.chat.id, reply)
+                .link_preview_options(super::send::no_link_preview())
+                .await;
             return;
         }
 

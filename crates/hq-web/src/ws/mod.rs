@@ -385,6 +385,10 @@ async fn handle_chat(state: &Arc<WsState>, req: ChatRequest) {
         return;
     };
     let record: SharedRecord = Arc::new(std::sync::Mutex::new(TurnRecord::default()));
+    record
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .set_vault(state.vault_path.clone());
     let turn = ChatTurn {
         db: state.db.clone(),
         tx: state.tx.clone(),
@@ -629,6 +633,10 @@ pub(crate) async fn start_driver_turn(
     };
     let history = thread_history(&state.db, thread_id, &config.context_fold);
     let record: SharedRecord = Arc::new(std::sync::Mutex::new(TurnRecord::with_driver(driver)));
+    record
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .set_vault(state.vault_path.clone());
     state.broadcast(&json!({"type": "turn_start", "thread_id": thread_id}).to_string());
     let turn = ChatTurn {
         db: state.db.clone(),

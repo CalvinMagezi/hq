@@ -265,6 +265,29 @@ fn substring_hit(
     )
 }
 
+const OFFICE_MIME_XLSX: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const OFFICE_MIME_DOCX: &str =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const OFFICE_MIME_PPTX: &str =
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+fn is_office_download(mime: &str) -> bool {
+    [OFFICE_MIME_XLSX, OFFICE_MIME_DOCX, OFFICE_MIME_PPTX].contains(&mime)
+}
+
+/// A file name that is safe inside a quoted header value.
+fn header_safe_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || " ._-()".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 /// Types a browser executes or renders as a document when navigated to.
 fn is_active_content(mime: &str) -> bool {
     mime.starts_with("image/svg+xml") || mime.starts_with("text/html") || mime.contains("xml")
@@ -304,6 +327,9 @@ pub(crate) async fn vault_asset_handler(
                 Some("xhtml") => "application/xhtml+xml",
                 Some("xml") => "application/xml",
                 Some("pdf") => "application/pdf",
+                Some("xlsx") => OFFICE_MIME_XLSX,
+                Some("docx") => OFFICE_MIME_DOCX,
+                Some("pptx") => OFFICE_MIME_PPTX,
                 Some("md") => "text/markdown; charset=utf-8",
                 Some("txt" | "csv" | "json" | "yaml" | "yml") => "text/plain; charset=utf-8",
                 _ => "application/octet-stream",
@@ -327,6 +353,18 @@ pub(crate) async fn vault_asset_handler(
                     axum::http::header::CONTENT_SECURITY_POLICY,
                     axum::http::HeaderValue::from_static("sandbox"),
                 );
+            }
+            if is_office_download(mime) {
+                // An office file is saved, not shown: the clients draw their own preview.
+                let name = abs
+                    .file_name()
+                    .map(|n| n.to_string_lossy())
+                    .unwrap_or_default();
+                let value = format!("attachment; filename=\"{}\"", header_safe_name(&name));
+                if let Ok(v) = axum::http::HeaderValue::from_str(&value) {
+                    res.headers_mut()
+                        .insert(axum::http::header::CONTENT_DISPOSITION, v);
+                }
             }
             res
         }
