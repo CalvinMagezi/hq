@@ -17,12 +17,12 @@ use axum::response::IntoResponse;
 use hq_core::config::HqConfig;
 use hq_core::types::{SCHEDULED_OFFER_SOURCE, ValueItem, ValueKind};
 use hq_db::offers::{Answer, LaterOutcome, MAX_SCHEDULE_SECS};
+use hq_tool_api::registry::ToolRegistry;
 use hq_tools::capabilities::next_step;
 use hq_tools::capabilities::offers::{
     TurnInput, TurnOffer, TurnState, for_turn, may_offer, offer_says, ready_detectors,
 };
 use hq_tools::capabilities::{Install, Offer, catalog, resolve, used_tools};
-use hq_tools::registry::ToolRegistry;
 use hq_tools::vault::configured_query_embedder;
 use serde::Deserialize;
 use serde_json::json;

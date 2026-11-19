@@ -132,7 +132,7 @@ pub fn default_profile_for_agent(name: &str) -> Option<AgentProfile> {
                 "computer_use".into(),
                 "audio".into(),
                 "meetings".into(),
-                hq_tools::remote_mcp::REMOTE_MCP_CATEGORY.into(),
+                hq_tools_web::remote_mcp::REMOTE_MCP_CATEGORY.into(),
             ],
             deny_tools: vec![
                 "skill_manage".into(),

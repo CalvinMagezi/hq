@@ -65,8 +65,8 @@ pub(super) fn tainted_reason_for(
     if !taint.is_tainted() {
         return None;
     }
-    if category == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY
-        && !tool.ends_with(hq_tools::remote_mcp::DISCOVER_TOOL_SUFFIX)
+    if category == hq_tools_web::remote_mcp::REMOTE_MCP_CATEGORY
+        && !tool.ends_with(hq_tools_web::remote_mcp::DISCOVER_TOOL_SUFFIX)
     {
         return Some("would call a remote MCP server".into());
     }
@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn tainted_session_asks_and_denies_marked_read_only_remote_mcp() {
-        use hq_tools::remote_mcp::{REMOTE_MCP_CATEGORY, record_tool_list};
+        use hq_tools_web::remote_mcp::{REMOTE_MCP_CATEGORY, record_tool_list};
         record_tool_list(
             "taint_srv",
             json!([{"name": "get", "annotations": {"readOnlyHint": true}}])

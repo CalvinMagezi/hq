@@ -68,7 +68,7 @@ async fn run_test(config: &HqConfig) -> Result<()> {
     let tools = hq_tools::shortcuts::create_shortcut_tools(config.vault_path.clone(), db);
 
     // Index tools by name for O(1) lookup.
-    let tool_map: std::collections::HashMap<&str, &dyn hq_tools::registry::HqTool> =
+    let tool_map: std::collections::HashMap<&str, &dyn hq_tool_api::registry::HqTool> =
         tools.iter().map(|t| (t.name(), t.as_ref())).collect();
 
     println!("Running {} shortcut probe(s)...\n", probe_file.probes.len());
@@ -120,7 +120,7 @@ async fn load_probes(config: &HqConfig) -> Result<(ProbeFile, String)> {
 
 async fn run_probe(
     probe: &Probe,
-    tool_map: &std::collections::HashMap<&str, &dyn hq_tools::registry::HqTool>,
+    tool_map: &std::collections::HashMap<&str, &dyn hq_tool_api::registry::HqTool>,
 ) -> Result<()> {
     let tool = tool_map
         .get(probe.tool.as_str())
@@ -166,7 +166,7 @@ mod tests {
         let vault = tempfile::tempdir().unwrap();
         let db = Arc::new(hq_db::Database::open_memory().unwrap());
         let tools = hq_tools::shortcuts::create_shortcut_tools(vault.path().to_path_buf(), db);
-        let tool_map: std::collections::HashMap<&str, &dyn hq_tools::registry::HqTool> =
+        let tool_map: std::collections::HashMap<&str, &dyn hq_tool_api::registry::HqTool> =
             tools.iter().map(|t| (t.name(), t.as_ref())).collect();
         assert!(!file.probes.is_empty());
         for probe in &file.probes {
