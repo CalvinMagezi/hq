@@ -212,6 +212,143 @@ fn every_suite_crate_is_a_workspace_member() {
     }
 }
 
+// The other direction: HQ may reach the suite only through a short, named list of places.
+
+/// Crates outside `crates/suite/` that may depend on a suite crate. Everything else (`hq-core`,
+/// `hq-db`, `hq-tool-api`, `hq-tools` and the rest) must stay free of it, so a change in the
+/// suite never rebuilds them. Add a crate here only with a reason in review.
+const MAY_DEPEND_ON_SUITE: &[&str] = &["hq-cli", "hq-tools-office", "hq-web"];
+
+/// Source files outside `crates/suite/` that may name a suite crate, relative to the workspace.
+const MAY_NAME_SUITE: &[&str] = &[
+    "crates/hq-cli/src/commands/start/daemon/tasks_periodic/suite_governor.rs",
+    "crates/hq-cli/src/commands/suite.rs",
+    "crates/hq-tools-office/src/lib.rs",
+    "crates/hq-web/src/suite_api.rs",
+];
+
+fn workspace_root() -> PathBuf {
+    suite_dir()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf()
+}
+
+/// Folders of every crate outside the suite, relative paths sorted.
+fn host_crate_dirs() -> Vec<PathBuf> {
+    let crates = workspace_root().join("crates");
+    let mut dirs: Vec<PathBuf> = fs::read_dir(&crates)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.join("Cargo.toml").is_file())
+        .collect();
+    dirs.sort();
+    dirs
+}
+
+fn suite_dependencies(manifest: &str) -> Vec<String> {
+    manifest_deps(manifest)
+        .into_iter()
+        .filter(|d| d.starts_with("hq-suite-"))
+        .collect()
+}
+
+fn unlisted_suite_users(crates: &[(String, String)], allowed: &[&str]) -> Vec<String> {
+    crates
+        .iter()
+        .filter(|(name, text)| {
+            !allowed.contains(&name.as_str()) && !suite_dependencies(text).is_empty()
+        })
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
+#[test]
+fn only_listed_crates_depend_on_the_suite() {
+    let crates: Vec<(String, String)> = host_crate_dirs()
+        .into_iter()
+        .map(|d| {
+            (
+                d.file_name().unwrap().to_string_lossy().into_owned(),
+                fs::read_to_string(d.join("Cargo.toml")).unwrap(),
+            )
+        })
+        .collect();
+    let bad = unlisted_suite_users(&crates, MAY_DEPEND_ON_SUITE);
+    assert!(
+        bad.is_empty(),
+        "{bad:?} depend on a suite crate but are not in MAY_DEPEND_ON_SUITE. A foundation crate \
+         that reaches the suite makes every suite change rebuild it."
+    );
+    // A stale entry is as bad as a missing one: the list must not grow past what is true.
+    for name in MAY_DEPEND_ON_SUITE {
+        let (_, text) = crates
+            .iter()
+            .find(|(n, _)| n == name)
+            .unwrap_or_else(|| panic!("{name} in MAY_DEPEND_ON_SUITE is not a crate"));
+        assert!(
+            !suite_dependencies(text).is_empty(),
+            "{name} no longer depends on the suite: remove it from MAY_DEPEND_ON_SUITE"
+        );
+    }
+}
+
+/// Rust files outside `crates/suite/` that name a suite crate in code, relative paths.
+fn files_naming_the_suite() -> Vec<String> {
+    let mut found = Vec::new();
+    for dir in host_crate_dirs() {
+        let mut files = Vec::new();
+        rust_files(&dir, &mut files);
+        for file in files {
+            let src = fs::read_to_string(&file).unwrap();
+            let code = code_of(&src);
+            if code.contains("hq_suite") || code.contains("hq-suite") {
+                let rel = file.strip_prefix(workspace_root()).unwrap();
+                found.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+#[test]
+fn only_listed_files_name_a_suite_crate() {
+    let found = files_naming_the_suite();
+    let bad: Vec<&String> = found
+        .iter()
+        .filter(|f| !MAY_NAME_SUITE.contains(&f.as_str()))
+        .collect();
+    assert!(
+        bad.is_empty(),
+        "{bad:?} name a suite crate but are not in MAY_NAME_SUITE. Reach the suite through \
+         hq-tools-office, hq-web or hq-cli, or add the file here with a reason."
+    );
+    for allowed in MAY_NAME_SUITE {
+        assert!(
+            found.iter().any(|f| f == allowed),
+            "{allowed} no longer names the suite: remove it from MAY_NAME_SUITE"
+        );
+    }
+}
+
+#[test]
+fn the_reverse_check_sees_a_planted_dependency() {
+    let planted = vec![(
+        "hq-tools".to_string(),
+        "[package]\nname='x'\n[dependencies]\nhq-suite-adapter = { workspace = true, optional = true }\n"
+            .to_string(),
+    )];
+    assert_eq!(
+        unlisted_suite_users(&planted, MAY_DEPEND_ON_SUITE),
+        ["hq-tools"]
+    );
+    assert!(unlisted_suite_users(&planted, &["hq-tools"]).is_empty());
+}
+
 // The guard guarding itself: a planted breach of every kind must be seen.
 
 #[test]

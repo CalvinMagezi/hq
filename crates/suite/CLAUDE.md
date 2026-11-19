@@ -29,6 +29,11 @@ programs), 3 and 4. It also checks that every suite crate is listed below and is
 member, and that its own scanner still sees planted breaches. A later change that needs to cross a line has
 to delete the guard first and say why in review.
 
+The test also guards the other direction. Only the crates in `MAY_DEPEND_ON_SUITE` (`hq-cli`,
+`hq-tools-office`, `hq-web`) may depend on a suite crate, and only the files in `MAY_NAME_SUITE` may
+name one, so `hq-core`, `hq-db`, `hq-tool-api` and `hq-tools` stay free of it and a suite change
+never rebuilds them. A stale entry fails too: the lists only shrink or change with a reason.
+
 ## Crates
 
 | Crate | Job | May depend on |
@@ -41,12 +46,13 @@ to delete the guard first and say why in review.
 | `hq-suite-docs` | Docs: render a record as a Word file (`hq-export`) and the regenerate check that the render reads back as the same record | `hq-convert`, `hq-export`, `hq-suite-ingest`, `hq-suite-md` |
 | `hq-suite-sinks` | Cold storage: a folder the owner keeps, originals sealed one at a time under a recovery code, read back before they count as stored, and the restore drill | `hq-backup` (the sealing), `hq-suite-store`, `serde*`, `sha2`, `hex` |
 | `hq-suite-slides` | Slides: a slides note as cards (title, bullets, numbered, paragraphs, code, tables, a two-column layout) and a native `.pptx` writer with no template and no tool | `hq-export` (its markdown reader), `zip`, `thiserror` |
+| `hq-suite-xlsx` | Sheets: a native `.xlsx` writer for `sheet` blocks: typed cells and number formats, real formulas with cached values from `hq-suite-calc`, formulas outside the engine's function list written as text | `hq-suite-calc`, `hq-suite-md`, `zip`, `thiserror` |
 | `hq-suite-calc` | Sheets: a spreadsheet formula engine (parse, evaluate, cycles, errors). Pure computation | `thiserror` |
 | `hq-suite-adapter` | The only crate that knows HQ: config, tools, CLI glue, daemon task, device actions, REST | everything |
 
 The plan names more crates (governor, sinks, render, calc, one per tool).
 They are added in the milestone that needs them, not before: an empty crate is debt.
-A crate that is added gets a row here and an Entry Points row in the root `CLAUDE.md` if it
+A crate that is added gets a row here and an entry in the `CLAUDE.md` of the crate that reaches it if it
 has an entry point.
 
 ## Working here
@@ -62,3 +68,9 @@ has an entry point.
 - The measurement tool prints numbers and format classes only: no file names, no paths, no
   content. Keep it that way.
 - Adoption data about the suite stays on the device (`docs/security/ADOPTION_DATA.md`).
+
+## Where this is documented from the root
+
+| What | Path |
+|------|------|
+| HQ Suite (Drive, Docs, Sheets, Slides, Dashboard; `hq suite`, cargo feature `suite`, on by default): hqmd notes with typed blocks, shrinking documents to the small record, storage governance. Built inside this repo, behind rules a test enforces so it can be lifted out | `crates/suite/` (read `crates/suite/CLAUDE.md` first), `hq-suite-md` (the hqmd parser, printer, validator and patch API; spec `docs/suite/HQMD.md`, golden corpus in `tests/corpus/`), `hq-suite-ingest` (pictures in packages, tier projection), `hq-suite-store` (atomic files, content-addressed media in `_media/cas/`, trash, the shrink journal), `hq-suite-shrink` (picture codecs with pixel caps, candidate encoders, `hq suite measure`, the shrink pipeline `pipeline.rs` and its crash-matrix test), `hq-suite-adapter` (the only crate that knows HQ; `tests/boundary.rs` is the extraction guard), `crates/hq-cli/src/commands/suite.rs`, `crates/hq-tools-office/` (the `office_file` tool: the only place a chat tool meets the suite), `docs/suite/` (`README.md`, `HQMD.md`, `MEASURE.md`, `SHRINK.md`), plan `docs/plans/hq-suite.md` |

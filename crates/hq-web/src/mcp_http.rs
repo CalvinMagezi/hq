@@ -372,7 +372,7 @@ pub(crate) async fn call_tool(
 /// through hq_discover, so they get no catalog; the key is omitted rather than
 /// null because strict clients (the TS SDK's optional string) reject null.
 fn initialize_result(
-    registry: Option<&hq_tools::registry::ToolRegistry>,
+    registry: Option<&hq_tool_api::registry::ToolRegistry>,
     allowed: Option<&[&str]>,
     request: &Value,
 ) -> Value {
@@ -464,7 +464,7 @@ mod tests {
     #[test]
     fn initialize_omits_instructions_instead_of_sending_null() {
         let spark: &[&str] = &["vault_read"];
-        let registry = hq_tools::registry::ToolRegistry::new();
+        let registry = hq_tool_api::registry::ToolRegistry::new();
         let req = json!({});
         assert!(
             initialize_result(None, None, &req)
@@ -495,7 +495,7 @@ mod tests {
 
     use axum::body::Body;
     use axum::http::Request;
-    use hq_tools::registry::{HqTool, ToolRegistry};
+    use hq_tool_api::registry::{HqTool, ToolRegistry};
     use tower::ServiceExt;
 
     const FULL: &str = "full-key-1111";

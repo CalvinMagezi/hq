@@ -43,6 +43,10 @@ import example.hq.spike.data.SheetView
 import example.hq.spike.data.TileView
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
+import example.hq.spike.data.suiteEditCell
+import example.hq.spike.data.suitePlot
+import example.hq.spike.data.suiteSheet
+import example.hq.spike.data.suiteTile
 
 /** Counts the sheet edits made in the note being read, so its tiles and plots ask hq again. Null where nothing can be edited. */
 val LocalBlocksRevision = compositionLocalOf<androidx.compose.runtime.MutableIntState?> { null }

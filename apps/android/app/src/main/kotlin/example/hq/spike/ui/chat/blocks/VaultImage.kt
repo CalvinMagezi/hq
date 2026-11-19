@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 import example.hq.spike.data.HqServices
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import example.hq.spike.data.suiteMedia
 
 /** The folder of the note being read, so a picture link that is relative to the note can be resolved. Null in chat, where pictures stay blocked. */
 val LocalNoteFolder = compositionLocalOf<String?> { null }

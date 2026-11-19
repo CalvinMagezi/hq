@@ -14,6 +14,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import example.hq.spike.data.exportNote
 
 /** Makes an export of an open note on hq: pick a format, wait with a way out, then hold the file for Share, Save or Open. */
 class NoteExporter(

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-pub use hq_tools::family_confirm::{
+pub use hq_tool_api::family_confirm::{
     PENDING_FILE, PendingFamilyAction, TTL_HOURS, add_pending, take_pending,
 };
 
@@ -64,7 +64,8 @@ pub async fn resolve_family_action(
                 return Some((err_reply, origin_channel_id));
             };
 
-            match hq_tools::remote_mcp::call_named_server(server, &pending.tool, pending.args).await
+            match hq_tools_web::remote_mcp::call_named_server(server, &pending.tool, pending.args)
+                .await
             {
                 Ok(val) => {
                     let formatted =
