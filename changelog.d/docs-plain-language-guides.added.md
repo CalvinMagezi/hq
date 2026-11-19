@@ -1,0 +1,1 @@
+**Four plain-language guides in the docs.** What HQ asks you and why, Spending and limits, When HQ stops in the background, and Update HQ, each written for someone who has just installed HQ and checked against the words the app uses.
