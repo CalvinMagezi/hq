@@ -53,6 +53,19 @@ pub struct Followup {
     pub turn_id: String,
 }
 
+impl Followup {
+    /// The runs this turn reviews, without repeats.
+    pub fn run_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = Vec::new();
+        for (_, run) in &self.items {
+            if !ids.contains(&run.run_id) {
+                ids.push(run.run_id.clone());
+            }
+        }
+        ids
+    }
+}
+
 /// Claim due events for `platform` and group them by chat. Empty unless the
 /// rollout switch is on; with it off the outbox keeps accumulating evidence.
 pub fn claim_followups(
@@ -168,6 +181,19 @@ pub fn delivered(db: &Database, f: &Followup) -> bool {
 pub fn turn_failed(db: &Database, f: &Followup) {
     for (_, run) in &f.items {
         escalate(db, run, "the automatic follow-up turn failed part-way");
+    }
+}
+
+/// A follow-up turn read these runs and replied without failing, so nobody is left holding them:
+/// a clean run the model never gave a verdict becomes accepted, anything else keeps its status and
+/// is marked reviewed (see [`runs::close_consumed`]). A verdict the turn did record wins, a run
+/// that has not settled is not touched, and a failed turn must not call this (it escalates).
+pub fn close_after_turn(db: &Database, run_ids: &[String]) {
+    let at = now();
+    for id in run_ids {
+        if let Err(e) = db.with_conn(|c| runs::close_consumed(c, id, at)) {
+            warn!(error = %e, run = %id, "subagent followup: could not close a reviewed run");
+        }
     }
 }
 

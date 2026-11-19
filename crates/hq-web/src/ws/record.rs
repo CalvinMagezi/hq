@@ -93,6 +93,19 @@ impl TurnRecord {
             .map(str::to_string)
     }
 
+    /// The runs a sub-agent follow-up turn reviews (`run_ids` in its driver meta).
+    pub(super) fn followup_run_ids(&self) -> Vec<String> {
+        self.driver
+            .as_ref()
+            .and_then(|d| d.get("run_ids")?.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Whether the session driver started this reply, not the user.
     /// Whether the session driver (not a sub-agent follow-up) started this reply.
     pub(super) fn is_session_driver_turn(&self) -> bool {

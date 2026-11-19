@@ -417,3 +417,59 @@ fn an_explicit_verdict_is_not_overwritten_by_close_consumed() {
     assert_eq!(run.accept_status, runs::ACCEPT_BLOCKED);
     assert_eq!(run.reviewed_at, Some(at));
 }
+
+#[test]
+fn a_followup_turn_that_ends_cleanly_leaves_no_unverified_run() {
+    let db = db();
+    for id in ["run-clean11", "run-block22", "run-judged3", "run-going44"] {
+        add_run(&db, id, "chat-1", std::process::id() as i64);
+    }
+    settle(&db, "run-clean11", runs::ACCEPT_UNVERIFIED, "done");
+    settle(&db, "run-block22", runs::ACCEPT_BLOCKED, "stuck");
+    settle(&db, "run-judged3", runs::ACCEPT_PARTIAL, "half");
+    db.with_conn(|c| {
+        runs::review(
+            c,
+            "run-judged3",
+            runs::ACCEPT_PARTIAL,
+            &["the table".to_string()],
+            None,
+            5,
+        )
+    })
+    .unwrap();
+    let ids: Vec<String> = ["run-clean11", "run-block22", "run-judged3", "run-going44"]
+        .map(String::from)
+        .into();
+
+    close_after_turn(&db, &ids);
+
+    let get = |id: &str| db.with_conn(|c| runs::get(c, id)).unwrap().unwrap();
+    let clean = get("run-clean11");
+    assert_eq!(clean.accept_status, runs::ACCEPT_ACCEPTED);
+    assert!(clean.reviewed_at.is_some());
+    let blocked = get("run-block22");
+    assert_eq!(
+        blocked.accept_status,
+        runs::ACCEPT_BLOCKED,
+        "a bad outcome is not turned into success"
+    );
+    assert!(blocked.reviewed_at.is_some());
+    assert_eq!(
+        get("run-judged3").accept_status,
+        runs::ACCEPT_PARTIAL,
+        "an explicit verdict wins"
+    );
+    let going = get("run-going44");
+    assert!(
+        going.settled_at.is_none() && going.reviewed_at.is_none(),
+        "a running run is left alone"
+    );
+    let unresolved = db
+        .with_conn(|c| runs::list_unresolved(c, 0, i64::MAX / 2))
+        .unwrap();
+    assert!(
+        unresolved.is_empty(),
+        "nothing is left for the unfinished-work alert"
+    );
+}

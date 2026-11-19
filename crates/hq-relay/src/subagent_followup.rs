@@ -72,9 +72,12 @@ async fn deliver<K: ChatKey>(surface: &WatchSurface<K>, db: &Arc<Database>, f: F
     tokio::spawn(async move {
         let result = run_turn(&surface, key, &f).await;
         release_chat(&surface, key).await;
-        if let Err(e) = result {
-            tracing::warn!(%e, chat = %f.origin.chat_id, "subagent followup: turn failed");
-            followup::turn_failed(&db, &f);
+        match result {
+            Ok(()) => followup::close_after_turn(&db, &f.run_ids()),
+            Err(e) => {
+                tracing::warn!(%e, chat = %f.origin.chat_id, "subagent followup: turn failed");
+                followup::turn_failed(&db, &f);
+            }
         }
     });
 }

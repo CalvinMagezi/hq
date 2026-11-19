@@ -1,0 +1,1 @@
+**Background helpers no longer stay "unverified" after HQ has reported on them.** When HQ's automatic follow-up turn finishes without error, the helpers it reviewed are closed (clean ones accepted, blocked or partial ones keep their status and are marked reviewed), so they stop showing as open work.
