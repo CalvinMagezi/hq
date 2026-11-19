@@ -76,6 +76,7 @@ pub struct TaintTracker {
     seen_urls: Arc<Mutex<HashSet<String>>>,
     on_new_urls: Arc<Mutex<Option<SeenHook>>>,
     unattended: Arc<AtomicBool>,
+    fetches: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl std::fmt::Debug for TaintTracker {
@@ -193,6 +194,12 @@ impl TaintTracker {
         hosts
             .iter()
             .any(|named| host == *named || host.ends_with(&format!(".{named}")))
+    }
+
+    /// Counts a `web_fetch` made after the session was tainted and returns how many there have
+    /// been, so a run that picks among seen addresses cannot leak more than a few bits.
+    pub fn count_fetch(&self) -> usize {
+        self.fetches.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     /// Mark the session as one nobody is there to approve: a watch firing, a
