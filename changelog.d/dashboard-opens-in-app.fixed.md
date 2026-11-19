@@ -1,0 +1,1 @@
+**A dashboard HQ builds now opens inside the app.** An HTML dashboard opens in the side pane in one click, with Open full screen and Save as file. File names HQ writes in an answer, like an Excel file or a note path, are tappable. The sources listed under an answer now only include notes the answer cites or wrote, and scrolling over the "What I did" list no longer gets stuck.
