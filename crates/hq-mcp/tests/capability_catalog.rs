@@ -67,3 +67,75 @@ fn the_context_tools_are_registered_read_only_and_need_no_approval() {
         );
     }
 }
+
+fn default_registry() -> hq_tools::registry::ToolRegistry {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Arc::new(hq_db::Database::open_memory().unwrap());
+    let vault_client = Arc::new(hq_vault::VaultClient::new(dir.path().to_path_buf()).unwrap());
+    create_default_registry(
+        vault_client,
+        db,
+        dir.path().join("skills"),
+        dir.path().join("Agents"),
+        None,
+    )
+}
+
+/// Tool categories nobody lists in the catalog on purpose: plumbing, agent-only and owner-only
+/// tools. A category leaves this list when a catalog entry covers it; it joins only with a reason
+/// in review.
+const NOT_IN_THE_CATALOG: &str = include_str!("catalog_exceptions.txt");
+
+/// Every tool category in the default registry is either offered in the catalog (an entry names a
+/// tool of that category) or on the reviewed exceptions list, so a new feature cannot ship that
+/// the empty chat never mentions without someone deciding that is right. The list can only shrink.
+#[test]
+fn every_tool_category_is_in_the_catalog_or_a_reviewed_exception() {
+    let registry = default_registry();
+    let catalogued: std::collections::BTreeSet<String> = hq_tools::capabilities::catalog()
+        .iter()
+        .flat_map(|c| c.tools.iter())
+        .filter_map(|t| registry.get(t).map(|tool| tool.category().to_string()))
+        .collect();
+    let excepted: std::collections::BTreeSet<&str> = NOT_IN_THE_CATALOG
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect();
+    let categories: std::collections::BTreeSet<String> =
+        registry.categories().into_iter().collect();
+    let missing: Vec<&String> = categories
+        .iter()
+        .filter(|c| !catalogued.contains(*c) && !excepted.contains(c.as_str()))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "these tool categories have no catalog entry and no reviewed exception (add an entry to crates/hq-tools/assets/capabilities.yaml, or the category to crates/hq-mcp/tests/catalog_exceptions.txt with a reason in the PR): {missing:?}"
+    );
+    let stale: Vec<&&str> = excepted
+        .iter()
+        .filter(|c| catalogued.contains(**c) || !categories.contains(**c))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "on the exceptions list but covered or gone, remove them: {stale:?}"
+    );
+}
+
+#[test]
+#[ignore = "prints the categories to put on the exceptions list; run with --ignored --nocapture"]
+fn print_the_uncatalogued_categories() {
+    let registry = default_registry();
+    let catalogued: std::collections::BTreeSet<String> = hq_tools::capabilities::catalog()
+        .iter()
+        .flat_map(|c| c.tools.iter())
+        .filter_map(|t| registry.get(t).map(|tool| tool.category().to_string()))
+        .collect();
+    for c in registry
+        .categories()
+        .into_iter()
+        .filter(|c| !catalogued.contains(c))
+    {
+        println!("EXC {c}");
+    }
+}

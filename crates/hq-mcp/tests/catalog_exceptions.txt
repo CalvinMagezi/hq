@@ -1,0 +1,22 @@
+# Tool categories the capability catalog does not offer, by decision: plumbing, agent-only and
+# owner-only tools, and areas whose features the empty chat does not suggest yet. A category
+# leaves this list when a catalog entry covers it. Adding one needs a reason in the PR.
+agent-comm
+agents
+brand
+chat
+coding
+config
+context
+creative
+gateway
+git
+github
+memory
+notifications
+quality
+scheduling
+session
+skills
+system
+terminal
