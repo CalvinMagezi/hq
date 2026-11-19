@@ -1,0 +1,29 @@
+---
+import type { Step } from '../data/get';
+import CodeBlock from './CodeBlock.astro';
+
+interface Props {
+  steps: Step[];
+  prefix: string;
+}
+
+const { steps, prefix } = Astro.props;
+const DOTS = ['dot-blue', 'dot-green', 'dot-sky'];
+---
+
+<ol class="rail-steps">
+  <li class="rail" aria-hidden="true"><span></span></li>
+  {
+    steps.map((s, i) => (
+      <li class="gcard reveal">
+        <span class={`step-dot ${DOTS[i % DOTS.length]}`} aria-hidden="true"></span>
+        <div class="stack-sm">
+          <h3>{s.title}</h3>
+          <p class="body">{s.body}</p>
+          {s.code && <CodeBlock id={`${prefix}-${i + 1}`} code={s.code} />}
+          {s.link && <a href={s.link.href}>{s.link.text}</a>}
+        </div>
+      </li>
+    ))
+  }
+</ol>

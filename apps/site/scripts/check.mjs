@@ -17,6 +17,8 @@ const OUTBOUND_ALLOW = [
   'https://bun.sh',
   'https://rustup.rs',
   'https://jedisct1.github.io/minisign/',
+  // Where the Mac steps send a reader who has no Homebrew, which the minisign step needs.
+  'https://brew.sh',
   'https://tailscale.com/kb/',
   // The hosted Hetzner deploy wizard, a separate app (apps/deploy).
   'https://deploy.agent-hq.online',
