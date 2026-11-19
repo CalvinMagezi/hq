@@ -1,0 +1,1 @@
+**`hq adoption` counts withheld nudges.** It now ends with how many candidate nudges were shown, withheld, expired or answered in the last month, from a device-only ledger of counts. The daily "Your day" card is the first to write to it.

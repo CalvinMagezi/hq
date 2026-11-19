@@ -131,6 +131,15 @@ pub async fn run_daily_brief(db: &Database, config: &HqConfig) -> Result<()> {
     }
     if let Some(item) = brief_item(&lines, &Utc::now().format("%Y-%m-%d").to_string()) {
         hq_db::value_items::emit(db, &item)?;
+        db.with_conn(|c| {
+            hq_db::nudge_ledger::record(
+                c,
+                DAILY_BRIEF_SOURCE,
+                hq_db::nudge_ledger::Outcome::Shown,
+                "",
+                Utc::now().timestamp(),
+            )
+        })?;
         info!(lanes = lines.len(), "daily-brief: wrote today's brief");
     }
     Ok(())
