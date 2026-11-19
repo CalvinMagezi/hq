@@ -6,7 +6,7 @@
 //! is shown to the owner and to a session the owner drives, and goes nowhere else.
 
 pub mod alerts;
-pub mod gate;
+pub use crate::lane_gate as gate;
 pub mod pace;
 
 use std::collections::BTreeMap;

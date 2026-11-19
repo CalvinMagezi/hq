@@ -42,7 +42,7 @@ pub async fn critique_diff(
 ///
 /// Uses `LlmRouter::from_env()` on the cheap `"critic"` model alias.
 pub async fn review_uncommitted_changes(cwd: &std::path::Path) -> Result<Option<(String, bool)>> {
-    let diff = hq_tools::coding::git::uncommitted_diff(cwd).await?;
+    let diff = hq_tools_coding::coding::git::uncommitted_diff(cwd).await?;
     if diff.trim().is_empty() {
         return Ok(None);
     }

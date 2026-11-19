@@ -20,7 +20,7 @@ pub fn slug(name: &str) -> String {
         .collect()
 }
 
-pub(super) fn prefix_slug(name: &str) -> String {
+pub(crate) fn prefix_slug(name: &str) -> String {
     slug(name).to_uppercase()
 }
 

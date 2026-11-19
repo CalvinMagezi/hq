@@ -6,9 +6,6 @@
 # A "production line" excludes `#[cfg(test)]` items, so a file with a big inline test module is
 # measured without it (`hq-net/src/store.rs` is 1,734 lines long but 838 production lines).
 [allow]
-# The built-in coding-agent host: one cohesive file; whether and where to split it is Phase 2 row
-# P2-13 (read it, split only along sections that already exist).
-"crates/hq-host/src/host.rs" = 2000
 # Archive create, verify and restore with every check. Cold (one commit in 400); splitting it buys
 # nothing, the cap only stops it growing.
 "crates/hq-backup/src/archive.rs" = 1503

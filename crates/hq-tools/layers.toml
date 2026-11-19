@@ -2,7 +2,7 @@
 # this file and fails when a module reaches UP to a higher layer (a reference `crate::<module>` in
 # non-test source), unless the edge is listed in `allowed_back_edges`.
 #
-# Same layer or lower is always fine. The list below is not a wish list: it is the 13 back edges that
+# Same layer or lower is always fine. The list below is not a wish list: it is the back edges that
 # existed when the test was added (`python3 -I scripts/ci/module-graph.py` prints them). It can only
 # shrink. An entry that is no longer a back edge fails the test, so the fix that removes an edge
 # deletes its line here in the same PR. A module missing from [layers], or listed here and not in
@@ -10,28 +10,23 @@
 #
 # Layer 0 is empty: the foundation (`registry`, `util`, `family_guest`, `family_confirm`) moved to the
 # hq-tool-api crate, `web`, `remote_mcp` and `imagegen` to hq-tools-web, and `coding` and `file_edit` to
-# hq-tools-coding (all re-exported by hq-tools), so those are no longer modules of this crate. Layer 1
+# hq-tools-coding (consumers import those crates directly), so those are no longer modules of this crate. Layer 1
 # is free of the tangle (no path into it). Layers 2 to 18 are the tangle, ordered by `module-graph.py`
 # to have the fewest upward references. Layer 19 depends on the tangle and nothing depends back on it.
 
 allowed_back_edges = [
-  "harness_session -> a2a",
-  "agent_host -> lane_quotas",
-  "agent_host -> harness_session",
-  "harness_session -> tasks",
-  "provenance -> vault",
-  "agent_host -> helper_setup",
-  "github -> tasks",
-  "harness_session -> helper_setup",
-  "harness_session -> lane_quotas",
-  "link_capture -> vault_reorg",
-  "provenance -> shortcuts",
-  "vault -> vault_reorg",
 ]
 
 [layers]
 # 1: free of the tangle
 agent_comm = 1
+helper_catalog = 1
+write_policy = 1
+note_index = 1
+spawned_marker = 1
+harness_alias = 1
+lane_gate = 1
+task_placement = 1
 agents = 1
 background_turns = 1
 brand = 1
@@ -73,6 +68,7 @@ vault = 11
 lane_quotas = 12
 tasks = 13
 helper_setup = 14
+host_overview = 15
 skill_edit = 15
 skill_manage_tool = 16
 vault_reorg = 17

@@ -1,6 +1,6 @@
 use super::category::{Purpose, purpose_for};
 use super::*;
-use crate::agent_host::McpAccess;
+use crate::agent_host::{McpAccess, prompt_note};
 
 pub(super) fn build_args(
     harness: &Harness,
@@ -710,21 +710,8 @@ pub(super) fn submit_at_start(
 /// The host's error code for text refused because the agent waits at a dialog.
 const AGENT_BLOCKED_CODE: &str = "agent_blocked";
 
-pub(crate) fn prompt_note(outcome: PromptOutcome) -> Option<String> {
-    match outcome {
-        PromptOutcome::Resubmitted => Some(RESUBMITTED_NOTE.into()),
-        PromptOutcome::Stalled(_) => Some(
-            "The host saw no activity after the prompt; a fast agent can finish first. Read the output before resending.".into(),
-        ),
-        PromptOutcome::TimedOut(msg) => Some(format!("prompt wait timed out: {msg}")),
-        PromptOutcome::Submitted | PromptOutcome::Settled(_) => None,
-    }
-}
-
 pub(super) const STILL_STARTING: &str = "The agent was still starting when the launch bound ran out. A prompt given at launch runs once it is ready; wait for it with harness_session_wait.";
 pub(super) const STILL_STARTING_UNTYPED: &str = "The agent was still starting when the launch bound ran out, so the prompt was not typed. Wait for it with harness_session_wait, then send the prompt.";
-
-pub(super) const RESUBMITTED_NOTE: &str = "The host saw no activity after the prompt, so Enter was pressed once more. Read the output to confirm the agent started.";
 
 pub(super) fn launch_report(
     harness: &Harness,

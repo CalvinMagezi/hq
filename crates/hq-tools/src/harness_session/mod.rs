@@ -18,6 +18,8 @@ mod connector_notice;
 mod control;
 mod cwd;
 pub mod decisions;
+mod delegator;
+pub use delegator::{Delegator, install_delegator};
 pub mod dismiss;
 pub mod events;
 mod fallback;

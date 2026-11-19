@@ -4,10 +4,11 @@ use hq_core::config::HqConfig;
 use hq_db::Database;
 use hq_tool_api::registry::{HqTool, ToolRegistry};
 use hq_tools::{
-    a2a, agent_comm, agent_host, agents, ask, background_turns, brand, budget_status, coding,
-    convert, github, harness_session, notify, prose_lint, self_update, session_search, shortcuts,
-    skill_manage_tool, skills, slash_commands, subagent_runs, system_info, tasks, vault,
+    a2a, agent_comm, agents, ask, background_turns, brand, budget_status, convert, github,
+    harness_session, notify, prose_lint, self_update, session_search, shortcuts, skill_manage_tool,
+    skills, slash_commands, subagent_runs, system_info, tasks,
 };
+use hq_tools_coding::coding;
 use hq_tools_web::{imagegen, remote_mcp, web};
 
 #[cfg(feature = "gws")]
@@ -29,7 +30,7 @@ pub fn create_default_registry(
     let vault_path = vault_client.vault_path().to_path_buf();
     let mut tools: Vec<Box<dyn HqTool>> = Vec::new();
 
-    tools.extend(vault::create_vault_tools(
+    tools.extend(hq_tools::vault_reorg::create_vault_tools_with_reorg(
         vault_path.clone(),
         Some(db.clone()),
     ));
@@ -45,7 +46,9 @@ pub fn create_default_registry(
         None,
         None,
     ));
-    tools.extend(agent_host::tools::create_host_tools(db.clone()));
+    tools.extend(hq_tools::host_overview::create_host_tools_with_extras(
+        db.clone(),
+    ));
     // MCP callers hold an owner's key, so they look across every chat.
     tools.extend(background_turns::create_background_turn_tools(
         db.clone(),
