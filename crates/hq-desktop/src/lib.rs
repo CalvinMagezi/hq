@@ -11,6 +11,7 @@ pub mod bridge_holder;
 pub mod chooser;
 pub mod claude;
 pub mod desktop;
+pub mod downloads;
 pub mod helpers;
 pub mod host;
 pub mod menu;

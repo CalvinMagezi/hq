@@ -12,7 +12,8 @@ use hq_desktop::{Desktop, DesktopInit};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use tauri::{
-    Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, webview::NewWindowResponse,
+    Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
+    webview::{DownloadEvent, NewWindowResponse},
 };
 
 // Where the app is in closing, so a second quit never cuts the first one short.
@@ -229,11 +230,41 @@ pub async fn show_main(
     let parsed: tauri::Url = url
         .parse()
         .map_err(|_| "the proxy address is not a URL".to_string())?;
+    let download_origin = origin.clone();
     WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(parsed))
         .title(hq_desktop::window::main_title(desktop.hub_web_active()))
         .inner_size(1200.0, 800.0)
         .on_navigation(move |url| hq_desktop::window::main_page_allowed(url.as_str(), &origin))
         .on_new_window(|_, _| NewWindowResponse::Deny)
+        // The page's own files (a blob it made, or something the proxy served) go to Downloads and
+        // the page is told how it ended. The page learns it through a DOM event the shell
+        // evaluates, not through a command: this window still cannot call the app.
+        .on_download(move |webview, event| match event {
+            DownloadEvent::Requested { url, destination } => {
+                if !hq_desktop::downloads::download_allowed(url.as_str(), &download_origin) {
+                    return false;
+                }
+                let dir = hq_desktop::downloads::downloads_dir();
+                match hq_desktop::downloads::destination_for(destination, dir.as_deref(), |p| {
+                    p.exists()
+                }) {
+                    Some(path) => {
+                        *destination = path;
+                        true
+                    }
+                    None => {
+                        let _ = webview.eval(hq_desktop::downloads::finished_script(None, false));
+                        false
+                    }
+                }
+            }
+            DownloadEvent::Finished { path, success, .. } => {
+                let script = hq_desktop::downloads::finished_script(path.as_deref(), success);
+                let _ = webview.eval(script);
+                true
+            }
+            _ => true,
+        })
         .build()
         .map_err(|e| e.to_string())?;
     Ok(())

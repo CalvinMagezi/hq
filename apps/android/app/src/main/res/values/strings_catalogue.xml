@@ -2404,6 +2404,9 @@
     <string name="note_export_making_body">HQ is laying out the pages. Large notes take a little longer.</string>
     <string name="note_export_busy">Exporting…</string>
     <string name="note_export_done">%1$s is in your downloads</string>
+    <string name="note_export_saved">Saved %1$s to Downloads. %2$s</string>
+    <string name="note_export_save_failed">Couldn\'t save %1$s to Downloads. Check that you can write there and try again.</string>
+    <string name="note_export_save_failed_unnamed">Couldn\'t save the file to Downloads. Check that you can write there and try again.</string>
     <string name="note_export_shared_done">%1$s is ready to share</string>
     <string name="note_export_print_blocked">Your browser blocked the print window. Allow pop-ups for HQ and try again.</string>
     <string name="note_export_failed">Couldn\'t make the %1$s. HQ didn\'t answer in time. Try again.</string>

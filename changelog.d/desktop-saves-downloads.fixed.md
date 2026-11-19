@@ -1,0 +1,1 @@
+**The Mac app now saves exported files to Downloads.** Export from a note (Excel, CSV, PDF and the rest) used to close the menu and leave no file behind. The app now puts the file in your Downloads folder, never overwrites one that is already there, and shows a notice with the real location, or a plain message if it could not save.
