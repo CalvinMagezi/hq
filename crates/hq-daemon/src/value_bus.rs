@@ -18,6 +18,10 @@ pub enum ValueAction {
 /// Marks every pending item delivered. Nothing is sent to a chat relay.
 pub async fn run_value_bus_delivery(_vault_path: &Path, db: &Database) -> Result<()> {
     let _ = hq_db::value_items::gc_expired(db)?;
+    // After the gc, so an approval that just expired gets its note.
+    if let Err(e) = hq_db::approval_followup::run(db, chrono::Utc::now()) {
+        tracing::warn!(error = %e, "approval follow-up failed");
+    }
     for item in hq_db::value_items::list_by_state(db, ValueState::Pending)? {
         hq_db::value_items::set_delivered(db, &item.id)?;
     }
