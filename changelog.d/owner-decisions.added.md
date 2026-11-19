@@ -1,0 +1,1 @@
+**`hq decide` puts a question to you with a default and a deadline.** At the deadline a decision you marked reversible takes its recommended answer, and any other is held with nothing done. The question lands in your inbox and is pushed. Answer with `hq decide answer`.

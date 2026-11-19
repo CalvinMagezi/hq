@@ -692,6 +692,10 @@ pub(crate) enum Commands {
         site: Option<String>,
     },
 
+    /// Questions with a recommended default and a deadline: create, list, answer
+    #[command(subcommand)]
+    Decide(commands::decide::DecideAction),
+
     /// The few lanes of work you chose to move forward: list, add, park, remove
     #[command(subcommand)]
     Focus(commands::focus::FocusAction),

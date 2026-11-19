@@ -506,6 +506,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("helper-setup-offer", Duration::from_secs(1800)),
         // How HQ was used (capabilities, corrections, return), once a week; `daemon.adoption_digest`.
         DaemonTask::with_default_timeout("adoption-digest", Duration::from_secs(604800)),
+        // Decisions past their deadline take their default, or are held; see `hq decide`.
+        DaemonTask::with_default_timeout("owner-decisions", Duration::from_secs(600)),
         // Stale helper requests leave Needs you (restorable); `daemon.inbox_tidy`.
         // Starts 30 minutes after the daemon and runs only once the supervisor has swept.
         DaemonTask::delayed(
@@ -686,6 +688,7 @@ async fn dispatch_task(
         "adoption-digest" => tasks_periodic::run_adoption_digest(db, config).await,
         "helper-setup-offer" => tasks_periodic::run_helper_setup_offer(db, config).await,
         "inbox-tidy" => tasks_periodic::run_inbox_tidy(db, config).await,
+        "owner-decisions" => tasks_periodic::run_owner_decisions(db).await,
         "due-reminders" => tasks_periodic::run_due_reminders(db).await,
         "scheduled-offers" => tasks_periodic::run_scheduled_offers(db).await,
         "link-capture" => tasks_periodic::run_link_capture(vault_path, db, config).await,
