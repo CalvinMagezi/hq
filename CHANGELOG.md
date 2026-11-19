@@ -4,6 +4,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ## [Unreleased]
 
+- Relays: link previews are off on every outbound Telegram message and embeds are suppressed on Discord replies, so a link the model writes cannot make Telegram's or Discord's servers fetch it. The Jina Reader fallback of `web_fetch` is now off unless `HQ_WEB_FETCH_JINA=1`.
 - Tasks: moving a task to review raises an inbox card only when the task is assigned to the owner (`owner`) or waits on them. Other reviews are silent.
 - Web push: `web_push.quiet_hours_utc` holds pushes during a window and sends them when it ends; non-urgent items fold into one push an hour and stop at `web_push.non_urgent_per_day` (default 5). Approvals, `notify_owner` and reminders are not limited by the budget.
 

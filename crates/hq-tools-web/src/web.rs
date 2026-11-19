@@ -41,7 +41,7 @@
 //! confident container is found. A page that comes back as an empty
 //! client-rendered shell is recovered from its embedded JSON-LD or framework
 //! data, then from Jina Reader (`r.jina.ai`, a third-party service that
-//! receives only the URL; `HQ_WEB_FETCH_JINA=0` turns it off). PDFs use
+//! receives only the URL; it is off unless `HQ_WEB_FETCH_JINA=1`). PDFs use
 //! `hq-convert` (text layer first, OCR for scanned files, which needs
 //! `pdftoppm` and `tesseract` off macOS). Every redirect hop is re-checked
 //! against the private-network rules. Pages that need a logged-in browser,

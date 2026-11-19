@@ -30,7 +30,11 @@ pub(super) fn tg_sender(
         let bot = bot.clone();
         tokio::spawn(async move {
             for chunk in split_message(&text, TG_MESSAGE_CHARS) {
-                if let Err(e) = bot.send_message(chat, chunk).await {
+                if let Err(e) = bot
+                    .send_message(chat, chunk)
+                    .link_preview_options(super::send::no_link_preview())
+                    .await
+                {
                     tracing::warn!(error = %e, "telegram delivery failed");
                     break;
                 }
@@ -245,6 +249,7 @@ fn spawn_feed_ticker(
             }
             if bot
                 .edit_message_text(chat, placeholder, &text)
+                .link_preview_options(super::send::no_link_preview())
                 .await
                 .is_ok()
             {
