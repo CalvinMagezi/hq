@@ -1,6 +1,6 @@
 ---
 import '../styles/global.css';
-import { SITE_URL, latestBuild, links, nav } from '../data/site';
+import { HEADER_HREFS, SITE_URL, latestBuild, links, nav } from '../data/site';
 
 interface Props {
   title: string;
@@ -19,7 +19,7 @@ const current = path;
 const GET_PATH = '/get/';
 const build = await latestBuild();
 // Home is the brand link and Get HQ is the call to action, so the text links are the rest.
-const textLinks = nav.filter((n) => n.href !== '/' && n.href !== GET_PATH);
+const textLinks = nav.filter((n) => HEADER_HREFS.includes(n.href));
 
 // Scripts and styles are all same-origin files, so no inline hashes are needed.
 const csp = [
@@ -161,6 +161,7 @@ const csp = [
             <p class="eyebrow">Stuck</p>
             <ul class="foot-links">
               <li class="foot-hint">Run <code>hq doctor</code> first</li>
+              <li><a href="/help/">Fix it in your own words</a></li>
               <li><a href={links.issues}>Ask on GitHub</a></li>
               <li><a href={links.reportVulnerability}>Report a security problem</a></li>
               <li><a href={links.repo}>Source code</a></li>

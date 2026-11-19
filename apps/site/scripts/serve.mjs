@@ -39,4 +39,4 @@ export function serve() {
   });
 }
 
-export const PAGES = ['/', '/architecture/', '/compare/', '/get/', '/install/', '/docs/', '/docs/first-run/', '/docs/windows/', '/security/', '/404/'];
+export const PAGES = ['/', '/architecture/', '/compare/', '/get/', '/install/', '/start/', '/guides/', '/guides/ai-key/', '/help/', '/new/', '/docs/', '/docs/first-run/', '/docs/windows/', '/security/', '/404/'];

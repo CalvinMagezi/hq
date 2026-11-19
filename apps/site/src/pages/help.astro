@@ -1,0 +1,44 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { helpGroups } from '../data/help';
+import { links } from '../data/site';
+---
+
+<Layout
+  title="Help"
+  description="Fixes for the things people get stuck on with Agent HQ, listed by what you see: Play Protect, a key that is refused, an AI service that does not answer."
+  path="/help/"
+>
+  <section class="sec sec-hero get-hero" aria-labelledby="help-h">
+    <span class="orb orb-b o-tl" aria-hidden="true"></span>
+    <div class="container stack">
+      <h1 id="help-h" class="display">
+        <span class="hl"><span>Stuck?</span></span>
+        <span class="hl"><span class="accent">Find what you see.</span></span>
+      </h1>
+      <p class="lede get-lede">Fixes are listed by the words on your screen. If yours is not here, ask on <a href={links.issues}>GitHub</a>.</p>
+    </div>
+  </section>
+  <section class="sec sec-top0" aria-label="Fixes">
+    <div class="container stack get-stack">
+      {
+        helpGroups.map((g) => (
+          <div class="stack">
+            <h2>{g.title}</h2>
+            <div class="stack-sm">
+              {
+                g.items.map((i) => (
+                  <details class="more">
+                    <summary>{i.symptom}</summary>
+                    {i.fix}
+                    {i.link && <> <a href={i.link.href}>{i.link.text}</a></>}
+                  </details>
+                ))
+              }
+            </div>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+</Layout>

@@ -1,0 +1,39 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { guides } from '../data/guides';
+---
+
+<Layout
+  title="Start here"
+  description="Your first hour with Agent HQ in six short guides, in order: install, add an AI key, save a note, ask a question, connect a computer and back up."
+  path="/start/"
+>
+  <section class="sec sec-hero get-hero" aria-labelledby="start-h">
+    <span class="orb orb-b o-tl" aria-hidden="true"></span>
+    <span class="orb orb-g o-br slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="tags"><span class="tag tag-green">Your first hour</span></div>
+      <h1 id="start-h" class="display">
+        <span class="hl"><span>Six short guides.</span></span>
+        <span class="hl"><span class="accent">One hour.</span></span>
+      </h1>
+      <p class="lede get-lede">Do them in order. Each one is a few minutes, says what you need and lists what to do when something looks wrong.</p>
+    </div>
+  </section>
+  <section class="sec sec-top0" aria-label="The guides in order">
+    <div class="container stack">
+      <ol class="doc-list list-plain">
+        {
+          guides.map((g, i) => (
+            <li class="gcard">
+              <span class="tag">{i + 1}. {g.time}</span>
+              <h2 class="h3-like"><a href={`/guides/${g.id}/`}>{g.title}</a></h2>
+              <p class="body">{g.summary}</p>
+            </li>
+          ))
+        }
+      </ol>
+      <p class="small">Need the downloads first? <a href="/get/">Get HQ</a>. Something not working? <a href="/help/">Help</a>.</p>
+    </div>
+  </section>
+</Layout>

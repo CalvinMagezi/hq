@@ -1,0 +1,48 @@
+---
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import Layout from '../../layouts/Layout.astro';
+import StepList from '../../components/StepList.astro';
+import Media from '../../components/Media.astro';
+import manifest from '../../data/media.json';
+import { guides } from '../../data/guides';
+
+export function getStaticPaths() {
+  return guides.map((guide, i) => ({ params: { id: guide.id }, props: { guide, next: guides[i + 1] } }));
+}
+
+const { guide, next } = Astro.props;
+// A clip or screenshot shows only once its file is committed, so no guide ships a placeholder tile.
+const clip = manifest.find((m) => m.id === `guide-${guide.id}`);
+const hasClip = Boolean(clip?.src) && existsSync(join(process.cwd(), 'public', clip!.src));
+---
+
+<Layout title={guide.title} description={`${guide.summary} About ${guide.time}.`} path={`/guides/${guide.id}/`}>
+  <section class="sec sec-top0 doc-page">
+    <div class="container doc-wrap">
+      <nav class="crumbs small" aria-label="Breadcrumb"><a href="/guides/">Guides</a></nav>
+      <h1 class="doc-title">{guide.title}</h1>
+      <p class="lede">{guide.intro}</p>
+      <p class="small doc-meta">About {guide.time}.</p>
+      {hasClip && <Media id={`guide-${guide.id}`} />}
+      <StepList steps={guide.steps} prefix={`g-${guide.id}`} level={2} />
+      <div class="stack">
+        <h2 class="h3-like">If it went wrong</h2>
+        <div class="stack-sm">
+          {
+            guide.wrong.map((w) => (
+              <details class="more">
+                <summary>{w.symptom}</summary>
+                {w.fix}
+              </details>
+            ))
+          }
+        </div>
+      </div>
+      <p class="small">
+        {guide.doc && <><a href={guide.doc.href}>{guide.doc.text}</a>. </>}
+        {next && <>Next: <a href={`/guides/${next.id}/`}>{next.title}</a>.</>}
+      </p>
+    </div>
+  </section>
+</Layout>

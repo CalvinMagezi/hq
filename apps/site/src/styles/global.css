@@ -1334,6 +1334,15 @@ pre {
   }
 }
 
+.rail-steps :is(h2, h3) {
+  font-size: 22px;
+  line-height: 28px;
+}
+.h3-like {
+  font-size: 22px;
+  line-height: 28px;
+}
+
 /* Chips used for in-page navigation */
 .toc {
   display: flex;

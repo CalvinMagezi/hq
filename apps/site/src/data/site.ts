@@ -52,9 +52,16 @@ export const nav = [
   { href: '/compare/', label: 'Compare' },
   { href: '/get/', label: 'Get HQ' },
   { href: '/install/', label: 'Install' },
+  { href: '/start/', label: 'Start' },
+  { href: '/guides/', label: 'Guides' },
   { href: '/docs/', label: 'Docs' },
+  { href: '/help/', label: 'Help' },
+  { href: '/new/', label: 'What is new' },
   { href: '/security/', label: 'Security' },
 ] as const;
+
+// The header carries the short list; the footer and sitemap carry every page.
+export const HEADER_HREFS = ['/start/', '/guides/', '/docs/', '/security/'];
 
 const RELEASES_API = 'https://api.github.com/repos/CalvinMagezi/hq/releases?per_page=1';
 const BUILD_LOOKUP_MS = 4000;

@@ -1,0 +1,29 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { CHECKED_ON, whatsNew } from '../data/whats-new';
+import { links } from '../data/site';
+---
+
+<Layout
+  title="What is new"
+  description="Recent changes to Agent HQ in plain words. The full developer changelog stays on GitHub, with every upgrade note."
+  path="/new/"
+>
+  <section class="sec sec-hero get-hero" aria-labelledby="new-h">
+    <span class="orb orb-g o-br slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <h1 id="new-h" class="display">
+        <span class="hl"><span>What is</span></span>
+        <span class="hl"><span class="accent">new.</span></span>
+      </h1>
+      <p class="lede get-lede">Recent changes, in plain words. Written from the changelog on {CHECKED_ON}. <a href={links.changelog}>The full changelog</a> lists everything, with upgrade notes.</p>
+    </div>
+  </section>
+  <section class="sec sec-top0" aria-label="Recent changes">
+    <div class="container stack">
+      <ul class="doc-list list-plain">
+        {whatsNew.map((n) => <li class="gcard"><h2 class="h3-like">{n.title}</h2><p class="body">{n.body}</p></li>)}
+      </ul>
+    </div>
+  </section>
+</Layout>

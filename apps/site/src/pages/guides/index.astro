@@ -1,0 +1,36 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { guides } from '../../data/guides';
+---
+
+<Layout
+  title="Guides"
+  description="Step-by-step guides for Agent HQ: one task per page, with what to do when it goes wrong. Start with install, then your AI key."
+  path="/guides/"
+>
+  <section class="sec sec-hero get-hero" aria-labelledby="guides-h">
+    <span class="orb orb-b o-tl" aria-hidden="true"></span>
+    <div class="container stack">
+      <h1 id="guides-h" class="display">
+        <span class="hl"><span>One task.</span></span>
+        <span class="hl"><span class="accent">One page.</span></span>
+      </h1>
+      <p class="lede get-lede">Each guide has numbered steps and an "If it went wrong" list. New to HQ? <a href="/start/">Start here</a> puts them in order.</p>
+    </div>
+  </section>
+  <section class="sec sec-top0" aria-label="All guides">
+    <div class="container stack">
+      <ul class="doc-list list-plain">
+        {
+          guides.map((g) => (
+            <li class="gcard">
+              <span class="tag">{g.time}</span>
+              <h2 class="h3-like"><a href={`/guides/${g.id}/`}>{g.title}</a></h2>
+              <p class="body">{g.summary}</p>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+</Layout>
