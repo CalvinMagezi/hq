@@ -85,8 +85,8 @@ impl SessionBuilder {
 
     /// File, shell, search, todo and web tools, sharing one file-state cache.
     fn coding_tools(&self, vault_path: &Path) -> Vec<Box<dyn AgentTool>> {
-        let state_cache = hq_tools::file_edit::FileStateCache::default();
-        let history = hq_tools::file_edit::FileHistory::default();
+        let state_cache = hq_tools_coding::file_edit::FileStateCache::default();
+        let history = hq_tools_coding::file_edit::FileHistory::default();
 
         // Deliberately narrower than hq-mcp's create_default_registry() (the
         // full catalog for external MCP harnesses): this is curated for what
@@ -105,13 +105,13 @@ impl SessionBuilder {
                 history.clone(),
             )),
             // Multi-file atomic edit — was previously only exposed to *other*
-            // harnesses over MCP (hq_tools::coding::BatchEditTool), not to
+            // harnesses over MCP (hq_tools_coding::coding::BatchEditTool), not to
             // hq's own session. Shares this session's state_cache/history so
             // read-before-write tracking and rollback stay consistent with
             // edit_file. hq_tools::HqTool -> AgentTool via HqToolAdapter, the
             // same wrapper used for every other hq-tools-sourced tool below.
             Box::new(HqToolAdapter {
-                inner: Box::new(hq_tools::coding::BatchEditTool::new(
+                inner: Box::new(hq_tools_coding::coding::BatchEditTool::new(
                     state_cache.clone(),
                     history.clone(),
                 )),
@@ -126,8 +126,8 @@ impl SessionBuilder {
             // quality is for the Workstream 6 competition harness to decide,
             // not assumed.
             Box::new(HqToolAdapter {
-                inner: Box::new(hq_tools::coding::TodoWriteTool::new(
-                    hq_tools::coding::TodoStore::new(),
+                inner: Box::new(hq_tools_coding::coding::TodoWriteTool::new(
+                    hq_tools_coding::coding::TodoStore::new(),
                 )),
             }),
             Box::new({
@@ -235,11 +235,11 @@ impl SessionBuilder {
         // session had to shell out through `bash` to touch git at all, and
         // reported having no GitHub access despite an authenticated `gh` on
         // PATH.
-        tools.push(Box::new(hq_tools::coding::GitStatusTool));
-        tools.push(Box::new(hq_tools::coding::GitDiffTool));
-        tools.push(Box::new(hq_tools::coding::GitLogTool));
-        tools.push(Box::new(hq_tools::coding::GitCommitTool));
-        tools.push(Box::new(hq_tools::coding::GitPrTool));
+        tools.push(Box::new(hq_tools_coding::coding::GitStatusTool));
+        tools.push(Box::new(hq_tools_coding::coding::GitDiffTool));
+        tools.push(Box::new(hq_tools_coding::coding::GitLogTool));
+        tools.push(Box::new(hq_tools_coding::coding::GitCommitTool));
+        tools.push(Box::new(hq_tools_coding::coding::GitPrTool));
 
         // Custom slash commands — lets the agent create/list/delete the
         // `_commands/*.md` templates the terminal's `/name` dispatch reads,
