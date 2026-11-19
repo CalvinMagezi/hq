@@ -1,6 +1,6 @@
 //! The few lanes of work the owner has chosen to move forward. Declared by the owner, never
 //! changed by HQ: HQ may suggest a swap, nothing more. Everything outside a lane is parked.
-//! Stays on this device (`sql/141_focus_lanes.sql`).
+//! Stays on this device (`sql/142_focus_lanes.sql`).
 
 use anyhow::{Result, bail};
 use rusqlite::params;
