@@ -4,6 +4,28 @@ Status: ready to execute, 2026-11-19. Written against `main` at `519aa967` plus 
 
 This document is safe to commit: it uses no real names, hosts, tokens or chat ids. Examples are invented.
 
+## Status after Wave 1 (2026-11-19)
+
+| WP | PR | State | Not done or not run |
+|---|---|---|---|
+| 0 spec | #596 | merged | |
+| 0a debug app id | none | skipped | `-Phq.appId=` already installs beside the live app; a debug suffix would break the `run-as` recipes. Nothing installed on the phone. |
+| 1 audience function | #600 | merged | Computed from source, kind and `owner_only`, no migration. Phone inbox and badge not checked on a device. |
+| 2 review cards | #603 | merged | Daily per-lane roll-up waits for WP-16. |
+| 3 strict_paths | #605 | merged | No live strict launch on a host. |
+| 4 zone table | #607 | merged | `trusted_folders`; the "every tool has a zone" test (unlisted tools default to zone A). |
+| 5 narrowed starts | #607 | merged | `origin_tainted` task bit (ignored `known_gap` test); per-chat and per-day spawn caps; the "N helpers started today" line. |
+| 6 approvals reach the owner | none | not started | Repeat after 15 minutes, 24 hour expiry message. |
+| 7 seen-URL web policy | #609 | merged | Per-turn fetch cap; device-only web ledger. |
+| 8 outbound surfaces | #611 | merged | Rendering unseen model-written URLs as plain text; no real Telegram or Discord check. |
+| 9 push gate | #612 | merged | Brief line for failed or abandoned helpers (needs WP-16). |
+
+Injection eval, main table: before `total=42 asked=19 denied=15 allowed=8`; after `total=47 asked=10 denied=23 allowed=14`. Only the section 7 flips moved, plus new cases for seen links, host labels, added queries and long searches. Ignored known gap: `known_gap_a_task_written_by_a_tainted_session_launders_a_start`.
+
+Owner steps pending: the Phase Z0 sweep gates (they need your verdicts, and the laptop HQ is nearly empty; the live data is on the phone), `agent_host.sandbox.strict_paths` for client folders, `web_push.enabled`, quiet hours, subscribing the phone to push, and sending a Telegram reply with a link to see no preview. `bash_sandbox::hqs_control_plane_is_hidden_from_bash` fails on a laptop with a running HQ because it finds the live sockets under `~/.hq`.
+
+Waves 2 and 3 are not started.
+
 ## 0. What this is and how to run it
 
 **The goal in one line.** Make HQ the place the owner works from, and make it quiet: it starts and drives helpers without asking, reads the web without asking, shows the owner only decisions and approvals at the edge where work leaves HQ, and stays sovereign and private while doing it.
