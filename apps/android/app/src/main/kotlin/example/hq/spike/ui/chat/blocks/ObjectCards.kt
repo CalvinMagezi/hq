@@ -134,25 +134,56 @@ private fun Modifier.chipBorder(dashed: Boolean): Modifier = if (!dashed) border
     drawRoundRect(Mts.Line, cornerRadius = CornerRadius(r), style = Stroke(1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))))
 }
 
-/** A file that came with a message: its name, what kind it is and how big, and an Open chip. */
+/** A file that came with a message: its name, what kind it is and how big, an Open chip, and, for a file made from a note, one chip per format it can be exported as. */
 @Composable
-fun FileCardView(file: Attachment, onOpen: () -> Unit, modifier: Modifier = Modifier) {
-    Row(
-        modifier.fillMaxWidth().heightIn(min = 64.dp).clip(CardShape).background(Mts.Surface000).border(1.dp, Mts.Hairline, CardShape)
-            .clickable(role = Role.Button, onClickLabel = "Open ${file.name}", onClick = onOpen)
-            .padding(start = 12.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(40.dp).background(Mts.Surface200, TileShape), contentAlignment = Alignment.Center) {
-            Icon(HqIcons.Notes, null, Modifier.size(22.dp), tint = Mts.Ink)
+fun FileCardView(file: Attachment, onOpen: () -> Unit, modifier: Modifier = Modifier, onExport: (String) -> Unit = {}) {
+    Column(modifier.fillMaxWidth().clip(CardShape).background(Mts.Surface000).border(1.dp, Mts.Hairline, CardShape)) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 64.dp)
+                .clickable(role = Role.Button, onClickLabel = "Open ${file.name}", onClick = onOpen)
+                .padding(start = 12.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(40.dp).background(Mts.Surface200, TileShape), contentAlignment = Alignment.Center) {
+                Icon(HqIcons.Notes, null, Modifier.size(22.dp), tint = Mts.Ink)
+            }
+            Column(Modifier.weight(1f)) {
+                Text(file.name, style = HqType.ChipTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${file.kind} · ${file.sizeWords}", style = SmallText, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Box(
+                Modifier.heightIn(min = 32.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).padding(horizontal = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text(stringResource(R.string.notice_action_open), style = HqType.ToolLine, color = Mts.Ink, maxLines = 1) }
         }
-        Column(Modifier.weight(1f)) {
-            Text(file.name, style = HqType.ChipTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${file.kind} · ${file.sizeWords}", style = SmallText, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        Box(
-            Modifier.heightIn(min = 32.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).padding(horizontal = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) { Text(stringResource(R.string.notice_action_open), style = HqType.ToolLine, color = Mts.Ink, maxLines = 1) }
+        if (file.exportFormats.isNotEmpty()) ExportChips(file, onExport)
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ExportChips(file: Attachment, onExport: (String) -> Unit) {
+    Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        file.fidelity?.let { Text(it, style = SmallText, color = Mts.InkMuted) }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            file.exportFormats.forEach { format ->
+                val label = stringResource(exportLabel(format))
+                Box(
+                    Modifier.heightIn(min = 32.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape)
+                        .clickable(role = Role.Button, onClickLabel = "${stringResource(R.string.chat_file_export)} $label") { onExport(format) }
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(label, style = HqType.ToolLine, color = Mts.Ink, maxLines = 1) }
+            }
+        }
+    }
+}
+
+private fun exportLabel(format: String): Int = when (format) {
+    "xlsx" -> R.string.export_format_xlsx
+    "csv" -> R.string.export_format_csv
+    "pdf" -> R.string.export_format_pdf
+    "docx" -> R.string.export_format_docx
+    "pptx" -> R.string.export_format_pptx
+    else -> R.string.export_format_md
 }

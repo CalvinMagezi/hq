@@ -225,7 +225,7 @@ function VaultFileView({ filePath, content, hash }: {
         setExportNote(null)
         setExporting(format)
         try {
-            const { blob, extension } = await fetchNoteExport(filePath, format)
+            const { blob, extension, kept } = await fetchNoteExport(filePath, format)
             const name = exportFileName(filePath, extension)
             const file = new File([blob], name, { type: blob.type || 'application/octet-stream' })
             const touch = window.matchMedia?.('(pointer: coarse)').matches
@@ -245,7 +245,7 @@ function VaultFileView({ filePath, content, hash }: {
             a.click()
             a.remove()
             setTimeout(() => URL.revokeObjectURL(url), 10_000)
-            toastNotice(t('note_export_done', { name }))
+            toastNotice(kept ? `${t('note_export_done', { name })} ${kept}` : t('note_export_done', { name }))
         } catch (err) {
             if (format === 'pdf' && err instanceof HqHttpError && err.status === 503) {
                 // The server's older PDF engine is not installed: print from the browser instead.

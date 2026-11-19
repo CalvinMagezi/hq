@@ -104,7 +104,7 @@ private fun ReplyFrame(modifier: Modifier = Modifier, border: androidx.compose.u
 fun ReplyBubble(message: UiMessage, blocks: BlockActions, lifted: Boolean = false, modifier: Modifier = Modifier) = ReplyFrame(modifier, if (lifted) Mts.Line else Mts.Hairline) {
     if (message.text.isNotBlank()) ReplyBody(message.text, blocks)
     val cards = remember(message.tools) { StepCards.of(message.tools) }
-    message.files.forEach { FileCardView(it, { blocks.onOpenFile(it) }, Modifier.padding(top = 12.dp)) }
+    message.files.forEach { f -> FileCardView(f, { blocks.onOpenFile(f) }, Modifier.padding(top = 12.dp), onExport = { format -> blocks.onExportFile(f, format) }) }
     ReplyCards(cards, message.createdAt.let { if (it.isBlank()) "just now" else ChatTime.since(it) }, blocks, Modifier.padding(top = 12.dp))
     if (message.tools.isNotEmpty()) ToolLine(message.tools)
 }

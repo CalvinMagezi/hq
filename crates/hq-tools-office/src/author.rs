@@ -29,6 +29,56 @@ pub fn create_author_tools(vault: PathBuf) -> Vec<Box<dyn HqTool>> {
     ]
 }
 
+/// Renders the note at `path` as `format` into `Exports/<yyyy-mm>/` and returns the `files` entry
+/// and the one-line statement of what was kept. The agent's `office_export` and the apps' Export
+/// sheet both call this, so they make the same bytes.
+pub async fn export_to_exports(vault: &Path, path: &str, format: &str) -> Result<Value> {
+    let stem = Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("export");
+    let dir = vault.join(hq_tool_api::files::exports_month_dir());
+    std::fs::create_dir_all(&dir)?;
+    let out = hq_tool_api::files::unique_path(&dir, &hq_tool_api::files::clean_stem(stem), format);
+    let (vault_owned, note, fmt, dest) = (
+        vault.to_path_buf(),
+        path.to_string(),
+        format.to_string(),
+        out.clone(),
+    );
+    let done = if fmt == "pdf" {
+        export_pdf(&vault_owned, &note, &dest).await?
+    } else {
+        tokio::task::spawn_blocking(move || {
+            hq_suite_adapter::author::export_note(&vault_owned, &note, &fmt, &dest)
+        })
+        .await??
+    };
+    let rel = out
+        .strip_prefix(vault)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut entry = hq_tool_api::files::file_entry(vault, &rel);
+    entry["note"] = json!(path);
+    entry["fidelity"] = json!(done.fidelity);
+    Ok(json!({
+        "files": [entry],
+        "web_path": rel,
+        "fidelity": done.fidelity,
+    }))
+}
+
+/// The formats a note of this kind can be exported as, in the order the Export sheet lists them.
+/// `md` is the note itself, offered for a document.
+pub fn export_formats(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "sheet" => &["xlsx", "csv", "pdf"],
+        "doc" => &["docx", "pdf", "md"],
+        "slides" => &["pptx", "pdf"],
+        _ => &[],
+    }
+}
+
 /// The note as a PDF, by the same exporter `vault_export` uses.
 async fn export_pdf(
     vault: &Path,
@@ -181,43 +231,21 @@ impl HqTool for OfficeExportTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         let path = text(&args, "path")?.to_string();
         let format = text(&args, "format")?.to_string();
-        let stem = std::path::Path::new(&path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("export");
-        let dir = self.vault.join(hq_tool_api::files::exports_month_dir());
-        std::fs::create_dir_all(&dir)?;
-        let out =
-            hq_tool_api::files::unique_path(&dir, &hq_tool_api::files::clean_stem(stem), &format);
-        let vault = self.vault.clone();
-        let note_rel = path.clone();
-        let (note, fmt, dest) = (path, format, out.clone());
-        let done = if fmt == "pdf" {
-            export_pdf(&vault, &note, &dest).await?
-        } else {
-            tokio::task::spawn_blocking(move || {
-                hq_suite_adapter::author::export_note(&vault, &note, &fmt, &dest)
-            })
-            .await??
-        };
-        let rel = out
-            .strip_prefix(&self.vault)
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let mut entry = hq_tool_api::files::file_entry(&self.vault, &rel);
-        entry["note"] = json!(note_rel);
-        entry["fidelity"] = json!(done.fidelity);
-        Ok(json!({
-            "files": [entry],
-            "web_path": rel,
-            "fidelity": done.fidelity,
-        }))
+        export_to_exports(&self.vault, &path, &format).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_kind_offers_its_own_formats() {
+        assert_eq!(export_formats("sheet"), ["xlsx", "csv", "pdf"]);
+        assert_eq!(export_formats("doc"), ["docx", "pdf", "md"]);
+        assert_eq!(export_formats("slides"), ["pptx", "pdf"]);
+        assert!(export_formats("drive-item").is_empty());
+    }
 
     fn author_tools(vault: &std::path::Path) -> (Box<dyn HqTool>, Box<dyn HqTool>) {
         let mut t = create_author_tools(vault.to_path_buf());

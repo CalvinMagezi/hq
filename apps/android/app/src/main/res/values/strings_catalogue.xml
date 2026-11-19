@@ -1921,6 +1921,15 @@
     <string name="chat_made_open">Open</string>
     <string name="chat_file_open">Open</string>
     <string name="chat_file_download">Download</string>
+    <string name="chat_file_export">Export</string>
+    <string name="chat_file_exporting">Making the file</string>
+    <string name="chat_file_export_failed">HQ could not make that file just now</string>
+    <string name="export_format_xlsx">Excel (.xlsx)</string>
+    <string name="export_format_csv">CSV</string>
+    <string name="export_format_pdf">PDF</string>
+    <string name="export_format_docx">Word (.docx)</string>
+    <string name="export_format_pptx">PowerPoint (.pptx)</string>
+    <string name="export_format_md">Markdown note</string>
     <string name="chat_file_kind_sheet">Spreadsheet</string>
     <string name="chat_file_kind_doc">Document</string>
     <string name="chat_file_kind_slides">Slides</string>

@@ -25,6 +25,8 @@ pub(crate) fn routes() -> Router<Arc<WsState>> {
     Router::new()
         .route("/api/suite/file", get(file_handler))
         .route("/api/suite/preview", get(preview_handler))
+        .route("/api/suite/export", post(export_handler))
+        .route("/api/suite/export-formats", get(export_formats_handler))
         .route("/api/suite/shrink", post(shrink_handler))
         .route("/api/suite/confirm", post(confirm_handler))
         .route("/api/suite/offload", post(offload_handler))
@@ -124,6 +126,113 @@ pub(crate) async fn file_handler(
     let vault = state.vault_path.clone();
     let status = blocking(move || hq_suite_adapter::api::status(&vault, &q.path)).await?;
     Ok(Json(status))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ExportBody {
+    path: String,
+    format: String,
+}
+
+/// The formats an Export sheet offers for a note, by the note's own kind.
+pub(crate) async fn export_formats_handler(
+    State(state): State<Arc<WsState>>,
+    Query(q): Query<PathQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    if !state.path_allowed(&q.path) {
+        return Err(ApiError::not_found());
+    }
+    let p = hq_suite_adapter::preview::preview(&state.vault_path, &q.path)
+        .await
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let formats = if p.suite {
+        hq_tools_office::author::export_formats(&p.kind)
+    } else {
+        &[]
+    };
+    Ok(Json(
+        serde_json::json!({ "kind": p.kind, "formats": formats }),
+    ))
+}
+
+/// Renders a note as a file under `Exports/`, with the same code the agent's `office_export` runs.
+pub(crate) async fn export_handler(
+    State(state): State<Arc<WsState>>,
+    Json(b): Json<ExportBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    if !state.path_allowed(&b.path) || !b.path.ends_with(".md") {
+        return Err(ApiError::not_found());
+    }
+    let p = hq_suite_adapter::preview::preview(&state.vault_path, &b.path)
+        .await
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    if b.format == "md" {
+        return Ok(Json(serde_json::json!({
+            "files": [hq_tools::deliver::file_entry(&state.vault_path, &b.path)],
+            "web_path": b.path,
+            "fidelity": "The note as it is written, with its blocks.",
+        })));
+    }
+    if !hq_tools_office::author::export_formats(&p.kind).contains(&b.format.as_str()) {
+        return Err(ApiError::bad_request(format!(
+            "a {} cannot be exported as {}",
+            p.kind, b.format
+        )));
+    }
+    let out = hq_tools_office::author::export_to_exports(&state.vault_path, &b.path, &b.format)
+        .await
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    Ok(Json(out))
+}
+
+/// A note with `sheet` blocks exports as the suite's own workbook (real formulas, typed columns),
+/// the same bytes the agent's `office_export` makes, and says in `X-Export-Note` what was kept.
+pub(crate) fn sheet_export_response(
+    abs: &std::path::Path,
+    format: hq_export::Format,
+) -> Option<axum::response::Response> {
+    let text = std::fs::read_to_string(abs).ok()?;
+    let (ext, mime) = match format {
+        hq_export::Format::Csv => ("csv", "text/csv"),
+        _ => (
+            "xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+    };
+    let made = hq_suite_adapter::author::sheet_bytes(&text, ext)?;
+    let (bytes, kept) = match made {
+        Ok(ok) => ok,
+        Err(e) => return Some(ApiError::bad_request(e.to_string()).into_response()),
+    };
+    let stem = abs
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "sheet".into());
+    let ascii: String = stem
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let disposition = format!("attachment; filename=\"{ascii}.{ext}\"");
+    let mut res = (
+        axum::http::StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, mime.to_string()),
+            (axum::http::header::CONTENT_DISPOSITION, disposition),
+            (axum::http::header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        axum::body::Body::from(bytes),
+    )
+        .into_response();
+    if let Ok(v) = axum::http::HeaderValue::from_str(&kept) {
+        res.headers_mut().insert("x-export-note", v);
+    }
+    Some(res)
 }
 
 /// One record view of a note or an office file, for every app to draw (content, not layout).

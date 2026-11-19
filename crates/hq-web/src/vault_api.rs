@@ -553,6 +553,12 @@ async fn note_export_response(
     let Ok(_slot) = EXPORT_SLOTS.acquire().await else {
         return ApiError::internal("export unavailable").into_response();
     };
+    #[cfg(feature = "suite")]
+    if matches!(format, hq_export::Format::Xlsx | hq_export::Format::Csv)
+        && let Some(res) = crate::suite_api::sheet_export_response(&abs, format)
+    {
+        return res;
+    }
     let done =
         match hq_export::export_note(&state.vault_path, &abs, format, brand.as_ref(), &languages)
             .await

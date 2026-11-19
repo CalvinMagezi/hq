@@ -40,7 +40,7 @@ data class Offer(val kind: String, val line: String, val reply: String, val send
 }
 
 /** A file a reply made, as the server saved it: [path] is vault-relative and was checked there. */
-data class ReplyFile(val name: String, val path: String, val mime: String, val size: Long) {
+data class ReplyFile(val name: String, val path: String, val mime: String, val size: Long, val note: String? = null, val fidelity: String? = null) {
     companion object {
         /** The entries that name a plain vault-relative path; anything else is dropped. */
         fun listFrom(a: JSONArray?): List<ReplyFile> {
@@ -50,7 +50,7 @@ data class ReplyFile(val name: String, val path: String, val mime: String, val s
                 val path = o.optString("path", "")
                 val name = o.optString("name", "").ifBlank { path.substringAfterLast('/') }
                 if (path.isBlank() || path.startsWith("/") || path.contains("..") || name.isBlank()) null
-                else ReplyFile(name, path, o.optString("mime", ""), o.optLong("size", 0))
+                else ReplyFile(name, path, o.optString("mime", ""), o.optLong("size", 0), o.optString("note", "").ifBlank { null }?.takeIf { !it.startsWith("/") && !it.contains("..") }, o.optString("fidelity", "").ifBlank { null })
             }
         }
     }

@@ -24,6 +24,7 @@ class BlockActions(
     val onOpenTasks: () -> Unit = {},
     val onCopied: () -> Unit = {},
     val onOpenFile: (Attachment) -> Unit = {},
+    val onExportFile: (Attachment, String) -> Unit = { _, _ -> },
     val chipState: (String) -> ChipState = { ChipState.Ready },
 )
 
