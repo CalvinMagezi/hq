@@ -1,3 +1,10 @@
+---
+audience: start
+order: 50
+summary: "Install HQ on Windows: the full edition with WSL2, or HQ Lite."
+updated: 2026-11-19
+---
+
 # HQ on Windows
 
 There are two ways to run HQ on Windows. Pick by what your computer allows.

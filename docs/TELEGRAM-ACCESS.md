@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 100
+summary: "Choose who can talk to HQ on Telegram, as owner or guest."
+updated: 2026-11-19
+---
+
 # Telegram owner and guest access
 
 HQ's Telegram relay supports one **owner** and optional **guests** (trusted contacts). Guests talk to the same assistant as the owner, with tool and command limits.

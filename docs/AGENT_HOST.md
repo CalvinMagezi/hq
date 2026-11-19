@@ -1,3 +1,10 @@
+---
+audience: build
+order: 20
+summary: "The built-in host that runs coding agents in sandboxed panes."
+updated: 2026-11-19
+---
+
 # Agent host
 
 `hq host` is HQ's built-in host for long-lived agents: coding agents, and the

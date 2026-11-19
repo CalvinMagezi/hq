@@ -1,3 +1,10 @@
+---
+audience: archive
+order: 910
+summary: "Retired: the Hermes harness and the hq-bus fabric."
+updated: 2026-11-19
+---
+
 # Hermes harness (agent-hq) — Retired 2026-08-10
 
 **Status: fully removed from the codebase and the machine.** This is a

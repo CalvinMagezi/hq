@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 90
+summary: "Connect HQ to claude.ai so Claude can read and write your Vault."
+updated: 2026-11-19
+---
+
 # Connecting HQ to claude.ai
 
 HQ can be added to claude.ai (web, Desktop and mobile) and to Claude Code as a custom connector.

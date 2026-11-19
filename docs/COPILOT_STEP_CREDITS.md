@@ -1,3 +1,10 @@
+---
+audience: build
+order: 100
+summary: "Copilot credits spent per step."
+updated: 2026-11-19
+---
+
 # Copilot credits per step
 
 The web chat shows an approximate Copilot credit figure for each agent step and a total in the reply footer.

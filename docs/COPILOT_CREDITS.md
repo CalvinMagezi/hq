@@ -1,3 +1,10 @@
+---
+audience: build
+order: 90
+summary: "The Copilot credit meter."
+updated: 2026-11-19
+---
+
 # Copilot credit meter
 
 HQ shows how many GitHub Copilot AI credits are left, how fast they are being spent, and when they will run out. It only appears when an enabled backend talks to Copilot: kind `github-copilot-api`, or an `openai-compatible` backend whose endpoint host contains `githubcopilot.com` (`hq_core::config::copilot_active`).

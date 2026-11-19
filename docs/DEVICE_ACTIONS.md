@@ -1,3 +1,10 @@
+---
+audience: build
+order: 40
+summary: "Asking the owner's phone to do something, and how that is approved."
+updated: 2026-11-19
+---
+
 # Device actions: asking the owner's phone to do something
 
 A device action is a request HQ sends to the owner's phone and waits for: put an event on the

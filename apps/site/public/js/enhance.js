@@ -61,6 +61,30 @@
     });
   }
 
+  // Filters the docs list as you type. Without this script the full list stays visible.
+  function setupDocFilter() {
+    var form = document.querySelector('[data-doc-filter]');
+    if (!form) return;
+    var input = form.querySelector('input');
+    var count = document.getElementById('doc-count');
+    var items = Array.prototype.slice.call(document.querySelectorAll('[data-doc-text]'));
+    var groups = Array.prototype.slice.call(document.querySelectorAll('[data-doc-group]'));
+    form.hidden = false;
+    form.addEventListener('submit', function (e) { e.preventDefault(); });
+    input.addEventListener('input', function () {
+      var words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+      var shown = 0;
+      items.forEach(function (li) {
+        var text = li.getAttribute('data-doc-text');
+        var hit = words.every(function (w) { return text.indexOf(w) !== -1; });
+        li.hidden = !hit;
+        if (hit) shown += 1;
+      });
+      groups.forEach(function (g) { g.hidden = !g.querySelector('[data-doc-text]:not([hidden])'); });
+      count.textContent = words.length ? shown + (shown === 1 ? ' page matches' : ' pages match') : '';
+    });
+  }
+
   // A tap ends the opening screen early. It also hides itself when its animation finishes.
   function setupIntro() {
     var intro = document.querySelector('.intro');
@@ -196,6 +220,7 @@
   setupAnimations();
   setupMarqueePause();
   setupIntro();
+  setupDocFilter();
   setupTabs();
   setupFocusSwitch();
   setupSpotlight();

@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 140
+summary: "Charts that appear inside a chat reply."
+updated: 2026-11-19
+---
+
 # Chart blocks in chat
 
 The web app draws a chart when an assistant reply contains a fenced code block

@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 150
+summary: "How HQ searches the web and reads pages, and what it sends out."
+updated: 2026-11-19
+---
+
 # Web search and page reading
 
 `web_search` and `web_fetch` work on a fresh install with no key, no Docker and no

@@ -1,3 +1,10 @@
+---
+audience: build
+order: 80
+summary: "The places where HQ lets middleware change a turn."
+updated: 2026-11-19
+---
+
 # Middleware seams (Cortex-style adoption)
 
 This document maps **natural handler boundaries** in Agent-HQ where composable middleware (`Chain`, retry/timeout policy, typed errors, auth gates) can wrap existing logic without rewriting domain code.

@@ -74,8 +74,13 @@ while IFS= read -r f; do
         scripts/*) rust=true ;;
 
         # Two Rust tests read these files (hq-core config tests, hq-desktop shell_config).
-        README.md | docs/DESKTOP.md) rust=true ;;
-        # Prose nobody builds: docs, and Markdown or licence files at the repository root.
+        README.md) rust=true ;;
+        # The site renders docs/*.md and serves docs/media, and one Rust test reads DESKTOP.md.
+        docs/media/*) site=true ;;
+        docs/DESKTOP.md) rust=true site=true ;;
+        # Prose nobody builds: nested docs (plans, security), and Markdown or licence files at the root.
+        docs/*/*) ;;
+        docs/*.md) site=true ;;
         docs/*) ;;
         changelog.d/*) ;;
         */*) unknown=$f ;;

@@ -1,3 +1,10 @@
+---
+audience: server
+order: 60
+summary: "Ask your HQ a question from another AI client."
+updated: 2026-11-19
+---
+
 # Asking HQ from an external client
 
 `hq_ask` lets an MCP client (a Claude Code session on a laptop, another agent) put a question to

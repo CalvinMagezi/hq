@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 130
+summary: "How HQ looks up contacts on your phone."
+updated: 2026-11-19
+---
+
 # Looking up contacts on the phone
 
 Contacts are the second domain on the shared device-action platform (`DEVICE_ACTIONS.md`). This

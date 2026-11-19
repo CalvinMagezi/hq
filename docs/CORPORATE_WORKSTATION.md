@@ -1,3 +1,10 @@
+---
+audience: start
+order: 70
+summary: "Use HQ on a work computer that limits what you can install."
+updated: 2026-11-19
+---
+
 # HQ on a work computer
 
 For a computer your employer manages: VS Code is there, perhaps with a company GitHub Copilot seat,

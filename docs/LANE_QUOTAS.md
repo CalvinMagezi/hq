@@ -1,3 +1,10 @@
+---
+audience: build
+order: 70
+summary: "Reading what is left of each coding agent lane's allowance."
+updated: 2026-11-19
+---
+
 # Lane quotas
 
 What is left of each coding-agent lane's allowance (Claude, Codex, Copilot, agy, Cursor, and

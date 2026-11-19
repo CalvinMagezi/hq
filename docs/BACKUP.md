@@ -1,3 +1,10 @@
+---
+audience: owner
+order: 10
+summary: "Save everything HQ holds in one encrypted file and bring it back on another device."
+updated: 2026-11-19
+---
+
 # Backup and restore
 
 `hq backup` writes one encrypted file holding your vault's notes, a consistent copy of its

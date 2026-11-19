@@ -1176,6 +1176,164 @@ pre {
   }
 }
 
+/* Docs pages: the repo's markdown, rendered. */
+.doc-wrap {
+  max-width: 1100px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-6);
+}
+.crumbs a {
+  color: var(--ink-muted);
+}
+.doc-title {
+  font-size: 44px;
+  line-height: 50px;
+  letter-spacing: -0.01em;
+}
+.doc-meta {
+  color: var(--ink-muted);
+}
+.doc-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 48px;
+  align-items: start;
+  margin-top: var(--space-4);
+}
+.doc-toc {
+  position: sticky;
+  top: 96px;
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+}
+.doc-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  font-size: 17px;
+  line-height: 28px;
+}
+.doc-body h2 {
+  margin-top: var(--space-5);
+  font-size: 30px;
+  line-height: 36px;
+}
+.doc-body h3 {
+  margin-top: var(--space-4);
+  font-size: 22px;
+  line-height: 28px;
+}
+.doc-body h4 {
+  font-size: 18px;
+}
+.doc-body :is(ul, ol) {
+  padding-left: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.doc-body a {
+  color: var(--text-blue);
+}
+.doc-body code {
+  font-size: 0.92em;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--glass-bg-light);
+  overflow-wrap: anywhere;
+}
+.doc-body pre {
+  overflow-x: auto;
+  padding: 16px 20px;
+  border-radius: var(--radius-md);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  line-height: 22px;
+}
+.doc-body pre code {
+  padding: 0;
+  background: none;
+  overflow-wrap: normal;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+.doc-body table {
+  border-collapse: collapse;
+  font-size: 15px;
+  line-height: 22px;
+}
+.doc-body :is(th, td) {
+  border: 1px solid var(--hairline);
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+.doc-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+}
+.doc-body blockquote {
+  margin: 0;
+  padding-left: 20px;
+  border-left: 3px solid var(--brand-blue);
+  color: var(--ink-muted);
+}
+.doc-search {
+  max-width: 560px;
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.doc-search[hidden] {
+  display: none;
+}
+.doc-search input {
+  font: inherit;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-light);
+  color: var(--ink);
+}
+.doc-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+}
+.doc-list [hidden],
+.doc-group[hidden] {
+  display: none;
+}
+@media (max-width: 960px) {
+  .doc-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .doc-toc {
+    position: static;
+    order: -1;
+  }
+}
+@media (max-width: 640px) {
+  .doc-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .doc-title {
+    font-size: 32px;
+    line-height: 38px;
+  }
+}
+
 /* Chips used for in-page navigation */
 .toc {
   display: flex;

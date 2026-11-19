@@ -1,3 +1,10 @@
+---
+audience: start
+order: 30
+summary: "Add a laptop or server to your HQ so it can run coding helpers for you."
+updated: 2026-11-19
+---
+
 # Joining a machine to your HQ
 
 A machine that should run coding agents for your HQ (a laptop, a workstation, a WSL2 install on

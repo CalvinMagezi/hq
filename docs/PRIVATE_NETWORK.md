@@ -1,3 +1,10 @@
+---
+audience: server
+order: 40
+summary: "Connect your machines on a private WireGuard network with hq net."
+updated: 2026-11-19
+---
+
 # A private network for HQ with `hq net`
 
 `hq net` sets up a WireGuard network between your HQ server and your own devices, so the web UI,
