@@ -325,6 +325,7 @@ impl SessionBuilder {
                     .and_then(hq_tool_api::family_guest::FamilyGuestContext::from_identity),
             ),
         );
+        hq_tools::a2a::install_delegation();
         tools.extend(hq_tools::host_overview::create_host_tools_with_extras(
             db.clone(),
         ));
