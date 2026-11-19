@@ -1,5 +1,6 @@
 use super::category::purpose_for;
 use super::*;
+use crate::agent_host::prompt_note;
 use hq_core::config::AgentHostConfig;
 
 pub(super) const MODE_DRIVE: &str = "drive";

@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent_host::prompt_note;
 use crate::agent_host::scripted::ScriptedHost;
 use crate::registry::HqTool;
 use hq_core::config::AgentHostConfig;

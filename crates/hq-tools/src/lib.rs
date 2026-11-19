@@ -55,6 +55,7 @@ pub mod skill_manage_tool;
 pub mod skill_model;
 pub mod skills;
 pub mod slash_commands;
+pub mod spawned_marker;
 pub mod spill;
 pub mod system_info;
 pub mod task_classifier;
