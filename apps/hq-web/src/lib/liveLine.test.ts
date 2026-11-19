@@ -33,5 +33,6 @@ describe('the live line', () => {
     expect(idleLine([], true).key).toBe('chat_live_thinking')
     expect(idleLine([step('web_search', 'done')], false)).toEqual({ key: 'chat_live_next_step', params: { n: '1' } })
     expect(idleLine([step('spawn_subagents', 'done')], false).key).toBe('chat_live_after_helpers')
+    expect(idleLine([step('spawn_subagents', 'done')], false, 2)).toEqual({ plural: 'chat_live_helpers_working', count: 2 })
   })
 })

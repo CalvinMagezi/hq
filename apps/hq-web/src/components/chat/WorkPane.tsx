@@ -1,17 +1,18 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { ExternalLink, ListChecks, MessageSquare, Maximize2, ArrowLeft, Pencil, Pin, PinOff, X } from 'lucide-react'
+import { ExternalLink, FileText, ListChecks, MessageSquare, Maximize2, ArrowLeft, Pencil, Pin, PinOff, X } from 'lucide-react'
 import { t, tn } from '~/strings'
 import type { ToolStep } from '~/store/threadStore'
 import { formatCredits, totalCredits, type StepCredit } from '~/lib/stepCredits'
 import { sourcesOf, type MadeNote, type ReplySource } from '~/lib/replySources'
 import type { ReplyFile } from '~/lib/replyFiles'
-import type { ChatHelperRun } from '~/lib/subagentHelpers'
+import { helperStatusLabel, type ChatHelperRun, type ChatHelperStatus } from '~/lib/subagentHelpers'
 import { secondsRunning } from '~/lib/liveLine'
 import { stripFrontmatter } from '~/lib/noteConflict'
 import { hasViewer, readHqmd } from '~/lib/hqmd'
-import { getNote, togglePinNote } from '~/lib/vaultApi'
+import { extractHtmlDocument, isHtmlPath } from '~/lib/htmlDashboard'
+import { downloadVaultFile, getNote, togglePinNote } from '~/lib/vaultApi'
 import type { PaneState, PaneTab } from '~/lib/workPane'
 import { MarkdownViewer } from '../MarkdownViewer'
 import { NoteBody } from '../suite/NoteBody'
@@ -100,7 +101,7 @@ export function WorkPane({ pane, onTab, onClose, steps, startedAt, credits, runn
         )}
         {pane.tab === 'helpers' && (
           <>
-            {chatHelpers.length > 0 && <ChatHelpersSection helpers={chatHelpers} />}
+            {chatHelpers.length > 0 && <ChatHelpersSection helpers={chatHelpers} onOpenResult={onSelectNote} />}
             {helpers}
           </>
         )}
@@ -175,29 +176,74 @@ function ResultTab({
   )
 }
 
-function ChatHelpersSection({ helpers }: { helpers: ChatHelperRun[] }) {
+const HELPER_STATE_CLASS: Record<ChatHelperStatus, string> = {
+  working: 'a-state working',
+  done: 'a-state ready',
+  needs_look: 'a-state needs',
+  failed: 'a-state needs',
+}
+
+function canOpenInPane(path: string): boolean {
+  return /\.md$/i.test(path) || isHtmlPath(path)
+}
+
+function HelperResultChip({ link, onOpenResult }: { link: string; onOpenResult?: (path: string) => void }) {
+  const fileName = link.split('/').filter(Boolean).pop() ?? link
+  const label = t('chat_helper_open_result', { name: fileName })
+  if (canOpenInPane(link) && onOpenResult) {
+    return (
+      <button type="button" className="a-chip" aria-label={label} onClick={() => onOpenResult(link)}>
+        <FileText className="a-ic xs" aria-hidden="true" />
+        {fileName}
+      </button>
+    )
+  }
+  if (canOpenInPane(link)) {
+    return (
+      <Link to="/notes/$" params={{ _splat: link }} className="a-chip" aria-label={label}>
+        <FileText className="a-ic xs" aria-hidden="true" />
+        {fileName}
+      </Link>
+    )
+  }
+  return (
+    <button type="button" className="a-chip" aria-label={label} onClick={() => void downloadVaultFile(link, fileName)}>
+      <FileText className="a-ic xs" aria-hidden="true" />
+      {fileName}
+    </button>
+  )
+}
+
+function ChatHelpersSection({ helpers, onOpenResult }: { helpers: ChatHelperRun[]; onOpenResult?: (path: string) => void }) {
   return (
     <div className="hq-chat-side">
       <p className="a-grp">
         {t('chat_helpers_in_chat')} <em className="a-count">{helpers.length}</em>
       </p>
       <ul className="hq-ctx-list">
-        {helpers.map((h) => (
-          <li key={h.id} className="hq-made hq-made-col">
-            <div className="hq-made-row">
-              <span className="hq-made-main">
-                <b>{h.name}</b>
-                {h.goal && <span className="a-body-sm a-muted">{h.goal}</span>}
-                {h.background && h.status === 'done' && (
-                  <span className="a-cap a-muted">{t('chat_helper_background_note')}</span>
-                )}
-              </span>
-              <span className={h.status === 'working' ? 'a-state work' : 'a-state ok'}>
-                {t(h.status === 'working' ? 'chat_helper_working' : 'chat_helper_done')}
-              </span>
-            </div>
-          </li>
-        ))}
+        {helpers.map((h) => {
+          const detail = h.blocker ?? h.error
+          return (
+            <li key={h.id} className="hq-made hq-made-col">
+              <div className="hq-made-row">
+                <span className="hq-made-main">
+                  <b>{h.name}</b>
+                  {h.goal && <span className="a-body-sm a-muted">{h.goal}</span>}
+                  {detail && <span className="a-cap a-muted">{detail}</span>}
+                  {h.background && h.status === 'done' && !h.resultLink && (
+                    <span className="a-cap a-muted">{t('chat_helper_background_note')}</span>
+                  )}
+                </span>
+                <span className={HELPER_STATE_CLASS[h.status]}>{helperStatusLabel(h.status)}</span>
+              </div>
+              {h.resultLink && (
+                <div className="a-chips">
+                  <HelperResultChip link={h.resultLink} onOpenResult={onOpenResult} />
+                </div>
+              )}
+            </li>
+          )
+        })}
       </ul>
     </div>
   )
@@ -254,7 +300,7 @@ function NoteResult({ path, onAsk, onTask }: { path: string; onAsk: (path: strin
 
 /** The note as the pane shows it: a suite viewer for a sheet, slides or dashboard, else its text. */
 function ResultBody({ content, path, hash, onSaved }: { content: string; path: string; hash?: string; onSaved: () => void }) {
-  const suite = hasViewer(readHqmd(content))
+  const suite = hasViewer(readHqmd(content)) || extractHtmlDocument(content, path) !== null
   return suite ? <NoteBody content={content} activePath={path} hash={hash} onSaved={onSaved} /> : <MarkdownViewer content={stripFrontmatter(content)} bare />
 }
 

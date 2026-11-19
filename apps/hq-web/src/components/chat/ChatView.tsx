@@ -8,7 +8,7 @@ import { useWS } from '~/context/WebSocketContext'
 import { toastUndo, toastAlert, toastNotice, useToasts } from '~/lib/toast'
 import { makeTaskDraft, saveReplyToVault } from '~/lib/saveReply'
 import { failureLine } from '~/lib/version'
-import { t } from '~/strings'
+import { t, tn } from '~/strings'
 import { sharedConnectionNow, useSharedConnection } from '~/lib/connection'
 import { isSharedComputer } from '~/lib/sharedComputer'
 import { archiveChatKey } from '~/lib/failureWords'
@@ -37,7 +37,8 @@ import { ChatTitle } from './ChatTitle'
 import { WorkPane } from './WorkPane'
 import { useWorkPane, usePane } from '~/store/workPaneStore'
 import { chatMadeItems, madeNotes, type MadeNote, type ReplySource } from '~/lib/replySources'
-import { extractHelperRuns } from '~/lib/subagentHelpers'
+import { countRunningHelpers, resolveChatHelpers } from '~/lib/subagentHelpers'
+import { useThreadHelperRuns } from '~/store/helperRunsStore'
 import { readAutoOpened, shouldAutoOpen, writeAutoOpened } from '~/lib/workPane'
 import { readPaneMode } from '~/lib/paneMode'
 import { useQuery } from '@tanstack/react-query'
@@ -415,8 +416,10 @@ export function ChatView({ active, threadId }: Props) {
     ...messages.flatMap((m) => (m.role === 'assistant' ? (m.toolSteps ?? []) : [])),
     ...(liveTurn?.toolSteps ?? []),
   ]
+  const { runs: helperRuns } = useThreadHelperRuns(activeThreadId, connected)
   const madeInChat = chatMadeItems(messages, liveTurn?.toolSteps ?? [])
-  const chatHelpers = extractHelperRuns(allAssistantSteps)
+  const chatHelpers = resolveChatHelpers(helperRuns, allAssistantSteps)
+  const runningHelpersCount = countRunningHelpers(chatHelpers)
 
   /** The last saved message of mine goes back in the box to be changed and sent again. */
   const editLast = () => {
@@ -532,6 +535,13 @@ export function ChatView({ active, threadId }: Props) {
         onOpenSource={openSource}
         onOpenMade={openMade}
       />
+
+      {!liveTurn && runningHelpersCount > 0 && (
+        <p className="hq-live" role="status">
+          <span className="a-spin" aria-hidden="true" />
+          <span className="hq-live-text">{tn('chat_live_helpers_working', runningHelpersCount)}</span>
+        </p>
+      )}
 
       <ChatApprovals threadId={activeThreadId} waiting={waitingForOwner} onKeepGoing={() => void handleSend(t('chat_keep_going'))} otherwise={slotOffer} />
 

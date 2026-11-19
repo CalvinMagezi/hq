@@ -10,6 +10,8 @@ import { useThreadStore } from '~/store/threadStore'
 import { useSharedConnection } from '~/lib/connection'
 import { useEdition } from '~/lib/edition'
 import { globalSessionsApi } from '~/lib/sessionsApi'
+import { searchHelperRuns } from '~/lib/helperRunsApi'
+import { fromHelperRun, helperStatusLabel } from '~/lib/subagentHelpers'
 import { STATUS_LABELS } from '~/lib/tasksApi'
 import { agentName, computerName } from '~/lib/names'
 import { sessionTitle, statusInfo } from '~/lib/workbench'
@@ -21,6 +23,7 @@ import {
   ASK_MAX,
   LITE_SCOPES,
   SCOPES,
+  SEARCH_DEBOUNCE_MS,
   foundParts,
   folderLabel,
   folderTrail,
@@ -221,6 +224,19 @@ function SearchPanel({ start, close }: { start: OpenDetail; close: () => void })
   const wantsHelpers = !lite && (scope === 'all' || scope === 'helpers')
   const notesFailed = typed && wantsNotes && notes.failed
 
+  const [debouncedQuery, setDebouncedQuery] = useState(query)
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedQuery(query), SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(id)
+  }, [query])
+
+  const helperRunsQuery = useQuery({
+    queryKey: ['search', 'helper-runs', debouncedQuery.trim()],
+    queryFn: () => searchHelperRuns(debouncedQuery.trim()).catch(() => ({ runs: [], count: 0 })),
+    enabled: !lite && wantsHelpers && debouncedQuery.trim().length > 0,
+    staleTime: 10_000,
+  })
+
   const taskHits = useMemo(() => (typed && wantsTasks ? matchTasks(tasks, query) : []), [typed, wantsTasks, tasks, query])
   const helperHits = useMemo(
     () => (typed && wantsHelpers ? matchHelpers(helpersQuery.data ?? [], query) : []),
@@ -336,18 +352,38 @@ function SearchPanel({ start, close }: { start: OpenDetail; close: () => void })
         open: () => void navigate({ to: '/chat/$id', params: { id: x.threadId } }),
       })),
       do: doRows,
-      helpers: helperHits.map((s) => {
-        const info = statusInfo(s)
-        return {
-          id: `helper:${s.id}`,
-          title: sessionTitle(s),
-          sub: t('search_helper_line', { agent: agentName(s.harness), computer: computerName(s.host), state: info.word }),
-          pill: info.warn || info.agent === 'blocked' ? info.word : undefined,
-          open: () => void navigate({ to: '/helpers/$id', params: { id: s.id } }),
-        }
-      }),
+      helpers: [
+        ...(typed && wantsHelpers ? (helperRunsQuery.data?.runs ?? []) : []).map((run) => {
+          const mapped = fromHelperRun(run)
+          const stateWord = helperStatusLabel(mapped.status)
+          return {
+            id: `helper-run:${run.id}`,
+            title: mapped.name,
+            sub: [stateWord, mapped.goal].filter(Boolean).join(' · '),
+            pill: mapped.status === 'needs_look' || mapped.status === 'failed' ? stateWord : undefined,
+            open: () => {
+              if (run.thread_id) {
+                useWorkPane.getState().showTab(run.thread_id, 'helpers')
+                void navigate({ to: '/chat/$id', params: { id: run.thread_id } })
+              } else {
+                void navigate({ to: '/chat', search: {} })
+              }
+            },
+          }
+        }),
+        ...helperHits.map((s) => {
+          const info = statusInfo(s)
+          return {
+            id: `helper:${s.id}`,
+            title: sessionTitle(s),
+            sub: t('search_helper_line', { agent: agentName(s.harness), computer: computerName(s.host), state: info.word }),
+            pill: info.warn || info.agent === 'blocked' ? info.word : undefined,
+            open: () => void navigate({ to: '/helpers/$id', params: { id: s.id } }),
+          }
+        }),
+      ],
     }),
-    [noteHits, folderHits, taskHits, chatHits, helperHits, doRows, navigate, inChat, activeThreadId],
+    [noteHits, folderHits, taskHits, chatHits, helperHits, helperRunsQuery.data, typed, wantsHelpers, doRows, navigate, inChat, activeThreadId],
   )
 
   const order: Kind[] = scope === 'all' ? ['notes', 'tasks', 'chats', 'helpers', 'do'] : [scope]

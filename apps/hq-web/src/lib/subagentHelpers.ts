@@ -1,15 +1,20 @@
-// Sub-agent helper runs extracted from chat tool steps (`spawn_subagents`, `agent_delegate`).
-// Reflects only what the server actually sent in tool_start / tool_end; never invents missing
-// background run status or result links.
+// Sub-agent helper runs: prefers the server's run registry (`helperRunsStore`), falling back
+// to chat tool steps (`spawn_subagents`, `agent_delegate`) when the endpoint is unavailable.
 
 import { t } from '~/strings'
+import type { HelperRun, HelperRunState } from './helperRunsApi'
+
+export type ChatHelperStatus = 'working' | 'done' | 'needs_look' | 'failed'
 
 export interface ChatHelperRun {
   id: string
   name: string
   goal: string
-  status: 'working' | 'done'
+  status: ChatHelperStatus
   background: boolean
+  resultLink?: string | null
+  error?: string | null
+  blocker?: string | null
 }
 
 export interface HelperStepLike {
@@ -91,6 +96,66 @@ export function extractHelperRuns(steps: HelperStepLike[]): ChatHelperRun[] {
     }
   })
   return out
+}
+
+/** Maps a server run state to the four plain-word statuses. */
+export function helperStateToStatus(state: HelperRunState): ChatHelperStatus {
+  switch (state) {
+    case 'queued':
+    case 'running':
+      return 'working'
+    case 'stalled':
+    case 'partial':
+    case 'blocked':
+      return 'needs_look'
+    case 'done':
+      return 'done'
+    case 'failed':
+    case 'timed_out':
+    case 'cancelled':
+    case 'interrupted':
+    case 'rejected':
+      return 'failed'
+  }
+}
+
+const STATUS_KEY: Record<ChatHelperStatus, 'chat_helper_working' | 'chat_helper_done' | 'chat_helper_needs_look' | 'chat_helper_failed'> = {
+  working: 'chat_helper_working',
+  done: 'chat_helper_done',
+  needs_look: 'chat_helper_needs_look',
+  failed: 'chat_helper_failed',
+}
+
+/** Plain-word label for a helper run's status. */
+export function helperStatusLabel(status: ChatHelperStatus): string {
+  return t(STATUS_KEY[status])
+}
+
+/** Converts a server `HelperRun` row into the UI's `ChatHelperRun`. */
+export function fromHelperRun(run: HelperRun): ChatHelperRun {
+  const name = cleanText(run.role) ?? cleanText(run.task) ?? t('chat_helper_default_name')
+  const rawGoal = cleanText(run.goal)
+  return {
+    id: run.id,
+    name,
+    goal: rawGoal ? clip(rawGoal, GOAL_MAX) : '',
+    status: helperStateToStatus(run.state),
+    background: run.detached,
+    resultLink: run.result_link,
+    error: cleanText(run.error),
+    blocker: cleanText(run.blocker),
+  }
+}
+
+/** Single source of helper runs for a chat: real registry runs when present, else tool-step fallback. */
+export function resolveChatHelpers(realRuns: HelperRun[], steps: HelperStepLike[]): ChatHelperRun[] {
+  if (realRuns.length > 0) return realRuns.map(fromHelperRun)
+  return extractHelperRuns(steps)
+}
+
+/** How many helpers are currently working (queued or running). */
+export function countRunningHelpers(helpers: ChatHelperRun[]): number {
+  return helpers.filter((h) => h.status === 'working').length
 }
 
 /** Formats a summary string for 2+ helpers in a single `spawn_subagents` call. */

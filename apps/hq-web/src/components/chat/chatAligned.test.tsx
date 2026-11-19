@@ -166,6 +166,8 @@ describe('WorkPane Result and Helpers tabs', () => {
         chatHelpers: [
           { id: 'h1', name: 'explorer', goal: 'Check Q3 revenue', status: 'working', background: false },
           { id: 'h2', name: 'coder', goal: 'Draft HTML summary', status: 'done', background: true },
+          { id: 'h3', name: 'analyst', goal: 'Review metrics', status: 'needs_look', background: true },
+          { id: 'h4', name: 'builder', goal: 'Export report', status: 'failed', background: false, resultLink: 'Exports/2026-11/dash.html' },
         ],
         helpers: createElement('div', null, 'watched'),
       }),
@@ -195,6 +197,9 @@ describe('WorkPane Result and Helpers tabs', () => {
     expect(html).toContain('Draft HTML summary')
     expect(html).toContain('Done')
     expect(html).toContain('Sent to run in the background')
+    expect(html).toContain('Needs a look')
+    expect(html).toContain('Failed')
+    expect(html).toContain('dash.html')
   })
 
   test('inner chat step and thinking lists do not trap wheel scroll with overscroll-contain', () => {

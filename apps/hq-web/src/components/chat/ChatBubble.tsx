@@ -57,13 +57,15 @@ interface Props {
   onOpenSource?: (source: ReplySource) => void
   /** A made note's Open was pressed. */
   onOpenMade?: (note: MadeNote) => void
+  /** Helpers still working in real state. */
+  runningHelpers?: number
 }
 
 /**
  * One chat message. A streaming reply renders through this same layout
  * (thinking, tools, then text), so nothing moves when it becomes a saved message.
  */
-export function ChatBubble({ message, live = false, startedAt, onEdit, onRegenerate, onSave, onMakeTask, onStop, onOpenSource, onOpenMade }: Props) {
+export function ChatBubble({ message, live = false, startedAt, onEdit, onRegenerate, onSave, onMakeTask, onStop, onOpenSource, onOpenMade, runningHelpers }: Props) {
   const [copied, setCopied] = useState(false)
   const isUser = message.role === 'user'
   const steps = message.toolSteps ?? []
@@ -88,7 +90,7 @@ export function ChatBubble({ message, live = false, startedAt, onEdit, onRegener
       )}
       {!isUser && message.driver && <DriverLabel driver={message.driver} />}
       {!isUser && message.reasoning && <ThinkingPanel content={message.reasoning} live={live} />}
-      {!isUser && live && <LiveLine steps={steps} startedAt={startedAt} writing={message.content !== ''} thinking={!!message.reasoning} onStop={onStop} />}
+      {!isUser && live && <LiveLine steps={steps} startedAt={startedAt} writing={message.content !== ''} thinking={!!message.reasoning} runningHelpers={runningHelpers} onStop={onStop} />}
       {message.attachments && <MessageAttachments attachments={message.attachments} />}
 
       {message.content && (

@@ -1,6 +1,6 @@
 // The one live line above a streaming reply: what HQ is doing now, as a sentence, replaced by the next
 // step and never stacked. After ten seconds the line offers Stop, so a slow reply always has a way out.
-import { t, type StringKey } from '~/strings'
+import { t, type PluralKey, type StringKey } from '~/strings'
 import { stepLine, unwrap, type StepLine } from './stepWords'
 
 /** How long a reply runs before its line offers Stop. */
@@ -24,8 +24,13 @@ const HELPER_TOOLS = new Set(['spawn_subagents', 'agent_delegate', 'harness_sess
  * What the line says when no step is running: HQ is waiting on the model, which is never idle time.
  * It names the phase, the steps done so far and the helpers that have reported back.
  */
-export function idleLine(steps: StepLike[], thinking: boolean): { key: StringKey; params?: Record<string, string> } {
+export function idleLine(
+  steps: StepLike[],
+  thinking: boolean,
+  runningHelpers = 0,
+): { key: StringKey; params?: Record<string, string> } | { plural: PluralKey; count: number } {
   if (thinking) return { key: 'chat_live_thinking' }
+  if (runningHelpers > 0) return { plural: 'chat_live_helpers_working', count: runningHelpers }
   const done = steps.filter((s) => s.status === 'done')
   if (done.length === 0) return { key: 'chat_live_reading' }
   const helpers = done.filter((s) => HELPER_TOOLS.has(unwrap(s.toolName, s.inputArgs)[0])).length

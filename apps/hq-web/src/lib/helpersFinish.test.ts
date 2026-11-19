@@ -161,7 +161,7 @@ test('Start a helper asks in the spec order and says the footer promise', () => 
   expect(source).toContain('...(taskId ? { task_id: taskId } : {})')
 })
 
-test('the list takes the whole page below 1024 and the detail shows Back to Helpers', () => {
+test('the list takes the whole page below 1024 and the detail shows Back to Coding tools', () => {
   expect(src('routes', 'helpers.tsx')).toContain('showDetail={Boolean(selectedId)}')
-  expect(renderToStaticMarkup(createElement(SessionDetail, { session: make({}), onBack() {}, onChanged() {} }))).toContain('Back to Helpers')
+  expect(renderToStaticMarkup(createElement(SessionDetail, { session: make({}), onBack() {}, onChanged() {} }))).toContain('Back to Coding tools')
 })
