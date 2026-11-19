@@ -82,6 +82,9 @@ pub enum SessionEvent {
         harness: String,
         result_preview: String,
     },
+    /// How long one model call, tool call or compaction took. Emitted when the call is over, so a
+    /// surface can show where a turn's time went without timing events itself.
+    Timing(CallTiming),
     /// Session stopped because it exceeded its USD budget.
     BudgetExhausted {
         spent: f64,
@@ -98,6 +101,43 @@ pub enum SessionEvent {
         /// not what the primary was configured to run.
         is_fallback: bool,
     },
+}
+
+/// What kind of call a [`CallTiming`] measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimingKind {
+    /// One model call: from sending the request to the end of its stream, so it includes the time
+    /// the model spent writing a long tool call's arguments.
+    Model,
+    /// One tool call, measured around its own execution (never the wait for a batch).
+    Tool,
+    /// A context compaction that ran before a model call.
+    Compaction,
+}
+
+impl TimingKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Model => "model",
+            Self::Tool => "tool",
+            Self::Compaction => "compaction",
+        }
+    }
+}
+
+/// One timed call. `bytes_in` is what went in (arguments for a tool, the conversation for a
+/// model call) and `bytes_out` what came back (the result, or the text and tool arguments written).
+#[derive(Debug, Clone)]
+pub struct CallTiming {
+    pub kind: TimingKind,
+    /// The tool name, or the model id for a model call.
+    pub name: String,
+    pub call_id: Option<String>,
+    /// Wall clock, milliseconds since the Unix epoch.
+    pub started_at_ms: u64,
+    pub duration_ms: u64,
+    pub bytes_in: u64,
+    pub bytes_out: u64,
 }
 
 /// Structured result from a completed session.

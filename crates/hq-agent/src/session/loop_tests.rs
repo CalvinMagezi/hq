@@ -371,6 +371,8 @@ fn an_unloaded_matching_skill_is_suggested_once_after_the_tool_results() {
 fn event_names(events: &[SessionEvent]) -> Vec<&'static str> {
     events
         .iter()
+        // Timings are bookkeeping around the lifecycle these tests pin; one test reads them.
+        .filter(|event| !matches!(event, SessionEvent::Timing(_)))
         .map(|event| match event {
             SessionEvent::TextDelta(_) => "text_delta",
             SessionEvent::Reasoning(_) => "reasoning",
@@ -391,6 +393,7 @@ fn event_names(events: &[SessionEvent]) -> Vec<&'static str> {
             SessionEvent::BudgetExhausted { .. } => "budget_exhausted",
             SessionEvent::CostUpdate { .. } => "cost_update",
             SessionEvent::StepCredits { .. } => "step_credits",
+            SessionEvent::Timing(_) => "timing",
         })
         .collect()
 }
@@ -508,6 +511,48 @@ async fn post_turn_callback_fires_once_with_the_prompt_and_final_reply() {
     );
     drop(agent);
     assert!(rx.recv().await.is_none(), "callback fired more than once");
+}
+
+#[tokio::test]
+async fn each_model_and_tool_call_reports_its_own_timing() {
+    let provider = Arc::new(MockProvider::new(
+        vec![
+            BufferedReply::ToolCall {
+                id: "call-1".to_string(),
+                name: "contract_tool".to_string(),
+                arguments: serde_json::json!({"input": "value"}),
+            },
+            BufferedReply::Complete("continued after tool".to_string()),
+        ],
+        vec![],
+    ));
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let mut agent = session(provider, vec![Box::new(ContractTool { cancel: None })]);
+    let sink = events.clone();
+    agent.on_event(move |event| sink.lock().unwrap().push(event));
+
+    agent.prompt("use the tool").await.unwrap();
+
+    let timings: Vec<hq_core::types::CallTiming> = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::Timing(t) => Some(t.clone()),
+            _ => None,
+        })
+        .collect();
+    let kinds: Vec<_> = timings.iter().map(|t| t.kind.as_str()).collect();
+    assert_eq!(kinds, ["model", "tool", "model"]);
+    let tool = &timings[1];
+    assert_eq!(tool.name, "contract_tool");
+    assert_eq!(tool.call_id.as_deref(), Some("call-1"));
+    assert_eq!(tool.bytes_out, "tool output".len() as u64);
+    assert!(tool.bytes_in > 0 && tool.started_at_ms > 0);
+    assert!(
+        timings[0].bytes_out > 0,
+        "the model wrote the tool call's arguments"
+    );
 }
 
 #[tokio::test]

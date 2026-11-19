@@ -196,6 +196,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             get(threads_api::get_thread_messages_handler),
         )
         .route(
+            "/api/threads/{thread_id}/timings",
+            get(threads_api::thread_timings_handler),
+        )
+        .route(
             "/api/threads/{thread_id}/rename",
             axum::routing::post(threads_api::rename_thread_handler),
         )

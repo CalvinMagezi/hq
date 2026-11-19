@@ -51,7 +51,28 @@ pub(super) struct TurnRecord {
     vault: Option<std::path::PathBuf>,
     /// Files this reply made, as cards: checked entries from trusted tools only.
     files: Vec<Value>,
+    /// Every timed model call, tool call and compaction of this reply.
+    timings: Vec<hq_core::types::CallTiming>,
+    /// When this reply began, so each span reads as an offset from it.
+    began: Began,
 }
+
+/// Wall-clock start of a reply (milliseconds since the epoch), taken when its record is made.
+struct Began(u64);
+
+impl Default for Began {
+    fn default() -> Self {
+        Self(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        )
+    }
+}
+
+/// Most spans one reply keeps; a runaway loop must not grow its saved meta without bound.
+const MAX_TIMINGS: usize = 300;
 
 struct StepRecord {
     id: String,
@@ -149,6 +170,9 @@ impl TurnRecord {
                     duration_ms: None,
                 });
             }
+            SessionEvent::Timing(t) if self.timings.len() < MAX_TIMINGS => {
+                self.timings.push(t.clone());
+            }
             SessionEvent::StepCredits { .. } if self.credits.len() < MAX_STEPS => {
                 self.record_credits(event)
             }
@@ -245,6 +269,9 @@ impl TurnRecord {
             let steps = self.steps.iter().map(StepRecord::to_json).collect();
             meta.insert("tool_steps".into(), Value::Array(steps));
         }
+        if !self.timings.is_empty() {
+            meta.insert("timings".into(), self.timings_json());
+        }
         if !self.credits.is_empty() {
             meta.insert("step_credits".into(), Value::Array(self.credits.clone()));
         }
@@ -258,6 +285,63 @@ impl TurnRecord {
             meta.insert("driver".into(), driver.clone());
         }
         (!meta.is_empty()).then_some(Value::Object(meta))
+    }
+}
+
+impl TurnRecord {
+    /// Where this reply's time went: each span as an offset from the start, totals per kind, and
+    /// the time no span covers (a model or tool call a surface never saw, or plain waiting).
+    /// `unaccounted_ms` merges overlapping spans first, so parallel tools are not counted twice.
+    fn timings_json(&self) -> Value {
+        let origin = self.began.0;
+        let spans: Vec<Value> = self
+            .timings
+            .iter()
+            .map(|t| {
+                json!({
+                    "kind": t.kind.as_str(), "name": t.name, "call_id": t.call_id,
+                    "start_ms": t.started_at_ms.saturating_sub(origin), "duration_ms": t.duration_ms,
+                    "bytes_in": t.bytes_in, "bytes_out": t.bytes_out,
+                })
+            })
+            .collect();
+        let total = |kind: hq_core::types::TimingKind| -> u64 {
+            self.timings
+                .iter()
+                .filter(|t| t.kind == kind)
+                .map(|t| t.duration_ms)
+                .sum()
+        };
+        let mut ranges: Vec<(u64, u64)> = self
+            .timings
+            .iter()
+            .map(|t| {
+                let start = t.started_at_ms.saturating_sub(origin);
+                (start, start + t.duration_ms)
+            })
+            .collect();
+        ranges.sort_unstable();
+        let (mut covered, mut end) = (0u64, 0u64);
+        for (start, stop) in ranges {
+            covered += stop.saturating_sub(start.max(end));
+            end = end.max(stop);
+        }
+        let wall = end.max(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(origin)
+                .saturating_sub(origin),
+        );
+        json!({
+            "started_at_ms": origin,
+            "wall_ms": wall,
+            "model_ms": total(hq_core::types::TimingKind::Model),
+            "tool_ms": total(hq_core::types::TimingKind::Tool),
+            "compaction_ms": total(hq_core::types::TimingKind::Compaction),
+            "unaccounted_ms": wall.saturating_sub(covered),
+            "spans": spans,
+        })
     }
 }
 
@@ -611,5 +695,41 @@ mod tests {
         }
         let meta = r.take(None, false).unwrap().meta.unwrap();
         assert_eq!(meta["tool_steps"].as_array().unwrap().len(), MAX_STEPS);
+    }
+
+    #[test]
+    fn a_reply_saves_where_its_time_went_without_double_counting_parallel_tools() {
+        use hq_core::types::{CallTiming, TimingKind};
+        let mut rec = TurnRecord::default();
+        let origin = rec.began.0;
+        let span = |kind, start: u64, ms: u64, name: &str| {
+            SessionEvent::Timing(CallTiming {
+                kind,
+                name: name.into(),
+                call_id: None,
+                started_at_ms: origin + start,
+                duration_ms: ms,
+                bytes_in: 10,
+                bytes_out: 20,
+            })
+        };
+        rec.observe(&span(TimingKind::Model, 0, 1_000, "m"));
+        rec.observe(&span(TimingKind::Tool, 1_000, 500, "a"));
+        rec.observe(&span(TimingKind::Tool, 1_100, 500, "b")); // overlaps a
+        rec.observe(&span(TimingKind::Model, 3_000, 1_000, "m")); // a gap of 1.4 s before it
+        let t = rec.timings_json();
+        assert_eq!(t["model_ms"], 2_000);
+        assert_eq!(t["tool_ms"], 1_000);
+        // covered: 0-1000, 1000-1600, 3000-4000 = 2600; wall is at least 4000.
+        assert!(t["wall_ms"].as_u64().unwrap() >= 4_000);
+        assert_eq!(
+            t["unaccounted_ms"].as_u64().unwrap(),
+            t["wall_ms"].as_u64().unwrap() - 2_600
+        );
+        assert_eq!(t["spans"][1]["start_ms"], 1_000);
+        assert_eq!(t["spans"][1]["bytes_out"], 20);
+        rec.observe(&SessionEvent::TextDelta("hi".into()));
+        let saved = rec.take(None, false).unwrap();
+        assert!(saved.meta.unwrap()["timings"]["spans"].is_array());
     }
 }

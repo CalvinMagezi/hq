@@ -34,7 +34,21 @@ impl AgentSession {
     }
 
     /// Execute a single tool call with harness policy enforcement.
+    /// Run one tool call and note how long it took, from its own start (a call that waited behind
+    /// a mutating one in its batch is not charged for the wait).
     pub(super) async fn execute_tool(&self, tc: &ToolCall) -> Result<hq_core::types::ToolResult> {
+        let started_at = super::timing::unix_ms();
+        let clock = std::time::Instant::now();
+        let result = self.execute_tool_untimed(tc).await;
+        let took = clock.elapsed().as_millis() as u64;
+        self.tool_timings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(tc.id.clone(), (started_at, took));
+        result
+    }
+
+    async fn execute_tool_untimed(&self, tc: &ToolCall) -> Result<hq_core::types::ToolResult> {
         // Backstop, redundant by design: `ToolGuardian::build_registry` is the
         // authoritative gate and already excludes autonomy-restricted tools
         // from an unattended session's registry entirely, so this branch
