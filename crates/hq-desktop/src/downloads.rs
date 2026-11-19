@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn an_existing_file_is_never_overwritten() {
-        let dir = Path::new("/Users/x/Downloads");
+        let dir = Path::new("/srv/example/Downloads");
         let taken = ["Plan.xlsx", "Plan (1).xlsx", "Plan (2).xlsx", "README"];
         let exists = |p: &Path| {
             p.parent() == Some(dir) && taken.contains(&p.file_name().unwrap().to_str().unwrap())
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn the_destination_is_inside_downloads_whatever_the_web_view_suggested() {
-        let dir = Path::new("/Users/x/Downloads");
+        let dir = Path::new("/srv/example/Downloads");
         let none = |_: &Path| false;
         let got = destination_for(
             Path::new("/tmp/elsewhere/../../etc/Plan.xlsx"),
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn the_script_carries_the_detail_as_data_not_code() {
-        let path = PathBuf::from("/Users/x/Downloads/a\"); alert(1); (\".csv");
+        let path = PathBuf::from("/srv/example/Downloads/a\"); alert(1); (\".csv");
         let script = finished_script(Some(&path), true);
         assert!(script.starts_with("window.dispatchEvent(new CustomEvent(\"hq-desktop-download\""));
         let value = detail_of(&script);

@@ -17,9 +17,9 @@ function recorder() {
 
 test('a saved file says its name and the real path', () => {
   const { seen, show } = recorder()
-  handleDesktopDownload(event({ name: 'Plan.xlsx', path: '/Users/x/Downloads/Plan.xlsx', success: true }), show)
-  expect(seen).toEqual([['notice', t('note_export_saved', { name: 'Plan.xlsx', path: '/Users/x/Downloads/Plan.xlsx' })]])
-  expect(seen[0]![1]).toContain('/Users/x/Downloads/Plan.xlsx')
+  handleDesktopDownload(event({ name: 'Plan.xlsx', path: '/srv/example/Downloads/Plan.xlsx', success: true }), show)
+  expect(seen).toEqual([['notice', t('note_export_saved', { name: 'Plan.xlsx', path: '/srv/example/Downloads/Plan.xlsx' })]])
+  expect(seen[0]![1]).toContain('/srv/example/Downloads/Plan.xlsx')
 })
 
 test('a failure is an alert, with or without a name', () => {
