@@ -47,6 +47,10 @@ pub(super) struct TurnRecord {
     driver: Option<Value>,
     /// The one thing HQ offers under this reply, chosen on the device.
     offer: Option<hq_tools::capabilities::offers::TurnOffer>,
+    /// The vault, so the files a trusted tool names can be checked against it.
+    vault: Option<std::path::PathBuf>,
+    /// Files this reply made, as cards: checked entries from trusted tools only.
+    files: Vec<Value>,
 }
 
 struct StepRecord {
@@ -102,6 +106,21 @@ impl TurnRecord {
         self.steps.iter().map(|s| s.name.clone()).collect()
     }
 
+    pub(super) fn set_vault(&mut self, vault: std::path::PathBuf) {
+        self.vault = Some(vault);
+    }
+
+    /// Adds the files a finished tool call named, when the tool is one that may name files.
+    fn collect_files(&mut self, tool: &str, result: &str) {
+        let Some(vault) = &self.vault else { return };
+        for entry in hq_tools::deliver::files_from_tool_result(vault, tool, result) {
+            let seen = self.files.iter().any(|f| f["path"] == entry["path"]);
+            if !seen && self.files.len() < hq_tools::deliver::MAX_FILES_PER_REPLY {
+                self.files.push(entry);
+            }
+        }
+    }
+
     pub(super) fn set_offer(&mut self, offer: hq_tools::capabilities::offers::TurnOffer) {
         self.offer = Some(offer);
     }
@@ -134,10 +153,11 @@ impl TurnRecord {
                 self.record_credits(event)
             }
             SessionEvent::ToolEnd {
+                tool_name,
                 tool_call_id,
                 result,
-                ..
             } => {
+                self.collect_files(tool_name, result);
                 if let Some(step) = self.steps.iter_mut().find(|s| &s.id == tool_call_id) {
                     step.result = Some(result_preview(result, MAX_STEP_RESULT_CHARS));
                     step.duration_ms = Some(step.started.elapsed().as_millis() as u64);
@@ -183,7 +203,8 @@ impl TurnRecord {
             .unwrap_or(&self.content)
             .to_string();
         // A stop flag alone is not worth a message: stopped before anything happened saves nothing.
-        let did_work = !self.steps.is_empty() || !self.reasoning.trim().is_empty();
+        let did_work =
+            !self.steps.is_empty() || !self.reasoning.trim().is_empty() || !self.files.is_empty();
         if content.trim().is_empty() && !did_work {
             return None;
         }
@@ -214,6 +235,9 @@ impl TurnRecord {
         }
         if !self.credits.is_empty() {
             meta.insert("step_credits".into(), Value::Array(self.credits.clone()));
+        }
+        if !self.files.is_empty() {
+            meta.insert("files".into(), Value::Array(self.files.clone()));
         }
         if stopped {
             meta.insert("stopped".into(), Value::Bool(true));
@@ -312,6 +336,59 @@ mod tests {
             tool_call_id: id.into(),
             result: result.into(),
         }
+    }
+
+    fn end_for(tool: &str, id: &str, result: &str) -> SessionEvent {
+        SessionEvent::ToolEnd {
+            tool_name: tool.into(),
+            tool_call_id: id.into(),
+            result: result.into(),
+        }
+    }
+
+    #[test]
+    fn a_trusted_tools_files_become_cards_in_the_saved_meta_and_nothing_else_does() {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(vault.path().join("Exports/2026-11")).unwrap();
+        std::fs::write(vault.path().join("Exports/2026-11/a.xlsx"), b"x").unwrap();
+        std::fs::write(vault.path().join("Exports/2026-11/b.docx"), b"x").unwrap();
+        let named = |p: &str| json!({"files": [{"path": p}]}).to_string();
+
+        let mut rec = TurnRecord::default();
+        rec.set_vault(vault.path().to_path_buf());
+        rec.observe(&end_for(
+            "office_export",
+            "1",
+            &named("Exports/2026-11/a.xlsx"),
+        ));
+        // A web page that talks about a file, and a forged path from a trusted tool.
+        rec.observe(&end_for("web_fetch", "2", &named("Exports/2026-11/b.docx")));
+        rec.observe(&end_for("file_deliver", "3", &named("../../etc/passwd")));
+        // The same file twice is one card.
+        rec.observe(&end_for(
+            "vault_export",
+            "4",
+            &named("Exports/2026-11/a.xlsx"),
+        ));
+        let saved = rec.take(Some("Done."), false).unwrap();
+        let files = saved.meta.unwrap()["files"].clone();
+        assert_eq!(files.as_array().unwrap().len(), 1, "{files}");
+        assert_eq!(files[0]["path"], "Exports/2026-11/a.xlsx");
+        assert_eq!(files[0]["kind"], "sheet");
+    }
+
+    #[test]
+    fn a_reply_that_only_made_a_file_is_still_saved() {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::write(vault.path().join("t.csv"), b"a").unwrap();
+        let mut rec = TurnRecord::default();
+        rec.set_vault(vault.path().to_path_buf());
+        rec.observe(&end_for(
+            "file_deliver",
+            "1",
+            &json!({"files": [{"path": "t.csv"}]}).to_string(),
+        ));
+        assert!(rec.take(None, true).is_some());
     }
 
     #[test]
