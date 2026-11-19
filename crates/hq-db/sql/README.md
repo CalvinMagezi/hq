@@ -15,3 +15,5 @@ in that order, once each, recording the file name (without `.sql`) in `schema_ve
 - **Numbers are consecutive.** `012` is shared by two old files and `006` was never used; those are
   the only exceptions (`KNOWN_SHARED_NUMBERS` and `KNOWN_MISSING_NUMBERS` in the same test), and
   nothing new belongs in either list.
+- **Finding the next number.** Run `scripts/next-migration-number.sh` for the next free `NNN`. Run
+  it again after rebasing onto `main`, since another branch may have taken the number meanwhile.
