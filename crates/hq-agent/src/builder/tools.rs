@@ -85,8 +85,8 @@ impl SessionBuilder {
 
     /// File, shell, search, todo and web tools, sharing one file-state cache.
     fn coding_tools(&self, vault_path: &Path) -> Vec<Box<dyn AgentTool>> {
-        let state_cache = hq_tools::file_edit::FileStateCache::default();
-        let history = hq_tools::file_edit::FileHistory::default();
+        let state_cache = hq_tools_coding::file_edit::FileStateCache::default();
+        let history = hq_tools_coding::file_edit::FileHistory::default();
 
         // Deliberately narrower than hq-mcp's create_default_registry() (the
         // full catalog for external MCP harnesses): this is curated for what
@@ -105,13 +105,13 @@ impl SessionBuilder {
                 history.clone(),
             )),
             // Multi-file atomic edit — was previously only exposed to *other*
-            // harnesses over MCP (hq_tools::coding::BatchEditTool), not to
+            // harnesses over MCP (hq_tools_coding::coding::BatchEditTool), not to
             // hq's own session. Shares this session's state_cache/history so
             // read-before-write tracking and rollback stay consistent with
             // edit_file. hq_tools::HqTool -> AgentTool via HqToolAdapter, the
             // same wrapper used for every other hq-tools-sourced tool below.
             Box::new(HqToolAdapter {
-                inner: Box::new(hq_tools::coding::BatchEditTool::new(
+                inner: Box::new(hq_tools_coding::coding::BatchEditTool::new(
                     state_cache.clone(),
                     history.clone(),
                 )),
@@ -126,13 +126,15 @@ impl SessionBuilder {
             // quality is for the Workstream 6 competition harness to decide,
             // not assumed.
             Box::new(HqToolAdapter {
-                inner: Box::new(hq_tools::coding::TodoWriteTool::new(
-                    hq_tools::coding::TodoStore::new(),
+                inner: Box::new(hq_tools_coding::coding::TodoWriteTool::new(
+                    hq_tools_coding::coding::TodoStore::new(),
                 )),
             }),
             Box::new({
                 let remotes = hq_db::bridge_setup::resolve_remote_mcp(&self.config);
-                hq_tools::web::set_search_peer(self.config.web_search_peer_in(&remotes).cloned());
+                hq_tools_web::web::set_search_peer(
+                    self.config.web_search_peer_in(&remotes).cloned(),
+                );
                 crate::web::WebSearchTool::new(
                     self.config.searxng_url.clone(),
                     self.config.brave_api_key.clone(),
@@ -203,11 +205,11 @@ impl SessionBuilder {
 
         // Remote MCP servers from `remote_mcp:`. ToolGuardian::build_registry
         // drops the ones marked live_user_turn_only from unattended sessions.
-        tools.extend(hq_tools::remote_mcp::create_remote_mcp_tools(
+        tools.extend(hq_tools_web::remote_mcp::create_remote_mcp_tools(
             &hq_db::bridge_setup::resolve_remote_mcp(&self.config),
             self.identity
                 .as_ref()
-                .and_then(hq_tools::family_guest::FamilyGuestContext::from_identity),
+                .and_then(hq_tool_api::family_guest::FamilyGuestContext::from_identity),
             self.config.governance.remote_mcp_ask,
         ));
 
@@ -231,11 +233,11 @@ impl SessionBuilder {
         // session had to shell out through `bash` to touch git at all, and
         // reported having no GitHub access despite an authenticated `gh` on
         // PATH.
-        tools.push(Box::new(hq_tools::coding::GitStatusTool));
-        tools.push(Box::new(hq_tools::coding::GitDiffTool));
-        tools.push(Box::new(hq_tools::coding::GitLogTool));
-        tools.push(Box::new(hq_tools::coding::GitCommitTool));
-        tools.push(Box::new(hq_tools::coding::GitPrTool));
+        tools.push(Box::new(hq_tools_coding::coding::GitStatusTool));
+        tools.push(Box::new(hq_tools_coding::coding::GitDiffTool));
+        tools.push(Box::new(hq_tools_coding::coding::GitLogTool));
+        tools.push(Box::new(hq_tools_coding::coding::GitCommitTool));
+        tools.push(Box::new(hq_tools_coding::coding::GitPrTool));
 
         // Custom slash commands — lets the agent create/list/delete the
         // `_commands/*.md` templates the terminal's `/name` dispatch reads,
@@ -318,7 +320,7 @@ impl SessionBuilder {
                     .and_then(|i| watching_chat(i, &self.config.agent_host, db)),
                 self.identity
                     .as_ref()
-                    .and_then(hq_tools::family_guest::FamilyGuestContext::from_identity),
+                    .and_then(hq_tool_api::family_guest::FamilyGuestContext::from_identity),
             ),
         );
         tools.extend(hq_tools::agent_host::tools::create_host_tools(db.clone()));

@@ -2,14 +2,14 @@
 //!
 //! Search works with no setup through a built-in engine pool; a configured
 //! SearxNG instance is tried first and the paid Brave Search API last (see
-//! `hq_tools::web`). Fetching reduces a page to its main content, recovers
+//! `hq_tools_web::web`). Fetching reduces a page to its main content, recovers
 //! client-rendered pages from their embedded data and, last, a Jina Reader
 //! fallback; no API key required for either tool.
 
 use anyhow::Result;
 use async_trait::async_trait;
 use hq_core::types::ToolResult;
-use hq_tools::web;
+use hq_tools_web::web;
 use serde_json::{Value, json};
 use tracing::debug;
 

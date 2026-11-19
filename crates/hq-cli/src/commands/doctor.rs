@@ -327,7 +327,7 @@ fn on_path(tool: &str) -> bool {
 /// real query per configured backend (one request of Brave's quota).
 async fn report_web_search(config: &HqConfig) {
     println!("\nWeb search (one test query per configured backend)");
-    let statuses = hq_tools::web::probe_search_backends(
+    let statuses = hq_tools_web::web::probe_search_backends(
         config.searxng_url.as_deref(),
         config.brave_api_key.as_deref(),
         config.web_search_native,

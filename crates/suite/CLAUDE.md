@@ -52,7 +52,7 @@ never rebuilds them. A stale entry fails too: the lists only shrink or change wi
 
 The plan names more crates (governor, sinks, render, calc, one per tool).
 They are added in the milestone that needs them, not before: an empty crate is debt.
-A crate that is added gets a row here and an Entry Points row in the root `CLAUDE.md` if it
+A crate that is added gets a row here and an entry in the `CLAUDE.md` of the crate that reaches it if it
 has an entry point.
 
 ## Working here
@@ -68,3 +68,9 @@ has an entry point.
 - The measurement tool prints numbers and format classes only: no file names, no paths, no
   content. Keep it that way.
 - Adoption data about the suite stays on the device (`docs/security/ADOPTION_DATA.md`).
+
+## Where this is documented from the root
+
+| What | Path |
+|------|------|
+| HQ Suite (Drive, Docs, Sheets, Slides, Dashboard; `hq suite`, cargo feature `suite`, on by default): hqmd notes with typed blocks, shrinking documents to the small record, storage governance. Built inside this repo, behind rules a test enforces so it can be lifted out | `crates/suite/` (read `crates/suite/CLAUDE.md` first), `hq-suite-md` (the hqmd parser, printer, validator and patch API; spec `docs/suite/HQMD.md`, golden corpus in `tests/corpus/`), `hq-suite-ingest` (pictures in packages, tier projection), `hq-suite-store` (atomic files, content-addressed media in `_media/cas/`, trash, the shrink journal), `hq-suite-shrink` (picture codecs with pixel caps, candidate encoders, `hq suite measure`, the shrink pipeline `pipeline.rs` and its crash-matrix test), `hq-suite-adapter` (the only crate that knows HQ; `tests/boundary.rs` is the extraction guard), `crates/hq-cli/src/commands/suite.rs`, `crates/hq-tools-office/` (the `office_file` tool: the only place a chat tool meets the suite), `docs/suite/` (`README.md`, `HQMD.md`, `MEASURE.md`, `SHRINK.md`), plan `docs/plans/hq-suite.md` |
