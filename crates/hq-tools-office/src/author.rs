@@ -190,6 +190,7 @@ impl HqTool for OfficeExportTool {
         let out =
             hq_tool_api::files::unique_path(&dir, &hq_tool_api::files::clean_stem(stem), &format);
         let vault = self.vault.clone();
+        let note_rel = path.clone();
         let (note, fmt, dest) = (path, format, out.clone());
         let done = if fmt == "pdf" {
             export_pdf(&vault, &note, &dest).await?
@@ -203,8 +204,11 @@ impl HqTool for OfficeExportTool {
             .strip_prefix(&self.vault)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
+        let mut entry = hq_tool_api::files::file_entry(&self.vault, &rel);
+        entry["note"] = json!(note_rel);
+        entry["fidelity"] = json!(done.fidelity);
         Ok(json!({
-            "files": [hq_tool_api::files::file_entry(&self.vault, &rel)],
+            "files": [entry],
             "web_path": rel,
             "fidelity": done.fidelity,
         }))
@@ -267,6 +271,8 @@ mod tests {
             "{rel}"
         );
         assert_eq!(file["kind"], "sheet");
+        assert_eq!(file["note"], note);
+        assert!(file["fidelity"].as_str().unwrap().contains("Formulas"));
         assert!(
             out["fidelity"].as_str().unwrap().contains("Formulas"),
             "{out}"
