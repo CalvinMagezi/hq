@@ -4209,6 +4209,7 @@ dependencies = [
  "hq-suite-adapter",
  "hq-tool-api",
  "hq-tools",
+ "hq-tools-office",
  "hq-vault",
  "http",
  "http-body-util",

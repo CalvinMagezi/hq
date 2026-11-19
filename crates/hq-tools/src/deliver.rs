@@ -38,6 +38,74 @@ fn expected_content(ext: &str) -> Option<Kind> {
     }
 }
 
+/// Tools whose results may name files for the chat to show as cards. A result from any other
+/// tool (a web page, a mail, a script's output) never becomes a card, so injected text cannot
+/// make the chat offer a vault file.
+pub const FILE_TOOLS: &[&str] = &[
+    "file_deliver",
+    "office_export",
+    "convert_from_markdown",
+    "vault_export",
+    "vault_export_pdf",
+];
+/// Longest fidelity sentence kept on a card.
+const MAX_FIDELITY_CHARS: usize = 300;
+/// Most files one reply may show.
+pub const MAX_FILES_PER_REPLY: usize = 10;
+
+/// The `files` a trusted tool's result names, checked and described again from the vault: the
+/// path must be a plain vault-relative file outside HQ's own folders, and name, type and size are
+/// read from the file, never taken from the result.
+pub fn files_from_tool_result(vault: &Path, tool: &str, result: &str) -> Vec<Value> {
+    if !FILE_TOOLS.contains(&tool) {
+        return Vec::new();
+    }
+    let Ok(parsed) = serde_json::from_str::<Value>(result) else {
+        return Vec::new();
+    };
+    let Some(entries) = parsed.get("files").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|e| {
+            let rel = e.get("path").and_then(Value::as_str)?;
+            vault_file_is_shareable(vault, rel).then(|| described(vault, rel, e))
+        })
+        .take(MAX_FILES_PER_REPLY)
+        .collect()
+}
+
+/// The entry for a checked file, with the source note and the one-line statement of what the
+/// export kept when the tool gave them and the note is a real vault note.
+fn described(vault: &Path, rel: &str, given: &Value) -> Value {
+    let mut entry = file_entry(vault, rel);
+    let note = given.get("note").and_then(Value::as_str);
+    if let Some(note) = note.filter(|n| n.ends_with(".md") && vault_file_is_shareable(vault, n)) {
+        entry["note"] = json!(note);
+    }
+    if let Some(line) = given.get("fidelity").and_then(Value::as_str) {
+        entry["fidelity"] = json!(line.chars().take(MAX_FIDELITY_CHARS).collect::<String>());
+    }
+    entry
+}
+
+fn vault_file_is_shareable(vault: &Path, rel: &str) -> bool {
+    let rel_path = Path::new(rel);
+    let plain = !rel.is_empty()
+        && rel_path.components().all(|c| match c {
+            std::path::Component::Normal(n) => !n.to_string_lossy().starts_with(['.', '_']),
+            _ => false,
+        });
+    if !plain {
+        return false;
+    }
+    let (Ok(root), Ok(abs)) = (vault.canonicalize(), vault.join(rel_path).canonicalize()) else {
+        return false;
+    };
+    abs.starts_with(&root) && abs.is_file()
+}
+
 fn in_private_dir(vault: &Path, abs: &Path) -> bool {
     PRIVATE_DIRS.iter().any(|d| abs.starts_with(vault.join(d)))
 }
@@ -288,5 +356,35 @@ mod tests {
         let out = deliver(vault.path(), &vault.path().join("Notebooks/t.csv"), None).unwrap();
         assert_eq!(out["web_path"], "Notebooks/t.csv");
         assert!(!vault.path().join("Exports").exists());
+    }
+
+    #[test]
+    fn only_trusted_tools_name_files_and_only_real_vault_files_survive() {
+        let (vault, _s) = setup();
+        std::fs::create_dir_all(vault.path().join("Exports/2026-11")).unwrap();
+        std::fs::create_dir_all(vault.path().join("_system")).unwrap();
+        std::fs::write(vault.path().join("Exports/2026-11/a.xlsx"), b"x").unwrap();
+        std::fs::write(vault.path().join("_system/SOUL.md"), b"x").unwrap();
+        let result = json!({"files": [
+            {"path": "Exports/2026-11/a.xlsx", "name": "forged.exe", "size": 1},
+            {"path": "_system/SOUL.md"},
+            {"path": "../etc/passwd"},
+            {"path": "/etc/passwd"},
+            {"path": "Exports/2026-11/missing.xlsx"}
+        ]})
+        .to_string();
+        let kept = files_from_tool_result(vault.path(), "office_export", &result);
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(kept[0]["name"], "a.xlsx", "name comes from the file");
+        assert_eq!(kept[0]["kind"], "sheet");
+        let with_note = json!({"files": [{"path": "Exports/2026-11/a.xlsx", "note": "_system/SOUL.md", "fidelity": "Kept."}]}).to_string();
+        let kept = files_from_tool_result(vault.path(), "office_export", &with_note);
+        assert!(
+            kept[0].get("note").is_none(),
+            "a note outside the allowlist is dropped"
+        );
+        assert_eq!(kept[0]["fidelity"], "Kept.");
+        assert!(files_from_tool_result(vault.path(), "web_fetch", &result).is_empty());
+        assert!(files_from_tool_result(vault.path(), "office_export", "not json").is_empty());
     }
 }

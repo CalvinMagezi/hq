@@ -37,6 +37,7 @@ mod injection;
 mod owner_approval;
 mod paths;
 pub(crate) mod secrets;
+pub mod seen_urls;
 mod taint;
 mod tainted_calls;
 mod trackers;

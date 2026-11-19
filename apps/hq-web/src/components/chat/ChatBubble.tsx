@@ -4,10 +4,11 @@ import { Mic, Copy, Check, FilePlus, ListChecks, Pencil, Plug, RotateCw, Termina
 import type { ToolStep } from '~/store/threadStore'
 import type { DriverMeta } from '~/lib/sessionsApi'
 import type { ChatAttachment } from '~/lib/chatUploads'
+import type { ReplyFile } from '~/lib/replyFiles'
 import { CREDITS_TOOLTIP, formatCredits, totalCredits, type StepCredit } from '~/lib/stepCredits'
 import { ToolCallBlock } from './ToolCallBlock'
 import { LiveLine } from './LiveLine'
-import { MadeCard, SourceChips } from './ReplyExtras'
+import { FileCard, MadeCard, SourceChips } from './ReplyExtras'
 import { madeNotes, sourcesOf, type MadeNote, type ReplySource } from '~/lib/replySources'
 import { ThinkingPanel } from './ThinkingPanel'
 import { MessageAttachments } from './AttachmentChips'
@@ -32,6 +33,8 @@ interface DisplayMessage {
   viaMcp?: string
   /** Asked by voice. */
   spoken?: boolean
+  /** Files this reply made, checked by the server. */
+  files?: ReplyFile[]
 }
 
 interface Props {
@@ -92,6 +95,9 @@ export function ChatBubble({ message, live = false, startedAt, onEdit, onRegener
       {!isUser && !live && steps.length > 0 && <ToolCallBlock steps={steps} credits={message.stepCredits} />}
       {made.map((n) => (
         <MadeCard key={n.path} note={n} onOpen={(note) => onOpenMade?.(note)} />
+      ))}
+      {!isUser && !live && message.files?.map((f) => (
+        <FileCard key={f.path} file={f} onOpenNote={(note) => onOpenMade?.(note)} />
       ))}
       {sources.length > 0 && <SourceChips sources={sources} onOpen={(s) => onOpenSource?.(s)} />}
 

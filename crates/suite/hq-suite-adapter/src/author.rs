@@ -296,6 +296,28 @@ fn csv_of(spec: &SheetSpec) -> String {
     lines.join("\n") + "\n"
 }
 
+/// The note's sheet blocks as an `.xlsx` or a `.csv`, in memory, with the one-line statement of what
+/// was kept. `None` when the note has no sheet block (the caller falls back to its tables).
+pub fn sheet_bytes(text: &str, format: &str) -> Option<Result<(Vec<u8>, String)>> {
+    let specs = sheets_of(text).ok()?;
+    Some(match format {
+        "xlsx" => write_xlsx(&specs)
+            .map(|(bytes, report)| (bytes, report.fidelity_line()))
+            .map_err(Into::into),
+        "csv" => Ok((csv_of(&specs[0]).into_bytes(), csv_fidelity(specs.len()))),
+        other => Err(anyhow::anyhow!("`{other}` is not a sheet format")),
+    })
+}
+
+fn csv_fidelity(sheets: usize) -> String {
+    let more = if sheets > 1 {
+        " Only the first sheet is included."
+    } else {
+        ""
+    };
+    format!("Values only: formulas are saved as their results and formats as plain text.{more}")
+}
+
 /// Renders the note at `note_rel` as `format` (`xlsx`, `csv`, `docx` or `pptx`) at `out`, a path
 /// inside the vault that does not exist yet.
 pub fn export_note(vault: &Path, note_rel: &str, format: &str, out: &Path) -> Result<Exported> {

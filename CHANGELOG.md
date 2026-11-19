@@ -5,6 +5,8 @@ All notable changes to Agent-HQ will be documented in this file.
 ## [Unreleased]
 
 - Agent host: `agent_host.sandbox.strict_paths` runs any session whose working directory lies under a listed folder under the `strict` profile, whatever the default profile is. `hq doctor` lists the strict paths and the network allowlist in force.
+- Web: a chat that has read outside text no longer asks about hosts. `web_fetch` runs for an address HQ saw arrive from outside (search results, fetched pages, the owner's own words) and is refused, with guidance and no inbox item, for an address the model composed. `web_search` is refused above 300 characters instead of asking above 150.
+- Relays: link previews are off on every outbound Telegram message and embeds are suppressed on Discord replies, so a link the model writes cannot make Telegram's or Discord's servers fetch it. The Jina Reader fallback of `web_fetch` is now off unless `HQ_WEB_FETCH_JINA=1`.
 - Tasks: moving a task to review raises an inbox card only when the task is assigned to the owner (`owner`) or waits on them. Other reviews are silent.
 - Web push: `web_push.quiet_hours_utc` holds pushes during a window and sends them when it ends; non-urgent items fold into one push an hour and stop at `web_push.non_urgent_per_day` (default 5). Approvals, `notify_owner` and reminders are not limited by the budget.
 

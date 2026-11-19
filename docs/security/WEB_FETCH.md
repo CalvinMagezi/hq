@@ -49,7 +49,7 @@ through (`web::guarded_client()` for other tools):
 - The Jina Reader fallback (`r.jina.ai`) receives the URL and fetches it from
   its side. HQ only sends URLs that already passed the checks above. It is the
   last resort, after main-content extraction and recovery from the page's own
-  embedded data. Set `HQ_WEB_FETCH_JINA=0` to never send a URL to it.
+  embedded data. It is off by default, because it would send the page URL to a third party; set `HQ_WEB_FETCH_JINA=1` to allow it.
 - A hostname is refused if any of its addresses is non-public, even if others
   are public. That is stricter than filtering and avoids split-horizon surprises.
 - `web_search_peer` names a `remote_mcp` entry (another HQ). When this machine's

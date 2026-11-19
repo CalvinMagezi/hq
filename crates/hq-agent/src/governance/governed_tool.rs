@@ -485,6 +485,14 @@ impl GovernedTool {
             )));
         }
 
+        // The web is decided by code, never asked: see `web_refusal`. A site the owner allowed
+        // (trusted domains and approvals) still goes through.
+        if let Some(refusal) = self.web_refusal(&args) {
+            self.record_denial("denial threshold exceeded under the web policy");
+            info!(tool = tool_name, "refused by the web policy: {refusal}");
+            return Ok(text_result(refusal));
+        }
+
         // Asked last, so a call the checks above would refuse never reaches the owner.
         if let Some(waiting) = self.owner_decision(&mut args).await {
             return Ok(text_result(waiting));
@@ -492,7 +500,21 @@ impl GovernedTool {
 
         self.run_tracked(id, args).await
     }
+
+    /// The refusal for a tainted `web_fetch` or `web_search` the web policy does not let through.
+    /// No inbox item: a refusal costs the model one more search, not the owner a decision.
+    fn web_refusal(&self, args: &Value) -> Option<String> {
+        let refusal = super::tainted_calls::web_refusal(self.inner.name(), args, &self.taint)?;
+        let allowed_site = self.owner_approval.as_ref().is_some_and(|approval| {
+            super::tainted_calls::fetch_site(self.inner.name(), args)
+                .is_some_and(|site| approval.site_allowed(&site))
+        });
+        (!allowed_site).then_some(refusal)
+    }
 }
+
+/// Tools whose results list addresses HQ itself saw arrive from outside.
+const SEEN_URL_SOURCES: &[&str] = &["web_search", "web_fetch"];
 
 #[async_trait]
 impl AgentTool for GovernedTool {
@@ -552,6 +574,13 @@ impl AgentTool for GovernedTool {
         let mut result = self.execute_governed(id, args).await;
         if is_untrusted_source(tool_name, self.inner.category()) {
             self.taint.mark(tool_name);
+        }
+        if SEEN_URL_SOURCES.contains(&tool_name)
+            && let Ok(tr) = &result
+        {
+            for part in &tr.content {
+                self.taint.note_seen_text(&part.text);
+            }
         }
         if let Ok(tr) = &mut result
             && let Some(advisory) = repeat_advisory
