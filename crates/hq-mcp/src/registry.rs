@@ -4,10 +4,11 @@ use hq_core::config::HqConfig;
 use hq_db::Database;
 use hq_tool_api::registry::{HqTool, ToolRegistry};
 use hq_tools::{
-    a2a, agent_comm, agents, ask, background_turns, brand, budget_status, coding, convert, github,
+    a2a, agent_comm, agents, ask, background_turns, brand, budget_status, convert, github,
     harness_session, notify, prose_lint, self_update, session_search, shortcuts, skill_manage_tool,
     skills, slash_commands, subagent_runs, system_info, tasks,
 };
+use hq_tools_coding::coding;
 use hq_tools_web::{imagegen, remote_mcp, web};
 
 #[cfg(feature = "gws")]

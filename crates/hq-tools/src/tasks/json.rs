@@ -201,10 +201,16 @@ pub(super) fn tags_from_args(args: &Value, key: &str) -> Vec<String> {
 /// task's status transitions into `ready_for_review`; the dedup key collapses
 /// a repeat while one request is still outstanding. Never fails the caller.
 ///
+/// Only a task assigned to the owner or waiting on them raises a card; any other review is
+/// silent (the daily roll-up counts those).
+///
 /// A task whose completion HQ verifies itself (`tasks.verification` enforced for its tier) is
 /// not the owner's to review, so it raises nothing: the owner hears only of exceptions
 /// ([`notify_owner_exception`]).
 pub async fn notify_ready_for_review(vault_path: PathBuf, task: t::Task) {
+    if !is_the_owners(&task) {
+        return;
+    }
     let summary = format!("{}: {}", task.display_id, task.title);
     let item = hq_core::types::ValueItem::new(
         TASK_REVIEW_SOURCE,
@@ -230,6 +236,16 @@ pub async fn notify_ready_for_review(vault_path: PathBuf, task: t::Task) {
     if let Err(e) = emitted {
         tracing::warn!(error = %e, task_id = %task.id, "task-notify: failed to emit ready-for-review value item");
     }
+}
+
+/// The assignee name that stands for the person using HQ.
+pub const OWNER_ASSIGNEE: &str = "owner";
+
+/// Whether a task is the owner's to look at: assigned to them, or waiting on them. Every other
+/// task is the agents' coordination, and moving it to review is not worth an inbox card.
+fn is_the_owners(task: &t::Task) -> bool {
+    let named = |s: &str| s.eq_ignore_ascii_case(OWNER_ASSIGNEE);
+    task.assignees.iter().any(|a| named(a)) || task.waiting_on.as_deref().is_some_and(named)
 }
 
 /// The value source of a review request.
