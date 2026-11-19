@@ -100,7 +100,7 @@ pub(crate) async fn create_space_handler(
     if body.name.trim().is_empty() {
         return ApiError::bad_request("name is required").into_response();
     }
-    let id = hq_tools::util::generate_id("sp");
+    let id = hq_tool_api::util::generate_id("sp");
     let space_slug = slug(&body.name);
     match state
         .db
@@ -211,7 +211,7 @@ pub(crate) async fn create_initiative_handler(
     if body.space_id.trim().is_empty() || body.name.trim().is_empty() {
         return ApiError::bad_request("space_id and name are required").into_response();
     }
-    let id = hq_tools::util::generate_id("in");
+    let id = hq_tool_api::util::generate_id("in");
     let initiative_slug = slug(&body.name);
     let result = state.db.with_conn(move |c| {
         let space_id = resolve_space_id(c, &body.space_id)?;
@@ -377,7 +377,7 @@ pub(crate) async fn create_task_handler(
     if body.title.trim().is_empty() {
         return ApiError::bad_request("title is required").into_response();
     }
-    let id = hq_tools::util::generate_id("tk");
+    let id = hq_tool_api::util::generate_id("tk");
     let external_id = body.external_id.clone().or_else(|| {
         hq_db::client_ids::usable(body.client_id.as_deref())
             .map(|c| format!("{CLIENT_ID_PREFIX}{c}"))
@@ -1981,7 +1981,7 @@ mod tests {
     #[tokio::test]
     async fn claim_safe_update_conflict_returns_409() {
         let state = test_state();
-        let id = hq_tools::util::generate_id("tk");
+        let id = hq_tool_api::util::generate_id("tk");
         let task = state
             .db
             .with_conn(move |c| {

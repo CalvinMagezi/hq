@@ -8,7 +8,8 @@ hq-agent = { workspace = true }
 hq-core = { workspace = true }
 hq-vault = { workspace = true }
 hq-db = { workspace = true }
-hq-tools = { workspace = true }
+hq-tools-web = { workspace = true }
+hq-tool-api = { workspace = true }
 hq-llm = { workspace = true }
 hq-memory = { workspace = true }
 tokio = { workspace = true }

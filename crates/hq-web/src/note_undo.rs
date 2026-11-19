@@ -433,7 +433,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn restore_racing_an_hq_tool_write_never_overwrites_the_newer_write() {
-        use hq_tools::registry::HqTool;
+        use hq_tool_api::registry::HqTool;
 
         for iter in 0..50 {
             let (v, state, app) = setup();
@@ -501,7 +501,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn restore_and_hq_tool_write_both_wait_for_shared_note_lock() {
-        use hq_tools::registry::HqTool;
+        use hq_tool_api::registry::HqTool;
 
         let (v, state, app) = setup();
         let id = hq_edits(&v, &state, "---\ntitle: A\n---\nHQ v1");

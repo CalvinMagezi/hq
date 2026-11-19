@@ -270,10 +270,10 @@ fn the_scanner_catches_planted_breaches() {
     assert_eq!(problems(&scan(&src), &layers), Vec::<String>::new());
 
     // 1. A module free of the tangle (layer 1) reaching up into it.
-    let file_edit = src.join("file_edit.rs");
-    let mut text = fs::read_to_string(&file_edit).unwrap();
+    let agent_comm = src.join("agent_comm.rs");
+    let mut text = fs::read_to_string(&agent_comm).unwrap();
     text.push_str("\nuse crate::tasks::PlantedBreach;\n");
-    fs::write(&file_edit, text).unwrap();
+    fs::write(&agent_comm, text).unwrap();
 
     // 2. A new module nobody gave a layer.
     fs::write(src.join("zz_planted_module.rs"), "pub fn planted() {}\n").unwrap();
@@ -293,7 +293,7 @@ fn the_scanner_catches_planted_breaches() {
 
     let found = problems(&scan(&src), &layers);
     let has = |needle: &str| found.iter().any(|p| p.contains(needle));
-    assert!(has("`file_edit` (layer 1) uses `tasks`"), "{found:#?}");
+    assert!(has("`agent_comm` (layer 1) uses `tasks`"), "{found:#?}");
     assert!(
         has("module `zz_planted_module` is not in layers.toml"),
         "{found:#?}"
@@ -315,7 +315,7 @@ fn the_allowlist_can_only_shrink_and_a_stale_layer_is_named() {
 
     // An allowed edge that is not a back edge (a down-pointing one) is stale, as is one that does
     // not exist at all.
-    layers.allowed.insert(("tasks".into(), "file_edit".into()));
+    layers.allowed.insert(("tasks".into(), "agent_comm".into()));
     // A layer for a module that is not there.
     layers.layer.insert("zz_gone".into(), 1);
 
@@ -323,7 +323,7 @@ fn the_allowlist_can_only_shrink_and_a_stale_layer_is_named() {
     assert!(
         found
             .iter()
-            .any(|p| p.contains("`tasks -> file_edit`") && p.contains("no longer a back edge")),
+            .any(|p| p.contains("`tasks -> agent_comm`") && p.contains("no longer a back edge")),
         "{found:#?}"
     );
     assert!(

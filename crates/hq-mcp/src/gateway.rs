@@ -3,7 +3,7 @@
 
 use hq_core::microcompact::{MICROCOMPACT_THRESHOLD, MicrocompactStrategy, microcompact};
 use hq_core::tokens::count_tokens_fast;
-use hq_tools::registry::ToolRegistry;
+use hq_tool_api::registry::ToolRegistry;
 use rmcp::ErrorData;
 use rmcp::model::{CallToolResult, ContentBlock, Tool};
 use serde::Deserialize;
@@ -259,7 +259,7 @@ pub(crate) fn handle_discover(
 const INDEX_SUMMARY_CHARS: usize = 100;
 
 /// Every tool by category, with a one-line summary and no parameter schemas.
-fn discover_index(results: &[hq_tools::registry::ToolSummary]) -> Value {
+fn discover_index(results: &[hq_tool_api::registry::ToolSummary]) -> Value {
     let mut categories: std::collections::BTreeMap<&str, Vec<Value>> = Default::default();
     for t in results {
         categories
@@ -274,7 +274,7 @@ fn discover_index(results: &[hq_tools::registry::ToolSummary]) -> Value {
     })
 }
 
-fn index_summary(t: &hq_tools::registry::ToolSummary) -> String {
+fn index_summary(t: &hq_tool_api::registry::ToolSummary) -> String {
     let text = t.search_hint.as_deref().unwrap_or(&t.description);
     let first = text
         .split(". ")
@@ -452,7 +452,7 @@ async fn handle_call_as(
     }
     mark_scope(&mut call_args, allowed, caller.connector);
     attest_caller(&mut call_args, caller.session);
-    let call_result = hq_tools::registry::validate_and_execute(tool, call_args).await;
+    let call_result = hq_tool_api::registry::validate_and_execute(tool, call_args).await;
 
     // Telemetry is best-effort and must not fail the call. This layer never sees
     // the caller identity the HTTP transport resolves, hence "mcp-external".
@@ -501,7 +501,7 @@ pub async fn call_tool_whole(
         .ok_or_else(|| format!("unknown tool: {tool}"))?;
     let mut args = if args.is_null() { json!({}) } else { args };
     mark_scope(&mut args, allowed, None);
-    hq_tools::registry::validate_and_execute(t, args)
+    hq_tool_api::registry::validate_and_execute(t, args)
         .await
         .map_err(|e| format!("tool error: {e}"))
 }
@@ -611,12 +611,12 @@ pub fn needs_owner_confirmation(registry: &ToolRegistry, tool: &str, args: &Valu
             .is_some_and(|o| !o.is_empty());
     }
     // Moving an original to the trash waits; reading, preparing a record and undoing do not.
-    if tool == hq_tools::office::OFFICE_TOOL {
+    if tool == hq_tool_api::office::OFFICE_TOOL {
         let action = args
             .get("action")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        return hq_tools::office::moves_original(action);
+        return hq_tool_api::office::moves_original(action);
     }
     if VAULT_WRITE_TOOLS.contains(&tool) {
         return VAULT_PATH_ARGS
@@ -633,10 +633,10 @@ pub fn needs_owner_confirmation(registry: &ToolRegistry, tool: &str, args: &Valu
     }
     let is_remote = registry
         .get(tool)
-        .is_some_and(|t| t.category() == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY);
+        .is_some_and(|t| t.category() == hq_tools_web::remote_mcp::REMOTE_MCP_CATEGORY);
     is_remote
-        && hq_tools::remote_mcp::asks_owner(
-            hq_tools::remote_mcp::RemoteMcpCaller::Connector,
+        && hq_tools_web::remote_mcp::asks_owner(
+            hq_tools_web::remote_mcp::RemoteMcpCaller::Connector,
             tool,
             args,
         )
@@ -772,7 +772,7 @@ fn compact_output(text: String, tool: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hq_tools::registry::HqTool;
+    use hq_tool_api::registry::HqTool;
 
     struct DummyTool {
         name: &'static str,
@@ -1077,7 +1077,9 @@ mod tests {
     #[test]
     fn connector_always_asks_for_remote_tools_even_when_marked_read_only() {
         use hq_core::config::RemoteMcpAsk;
-        use hq_tools::remote_mcp::{RemoteMcpCaller, create_remote_mcp_tools, record_tool_list};
+        use hq_tools_web::remote_mcp::{
+            RemoteMcpCaller, create_remote_mcp_tools, record_tool_list,
+        };
         let server = hq_core::config::RemoteMcpServer {
             name: "gatewaypolicy".into(),
             url: "https://example.invalid/mcp".into(),
@@ -1105,7 +1107,7 @@ mod tests {
                 "connector must always ask for {tool}"
             );
             assert_eq!(
-                hq_tools::remote_mcp::asks_owner(
+                hq_tools_web::remote_mcp::asks_owner(
                     RemoteMcpCaller::Agent,
                     "gatewaypolicy_call",
                     &args
@@ -1119,7 +1121,7 @@ mod tests {
             "gatewaypolicy_discover",
             &json!({})
         ));
-        assert!(!hq_tools::remote_mcp::asks_owner(
+        assert!(!hq_tools_web::remote_mcp::asks_owner(
             RemoteMcpCaller::Agent,
             "gatewaypolicy_discover",
             &json!({})
