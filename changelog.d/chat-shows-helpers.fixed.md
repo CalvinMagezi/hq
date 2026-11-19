@@ -1,0 +1,1 @@
+**The chat now shows which helpers are working.** While HQ asks helpers for help, the working line names how many are running and what each one does, and the side panel lists them under Helpers and lists the notes made under Result. The note Export menu no longer repeats "Export as" or shows an empty {title}.
