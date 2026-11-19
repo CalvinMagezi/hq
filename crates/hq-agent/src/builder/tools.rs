@@ -132,7 +132,9 @@ impl SessionBuilder {
             }),
             Box::new({
                 let remotes = hq_db::bridge_setup::resolve_remote_mcp(&self.config);
-                hq_tools::web::set_search_peer(self.config.web_search_peer_in(&remotes).cloned());
+                hq_tools_web::web::set_search_peer(
+                    self.config.web_search_peer_in(&remotes).cloned(),
+                );
                 crate::web::WebSearchTool::new(
                     self.config.searxng_url.clone(),
                     self.config.brave_api_key.clone(),
@@ -205,11 +207,11 @@ impl SessionBuilder {
 
         // Remote MCP servers from `remote_mcp:`. ToolGuardian::build_registry
         // drops the ones marked live_user_turn_only from unattended sessions.
-        tools.extend(hq_tools::remote_mcp::create_remote_mcp_tools(
+        tools.extend(hq_tools_web::remote_mcp::create_remote_mcp_tools(
             &hq_db::bridge_setup::resolve_remote_mcp(&self.config),
             self.identity
                 .as_ref()
-                .and_then(hq_tools::family_guest::FamilyGuestContext::from_identity),
+                .and_then(hq_tool_api::family_guest::FamilyGuestContext::from_identity),
             self.config.governance.remote_mcp_ask,
         ));
 
@@ -320,7 +322,7 @@ impl SessionBuilder {
                     .and_then(|i| watching_chat(i, &self.config.agent_host, db)),
                 self.identity
                     .as_ref()
-                    .and_then(hq_tools::family_guest::FamilyGuestContext::from_identity),
+                    .and_then(hq_tool_api::family_guest::FamilyGuestContext::from_identity),
             ),
         );
         tools.extend(hq_tools::agent_host::tools::create_host_tools(db.clone()));

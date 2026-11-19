@@ -21,6 +21,7 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
+import example.hq.spike.data.inProgress
 
 /** The three home screen widgets, drawn from what HQ last said. They never fetch on their own: the hub's poll pushes into them. */
 class CaptureWidget : AppWidgetProvider() {

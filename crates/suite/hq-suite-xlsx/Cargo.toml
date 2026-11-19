@@ -1,0 +1,19 @@
+[package]
+name = "hq-suite-xlsx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HQ Suite Sheets: a native .xlsx writer for sheet blocks, with formulas and cached values"
+
+# Pure conversion: rows in, a .xlsx file's bytes out. Files and the vault come in through the
+# adapter (crates/suite/CLAUDE.md).
+[dependencies]
+hq-suite-calc = { workspace = true }
+hq-suite-md = { workspace = true }
+thiserror = { workspace = true }
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+hq-convert = { workspace = true }
+roxmltree = "0.21"
+tokio = { workspace = true }

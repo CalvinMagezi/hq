@@ -314,6 +314,12 @@ impl Workbook {
         self.grid.set_value(col + Self::offset(sheet), row, value)
     }
 
+    /// Whether `formula` (written without its leading `=`) is one this engine can read from
+    /// `sheet`, so a writer can tell a real formula from text that only starts with `=`.
+    pub fn formula_parses(&self, sheet: usize, formula: &str) -> bool {
+        sheet < self.names.len() && parse_formula_in(formula, &self.context(sheet)).is_ok()
+    }
+
     /// The value of one cell, calculated.
     pub fn get(&self, sheet: usize, col: u32, row: u32) -> Value {
         if sheet >= self.names.len() || col >= MAX_COLUMNS {
