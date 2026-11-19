@@ -9,7 +9,7 @@ use hq_mcp::registry::create_default_registry;
 use serde_json::{Value, json};
 
 struct Client {
-    registry: hq_tools::registry::ToolRegistry,
+    registry: hq_tool_api::registry::ToolRegistry,
     db: Arc<hq_db::Database>,
 }
 

@@ -3,7 +3,7 @@
 use super::*;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use hq_tools::registry::{HqTool, ToolRegistry};
+use hq_tool_api::registry::{HqTool, ToolRegistry};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use tower::ServiceExt;

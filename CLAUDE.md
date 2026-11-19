@@ -55,6 +55,10 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 - On a conflict in a generated file (`Cargo.lock`, or the strings outputs `en.gen.ts` and
   `strings_catalogue.xml`), never merge it by hand: run `scripts/resolve-generated.sh`, then `git add`
   what it lists. Rebase onto current `main` before the final push.
+- No Rust file grows past 1,500 production lines (inline `#[cfg(test)]` code does not count);
+  `scripts/ci/file-size.py` fails the lint job on one, and the files already over are capped in
+  `scripts/ci/file-size-allow.toml`, which can only shrink. Split by concern, not by line count.
+- This root file is loaded into every session, so it stays under 20 KB (`scripts/claude-md-check.py`). Notes about one area go in the `CLAUDE.md` beside that code and are listed in "Where things live" below.
 - Do not hand-deploy to a server. Servers update themselves from signed releases
   (`docs/UPDATE_SYSTEM.md`, `deploy/README.md`).
 
@@ -75,78 +79,9 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 - All source lives in `crates/`, with standard Rust conventions (snake_case).
 - `.vault/` is the center: shared memory, context engine, knowledge base.
 - Frontmatter is parsed with the `gray_matter` crate.
-- **Execution**: sub-agents run through the unified `spawn_subagents` tool
-  (`SpawnSubagentsTool`) over `AgentService` (single, parallel, race and graph
-  modes, in process). It is the only sub-agent substrate.
-  `agent_send_message` and `agent_read_inbox` are plain vault-mailbox tools for
-  handing text to `relay` or another local mailbox id.
-- **Coding-agent runtime**: long-lived coding agents (Claude Code, Codex, Cursor,
-  Pi, OpenCode, Copilot CLI, Kimi, Qwen, Antigravity) run in HQ's built-in host
-  (`hq host`, crate `hq-host`). General-purpose agents (Hermes, OpenClaw) run
-  there too as a second harness category
-  (`crates/hq-tools/src/harness_session/category.rs`): every session has a
-  `purpose` (`code`, `monitor`, `research`, `review`, `general`), a
-  general-purpose agent refuses `code`, a monitor or reviewer never moves its
-  task, and any session given sessions to `observe` (at spawn, or at run time with
-  `harness_session_subscribe`) hears their finished turns, blocks
-  and exits through the task-thread messages the supervisor delivers. They get
-  no HQ token. The **Agentic Stack** (`stack:` config,
-  `crates/hq-tools/src/harness_session/stack.rs`, daemon task `stack-dispatch`,
-  `hq stack`) names such agents as specialists that pull the tasks assigned to
-  them and run each as one one-shot job (`hermes chat --oneshot -q "<brief>"`); the
-  process ending puts the task into review (`mission::Event::RunEnded`). A pane
-  whose process ended counts as gone (`AgentInfo::exited`). "General-purpose
-  agents" in `docs/AGENT_SESSIONS.md`, plan in `docs/plans/agentic-stack.md`. `crates/hq-tools/src/agent_host/`
-  (to be renamed) holds the client: `NativeBackend` talks to the host on this
-  machine, or to one on another machine over SSH through a key pinned to
-  `hq host gate`. Agents run in a process sandbox whose profile is
-  `agent_host.sandbox.profile`: `open` (default) walls off HQ's own files (host tokens, `~/.hq`, the vault's `_data`,
-  the config file and `*.env` beside it; the vault folders HQ loads, such as `_system` and
-  `skills`, are read-only), other processes' environments, other Claude accounts and
-  credential stores unless `hide_credentials: false`, and leaves the rest of the machine and
-  its network to the agent;
-  `strict` adds an egress allowlist and read and write allowlists (`crates/hq-host/src/sandbox.rs`).
-  `hq host join` / `hq host add` / the `host_add` tool pair a machine.
-  `harness_session_*`, the read-only `host_list`/`host_agents`/`host_read`
-  tools and `host_send` sit on top. The host sends state changes as events; the
-  supervisor treats an unreachable host as "unknown" (never "exited"), and alerts
-  when an agent blocks. A coding agent's trust dialog defaults to "No, exit", so
-  blocked launches are reported, never auto-answered. Setup, security model and
-  pairing a machine: `docs/AGENT_HOST.md`, `docs/JOIN_A_MACHINE.md`.
-- **Three places.** The web app, the desktop window and the phone show Notes, Chat and Inbox.
-  Tasks and Helpers are where HQ and its agents work: they keep their pages and addresses and
-  open from an Inbox item, a chat card, search or Settings, never from the bar
-  (`BAR_PLACES` in `apps/hq-web/src/lib/routes.ts`, `Place.bar` in the Android shell). Do not
-  add a place to the bar for something only agents use. Plan: `docs/plans/three-places.md`.
-- **The owner hears from HQ, not from helpers.** A helper a chat drives wakes that chat when
-  it blocks; the owner's inbox gets an item only if the prompt outlives
-  `agent_host.driver_grace_minutes` or nobody drives the session
-  (`session_supervisor/alerts.rs`, `raise_unanswered`). The owner can silence a topic
-  (helpers, tasks, tips, upkeep, email) or pause them all (`hq_db::inbox_prefs`,
-  `/api/notifications/silences`): silenced items still land in the inbox, with no push, no
-  phone notice and no badge count. A source nobody listed is HQ's own topic, which can never
-  be silenced, so a new kind of approval is never hidden by accident.
 - **No job queue**: the filesystem job queue (`_jobs/`) is retired. All work
   dispatches through sub-agents.
-- **Chat relays are chat only.** Telegram and Discord carry conversations, never
-  notifications. Alerts, approvals and notices go to the owner's inbox (`value_items`:
-  web app, web push, the phone app). The relay pollers empty `_mailboxes/relay` without
-  sending (`hq_relay::relay_common::take_chat_flows`); the one chat flow left is a family
-  member's request, answered in Discord. Do not add a path that posts to a relay.
-- **Long relay turns**: turns that outlive the ack window
-  (`relay.turn_ack_timeout_secs`, default 270s) detach into the persisted
-  `background_turns` registry and deliver results asynchronously. A startup and
-  6-hourly reconciler interrupts stranded rows past
-  `relay.background_turn_max_days` (default 5), resumable via `resume <id>`.
-  Detached turns post progress heartbeats (`relay.background_progress_secs`,
-  default 300) and the agent can volunteer updates via `report_progress`.
-  `/watch <minutes> [for <N>h] <prompt>` schedules durable recurring turns
-  (restart-safe); `/unwatch <id>` stops one. The agent can do the same with
-  `watch_create`/`watch_list`/`watch_cancel` (`crates/hq-tools/src/background_turns.rs`).
-  A firing whose reply contains `WATCH_DONE` delivers once and stops its watch.
-  `background_turn_status` looks any turn up by its 8-character short ref.
 - The vault is the primary output target for knowledge and agent output.
-- **Search freshness has two sources.** The vault watcher (events, seconds) and the scheduled `embeddings` task's full scan (every 30 minutes, the correctness floor). Index writes go through `hq_db::search::reconcile`, never hand-written SQL on `notes_fts`, so a delete clears every derived row. Tests that touch the index use the real migrated schema (`crate::migrations::run`).
 - **Adoption data stays on the device.** What the person uses HQ for (capabilities used or never
   tried, corrections, return visits) is never sent to a model provider, a push service, a relay or
   any third party, and is never sold or shared. It orders the owner's own chips and fills their
@@ -156,89 +91,38 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   "You haven't tried this" nudges are chosen on the device, never by the model. Policy:
   `docs/security/ADOPTION_DATA.md`.
 - **Identity is never model-writable.** Tools learn the caller only from reserved `_hq_*` arguments the runtime sets (`_hq_connector`, `_hq_caller_session`, `_hq_native_*`). A native session strips every `_hq_*` key the model sent before it sets its own, and the MCP gateway strips `_hq_native_*` from callers. Provenance is recorded only where a write path knows the caller; otherwise it is `unknown`. Review state changes only through `note_review`.
-- **Disk watchdog**: `crates/hq-cli/src/commands/start/daemon/tasks_periodic/disk_watchdog.rs` is a 6-hour daemon task
-  that checks overall disk usage, the bun install cache, and `node_modules` and
-  `target` bloat under configurable roots, putting a report in the owner's inbox on
-  breach. Config: `disk_watchdog:` in `~/.hq/config.yaml`.
-- **Capabilities and the adoption digest**: `crates/hq-tools/assets/capabilities.yaml` lists what
-  HQ can do in the person's words; `hq_tools::capabilities` resolves it against the install (model
-  key, OCR, `gws`, registered tools) and what the owner's sessions used. It feeds the empty chat's
-  chips (`GET /api/capabilities`, web and Android), a short usage-free "Things you can offer"
-  block in the owner's own sessions, and the weekly device-only `adoption-digest` daemon task
-  (`crates/hq-cli/src/commands/start/daemon/tasks_periodic/adoption_digest.rs`, queries in
-  `hq_db::adoption`). `hq adoption` prints the same report and `hq offers replay` runs the phase 2
-  offer detectors (`hq_tools::capabilities::offers`) over past chats, counts only
-  (`crates/hq-cli/src/commands/adoption.rs`); `scripts/phone-hq.sh` reads both from a phone over the bridge
-  (`GET /api/adoption`, `GET /api/offers/replay`, `crates/hq-web/src/adoption_api.rs`) with a device token.
-  A reply in the web or phone chat may carry one offer (`chat_messages.meta.offer`, chosen on the
-  device by `offers::for_turn`, answered through `POST /api/offers/answer`,
-  `crates/hq-web/src/offers_api.rs`, kept in `hq_db::offers`); the model never sees it. When no rule fires and the turn worked on a task, `hq_tools::capabilities::next_step` may offer one next step by comparing the task with invented examples (`assets/next_step_examples.jsonl`) through the on-device embedder; no language model takes part. The
-  `due-reminders` daemon task reminds about tasks made in chat. A new catalog tool must be registered (`crates/hq-mcp/tests/capability_catalog.rs`).
-  Plan: `docs/plans/simple-hq.md`. Off with `daemon.adoption_digest: false`.
-- **Tool failure digest**: `crates/hq-cli/src/commands/start/daemon/tasks_periodic/tool_failure_digest.rs`
-  is a weekly daemon task that groups the week's failed tool calls (`tool_usage`) by a
-  normalized error signature (`hq_db::tool_failures`), compares them with the week before
-  and puts one item in the owner's inbox. No model is involved. Off with `daemon.tool_failure_digest: false`.
 
-## Entry Points
+## Where things live
+
+Every area keeps its entry points, paths and area rules in a `CLAUDE.md` beside its code, which an
+assistant loads when it works there. Start from the file nearest the code you are changing.
+
+| File | Covers |
+|------|--------|
+| `crates/hq-agent/CLAUDE.md` | Agent sessions, sub-agents and governance |
+| `crates/hq-bridge/CLAUDE.md` | Pairing machines |
+| `crates/hq-cli/CLAUDE.md` | The `hq` binary and its commands |
+| `crates/hq-convert/CLAUDE.md` | Document conversion and import |
+| `crates/hq-core/CLAUDE.md` | Types, configuration and editions |
+| `crates/hq-db/CLAUDE.md` | The database, search and vault events |
+| `crates/hq-desktop/CLAUDE.md` | The macOS desktop app |
+| `crates/hq-edge/CLAUDE.md` | The public forwarder |
+| `crates/hq-export/CLAUDE.md` | Note export |
+| `crates/hq-mcp/CLAUDE.md` | The MCP server |
+| `crates/hq-memory/CLAUDE.md` | The memory system |
+| `crates/hq-net/CLAUDE.md` | The private network |
+| `crates/hq-relay/CLAUDE.md` | Discord and Telegram |
+| `crates/hq-tools/CLAUDE.md` | HQ tools, harness sessions and the features built on them |
+| `crates/hq-tools-web/CLAUDE.md` | Web tools and remote MCP servers |
+| `crates/hq-vault/CLAUDE.md` | The vault client |
+| `crates/hq-web/CLAUDE.md` | The web server and its auth |
+| `crates/suite/CLAUDE.md` | The HQ Suite |
+
+Docs that are not tied to one crate:
 
 | What | Path |
 |------|------|
-| CLI binary | `crates/hq-cli/src/main.rs` |
-| Agent session | `crates/hq-agent/src/session/mod.rs` |
-| Sub-agent dispatch | `crates/hq-agent/src/agents/service.rs`, `crates/hq-agent/src/agents/tool.rs` |
-| Coding-agent runtime (built-in host) | `crates/hq-host/`, `crates/hq-tools/src/agent_host/`, `crates/hq-tools/src/harness_session/`, `docs/AGENT_HOST.md` |
-| Private network (`hq net`, WireGuard hub and spoke), the root applier and its grammar | `crates/hq-net/` (`grammar.rs` is the only language the applier reads, `applier.rs` the Linux-only opener and the `wg` and `nft` caller, `wgconf.rs`, `links.rs` (the set of linked device pairs the applier hands to `nft`; version 2 of the peers file), `store.rs`, `init.rs`, `ops.rs`), `crates/hq-cli/src/commands/net.rs`, `deploy/net/` (systemd units; `deploy/net/test/run.sh` runs them for real in Docker, `deploy/net/tunnel-test/run.sh` runs the userspace tunnel against that hub; both share `deploy/net/test/hub-lib.sh`), `docs/PRIVATE_NETWORK.md`, `docs/plans/private-network.md`, `docs/security/NETWORK.md` |
-| The phone as a userspace WireGuard peer without `VpnService`: the `hq-tunnel` crate and `hq net tunnel` (subcommands keygen, import, check, run, status; cargo feature `tunnel`, off by default, on in the Android build) | `crates/hq-tunnel/` (`join.rs` the strict join-text parser, `config.rs` the serve and reach maps, `stack.rs` the smoltcp side and the source fence, `run.rs` the poll loop and its schedule, `status.rs` the status file, `session.rs` boringtun, `store.rs` the tunnel directory and the new-hub rule, `keyin.rs` the key from stdin or a private file), `crates/hq-cli/src/commands/net_tunnel.rs`, `crates/hq-cli/tests/net_tunnel.rs` (`cargo test -p hq-cli --features tunnel --test net_tunnel`), `docs/PRIVATE_NETWORK.md` ("A phone without the WireGuard app"), `docs/security/NETWORK.md` section 9 |
-| The public forwarder (`hq edge run|id|allow|revoke|list|invite`, config key `edge:`, off by default): reads only the TLS server name on one TCP listener, never decrypts, forwards to the registered device over an iroh stream (ALPN `hq/edge/1`); invite-only through the `Registry` trait (an allowlist file for now); optional co-hosted `iroh-relay` that admits only registered devices; per-device and pre-handshake caps | `crates/hq-edge/` (`hello.rs` ClientHello and its byte cap, `registry.rs` the `Registry` trait, `device_label` and the allowlist file checks, `limits.rs` token bucket and pending caps, `pipe.rs` the copy with idle timeout and rate limit, `server.rs` the listener and per-connection decision, `relay.rs` the co-hosted relay and its access control, `config.rs` the `edge:` section, `tests/edge.rs` the device-behind-a-NAT end to end), `crates/hq-cli/src/commands/edge.rs` (not built for Android or Windows), `deploy/edge/` (systemd unit, Dockerfile), `docs/EDGE.md`, `docs/security/EDGE.md`, `docs/plans/native-bridge-sprint.md` |
-| Editions (`profile: full`, `lite`, `mobile`) and the Android build | `crates/hq-core/src/config/profile.rs` (`Profile`, `MobileConfig`, `embeds_notes`), `effective_profile` in `crates/hq-core/src/config/mod.rs` (Windows is always Lite, Android defaults to Mobile), `Profile::drops_tool_category` (used by `crates/hq-mcp/src/registry.rs` and `crates/hq-agent/src/builder/tools.rs`), `scheduled_tasks` in `crates/hq-cli/src/commands/start/daemon/mod.rs`, `.github/workflows/android.yml`, `scripts/check-android-alignment.sh`, `docs/HQ_MOBILE.md`, `docs/HQ_LITE.md` |
 | Windows users (WSL2), adding a machine | `docs/WINDOWS.md`, `docs/JOIN_A_MACHINE.md` |
-| Task-linked and chat-driven harness sessions | `crates/hq-tools/src/harness_session/mission.rs`, `crates/hq-web/src/session_driver.rs`, `crates/hq-web/src/sessions_api.rs`, "Sessions that work on a task" and "Watching and driving from a web chat" in `docs/AGENT_SESSIONS.md` |
-| Device actions (asking the owner's phone to do something: the calendar tools today, contacts and messages next): the pending-action store, the link to the phone, the risk-class table governance reads, the one agent wrapper, the phone routes | `crates/hq-tools/src/device_actions/` (`store.rs`, `link.rs`, `spec.rs` the `DeviceToolSpec` table and `RiskClass`, `fake.rs` the test-support fake domain), `crates/hq-tools/src/calendar/` (the first domain), `crates/hq-agent/src/device_tool.rs`, `crates/hq-web/src/device_actions_api.rs`, `docs/DEVICE_ACTIONS.md`, `docs/CALENDAR_CREATION.md` |
-| Lane quotas (what is left of each coding-agent lane's allowance, read on the host that holds the login, stored, with pace; `hq quota`, `lane_quotas`, `GET /api/lane-quotas`, daemon task `lane-quotas`, config `quota:`) | `crates/hq-host/src/quota/` (readers, `host.quota`), `crates/hq-core/src/quota.rs` and `config/quota.rs` (types and config), `HostBackend::quota` in `crates/hq-tools/src/agent_host/` (native and scripted), `crates/hq-tools/src/lane_quotas/` (`mod.rs` read, store, stale fallback and the tool; `pace.rs` the pure pace maths), `crates/hq-db/src/lane_quota_samples.rs` (`sql/129_lane_quota_samples.sql`), `crates/hq-web/src/lane_quotas_api.rs`, `crates/hq-cli/src/commands/quota.rs`, `tasks_periodic/lane_quotas.rs`, `docs/LANE_QUOTAS.md`. Owner-only data. |
-| HQ Suite (Drive, Docs, Sheets, Slides, Dashboard; `hq suite`, cargo feature `suite`, on by default): hqmd notes with typed blocks, shrinking documents to the small record, storage governance. Built inside this repo, behind rules a test enforces so it can be lifted out | `crates/suite/` (read `crates/suite/CLAUDE.md` first), `hq-suite-md` (the hqmd parser, printer, validator and patch API; spec `docs/suite/HQMD.md`, golden corpus in `tests/corpus/`), `hq-suite-ingest` (pictures in packages, tier projection), `hq-suite-store` (atomic files, content-addressed media in `_media/cas/`, trash, the shrink journal), `hq-suite-shrink` (picture codecs with pixel caps, candidate encoders, `hq suite measure`, the shrink pipeline `pipeline.rs` and its crash-matrix test), `hq-suite-adapter` (the only crate that knows HQ; `tests/boundary.rs` is the extraction guard), `crates/hq-cli/src/commands/suite.rs`, `crates/hq-tools-office/` (the `office_file` tool: the only place a chat tool meets the suite), `docs/suite/` (`README.md`, `HQMD.md`, `MEASURE.md`, `SHRINK.md`), plan `docs/plans/hq-suite.md` |
-| Pull-based updates | `crates/hq-update/`, `crates/hq-cli/src/commands/update.rs`, `deploy/install.sh`, `deploy/update/`, `docs/UPDATE_SYSTEM.md` |
-| Encrypted backup and restore (`hq backup create|verify|restore|keygen|prune`, `hq restore`, the opt-in `backup:` daemon task) | `crates/hq-backup/` (`archive.rs` create, verify and restore with every check, `crypto.rs` the sealed container, `key.rs` passphrase and key file, `snapshot.rs` the consistent database copy, `retention.rs`), `crates/hq-cli/src/commands/backup.rs`, `crates/hq-cli/src/commands/start/daemon/tasks_periodic/backup.rs`, `BackupConfig` in `crates/hq-core/src/config/backup.rs`, `hq_db::migrations::newer_migrations`, `docs/BACKUP.md` |
-| Pairing machines with a QR code and reconnecting by key (`hq bridge`, with `register`, `edge` and `forget-edge` for a device's `hq edge`; cargo feature `bridge`, on by default except on Windows; the library does nothing until a caller starts it) | `crates/hq-bridge/` (`ticket.rs` the `hqpair://` link and protocol versions, `code.rs` the one-time code, commitment and six digits, `limits.rs` per-source limits, `host.rs` the ticket and its throwaway endpoint, `join.rs`, `bridge.rs` the long-term endpoint, the paired-only gate and pushed revocation, `door.rs` the `hq/edge/1` protocol a device accepts only from the edge it registered with and pipes to the connector door on loopback, `wire.rs`), `crates/hq-db/src/bridge.rs` and `sql/098_bridge_pairing.sql`, `sql/099_bridge_edge.sql` (the `bridge_peers` list and the one `bridge_edge`), `crates/hq-cli/src/commands/bridge.rs`, `docs/PAIRING.md`, `docs/security/PAIRING.md`, `docs/plans/native-bridge-sprint.md`, `docs/plans/native-bridge/spike-f/` (the historical spike) |
-| The phone app as a pairing hub (`hq bridge run`: JSON lines on stdin and stdout, driven by the Android app; the Android build sets a null `ndk-context` and gives every bridge endpoint its own resolver) | `crates/hq-cli/src/commands/bridge_control.rs` (control loop, tested with two machines), `crates/hq-cli/src/android_runtime.rs`, `crates/hq-bridge/src/dns.rs`, `apps/android/app/src/main/kotlin/example/hq/spike/bridge/` (supervisor, wire format, network watcher), `ui/pairing/` (screens, QR scan, `hqpair://` door), `ui/connect/` (Connect Claude), `docs/HQ_MOBILE.md` ("The bridge on the phone"), `docs/plans/native-bridge/w4-measurements.md`, `docs/security/PAIRING.md` section 12 |
-| macOS desktop app (Tauri 2: host start/stop, the pairing QR and typed digits, paired devices and revoke, Connect Claude, a loopback proxy for the web app and the consent page) | `crates/hq-desktop/` (all the logic, no GUI dependency, in the root workspace: `host.rs` the one child it may stop, `pairing.rs` over `hq-bridge`, `proxy.rs`, `connect.rs`, `window.rs` navigation allow-lists, `desktop.rs` wiring, `settings.rs`), `apps/desktop/` (the shell, its own Cargo workspace in `src-tauri`, excluded from the root: `main.rs`, `commands.rs`, `build.rs` and `capabilities/control.json` list the same commands; `ui/` the control window), `crates/hq-desktop/tests/` (`pairing_e2e.rs`, `proxy.rs`, `shell_config.rs` guards the CSP, capability and no-plugin settings, `cli_join.rs` opt-in), `docs/DESKTOP.md`, `docs/security/DESKTOP.md` |
-| Restart notices | `crates/hq-cli/src/commands/notify_restart.rs` (`hq notify-restart`) |
-| MCP server | `crates/hq-mcp/src/server.rs` |
-| Asking HQ from an MCP client (`hq_ask`, `hq_ask_result`) | `crates/hq-tools/src/ask.rs` (tools and the `AskRunner` seam), `crates/hq-web/src/ws/ask.rs` (runner, read-only enforcement via the permission preset), `crates/hq-db/src/ask_requests.rs`, `docs/MCP_ASK.md` |
-| Daemon scheduler | `crates/hq-cli/src/commands/start/daemon/mod.rs` |
-| Context fold (long chats as append-only summary blocks over `chat_messages` plus a raw tail, `context_fold:` config), chat history search and restore, the in-turn compactor and tool-output spill | `crates/hq-agent/src/fold/` (`mod.rs` view, cut, fold and distill, relations; `rules.rs` the summary rules), `crates/hq-db/src/thread_folds.rs` and `chat_search.rs` (`sql/115_thread_folds.sql`, `sql/116_chat_search.sql`), `thread_history` in `crates/hq-web/src/ws/mod.rs`, `fold_blocks` in `crates/hq-relay/src/native_run.rs`, `crates/hq-tools/src/session_search.rs` (`session_search`, `history_restore`), `crates/hq-tools/src/spill.rs` (`tool_output_read`), `crates/hq-agent/src/session/context.rs`, `crates/hq-agent/tests/fold_recall.rs` and `fold_graph.rs`, `docs/plans/context-fold.md` |
-| Context engine | `crates/hq-agent/src/context/engine.rs` |
-| Vault client | `crates/hq-vault/src/client.rs` |
-| Search (FTS5 + semantic) | `crates/hq-db/src/search/` |
-| `hq web` (host the web UI: foreground, `--detach`, `status`, `stop`, `--json`) | `crates/hq-cli/src/commands/web.rs`; shared server setup `build_web_state` and `default_static_dir` in `crates/hq-cli/src/commands/start/mod.rs`. Agents setting HQ up for someone should run `hq web --json` (it detaches) and read `login_url`. |
-| Discord bridge | `crates/hq-relay/src/discord/` |
-| Telegram bridge | `crates/hq-relay/src/telegram/`; commands and watch firing shared by both bridges in `chat_commands.rs` and `watch_scheduler.rs` |
-| Remote MCP servers (`remote_mcp:` config) | `crates/hq-tools-web/src/remote_mcp.rs` |
-| GitHub without a shell: `github_read`, `github_clone` (a hardened tarball fetch with a base record when neither git nor gh is installed), `github_write` (an `hq/` branch and a pull request for repositories in `github_write.repos`, token `HQ_GITHUB_WRITE_TOKEN`) | `crates/hq-tools/src/github/` (`mod.rs`, `tarball.rs`, `changes.rs`, `write.rs`), `crates/hq-core/src/config/github_write.rs`, `docs/plans/edge-coding-worker.md` |
-| HQ Coder jobs from chat: `hq_coder` (start, status, list, steer, stop, retry, feedback, budget; owner's chat only, everything but reading waits for approval), `coder_context` (a worker's only door into the vault: notes linked to its job), one budget and credit cap per job, retries after a kill, the phone and web job controls (`POST /api/coder/{action}`) | `crates/hq-tools/src/github/coder.rs`, `dispatch.rs`, `crates/hq-db/src/coder_jobs.rs`, `crates/hq-agent/src/session/job_budget.rs`, `crates/hq-web/src/coder_api.rs`, `apps/android/.../ui/helpers/CoderJobSheet.kt`, `apps/hq-web/src/components/sessions/OwnRunCard.tsx`, `docs/plans/hq-coder-sprint.md` |
-| Sites a chat may fetch without asking (allow a whole site, three approvals in a chat, three chats) | `crates/hq-db/src/fetch_sites.rs`, `fetch_site` in `crates/hq-agent/src/governance/tainted_calls.rs`, `note_site_answer` in `crates/hq-web/src/notifications_api.rs`, `crates/hq-web/src/fetch_sites_api.rs` |
-| HQ Coder: the person's own GitHub App by manifest (`hq github connect|status|disconnect`), scoped installation tokens, the repository check, the first-task yes and per-task budget. Owner-only; never a tool or an MCP route | `crates/hq-tools/src/github/app.rs` (manifest, `state`, key store, JWT, tokens), `repos.rs` (scan and flags), `dispatch.rs` (`allowed_repos`), `crates/hq-web/src/github_connect_api.rs`, `crates/hq-cli/src/commands/github.rs`, `apps/android/.../ui/helpers/GithubSheet.kt`, `apps/hq-web/src/components/sessions/GithubConnect.tsx`, `docs/plans/mobile-helpers.md` |
-| claude.ai connector (`mcp_connector:` config, OAuth for claude.ai and Claude Code, `hq connector`) | `crates/hq-web/src/oauth/` (server, consent API, `guard.rs` for approvals, rate limit and call log), `crates/hq-db/src/mcp_connector.rs`, `crates/hq-mcp/src/gateway.rs` (`CONNECTOR_CONFIRM_TOOLS`), `apps/hq-web/src/routes/connect.tsx`, `docs/CLAUDE_CONNECTOR.md`, `docs/plans/claude-connector.md`; the whole path from the forwarder to the door is `crates/hq-web/src/tls/tests/chain.rs`, and the real-account run is `docs/plans/native-bridge/w6-claude-run.md` |
-| Note export (pdf, docx, png, svg, html, md, xlsx, csv, json, jsonl, xml, latex, ipynb, jira, code): `hq vault export --format`, `hq vault export-pdf`, `vault_export`, `vault_export_pdf`, `/api/note/export`, `/api/note/pdf` | `crates/hq-export/` (document model `doc.rs`, writers, Typst layout `typst_markup.rs` and `render.rs`, vault glue `note.rs`), `crates/hq-convert/src/note_pdf.rs` (note preparation, legacy PDF engines behind `HQ_PDF_ENGINE`), `crates/hq-tools/src/convert.rs`, `crates/hq-web/src/vault_api.rs`, `docs/NOTE_EXPORT.md` |
-| Shared links summarised into their notes (`enrich_url` on `POST /api/note/create`, daemon task `link-capture`, off with `daemon.link_capture: false`) | `crates/hq-tools/src/link_capture.rs`, `crates/hq-db/src/link_captures.rs`, `crates/hq-cli/src/commands/start/daemon/tasks_periodic/link_capture.rs`, `web_fetch_direct` in `crates/hq-tools-web/src/web/fetch.rs`, `crates/hq-convert/src/ingest/keep.rs` (Google Keep export), `crates/hq-tools/src/collection_tip.rs` (weekly tip, daemon task `collection-tip`, off with `daemon.collection_tip: false`), `docs/plans/link-collection.md` |
-| Files the owner is handed (`file_deliver`, the typed `files` entry every export returns, `Exports/<yyyy-mm>/`; exports stay in the vault and are never cache) | `crates/hq-tools/src/deliver.rs`, `crates/hq-tools/src/convert.rs` (`confine_to_vault`) |
-| Importing files as notes (pdf, docx, xlsx, pptx, odt, rtf, html, xml, csv, images, old doc/ppt): `hq vault inventory`, `hq vault import`, `vault_inventory`, `vault_import`, `convert_to_markdown`, `POST /api/note/import` | `crates/hq-convert/src/ingest/` (entry `mod.rs`, sniffing `sniff.rs`, intermediate form and Markdown writer `ir.rs`, report `report.rs`, limits `package.rs`, one reader per format, PDF tables `pdf_layout.rs`, spreadsheet number formats `numfmt.rs` and `xlsx_formats.rs`, OCR confidence in `crates/hq-convert/src/ocr.rs`), `crates/hq-tools/src/vault/import.rs` (inventory, idempotent import by frontmatter `source`/`source_sha256`, archive, the two tools), `crates/hq-web/src/note_import.rs` (owner-only direct import route), `crates/hq-cli/src/commands/vault_import.rs`, `crates/hq-tools/src/convert.rs` (`convert_to_markdown`), connector approval in `crates/hq-mcp/src/gateway.rs` (`vault_import` is in `VAULT_WRITE_TOOLS`), taint in `crates/hq-agent/src/governance/taint.rs`, `crates/hq-convert/tests/corpus.rs`, `docs/NOTE_IMPORT.md` |
-| Task verification (HQ completes finished tasks from evidence, measures its own accuracy, `hq verify`) | `crates/hq-tools/src/tasks/verify/` (`pipeline.rs` gather, gate, review, finish and the veto window; `dispatch.rs` the loop behind the daemon task `verify-dispatch`; `collect.rs`, `artifact.rs`, `probe.rs` the evidence; `reviewer.rs`, `canary.rs`; `release_check.rs` the check at handover; `sweep.rs` plan, run, apply and undo; `second_opinion.rs`), `crates/hq-db/src/tasks/` (`verification.rs` verdicts and the guard on the edge into `complete`, `waits.rs`, `rework.rs`, `calibration.rs`, `veto.rs`, `sweeps.rs`, `briefing.rs`, `reverify.rs`, `shadow.rs` and `rollout.rs` the numbers that gate each rollout step), `VerificationConfig` in `crates/hq-core/src/config/tasks.rs`, daemon tasks `verify-dispatch`, `verify-audit` and `verify-briefing`, `crates/hq-cli/src/commands/verify.rs`, `crates/hq-web/src/verification_api.rs` (the owner-only REST routes), `apps/hq-web/src/components/tasks/verification/` and `apps/hq-web/src/lib/verificationApi.ts`, `docs/TASK_VERIFICATION.md`, `docs/plans/task-verification.md`. Owner-only by design: sweeps, audits, vetoes and second opinions are not agent tools and not reachable with any MCP key. |
-| Folder allow for a chat (per-chat, eight hours, from the approval card) and the nudge after three approvals | `crates/hq-agent/src/governance/folder_scope.rs` (what a grant may name and cover), `FolderCover` and `OwnerApproval::folder_cover` in `owner_approval.rs`, `owner_decision` in `governed_tool.rs`, `BashSettings::confined_to` in `crates/hq-agent/src/bash_sandbox.rs`, `crates/hq-db/src/owner_folder_grants.rs` (`sql/137_owner_folder_grants.sql`), `approve_folder` in `crates/hq-web/src/notifications_api.rs`, `chat_folders_api.rs`, `apps/hq-web/src/components/chat/ChatApprovals.tsx` and `SessionsPanel.tsx`, "Folder allow" in `docs/security/OWNER_APPROVAL.md` |
-| Helper setup (install the free coding helpers on a connected computer, start their sign-in, know which are ready; `helper_setup` tool, first-run offer, Helpers page panel) | `crates/hq-tools/src/helper_setup/` (`catalog.rs` the fixed commands, `runner.rs`, `service.rs`, `mod.rs`), `HostBackend::run_command`, `crates/hq-db/src/helper_status.rs` (`sql/138_helper_setup.sql`), `crates/hq-web/src/helper_setup_api.rs`, `tasks_periodic/helper_setup_offer.rs` (`daemon.helper_setup_offer`), `apps/hq-web/src/components/sessions/HelperSetup.tsx`, `docs/HELPER_SETUP.md`. The commands are fixed in the catalog; nothing a model or request says becomes a command. |
-| Native task management | `crates/hq-db/src/tasks.rs` (shared write surface: spaces > initiatives > tasks > comments), `crates/hq-tools/src/tasks/` (MCP tools), `crates/hq-web/src/tasks_api.rs` (REST + WS broadcast), `apps/hq-web/src/routes/tasks.tsx` (UI). Tag-based agent routing pushes to `_mailboxes/<tag>/` synchronously via `hq_core::mailbox::notify_tagged_agents`. Archiving for the view (`shelved_at`, `crates/hq-db/src/tasks/shelf.rs`, `tools_shelf.rs`) is display only and separate from `archived_at`, which is a removal: nothing outside a list that asks for `Shelf::Exclude` may read it. Sub-tasks, start dates, soft dependencies and List/Board/Timeline views: `docs/plans/native-tasks.md`. |
-| Web Push and `notify_owner` (`web_push:` config) | `crates/hq-tools/src/notify.rs` (tool), `crates/hq-web/src/web_push/` (VAPID, RFC 8291 encryption, dispatcher, `/api/notifications/push/*`), `crates/hq-db/src/push_subscriptions.rs`, `apps/hq-web/src/lib/webPush.ts`, `apps/hq-web/src/sw.ts`, `docs/WEB_PUSH.md` |
-| Vault change events: watcher, debounce queue, index and embedding freshness (`vault_watch:` config, `hq doctor` Search index, `hq vault repair`) | `crates/hq-daemon/src/vault_watch/` (`watcher.rs`, `queue.rs`, `pipeline.rs`, `status.rs`), `crates/hq-db/src/search/reconcile.rs` (the shared index writes and the full scan), `crates/hq-daemon/src/embeddings.rs` and `embedding_worker.rs`, `crates/hq-core/src/config/vault_watch.rs`, `docs/architecture/vault-events.md` |
-| Note provenance, review state and the task activity view | `crates/hq-db/src/provenance.rs` (tables `note_provenance`, `note_review_events`), `crates/hq-tools/src/provenance.rs` (who is calling, the `Recorder`), `crates/hq-tools/src/vault/review.rs` (`note_review`, `note_provenance`), `crates/hq-tools/src/tasks/activity.rs` (`task_activity`), `crates/hq-web/src/tasks_api.rs` (REST), `apps/hq-web/src/components/tasks/TaskActivity.tsx` and `InitiativeBriefing.tsx` |
-| Context packets (source-linked vault excerpts, built from a task id, with provenance and gaps) and their evaluation | `crates/hq-memory/src/context_packet.rs` (`build_packet`, `verify_citations`), `crates/hq-memory/src/context_task.rs` (the task record and its sources), `crates/hq-tools/src/vault/context.rs` (`context_packet`), `crates/hq-memory/tests/context_packet_eval.rs` (`cargo test -p hq-memory --test context_packet_eval`), `docs/architecture/vault-context-packets.md` |
-| Skills HQ ships (`hq skills sync`, `skills.builtin.off`): embedded in the binary, kept in the vault at every start, always loaded from the embedded text | `crates/hq-tools/src/skills/builtin.rs`, `crates/hq-tools/assets/skills/`, `crates/hq-core/src/config/skills.rs`, "Skills HQ ships" in `docs/SKILL_FLYWHEEL.md` |
-| Skill evidence, outcomes and fixtures (`hq skills evidence`) | `crates/hq-db/src/skill_invocations.rs`, `skill_outcomes.rs`, `skill_evidence.rs`, `crates/hq-tools/src/skills/fixtures.rs`, `evidence_proposal.rs`, `crates/hq-cli/src/commands/skills_evidence.rs`, `docs/SKILL_FLYWHEEL.md` |
-| Memory system | `crates/hq-memory/src/lib.rs` |
-| LLM usage report | `crates/hq-cli/src/commands/usage.rs` (`hq usage`/`cost`/`summary` read hq-db `task_outcomes`) |
-| Web and MCP auth, origin guard | `crates/hq-web/src/auth.rs`, `crates/hq-web/src/origin.rs`, `docs/security/WEB_AUTH.md` |
-| Bash sandbox, prompt-injection policy | `crates/hq-agent/src/bash_sandbox.rs`, `crates/hq-agent/src/governance/` (`taint.rs`, `secrets.rs`, `egress.rs`), `docs/security/BASH_SANDBOX.md`, `docs/security/PROMPT_INJECTION.md` |
-| Orchestrator role (`governance.orchestrator_role`) | `crates/hq-agent/src/builder.rs` (`SessionRole`, `ORCHESTRATOR_REMOVED_TOOLS`), `crates/hq-agent/src/session/role_denial.rs`, `crates/hq-tools/src/github.rs`, `docs/security/ORCHESTRATOR_ROLE.md` |
-| Owner approval in chat sessions (`PermissionMode::Default`, `governance.ask_owner`): a call that changes things outside the vault and tasks waits for the owner to approve exactly it in their inbox | `crates/hq-agent/src/governance/owner_approval.rs` (`needs_owner`, `OwnerApproval`), `GovernedTool::owner_decision` in `governed_tool.rs`, wired in `crates/hq-web/src/ws/mod.rs` and `crates/hq-relay/src/native_run.rs`, `hq_db::value_items::approval_gate`, `hq_core::approval_key::args_digest`, `docs/security/OWNER_APPROVAL.md` |
 | Security policy, release gate | `SECURITY.md`, `docs/security/RELEASE_CHECKLIST.md` |
 | Retired components (historical records only) | `docs/HERMES_HARNESS.md` (peer agents and the `hq-bus` fabric), `docs/N8N_HARNESS.md` (n8n and `hq-workflow`), `docs/FLEET_HARNESS.md` (multi-harness dispatch) |
 
@@ -314,55 +198,6 @@ can reach 100 GB or more in weeks.
 
 Details: `SECURITY.md` and `docs/security/`.
 
-## Remote MCP servers
-
-`crates/hq-tools-web/src/remote_mcp.rs` bridges any Streamable HTTP MCP server into
-HQ's tool registry. Each entry under `remote_mcp:` gets two tools,
-`<name>_discover` (tools/list) and `<name>_call` (tools/call), in the shared
-`remote_mcp` category that the Telegram guest profile denies. Pick a name that
-differs from the server's own tool prefixes (a server exposing `foo_call` should
-not be named `foo`), since the server's tools are nested one level under
-`<name>_call`. Entries default to `live_user_turn_only: true`, which keeps them
-out of unattended sessions.
-
-```yaml
-remote_mcp:
-  - name: diagrams
-    url: https://example.com/api/mcp
-    api_key: "..."
-```
-
-## Skills and document generation (optional)
-
-HQ has its own markdown skills under `.vault/skills/`, validated by
-`hq skills validate` and loaded into HQ sessions by hint match (see
-`crates/hq-tools/src/skills/`). Skill self-improvement is one mechanism,
-`hq_agent::skill_review`: after a session with enough tool calls, one LLM call
-proposes up to three edits to skills HQ minted or the owner adopted
-(`hq skills adopt|unadopt <name>` sets `managed: true`). Edits go through
-`hq_tools::skill_edit`, are scanned for instruction overrides and opaque
-payloads, and are audited in `skills/_audit.jsonl`. `hq skills revert <name>`
-restores the newest archive and `hq skills history <name>` prints the trail.
-`governance.skills_write_approval` (default off) stages every change in
-`skills/_proposed/` for `hq skills approve|reject <name>`.
-
-Skill evidence and tests: `skill_invocations` records the skill hash, task, purpose and
-outcome of every load (ids and fixed values only, never prompt or document text),
-`hq_db::skill_outcomes::settle` scores outcomes from observable acceptance rather than the
-session exit, and `skills/<name>/fixtures.yaml` holds regression fixtures that gate edits. See
-`docs/SKILL_FLYWHEEL.md`.
-
-Document generation (docx, pptx, xlsx, pdf) is optional and depends on external
-skills you install yourself. Brands are vault content, not a compiled-in list:
-`hq_convert::brand::discover_brands` scans `Notebooks/Projects/*/Branding/` at
-call time, so `brand_assets_list`, `brand_assets_add` and the `brand` parameter
-of `convert_from_markdown` offer only the brands registered in that vault. Add
-one with `Notebooks/Projects/<Name>/Branding/brand.yaml`.
-`hq_convert::brand::BrandKit` (`crates/hq-convert/src/brand.rs`) resolves a brand
-and `outbound.rs` uses it to pick a per-brand pandoc reference doc. The
-`prose_lint` tool (`crates/hq-tools/src/prose_lint.rs`) is a mechanical check for
-AI-sounding prose (`hq_core::prose_quality::SlopDetector`).
-
 ## Retired components
 
 HQ is a reactive single harness: relays, web, CLI, harness sessions over the host,
@@ -386,7 +221,7 @@ reference to them in old notes or skills as stale:
   store), `hq-crypto`, `hq-calendar`, `hq-sync`, `hq-tui` and `hq-codegraph`.
   Email goes through the `gws` CLI; agents orient with `grep` and line-range
   reads instead of a code graph.
-- ClickUp and Trello task mirroring. Tasks are native (see Entry Points).
+- ClickUp and Trello task mirroring. Tasks are native (see `crates/hq-tools/CLAUDE.md`).
 
 The MCP registry is a 2-tool gateway (`hq_discover`, `hq_call`); call
 `hq_discover` at runtime for the live tool catalog instead of trusting a count in
@@ -405,6 +240,7 @@ a document.
 | `hq-tool-api` | The `HqTool` trait and `ToolRegistry` (`registry`), shared helpers (`util`) and the family gates (`family_guest`, `family_confirm`). Depends only on `hq-core`; `hq-tools` re-exports every module, so `hq_tools::registry::...` still works |
 | `hq-tools-office` | The `office_file` tool (make a document in the vault smaller), over `hq-suite-adapter`. Split out of `hq-tools` so a change in the HQ Suite no longer rebuilds every tool; `hq-mcp` builds it under its `suite` feature. The tool's name and the actions that move an original are in `hq-tool-api::office` (re-exported as `hq_tools::office`) |
 | `hq-tools-web` | The web tools (`web`: search, fetch, the engine pool), the remote MCP bridge (`remote_mcp`) and `imagegen`, split out of `hq-tools`; `hq-tools` re-exports all three so `hq_tools::web::...` still works |
+| `hq-tools-coding` | The coding tools (`coding`: read, write, edit, search, git, shell) and the file-edit engine under them (`file_edit`), split out of `hq-tools`; `hq-tools` re-exports both so `hq_tools::coding::...` still works |
 | `hq-mcp` | MCP stdio server (2-tool gateway) |
 | `hq-daemon` | Agent worker, value bus, memory cycle, email triage (recurring prompts are `/watch`, not a daemon task) |
 | `hq-memory` | Consolidator, ingester, querier, forgetter, entity graph |
