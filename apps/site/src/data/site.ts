@@ -53,3 +53,19 @@ export const nav = [
   { href: '/install/', label: 'Install' },
   { href: '/security/', label: 'Security' },
 ] as const;
+
+const RELEASES_API = 'https://api.github.com/repos/CalvinMagezi/hq/releases?per_page=1';
+const BUILD_LOOKUP_MS = 4000;
+
+// Read once at build time so the footer never carries a typed build number. The site is built
+// in CI with network; a local build offline falls back to the version note instead of failing.
+export async function latestBuild(): Promise<{ tag: string; date: string }> {
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const res = await fetch(RELEASES_API, { signal: AbortSignal.timeout(BUILD_LOOKUP_MS) });
+    const [latest] = (await res.json()) as { tag_name: string }[];
+    return { tag: latest.tag_name, date: today };
+  } catch {
+    return { tag: LATEST_VERSION_NOTE, date: today };
+  }
+}
