@@ -114,7 +114,7 @@ private fun rememberBlockActions(state: ChatUiState, actions: ChatActions): Bloc
     return remember(state.openingNote, state.missingNotes, actions) {
         BlockActions(
             onOpenNote = actions.onOpenNote, onOpenChart = actions.onOpenChart, onOpenTable = actions.onOpenTable,
-            onOpenTasks = { go(Place.Tasks) }, onCopied = { actions.onNotice("Copied") }, onOpenFile = actions.onOpenFile,
+            onOpenTasks = { go(Place.Tasks) }, onCopied = { actions.onNotice("Copied") }, onOpenFile = actions.onOpenFile, onExportFile = actions.onExportFile,
             chipState = { path ->
                 when {
                     path in state.missingNotes -> ChipState.Missing

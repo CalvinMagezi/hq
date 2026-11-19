@@ -1,6 +1,7 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { FileText, Globe, File as FileIcon } from 'lucide-react'
-import { getNote } from '~/lib/vaultApi'
+import { downloadVaultFile, getExportFormats, getNote, makeExport } from '~/lib/vaultApi'
 import { readHqmd } from '~/lib/hqmd'
 import { computeSheet, formatValue, readSheet } from '~/lib/sheetCalc'
 import { Link } from '@tanstack/react-router'
@@ -86,12 +87,68 @@ export function FileCard({ file, onOpenNote }: { file: ReplyFile; onOpenNote?: (
             {t('chat_file_open')}
           </Link>
         )}
-        <a className="a-btn secondary compact" href={url ?? undefined} download={file.name}>
-          {t('chat_file_download')}
-        </a>
+        {note ? (
+          <ExportList note={note} />
+        ) : (
+          <a className="a-btn secondary compact" href={url ?? undefined} download={file.name}>
+            {t('chat_file_download')}
+          </a>
+        )}
       </div>
       {file.fidelity && <span className="a-cap a-muted">{file.fidelity}</span>}
     </div>
+  )
+}
+
+const EXPORT_LABEL = {
+  xlsx: 'export_format_xlsx',
+  csv: 'export_format_csv',
+  pdf: 'export_format_pdf',
+  docx: 'export_format_docx',
+  pptx: 'export_format_pptx',
+  md: 'export_format_md',
+} as const
+
+type ExportFormat = keyof typeof EXPORT_LABEL
+
+/** Export: the formats this note can be saved as, then the file, and one line on what it kept. */
+function ExportList({ note }: { note: string }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [line, setLine] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  const formats = useQuery({ queryKey: ['export-formats', note], queryFn: () => getExportFormats(note), enabled: open, staleTime: 60_000, retry: false })
+  const run = async (format: string) => {
+    setBusy(format)
+    setFailed(false)
+    try {
+      const made = await makeExport(note, format)
+      const file = made.files[0]
+      if (file) await downloadVaultFile(file.path, file.name)
+      setLine(made.fidelity)
+    } catch {
+      setFailed(true)
+    } finally {
+      setBusy(null)
+    }
+  }
+  return (
+    <>
+      <button type="button" className="a-btn secondary compact" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {t('chat_file_export')}
+      </button>
+      {open && (
+        <div role="group" aria-label={t('chat_file_export')} className="a-chips">
+          {(formats.data?.formats ?? []).filter((f): f is ExportFormat => f in EXPORT_LABEL).map((f) => (
+            <button key={f} type="button" className="a-chip" disabled={busy !== null} onClick={() => void run(f)}>
+              {busy === f ? t('chat_file_exporting') : t(EXPORT_LABEL[f])}
+            </button>
+          ))}
+        </div>
+      )}
+      {line && <span role="status" className="a-cap a-muted">{line}</span>}
+      {failed && <span role="alert" className="a-cap a-warn-t">{t('chat_file_export_failed')}</span>}
+    </>
   )
 }
 

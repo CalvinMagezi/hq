@@ -32,8 +32,11 @@ const FENCE = /^\s{0,3}(```|~~~)/
 // a pipe on it, which keeps a plain `---` (a rule, or the end of frontmatter) from counting.
 const DELIMITER_ROW = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
 
-/** Whether the Markdown has a table, ignoring anything inside a fenced code block. */
+const SHEET_FENCE = /^\s{0,3}(```|~~~)\s*sheet(\s|$)/m
+
+/** Whether the Markdown has a table, ignoring anything inside a fenced code block. A suite `sheet` block counts: it exports as a workbook. */
 export function noteHasTables(markdown: string): boolean {
+  if (SHEET_FENCE.test(markdown)) return true
   let fence: string | null = null
   let previous = ''
   for (const line of markdown.split('\n')) {

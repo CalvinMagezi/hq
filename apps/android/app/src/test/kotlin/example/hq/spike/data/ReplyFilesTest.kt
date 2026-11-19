@@ -28,3 +28,20 @@ class ReplyFilesTest {
         assertTrue(m.files.isEmpty())
     }
 }
+
+class ExportFormatsTest {
+    private fun file(name: String, note: String?) =
+        example.hq.spike.ui.chat.blocks.Attachment(name, "Exports/2026-11/$name", "", 10, note)
+
+    @Test
+    fun aFileMadeFromANoteOffersItsKindsFormats() {
+        assertEquals(listOf("xlsx", "csv", "pdf"), file("a.xlsx", "Notebooks/Office/a.md").exportFormats)
+        assertEquals(listOf("docx", "pdf", "md"), file("b.docx", "Notebooks/Office/b.md").exportFormats)
+        assertEquals(listOf("pptx", "pdf"), file("c.pptx", "Notebooks/Office/c.md").exportFormats)
+    }
+
+    @Test
+    fun aFileWithNoNoteOffersNoExport() {
+        assertTrue(file("a.xlsx", null).exportFormats.isEmpty())
+    }
+}

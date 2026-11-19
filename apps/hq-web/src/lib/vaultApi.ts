@@ -155,7 +155,7 @@ export async function getNote(
 export async function fetchNoteExport(
   notePath: string,
   format: NoteExportFormat,
-): Promise<{ blob: Blob; extension: string }> {
+): Promise<{ blob: Blob; extension: string; kept?: string }> {
   const res = await hqFetch(
     `/api/note/export?path=${encodeURIComponent(notePath)}&format=${encodeURIComponent(format)}`,
   )
@@ -166,6 +166,7 @@ export async function fetchNoteExport(
   return {
     blob: await res.blob(),
     extension: extensionFromDisposition(res.headers.get('content-disposition'), defaultExtension(format)),
+    kept: res.headers.get('x-export-note') ?? undefined,
   }
 }
 
@@ -271,4 +272,33 @@ export interface FilePreview {
 
 export function getPreview(path: string): Promise<FilePreview> {
   return hqJson(`/api/suite/preview?path=${encodeURIComponent(path)}`)
+}
+
+/** The formats an Export sheet offers for a note, decided by the server from the note's own kind. */
+export function getExportFormats(notePath: string): Promise<{ kind: string; formats: string[] }> {
+  return hqJson(`/api/suite/export-formats?path=${encodeURIComponent(notePath)}`)
+}
+
+export interface MadeExport {
+  files: Array<{ path: string; name: string }>
+  fidelity: string
+}
+
+/** Makes the file under Exports/ with the same code the agent uses; the line says what was kept. */
+export function makeExport(notePath: string, format: string): Promise<MadeExport> {
+  return hqJson('/api/suite/export', 'POST', { path: notePath, format })
+}
+
+/** Saves a vault file through the browser's download. */
+export async function downloadVaultFile(path: string, name: string): Promise<void> {
+  const res = await hqFetch(assetUrl(path))
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  const url = URL.createObjectURL(await res.blob())
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }

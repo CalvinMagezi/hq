@@ -34,6 +34,8 @@ pub struct Preview {
     pub notes: Vec<String>,
     /// Set when the preview is not the file's own look.
     pub banner: Option<&'static str>,
+    /// The note declares a suite kind, so it is an office note and may offer office exports.
+    pub suite: bool,
 }
 
 fn kind_of_extension(ext: &str) -> &'static str {
@@ -68,8 +70,9 @@ pub async fn preview(vault: &Path, rel: &str) -> Result<Preview> {
     if ext == "md" {
         let text = String::from_utf8_lossy(&bytes).into_owned();
         let doc = Document::parse(&text);
-        let kind =
-            frontmatter::get(doc.frontmatter(), "suite_kind").unwrap_or_else(|| "doc".into());
+        let declared = frontmatter::get(doc.frontmatter(), "suite_kind");
+        let suite = declared.is_some();
+        let kind = declared.unwrap_or_else(|| "doc".into());
         let title = frontmatter::get(doc.frontmatter(), "title")
             .unwrap_or_else(|| name.trim_end_matches(".md").to_string());
         let body = crate::docs::body_of(&text).to_string();
@@ -81,6 +84,7 @@ pub async fn preview(vault: &Path, rel: &str) -> Result<Preview> {
             markdown: cap(body),
             notes: Vec::new(),
             banner: None,
+            suite,
         });
     }
     let sniffed = sniff(&bytes, &ext);
@@ -105,6 +109,7 @@ pub async fn preview(vault: &Path, rel: &str) -> Result<Preview> {
         notes: done.report.warning_lines(),
         markdown: cap(done.markdown),
         banner: Some(CONTENT_ONLY),
+        suite: false,
     })
 }
 

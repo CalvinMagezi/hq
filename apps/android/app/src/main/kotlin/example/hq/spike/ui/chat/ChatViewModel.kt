@@ -18,6 +18,8 @@ import example.hq.spike.NoticeWords
 import example.hq.spike.data.ChatEvent
 import example.hq.spike.data.HqClient
 import example.hq.spike.R
+import org.json.JSONException
+import org.json.JSONObject
 import example.hq.spike.data.HqServices
 import example.hq.spike.update.AppVisibility
 import example.hq.spike.ui.shell.ClientRestore
@@ -72,6 +74,7 @@ class ChatActions(
     val onOpenTable: (Block.Table) -> Unit = {},
     val onClosePage: () -> Unit = {},
     val onOpenFile: (Attachment) -> Unit = {},
+    val onExportFile: (Attachment, String) -> Unit = { _, _ -> },
     val onRemoveContext: (ContextRef) -> Unit = {},
     val onOpenAdd: () -> Unit = {},
     val onCloseAdd: () -> Unit = {},
@@ -146,7 +149,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         onNotice = { text -> _state.update { it.copy(notice = Notice(text)) } },
         onOpenNote = ::openNote, onCloseNote = { _state.update { it.copy(note = null) } }, onAskAboutNote = ::askAbout,
         onOpenChart = { spec -> _state.update { it.copy(page = Page.Chart(spec)) } }, onOpenTable = ::openTable,
-        onClosePage = { _state.update { it.copy(page = null) } }, onOpenFile = ::openFile,
+        onClosePage = { _state.update { it.copy(page = null) } }, onOpenFile = ::openFile, onExportFile = ::exportFile,
         onRemoveContext = composer::removeContext,
         onOpenAdd = composer::openAdd, onCloseAdd = composer::closeAdd, onPickKind = composer::openPicker, onPickerQuery = composer::queryPicker,
         onClosePicker = composer::closePicker, onChoose = composer::choose, onFiles = composer::addFiles, onRetryFile = composer::retry,
@@ -448,7 +451,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt, spoken = m.spoken, offer = m.offer, clientId = m.clientId, replyFiles = m.files.map { Attachment(it.name, it.path, it.mime, it.size) })
+    private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt, spoken = m.spoken, offer = m.offer, clientId = m.clientId, replyFiles = m.files.map { Attachment(it.name, it.path, it.mime, it.size, it.note, it.fidelity) })
 
     /**
      * Collapses the offer to its result line at once and tells HQ. Yes acts after HQ has taken the answer (or has no route for it),
@@ -600,6 +603,31 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(notice = Notice("Couldn\'t fetch the file. HQ didn\'t answer in time. Try again.")) }
             } catch (e: ActivityNotFoundException) {
                 _state.update { it.copy(notice = Notice("No app on this phone can open that file.")) }
+            }
+        }
+    }
+
+    /** Makes the file in this format on HQ, fetches it, and hands it to the share sheet (which also saves to Files or Drive). */
+    private fun exportFile(file: Attachment, format: String) {
+        val note = file.note ?: return
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            try {
+                _state.update { it.copy(notice = Notice(app.getString(R.string.chat_file_exporting))) }
+                val made = client.postJson("/api/suite/export", JSONObject().put("path", note).put("format", format))
+                val entry = made.getJSONArray("files").getJSONObject(0)
+                val name = entry.getString("name")
+                val dest = File(app.cacheDir, "chat-files/${name.replace('/', '_')}")
+                client.download(entry.getString("path"), dest)
+                val uri = FileProvider.getUriForFile(app, "${app.packageName}.files", dest)
+                val send = Intent(Intent.ACTION_SEND).setType(entry.optString("mime", "").ifBlank { "*/*" })
+                    .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                app.startActivity(Intent.createChooser(send, name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                _state.update { it.copy(notice = Notice(made.optString("fidelity", ""))) }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(notice = Notice(app.getString(R.string.chat_file_export_failed))) }
+            } catch (e: JSONException) {
+                _state.update { it.copy(notice = Notice(app.getString(R.string.chat_file_export_failed))) }
             }
         }
     }
