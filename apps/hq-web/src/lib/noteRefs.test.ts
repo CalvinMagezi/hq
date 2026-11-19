@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { codespanHtml, noteRefFromCode, vaultFileLinkTarget, vaultLinkTarget } from './noteRefs'
+import { codespanHtml, fileRefFromCode, noteRefFromCode, vaultFileLinkTarget, vaultLinkTarget } from './noteRefs'
 
 test('noteRefFromCode recognises a backticked vault path', () => {
   expect(
@@ -86,4 +86,21 @@ test('vaultFileLinkTarget leaves real links and notes alone', () => {
   expect(vaultFileLinkTarget('/chat')).toBeNull()
   expect(vaultFileLinkTarget('../secret.xlsx')).toBeNull()
   expect(vaultFileLinkTarget(null)).toBeNull()
+})
+
+test('fileRefFromCode and codespanHtml turn vault file code spans into tappable file chips', () => {
+  expect(fileRefFromCode('Exports/x.xlsx')).toBe('Exports/x.xlsx')
+  expect(fileRefFromCode('Exports/2026-11/dash.html')).toBe('Exports/2026-11/dash.html')
+  expect(fileRefFromCode('Notebooks/Report.html')).toBe('Notebooks/Report.html')
+  expect(fileRefFromCode('sandbox:/mnt/out/Exports/2026-11/dash.html')).toBe('Exports/2026-11/dash.html')
+  expect(fileRefFromCode('crates/hq-web/src/lib.rs')).toBeNull()
+  expect(fileRefFromCode('Notebooks/Research/y.md')).toBeNull()
+
+  const xlsx = codespanHtml('Exports/x.xlsx')
+  expect(xlsx).toContain('data-vault-file="Exports/x.xlsx"')
+  expect(xlsx).toContain('role="button"')
+  expect(xlsx).toContain('tabindex="0"')
+  expect(xlsx).toContain('>Exports/x.xlsx</code>')
+
+  expect(codespanHtml('crates/hq-web/src/lib.rs')).toBe('<code>crates/hq-web/src/lib.rs</code>')
 })

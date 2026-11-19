@@ -11,6 +11,7 @@ import { blockRemoteImages } from '~/lib/remoteImages'
 import { chartSlot, fillChartSlots } from '~/lib/chartSlots'
 import { parseChart, parseMermaidPie, renderChartHtml } from '~/lib/chart'
 import { codespanHtml, vaultFileLinkTarget, vaultLinkTarget } from '~/lib/noteRefs'
+import { isHtmlPath } from '~/lib/htmlDashboard'
 import { downloadVaultFile, vaultFileExists } from '~/lib/vaultApi'
 
 // Lazy-load shiki only when first needed (avoids bundling all grammars eagerly)
@@ -48,7 +49,7 @@ function renderHtml(markdown: string): string {
         return `<button type="button" class="md-wikilink a-link" data-vault-note="${escapeHtml(target)}" aria-label="Open note ${escapeHtml(label)}">${escapeHtml(label)}</button>`
     })
     const raw = marked.parse(md, { async: false }) as string
-    const sanitized = DOMPurify.sanitize(raw, { USE_PROFILES: { html: true }, ADD_ATTR: ['data-copy-text', 'data-vault-note', 'data-chart-slot', 'data-table-copy', 'data-table-expand'] })
+    const sanitized = DOMPurify.sanitize(raw, { USE_PROFILES: { html: true }, ADD_ATTR: ['data-copy-text', 'data-vault-note', 'data-vault-file', 'data-chart-slot', 'data-table-copy', 'data-table-expand'] })
     return fillChartSlots(blockRemoteImages(sanitized))
 }
 
@@ -138,7 +139,7 @@ export function tableText(table: HTMLTableElement): string {
 export const markdownReady = () => ensureMarkedConfigured()
 
 /** `bare` drops the frontmatter panel and selection toolbar, for chat bubbles. */
-export function MarkdownViewer({ content, activePath, zoom, bare }: { content: string; activePath?: string; zoom?: number; bare?: boolean }) {
+export function MarkdownViewer({ content, activePath, zoom, bare, onOpenFile }: { content: string; activePath?: string; zoom?: number; bare?: boolean; onOpenFile?: (path: string) => void }) {
     const [html, setHtml] = useState(() => firstHtml(content, bare))
     const [frontmatter, setFrontmatter] = useState<Record<string, any>>({})
     const [metaOpen, setMetaOpen] = useState(false)
@@ -244,6 +245,24 @@ export function MarkdownViewer({ content, activePath, zoom, bare }: { content: s
                 return
             }
 
+            const openOrDownloadFile = (file: string, trigger: HTMLElement) => {
+                if (isHtmlPath(file)) {
+                    if (onOpenFile) onOpenFile(file)
+                    else useVaultNoteStore.getState().openNote(file, trigger)
+                    return
+                }
+                const name = file.split('/').pop() ?? file
+                downloadVaultFile(file, name).catch(() => toastNotice(t('chat_file_link_missing')))
+            }
+
+            const fileBtn = (e.target as Element).closest<HTMLElement>('[data-vault-file]')
+            if (fileBtn) {
+                e.preventDefault()
+                const filePath = fileBtn.getAttribute('data-vault-file')
+                if (filePath) openOrDownloadFile(filePath, fileBtn)
+                return
+            }
+
             const link = (e.target as Element).closest<HTMLAnchorElement>('a')
             if (link) {
                 const target = vaultLinkTarget(link.getAttribute('href'))
@@ -255,15 +274,14 @@ export function MarkdownViewer({ content, activePath, zoom, bare }: { content: s
                 const file = vaultFileLinkTarget(link.getAttribute('href'))
                 if (file) {
                     e.preventDefault()
-                    const name = file.split('/').pop() ?? file
-                    downloadVaultFile(file, name).catch(() => toastNotice(t('chat_file_link_missing')))
+                    openOrDownloadFile(file, link)
                 }
             }
         }
-        // The inline-code note chip is not a native button, so Enter and Space click it.
+        // The inline-code note or file chip is not a native button, so Enter and Space click it.
         const keyHandler = (e: KeyboardEvent) => {
             if (e.key !== 'Enter' && e.key !== ' ') return
-            const chip = (e.target as Element).closest<HTMLElement>('code[data-vault-note]')
+            const chip = (e.target as Element).closest<HTMLElement>('code[data-vault-note],code[data-vault-file]')
             if (!chip) return
             e.preventDefault()
             chip.click()

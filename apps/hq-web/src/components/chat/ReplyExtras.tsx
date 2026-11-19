@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { FileText, Globe, File as FileIcon } from 'lucide-react'
 import { downloadVaultFile, getExportFormats, getNote, makeExport } from '~/lib/vaultApi'
 import { readHqmd } from '~/lib/hqmd'
+import { isHtmlPath } from '~/lib/htmlDashboard'
 import { computeSheet, formatValue, readSheet } from '~/lib/sheetCalc'
 import { Link } from '@tanstack/react-router'
 import { t } from '~/strings'
@@ -70,6 +71,7 @@ function noteTitle(path: string): string {
 export function FileCard({ file, onOpenNote }: { file: ReplyFile; onOpenNote?: (note: MadeNote) => void }) {
   const url = useAssetUrl(file.path)
   const note = file.note
+  const openTarget = note ? { title: noteTitle(note), path: note } : isHtmlPath(file.path) ? { title: file.name, path: file.path } : null
   return (
     <div className="hq-made hq-made-col">
       <div className="hq-made-row">
@@ -78,8 +80,8 @@ export function FileCard({ file, onOpenNote }: { file: ReplyFile; onOpenNote?: (
           <b>{file.name}</b>
           <span className="a-cap a-muted">{`${t(KIND_LABEL[file.kind])} · ${sizeLabel(file.size)}`}</span>
         </span>
-        {note && onOpenNote ? (
-          <button type="button" className="a-btn secondary compact" onClick={() => onOpenNote({ title: noteTitle(note), path: note })}>
+        {openTarget && onOpenNote ? (
+          <button type="button" className="a-btn secondary compact" onClick={() => onOpenNote(openTarget)}>
             {t('chat_file_open')}
           </button>
         ) : (

@@ -116,3 +116,11 @@ dialog.hq-sheet.hq-chats-sheet{top:120px;max-height:none}
 .hq-title-btn{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:inherit;color:inherit;text-align:left;border-radius:var(--radius-md);padding:2px 6px;margin:0 -6px}
 .hq-title-btn:hover{background:var(--surface-100)}
 .hq-title-input{flex:1 1 0;min-width:0;padding:2px 6px;border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface-000);color:var(--ink)}
+
+/* HTML dashboard viewer inside the work pane and fullscreen sheet. */
+.hq-html-dash{display:flex;flex-direction:column;gap:8px;flex:1 1 auto;min-height:0}
+.hq-html-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.hq-html-frame{width:100%;min-height:420px;flex:1 1 auto;border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface-000)}
+dialog.hq-sheet.hq-html-fullscreen{width:min(96vw,1400px);max-width:96vw;height:90dvh;max-height:90dvh}
+dialog.hq-sheet.hq-html-fullscreen .a-sheet-body{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
+.hq-html-frame-full{min-height:0;height:100%}

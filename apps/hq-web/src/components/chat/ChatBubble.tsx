@@ -9,7 +9,7 @@ import { CREDITS_TOOLTIP, formatCredits, totalCredits, type StepCredit } from '~
 import { ToolCallBlock } from './ToolCallBlock'
 import { LiveLine } from './LiveLine'
 import { FileCard, MadeCard, SourceChips } from './ReplyExtras'
-import { madeNotes, sourcesOf, type MadeNote, type ReplySource } from '~/lib/replySources'
+import { madeNotes, relevantSources, type MadeNote, type ReplySource } from '~/lib/replySources'
 import { ThinkingPanel } from './ThinkingPanel'
 import { MessageAttachments } from './AttachmentChips'
 import { t } from '~/strings'
@@ -69,7 +69,7 @@ export function ChatBubble({ message, live = false, startedAt, onEdit, onRegener
   const steps = message.toolSteps ?? []
   const replyCredits = isUser ? null : totalCredits(message.stepCredits)
   // What the reply read and made is only known once it is saved; while it streams, the live line speaks.
-  const sources = !isUser && !live ? sourcesOf(steps) : []
+  const sources = !isUser && !live ? relevantSources(steps, message.content) : []
   const made = !isUser && !live ? madeNotes(steps) : []
 
   const handleCopy = () => {
@@ -91,7 +91,11 @@ export function ChatBubble({ message, live = false, startedAt, onEdit, onRegener
       {!isUser && live && <LiveLine steps={steps} startedAt={startedAt} writing={message.content !== ''} thinking={!!message.reasoning} onStop={onStop} />}
       {message.attachments && <MessageAttachments attachments={message.attachments} />}
 
-      {message.content && (isUser ? <p className="hq-msg-text">{message.content}</p> : <MarkdownViewer content={message.content} bare />)}
+      {message.content && (
+        isUser
+          ? <p className="hq-msg-text">{message.content}</p>
+          : <MarkdownViewer content={message.content} bare onOpenFile={(path) => onOpenMade?.({ title: path.split('/').pop() ?? path, path })} />
+      )}
       {!isUser && !live && steps.length > 0 && <ToolCallBlock steps={steps} credits={message.stepCredits} />}
       {made.map((n) => (
         <MadeCard key={n.path} note={n} onOpen={(note) => onOpenMade?.(note)} />

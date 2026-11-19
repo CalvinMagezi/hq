@@ -1,4 +1,5 @@
 import { sanitizeVaultPath } from '~/store/vaultNoteStore'
+import { t } from '~/strings'
 
 const MAX_NOTE_REF_LENGTH = 300
 // Characters a vault path never has but prose and shell snippets in backticks often do.
@@ -68,11 +69,35 @@ export function vaultFileLinkTarget(href: string | null | undefined): string | n
   return sanitizeVaultPath(relative)
 }
 
-/** Inline code as HTML: a tappable note reference when it names a vault note, plain `<code>` otherwise. */
+const VAULT_FILE_ROOTS = /^(?:Exports|Notebooks|Inbox|_attachments)\//
+const EXPLICIT_VAULT_PREFIX = /^(?:sandbox:|file:|vault:|note:|\/api\/vault-asset\?)/i
+
+/**
+ * The vault path a backticked non-note file reference points at (for example `Exports/x.xlsx`
+ * or `Notebooks/Report.html`), or null when it is ordinary inline code such as a repo path.
+ */
+export function fileRefFromCode(text: string | null | undefined): string | null {
+  if (!text || text !== text.trim() || text.length > MAX_NOTE_REF_LENGTH) return null
+  if (NOT_A_PATH.test(text) || !text.includes('/')) return null
+  const target = vaultFileLinkTarget(text)
+  if (!target) return null
+  if (VAULT_FILE_ROOTS.test(target) || EXPLICIT_VAULT_PREFIX.test(text)) return target
+  return null
+}
+
+/** Inline code as HTML: a tappable note or file chip when it names a vault path, plain `<code>` otherwise. */
 export function codespanHtml(text: string): string {
   const escaped = escapeAttr(text)
   const note = noteRefFromCode(text)
-  if (!note) return `<code>${escaped}</code>`
-  const path = escapeAttr(note)
-  return `<code class="md-note-ref" role="button" tabindex="0" data-vault-note="${path}" title="Open note" aria-label="Open note ${path}">${escaped}</code>`
+  if (note) {
+    const path = escapeAttr(note)
+    return `<code class="md-note-ref" role="button" tabindex="0" data-vault-note="${path}" title="Open note" aria-label="Open note ${path}">${escaped}</code>`
+  }
+  const file = fileRefFromCode(text)
+  if (file) {
+    const path = escapeAttr(file)
+    const label = escapeAttr(t('chat_file_chip_open'))
+    return `<code class="md-note-ref md-file-ref" role="button" tabindex="0" data-vault-file="${path}" title="${label}" aria-label="${label} ${path}">${escaped}</code>`
+  }
+  return `<code>${escaped}</code>`
 }
