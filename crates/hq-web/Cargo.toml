@@ -26,6 +26,7 @@ hq-core = { workspace = true }
 hq-llm = { workspace = true }
 hq-mcp = { workspace = true }
 hq-tools = { workspace = true }
+hq-tool-api = { workspace = true }
 chrono = { workspace = true }
 iana-time-zone = "0.1"
 serde_yaml = { workspace = true }

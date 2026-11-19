@@ -53,6 +53,8 @@ The debug profile accumulates stale binaries Cargo never cleans. With 17 crates 
 
 ## Entry Points
 
+The full list of entry points, by area, is in the nested `CLAUDE.md` files; the index is the "Where things live" table in the root `CLAUDE.md`. The short table below is a starting point.
+
 | What | Path |
 |------|------|
 | CLI binary | `crates/hq-cli/src/main.rs` |

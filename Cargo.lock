@@ -3376,7 +3376,10 @@ dependencies = [
  "hq-db",
  "hq-llm",
  "hq-memory",
+ "hq-tool-api",
  "hq-tools",
+ "hq-tools-coding",
+ "hq-tools-web",
  "hq-vault",
  "libc",
  "lru",
@@ -3475,7 +3478,9 @@ dependencies = [
  "hq-relay",
  "hq-sandbox",
  "hq-suite-adapter",
+ "hq-tool-api",
  "hq-tools",
+ "hq-tools-web",
  "hq-tunnel",
  "hq-update",
  "hq-vault",
@@ -3568,7 +3573,8 @@ dependencies = [
  "hq-db",
  "hq-llm",
  "hq-memory",
- "hq-tools",
+ "hq-tool-api",
+ "hq-tools-web",
  "hq-vault",
  "libc",
  "notify",
@@ -3740,8 +3746,11 @@ dependencies = [
  "async-trait",
  "hq-core",
  "hq-db",
+ "hq-tool-api",
  "hq-tools",
+ "hq-tools-coding",
  "hq-tools-office",
+ "hq-tools-web",
  "hq-vault",
  "rmcp",
  "serde",
@@ -3844,6 +3853,7 @@ dependencies = [
  "hq-suite-sinks",
  "hq-suite-slides",
  "hq-suite-store",
+ "hq-suite-xlsx",
  "hq-vault",
  "image",
  "serde",
@@ -3968,6 +3978,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hq-suite-xlsx"
+version = "0.9.1"
+dependencies = [
+ "hq-convert",
+ "hq-suite-calc",
+ "hq-suite-md",
+ "roxmltree 0.21.1",
+ "thiserror 2.0.18",
+ "tokio",
+ "zip 9.0.5",
+]
+
+[[package]]
 name = "hq-tool-api"
 version = "0.9.1"
 dependencies = [
@@ -4006,7 +4029,6 @@ dependencies = [
  "hq-llm",
  "hq-memory",
  "hq-tool-api",
- "hq-tools-web",
  "hq-vault",
  "html2text",
  "libc",
@@ -4034,11 +4056,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "hq-tools-coding"
+version = "0.9.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "dirs",
+ "filetime",
+ "hq-core",
+ "hq-host",
+ "hq-tool-api",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "hq-tools-office"
 version = "0.9.1"
 dependencies = [
  "anyhow",
  "async-trait",
+ "hq-convert",
+ "hq-export",
  "hq-suite-adapter",
  "hq-tool-api",
  "serde_json",
@@ -4164,6 +4207,7 @@ dependencies = [
  "hq-llm",
  "hq-mcp",
  "hq-suite-adapter",
+ "hq-tool-api",
  "hq-tools",
  "hq-vault",
  "http",

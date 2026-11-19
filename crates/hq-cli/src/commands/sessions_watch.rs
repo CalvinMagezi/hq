@@ -86,7 +86,7 @@ impl Source {
                 events::wait_read(db, feed, &scope, &Reader::default(), after, 200, wait).await
             }
             Source::Remote(server) => {
-                let call = hq_tools::remote_mcp::call_named_server(
+                let call = hq_tools_web::remote_mcp::call_named_server(
                     server,
                     "hq_call",
                     json!({ "tool": "harness_session_events", "args": args }),

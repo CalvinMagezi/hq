@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use hq_mcp::server::HqMcpServer;
-use hq_tools::registry::{HqTool, ToolRegistry};
+use hq_tool_api::registry::{HqTool, ToolRegistry};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream, Lines};
 

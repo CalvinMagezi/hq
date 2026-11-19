@@ -12,10 +12,11 @@ use async_trait::async_trait;
 use hq_convert::ingest::sniff::{Kind, sniff};
 use serde_json::{Value, json};
 
+pub use hq_tool_api::files::{EXPORTS_DIR, clean_stem, exports_month_dir, file_entry, unique_path};
+use hq_tool_api::files::{FILE_TYPES, FileType, extension_of, file_type};
+
 use crate::registry::HqTool;
 
-/// Where delivered files and exports land, relative to the vault.
-pub(crate) const EXPORTS_DIR: &str = "Exports";
 /// A delivered file may not be larger than this.
 const MAX_DELIVER_BYTES: u64 = 50 * 1024 * 1024;
 /// Vault folders that hold identity, threads and databases; files never belong there.
@@ -25,144 +26,16 @@ const MACRO_EXTENSIONS: [&str; 6] = ["xlsm", "xlsb", "docm", "pptm", "dotm", "xl
 /// Folders a session's own files may come from, besides its working directory.
 const SCRATCH_ROOTS: [&str; 4] = ["/tmp", "/var/tmp", "/private/tmp", "/private/var/folders"];
 
-/// A type the owner can be handed: its extension, mime type, card kind and the content it must have.
-struct Deliverable {
-    ext: &'static str,
-    mime: &'static str,
-    kind: &'static str,
-    content: Option<Kind>,
-}
-
-const DELIVERABLES: &[Deliverable] = &[
-    Deliverable {
-        ext: "xlsx",
-        mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        kind: "sheet",
-        content: Some(Kind::Xlsx),
-    },
-    Deliverable {
-        ext: "docx",
-        mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        kind: "doc",
-        content: Some(Kind::Docx),
-    },
-    Deliverable {
-        ext: "pptx",
-        mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        kind: "slides",
-        content: Some(Kind::Pptx),
-    },
-    Deliverable {
-        ext: "pdf",
-        mime: "application/pdf",
-        kind: "pdf",
-        content: Some(Kind::Pdf),
-    },
-    Deliverable {
-        ext: "csv",
-        mime: "text/csv",
-        kind: "sheet",
-        content: None,
-    },
-    Deliverable {
-        ext: "tsv",
-        mime: "text/tab-separated-values",
-        kind: "sheet",
-        content: None,
-    },
-    Deliverable {
-        ext: "png",
-        mime: "image/png",
-        kind: "image",
-        content: Some(Kind::Image),
-    },
-    Deliverable {
-        ext: "jpg",
-        mime: "image/jpeg",
-        kind: "image",
-        content: Some(Kind::Image),
-    },
-    Deliverable {
-        ext: "jpeg",
-        mime: "image/jpeg",
-        kind: "image",
-        content: Some(Kind::Image),
-    },
-    Deliverable {
-        ext: "webp",
-        mime: "image/webp",
-        kind: "image",
-        content: Some(Kind::Image),
-    },
-    Deliverable {
-        ext: "gif",
-        mime: "image/gif",
-        kind: "image",
-        content: Some(Kind::Image),
-    },
-];
-
-fn deliverable(ext: &str) -> Option<&'static Deliverable> {
-    DELIVERABLES.iter().find(|d| d.ext == ext)
-}
-
-fn extension_of(path: &Path) -> String {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase()
-}
-
-/// The typed record of a file in the vault, as a chat message carries it: path, name, mime type,
-/// size and the kind of card to draw. `rel` is vault-relative.
-pub(crate) fn file_entry(vault: &Path, rel: &str) -> Value {
-    let path = vault.join(rel);
-    let ext = extension_of(&path);
-    let known = deliverable(&ext);
-    json!({
-        "path": rel,
-        "name": path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-        "mime": known.map_or("application/octet-stream", |d| d.mime),
-        "kind": known.map_or("file", |d| d.kind),
-        "size": std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
-    })
-}
-
-/// `Exports/<yyyy-mm>` for today.
-pub(crate) fn exports_month_dir() -> PathBuf {
-    PathBuf::from(EXPORTS_DIR).join(chrono::Local::now().format("%Y-%m").to_string())
-}
-
-/// `dir/stem.ext`, or `dir/stem-2.ext` and so on when that name is taken. Nothing is overwritten.
-pub(crate) fn unique_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
-    let name = |n: u32| match (n, ext.is_empty()) {
-        (1, true) => stem.to_string(),
-        (1, false) => format!("{stem}.{ext}"),
-        (n, true) => format!("{stem}-{n}"),
-        (n, false) => format!("{stem}-{n}.{ext}"),
-    };
-    (1..)
-        .map(|n| dir.join(name(n)))
-        .find(|p| !p.exists())
-        .expect("an unbounded range yields a free name")
-}
-
-/// A file name with no folders in it and nothing a file system dislikes.
-pub(crate) fn clean_stem(raw: &str) -> String {
-    let stem: String = raw
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '(' | ')') {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let stem = stem
-        .trim_matches(|c: char| c == '-' || c == ' ')
-        .to_string();
-    if stem.is_empty() { "file".into() } else { stem }
+/// What a file of each deliverable type must contain, judged by its bytes.
+fn expected_content(ext: &str) -> Option<Kind> {
+    match ext {
+        "xlsx" => Some(Kind::Xlsx),
+        "docx" => Some(Kind::Docx),
+        "pptx" => Some(Kind::Pptx),
+        "pdf" => Some(Kind::Pdf),
+        "png" | "jpg" | "jpeg" | "webp" | "gif" => Some(Kind::Image),
+        _ => None,
+    }
 }
 
 fn in_private_dir(vault: &Path, abs: &Path) -> bool {
@@ -183,7 +56,7 @@ fn in_session_space(abs: &Path) -> bool {
 }
 
 /// Everything `file_deliver` checks before it copies, with the reason in words the agent can act on.
-fn check_source(vault: &Path, raw: &Path) -> Result<(PathBuf, &'static Deliverable)> {
+fn check_source(vault: &Path, raw: &Path) -> Result<(PathBuf, &'static FileType)> {
     let meta = std::fs::symlink_metadata(raw)
         .map_err(|_| anyhow::anyhow!("no such file: {}", raw.display()))?;
     if meta.file_type().is_symlink() || !meta.is_file() {
@@ -205,8 +78,8 @@ fn check_source(vault: &Path, raw: &Path) -> Result<(PathBuf, &'static Deliverab
             "macro-enabled Office files (.{ext}) are not delivered; save a macro-free copy first"
         );
     }
-    let Some(kind) = deliverable(&ext) else {
-        let allowed: Vec<&str> = DELIVERABLES.iter().map(|d| d.ext).collect();
+    let Some(kind) = file_type(&ext) else {
+        let allowed: Vec<&str> = FILE_TYPES.iter().map(|d| d.ext).collect();
         bail!(
             "type .{ext} is not delivered; allowed: {}",
             allowed.join(", ")
@@ -222,8 +95,8 @@ fn check_source(vault: &Path, raw: &Path) -> Result<(PathBuf, &'static Deliverab
     Ok((abs, kind))
 }
 
-fn check_content(bytes: &[u8], ext: &str, want: &Deliverable) -> Result<()> {
-    match want.content {
+fn check_content(bytes: &[u8], ext: &str) -> Result<()> {
+    match expected_content(ext) {
         Some(kind) if sniff(bytes, ext).kind != kind => {
             bail!("the file's content is not a real .{ext} file")
         }
@@ -239,7 +112,7 @@ fn deliver(vault: &Path, raw: &Path, name: Option<&str>) -> Result<Value> {
     let vault = vault.canonicalize()?;
     let (abs, kind) = check_source(&vault, raw)?;
     let bytes = std::fs::read(&abs)?;
-    check_content(&bytes, kind.ext, kind)?;
+    check_content(&bytes, kind.ext)?;
 
     if let Ok(rel) = abs.strip_prefix(&vault) {
         let rel = rel.to_string_lossy().into_owned();
@@ -415,14 +288,5 @@ mod tests {
         let out = deliver(vault.path(), &vault.path().join("Notebooks/t.csv"), None).unwrap();
         assert_eq!(out["web_path"], "Notebooks/t.csv");
         assert!(!vault.path().join("Exports").exists());
-    }
-
-    #[test]
-    fn stems_are_clean_and_names_are_unique() {
-        assert_eq!(clean_stem("../../etc/passwd"), "etc-passwd");
-        assert_eq!(clean_stem(""), "file");
-        let d = tempfile::tempdir().unwrap();
-        std::fs::write(d.path().join("a.csv"), "").unwrap();
-        assert_eq!(unique_path(d.path(), "a", "csv"), d.path().join("a-2.csv"));
     }
 }

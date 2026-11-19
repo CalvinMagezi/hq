@@ -329,7 +329,7 @@ async fn call_peer(
     if !hq_mcp::gateway::TASKS_ALLOWLIST.contains(&tool) {
         bail!("`{tool}` is not a task tool");
     }
-    let call = hq_tools::remote_mcp::call_named_server(
+    let call = hq_tools_web::remote_mcp::call_named_server(
         peer,
         "hq_call",
         json!({ "tool": tool, "args": args }),

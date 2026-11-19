@@ -53,7 +53,7 @@ pub async fn run_link_capture(vault_path: &Path, db: &Database, config: &HqConfi
         Arc::new(db.clone()),
         vault,
         |url| async move {
-            let page = hq_tools::web::web_fetch_direct(&url, MAX_PAGE_CHARS).await?;
+            let page = hq_tools_web::web::web_fetch_direct(&url, MAX_PAGE_CHARS).await?;
             Ok(page.content)
         },
         move |user| ask(router.clone(), user),

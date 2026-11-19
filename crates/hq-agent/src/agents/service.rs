@@ -814,8 +814,8 @@ impl AgentService {
         allowed_paths: &[PathBuf],
         confined: bool,
     ) -> Vec<Box<dyn crate::tools::AgentTool>> {
-        let state_cache = hq_tools::file_edit::FileStateCache::default();
-        let history = hq_tools::file_edit::FileHistory::default();
+        let state_cache = hq_tools_coding::file_edit::FileStateCache::default();
+        let history = hq_tools_coding::file_edit::FileHistory::default();
         let mut tools: Vec<Box<dyn crate::tools::AgentTool>> = vec![
             Box::new(crate::coding::BashTool::new(self.bash_settings.clone())),
             Box::new(crate::coding::ReadTool::new(state_cache.clone())),
@@ -828,7 +828,7 @@ impl AgentService {
                 history.clone(),
             )),
             Box::new(crate::builder::HqToolAdapter {
-                inner: Box::new(hq_tools::coding::BatchEditTool::new(
+                inner: Box::new(hq_tools_coding::coding::BatchEditTool::new(
                     state_cache.clone(),
                     history.clone(),
                 )),
@@ -838,8 +838,8 @@ impl AgentService {
             Box::new(crate::coding::GrepTool),
             Box::new(crate::coding::LsTool),
             Box::new(crate::builder::HqToolAdapter {
-                inner: Box::new(hq_tools::coding::TodoWriteTool::new(
-                    hq_tools::coding::TodoStore::new(),
+                inner: Box::new(hq_tools_coding::coding::TodoWriteTool::new(
+                    hq_tools_coding::coding::TodoStore::new(),
                 )),
             }),
         ];
