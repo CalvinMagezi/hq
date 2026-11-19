@@ -1,0 +1,1 @@
+**A verifier checks the page, not the parent's numbers.** A verifier sub-agent now has the web fetch tool, fetches every URL in its goal, and reports each figure as confirmed, different (with the number it found) or could not fetch. It no longer calls a figure confirmed because the parent supplied it.

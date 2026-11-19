@@ -311,7 +311,7 @@ fn a_confined_child_has_file_tools_and_no_shell() {
     let root = [std::path::PathBuf::from("/tmp/hq-confined")];
     let names = |confined: bool| -> Vec<String> {
         service_with_fleet()
-            .build_inprocess_tools(&config, &provider, &root, confined)
+            .build_inprocess_tools(&config, &provider, &root, confined, false)
             .iter()
             .map(|t| t.name().to_string())
             .collect()
@@ -351,6 +351,7 @@ fn orchestrator_children_have_no_file_writers() {
                 &config,
                 &provider,
                 &[std::path::PathBuf::from("/tmp")],
+                false,
                 false,
             )
             .iter()
@@ -416,4 +417,28 @@ fn children_ask_the_owner_when_the_parent_does_and_nested_ones_too() {
             .child_guardian(paths, false)
             .asks_owner()
     );
+}
+
+/// A verifier, or any child whose goal names a URL, can fetch the page; others cannot.
+#[test]
+fn a_verifier_or_a_url_goal_gets_web_fetch() {
+    use hq_core::types::SubagentType;
+
+    let provider: Arc<dyn LlmProvider> = Arc::new(DummyProvider);
+    let config = SessionConfig::default();
+    let root = [std::path::PathBuf::from("/tmp")];
+    let has_web = |req: &ChildRequest| -> bool {
+        service_with_fleet()
+            .build_inprocess_tools(&config, &provider, &root, false, child_wants_web(req))
+            .iter()
+            .any(|t| t.name() == "web_fetch")
+    };
+    let mut verifier = ChildRequest::new("v", "check the four prices");
+    verifier.agent_type = SubagentType::Verifier;
+    assert!(has_web(&verifier));
+    assert!(has_web(&ChildRequest::new(
+        "g",
+        "read https://example.com/price and summarize"
+    )));
+    assert!(!has_web(&ChildRequest::new("g", "refactor the parser")));
 }
