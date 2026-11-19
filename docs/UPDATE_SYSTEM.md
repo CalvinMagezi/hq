@@ -208,6 +208,15 @@ Signatures are minisign (Ed25519), verified in-process with the
 `minisign-verify` crate (MIT). Nothing shells out for verification. Only
 prehashed signatures (the `minisign -S` default; never pass `-l`) are accepted.
 
+`install.sh` has one more path, for a machine with neither minisign nor an OpenSSL that can check
+Ed25519 (a Mac with no Homebrew). When `release/fallback-signing.pub` exists, CI also signs the
+manifest and each channel pointer with that ECDSA P-256 key (`<file>.ecdsa`, DER), and `install.sh`
+checks it with the system `openssl`. The fallback key is embedded in `install.sh` as
+`FALLBACK_PUBKEY`; `scripts/check-site-install-scripts.sh` fails the site build if that differs from
+the committed key. It is only used when the stronger check is unavailable, and `hq update` never
+uses it. The key ceremony is `scripts/release/fallback-key.sh`; the secret is `FALLBACK_SIGNING_KEY`.
+Until the key is made, `FALLBACK_PUBKEY` is empty and `install.sh` behaves as before.
+
 The public key is resolved in this order:
 
 1. `pubkey_path` from the config, if set.

@@ -1,0 +1,1 @@
+**A Mac with no Homebrew can verify the installer.** Releases can now carry a second, ECDSA signature that the Mac's own `openssl` checks, so `install.sh` no longer needs minisign or Homebrew OpenSSL first. It stays off until the project makes the signing key; nothing changes for anyone until then.

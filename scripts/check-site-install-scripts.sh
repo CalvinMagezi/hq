@@ -20,4 +20,11 @@ for f in install.sh install.ps1; do
 done
 grep -qxF "PUBKEY_LINE=\"$key\"" "$site/install.sh" || { echo "install.sh does not set PUBKEY_LINE to the release key" >&2; exit 1; }
 grep -qF "\$script:HqSigningKey = '$key'" "$site/install.ps1" || { echo "install.ps1 does not set HqSigningKey to the release key" >&2; exit 1; }
+# The fallback key in install.sh is empty until release/fallback-signing.pub exists, then must equal it.
+want_fallback=""
+if [ -f release/fallback-signing.pub ]; then
+  want_fallback=$(openssl ec -pubin -in release/fallback-signing.pub -outform DER 2>/dev/null | base64 | tr -d '\n')
+  [ -n "$want_fallback" ] || { echo "release/fallback-signing.pub is not a public key" >&2; exit 1; }
+fi
+grep -qxF "FALLBACK_PUBKEY=\"$want_fallback\"" "$site/install.sh" || { echo "install.sh FALLBACK_PUBKEY does not match release/fallback-signing.pub" >&2; exit 1; }
 echo "install.sh and install.ps1 match apps/site/public and embed the release key."

@@ -432,6 +432,8 @@ jobs:
         run: bash scripts/retired-names-check.sh
       - name: Every embedded release key is release/minisign.pub
         run: bash scripts/check-release-keys.sh
+      - name: The release's second (ECDSA) signature signs and verifies with the system openssl
+        run: bash scripts/release/fallback-test.sh
       - name: Android stable seq floor (fake gh)
         run: bash scripts/release/android-seq-test.sh
       - name: Stable auto-promote picks only soaked, newer main releases

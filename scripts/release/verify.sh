@@ -40,6 +40,7 @@ if [ -n "$repo" ] || [ -n "$tag" ]; then
     base="https://github.com/$repo/releases/download/$tag"
     get "$base/manifest.json" "$dir/manifest.json"
     get "$base/manifest.json.minisig" "$dir/manifest.json.minisig"
+    [ ! -f "$(dirname "$pubkey")/fallback-signing.pub" ] || get "$base/manifest.json.ecdsa" "$dir/manifest.json.ecdsa"
     # Nothing the manifest names is fetched until its signature verifies.
     minisign -V -p "$pubkey" -m "$dir/manifest.json" -x "$dir/manifest.json.minisig" -q ||
         fail "manifest signature does not verify"
@@ -54,6 +55,14 @@ fi
 
 minisign -V -p "$pubkey" -m "$dir/manifest.json" -x "$dir/manifest.json.minisig" -q ||
     fail "manifest signature does not verify"
+
+# Once the fallback key is committed, every release must carry a valid second signature too.
+fallback_pub=$(dirname "$pubkey")/fallback-signing.pub
+if [ -f "$fallback_pub" ]; then
+    [ -f "$dir/manifest.json.ecdsa" ] || fail "manifest.json.ecdsa is missing"
+    openssl dgst -sha256 -verify "$fallback_pub" -signature "$dir/manifest.json.ecdsa" "$dir/manifest.json" > /dev/null ||
+        fail "manifest fallback signature does not verify"
+fi
 
 count=$(jq '.artifacts | length' "$dir/manifest.json")
 [ "$count" -ge 1 ] || fail "manifest lists no artifacts"

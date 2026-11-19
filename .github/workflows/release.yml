@@ -438,6 +438,7 @@ jobs:
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          FALLBACK_SIGNING_KEY: ${{ secrets.FALLBACK_SIGNING_KEY }}
         run: bash scripts/release/sign.sh dist-release/manifest.json
 
       - name: Verify
@@ -450,6 +451,7 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           files=(dist-release/hq-*.tar.gz dist-release/SHA256SUMS dist-release/manifest.json dist-release/manifest.json.minisig)
+          [ ! -f dist-release/manifest.json.ecdsa ] || files+=(dist-release/manifest.json.ecdsa)
           gh release create "$TAG" "${files[@]}" --draft --target "$SHA" --title "$TAG" --prerelease \
             --notes "Build of ${SHA} from main. Promote with the Promote workflow."
           gh release edit "$TAG" --draft=false --prerelease
@@ -458,6 +460,7 @@ jobs:
         env:
           MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          FALLBACK_SIGNING_KEY: ${{ secrets.FALLBACK_SIGNING_KEY }}
           RUN_NUMBER: ${{ github.run_number }}
           ATTEMPT: ${{ github.run_attempt }}
         run: |
@@ -467,7 +470,9 @@ jobs:
           gh release view channel-main > /dev/null 2>&1 ||
             gh release create channel-main --title "channel-main" --prerelease \
               --notes "Signed pointer to the latest main build. Not a downloadable build."
-          gh release upload channel-main dist-release/channel-main.json dist-release/channel-main.json.minisig --clobber
+          pointer=(dist-release/channel-main.json dist-release/channel-main.json.minisig)
+          [ ! -f dist-release/channel-main.json.ecdsa ] || pointer+=(dist-release/channel-main.json.ecdsa)
+          gh release upload channel-main "${pointer[@]}" --clobber
 
   # The same hq the release builds, for 64-bit Android, with the release key compiled in.
   # No secrets, no environment: it runs repository build code.
