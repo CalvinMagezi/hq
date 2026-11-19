@@ -160,9 +160,17 @@ export function NoteBar({ editing, pinned, pinning, exporting, exportOpen, onEdi
                 {pinned ? t('pin_unpin') : t('notes_pin')}
             </button>
             {!lite && (
-                <button type="button" className="a-chip" aria-haspopup="menu" aria-expanded={exportOpen} disabled={exporting} onClick={onExport}>
+                <button
+                    type="button"
+                    className="a-chip"
+                    aria-haspopup="menu"
+                    aria-expanded={exportOpen}
+                    aria-busy={exporting || undefined}
+                    disabled={exporting}
+                    onClick={onExport}
+                >
                     <Download className="a-ic xs" aria-hidden="true" />
-                    {t('note_action_export')}
+                    {exporting ? t('note_export_busy') : t('note_action_export')}
                 </button>
             )}
             <button type="button" className="a-chip" onClick={onMove}>

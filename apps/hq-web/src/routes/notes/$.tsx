@@ -4,17 +4,16 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileQuestion } from 'lucide-react'
-import { deleteNote, fetchNoteExport, restoreNote, togglePinNote, type DirEntry, type NoteTreeNode } from '~/lib/vaultApi'
-import { exportFileName, exportGate, exportKeys, exportOptionsFor, type NoteExportFormat } from '~/lib/noteExport'
+import { deleteNote, restoreNote, togglePinNote, type DirEntry, type NoteTreeNode } from '~/lib/vaultApi'
+import { exportGate, exportKeys, exportOptionsFor, openPrintWindow, replaceOrPushToast, runNoteExport, type NoteExportFormat } from '~/lib/noteExport'
 import { t } from '~/strings'
 import { Dialog, workingLabel } from '~/components/ui/Dialog'
-import { toastAlert, toastNotice, toastUndo, useToasts } from '~/lib/toast'
+import { toastAlert, toastUndo } from '~/lib/toast'
 import { isSharedComputer } from '~/lib/sharedComputer'
 import { useInHub } from '~/lib/hubWindow'
 import { useEdition } from '~/lib/edition'
 import { useSharedConnection } from '~/lib/connection'
 import { AboutNote } from '~/components/notes/AboutNote'
-import { HqHttpError } from '~/lib/hqAuth'
 import { noteQuery, noteTreeQuery, vaultKeys } from '~/lib/queries'
 import { NoteBody } from '~/components/suite/NoteBody'
 import { MoveNote } from '~/components/vault/MoveNote'
@@ -220,57 +219,26 @@ function VaultFileView({ filePath, content, hash }: {
         else void handleExport(format)
     }
 
-    const handleExport = async (format: NoteExportFormat) => {
-        if (exporting) return
+    const handleExport = (format: NoteExportFormat) => {
         setExportNote(null)
-        setExporting(format)
-        try {
-            const { blob, extension, kept } = await fetchNoteExport(filePath, format)
-            const name = exportFileName(filePath, extension)
-            const file = new File([blob], name, { type: blob.type || 'application/octet-stream' })
-            const touch = window.matchMedia?.('(pointer: coarse)').matches
-            if (touch && navigator.canShare?.({ files: [file] })) {
-                try {
-                    await navigator.share({ files: [file], title: name })
-                } catch (err) {
-                    if (!(err instanceof DOMException && err.name === 'AbortError')) throw err
-                }
-                return
-            }
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = name
-            document.body.appendChild(a)
-            a.click()
-            a.remove()
-            setTimeout(() => URL.revokeObjectURL(url), 10_000)
-            toastNotice(kept ? `${t('note_export_done', { name })} ${kept}` : t('note_export_done', { name }))
-        } catch (err) {
-            if (format === 'pdf' && err instanceof HqHttpError && err.status === 503) {
-                // The server's older PDF engine is not installed: print from the browser instead.
-                await handlePrintPDF()
-            } else {
-                useToasts.getState().push({
-                    text: t('note_export_failed', { kind: t(exportKeys(format).kind) }),
-                    kind: 'alert',
-                    action: { label: t('note_export_try_again'), run: () => void handleExport(format) },
-                })
-            }
-        } finally {
-            setExporting(null)
-        }
+        return runNoteExport({
+            filePath,
+            format,
+            isBusy: () => exporting !== null,
+            setBusy: setExporting,
+            onFallbackPrintPdf: handlePrintPDF,
+        })
     }
 
     // Browser print window: the fallback when the server has no PDF engine.
-    const handlePrintPDF = async () => {
+    const handlePrintPDF = async (toastId: number) => {
         const filename = filePath.split('/').pop()?.replace(/\.md$/, '') ?? 'note'
 
         // Strip YAML frontmatter before rendering
         const body = content.replace(/^---[\s\S]*?---\n?/, '')
         let html: string
         try { html = await marked.parse(body) } catch {
-            useToasts.getState().push({ text: t('note_export_failed', { kind: t('note_export_kind_pdf') }), kind: 'alert' })
+            replaceOrPushToast(toastId, { text: t('note_export_failed', { kind: t('note_export_kind_pdf') }), kind: 'alert' })
             return
         }
         // Escape filename and sanitize html to prevent XSS in the print window
@@ -278,10 +246,7 @@ function VaultFileView({ filePath, content, hash }: {
         const safeFilename = escapeHtml(filename)
         const safeHtml = DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })
 
-        const win = window.open('', '_blank', 'width=900,height=700')
-        if (!win) return
-
-        win.document.write(`<!DOCTYPE html>
+        openPrintWindow(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -343,8 +308,7 @@ function VaultFileView({ filePath, content, hash }: {
 ${safeHtml}
 <script>window.onload = () => { window.print(); }<\/script>
 </body>
-</html>`)
-        win.document.close()
+</html>`, toastId)
     }
 
     // File rendering

@@ -1,6 +1,11 @@
 // The formats the note viewer offers for a vault note, and the small helpers around them.
 // Names match the `format` query parameter of GET /api/note/export.
 
+import { t } from '~/strings'
+import { HqHttpError } from './hqAuth'
+import { toastNotice, useToasts, type Toast } from './toast'
+import { fetchNoteExport } from './vaultApi'
+
 export type NoteExportFormat = 'pdf' | 'docx' | 'html' | 'md' | 'png' | 'svg' | 'xlsx' | 'csv' | 'json'
 
 export type NoteExportGroup = 'document' | 'image' | 'data'
@@ -108,4 +113,110 @@ export function extensionFromDisposition(header: string | null, fallback: string
   name ??= /filename\s*=\s*"([^"]*)"/i.exec(header)?.[1] ?? /filename\s*=\s*([^;\s]+)/i.exec(header)?.[1] ?? null
   const ext = name?.split('.').pop()?.toLowerCase()
   return ext && /^[a-z0-9]{1,8}$/.test(ext) && name!.includes('.') ? ext : fallback
+}
+
+type ToastPatch = Omit<Toast, 'id' | 'at' | 'late'>
+
+/** Replaces an in-flight toast if it is still visible, or pushes a new one if it already dismissed. */
+export function replaceOrPushToast(id: number, next: ToastPatch): number {
+  const store = useToasts.getState()
+  if (store.toasts.some((x) => x.id === id)) {
+    store.replace(id, next)
+    return id
+  }
+  return store.push(next)
+}
+
+export interface RunNoteExportOptions {
+  filePath: string
+  format: NoteExportFormat
+  isBusy: () => boolean
+  setBusy: (format: NoteExportFormat | null) => void
+  onFallbackPrintPdf: (toastId: number) => Promise<void>
+  fetchExport?: typeof fetchNoteExport
+  isTouch?: () => boolean
+  canShareFile?: (file: File) => boolean
+  shareFile?: (file: File, name: string) => Promise<void>
+  downloadBlob?: (blob: Blob, name: string) => void
+}
+
+function defaultDownloadBlob(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
+
+/** Opens the print fallback window for a note PDF, toasting if the browser blocked pop-ups. */
+export function openPrintWindow(
+  htmlDoc: string,
+  toastId: number,
+  openWindow: typeof window.open = (...args) => window.open(...args),
+): boolean {
+  const win = openWindow('', '_blank', 'width=900,height=700')
+  if (!win) {
+    replaceOrPushToast(toastId, { text: t('note_export_print_blocked'), kind: 'alert' })
+    return false
+  }
+  win.document.write(htmlDoc)
+  win.document.close()
+  useToasts.getState().dismiss(toastId)
+  return true
+}
+
+/** Runs a note export: keeps busy state outside the menu, shows a Making toast immediately, and replaces it on completion or failure. */
+export async function runNoteExport(opts: RunNoteExportOptions): Promise<void> {
+  if (opts.isBusy()) return
+  const {
+    filePath,
+    format,
+    setBusy,
+    onFallbackPrintPdf,
+    fetchExport = fetchNoteExport,
+    isTouch = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(pointer: coarse)').matches),
+    canShareFile = (file) => typeof navigator !== 'undefined' && Boolean(navigator.canShare?.({ files: [file] })),
+    shareFile = (file, name) => navigator.share({ files: [file], title: name }),
+    downloadBlob = defaultDownloadBlob,
+  } = opts
+
+  setBusy(format)
+  const kind = t(exportKeys(format).kind)
+  const toastId = toastNotice(t('note_export_making', { kind }))
+  try {
+    const { blob, extension, kept } = await fetchExport(filePath, format)
+    const name = exportFileName(filePath, extension)
+    const file = new File([blob], name, { type: blob.type || 'application/octet-stream' })
+    if (isTouch() && canShareFile(file)) {
+      try {
+        await shareFile(file, name)
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          useToasts.getState().dismiss(toastId)
+          return
+        }
+        throw err
+      }
+      replaceOrPushToast(toastId, { text: t('note_export_shared_done', { name }), kind: 'status' })
+      return
+    }
+    downloadBlob(blob, name)
+    const done = t('note_export_done', { name })
+    replaceOrPushToast(toastId, { text: kept ? `${done} ${kept}` : done, kind: 'status' })
+  } catch (err) {
+    if (format === 'pdf' && err instanceof HqHttpError && err.status === 503) {
+      await onFallbackPrintPdf(toastId)
+    } else {
+      replaceOrPushToast(toastId, {
+        text: t('note_export_failed', { kind }),
+        kind: 'alert',
+        action: { label: t('note_export_try_again'), run: () => void runNoteExport(opts) },
+      })
+    }
+  } finally {
+    setBusy(null)
+  }
 }

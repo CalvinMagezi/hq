@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, beforeEach, expect, test } from 'bun:test'
 import {
   NOTE_EXPORT_OPTIONS,
   defaultExtension,
@@ -6,9 +6,13 @@ import {
   exportOptionsFor,
   extensionFromDisposition,
   noteHasTables,
+  openPrintWindow,
+  runNoteExport,
+  type NoteExportFormat,
 } from './noteExport'
 import { fetchNoteExport } from './vaultApi'
 import { HqHttpError } from './hqAuth'
+import { useToasts } from './toast'
 
 const TABLE = '| a | b |\n|---|---|\n| 1 | 2 |\n'
 
@@ -108,4 +112,116 @@ test('fetchNoteExport survives an error body that is not JSON', async () => {
   const err = await fetchNoteExport('Plan.md', 'pdf').catch((e) => e)
   expect(err).toBeInstanceOf(HqHttpError)
   expect(err.status).toBe(502)
+})
+
+beforeEach(() => {
+  useToasts.setState({ toasts: [] })
+})
+
+test('runNoteExport shows a Making toast immediately and replaces it with the filename on desktop', async () => {
+  let busy: NoteExportFormat | null = null
+  let release!: () => void
+  const gate = new Promise<void>((r) => { release = r })
+  let downloadedName = ''
+
+  const run = runNoteExport({
+    filePath: 'Notebooks/Work/Plan.md',
+    format: 'xlsx',
+    isBusy: () => busy !== null,
+    setBusy: (f) => { busy = f },
+    onFallbackPrintPdf: async () => {},
+    isTouch: () => false,
+    downloadBlob: (_blob, name) => { downloadedName = name },
+    fetchExport: async () => {
+      await gate
+      return { blob: new Blob(['xlsx']), extension: 'xlsx', kept: null }
+    },
+  })
+
+  expect(busy).toBe('xlsx')
+  const initial = useToasts.getState().toasts
+  expect(initial).toHaveLength(1)
+  expect(initial[0].kind).toBe('status')
+  expect(initial[0].text).toContain('Making')
+  expect(initial[0].text).toContain('Excel workbook')
+  const makingId = initial[0].id
+
+  release()
+  await run
+
+  expect(busy).toBeNull()
+  expect(downloadedName).toBe('Plan.xlsx')
+  const after = useToasts.getState().toasts
+  expect(after).toHaveLength(1)
+  expect(after[0].id).toBe(makingId)
+  expect(after[0].kind).toBe('status')
+  expect(after[0].text).toContain('Plan.xlsx')
+})
+
+test('runNoteExport toasts with the filename on the touch share path', async () => {
+  let busy: NoteExportFormat | null = null
+  let sharedTitle = ''
+
+  await runNoteExport({
+    filePath: 'Notebooks/Work/Plan.md',
+    format: 'xlsx',
+    isBusy: () => busy !== null,
+    setBusy: (f) => { busy = f },
+    onFallbackPrintPdf: async () => {},
+    isTouch: () => true,
+    canShareFile: () => true,
+    shareFile: async (_file, name) => { sharedTitle = name },
+    fetchExport: async () => ({ blob: new Blob(['xlsx']), extension: 'xlsx', kept: null }),
+  })
+
+  expect(busy).toBeNull()
+  expect(sharedTitle).toBe('Plan.xlsx')
+  const toasts = useToasts.getState().toasts
+  expect(toasts).toHaveLength(1)
+  expect(toasts[0].kind).toBe('status')
+  expect(toasts[0].text).toContain('Plan.xlsx')
+})
+
+test('runNoteExport falls back to print on 503 and toasts an alert when the print window is blocked', async () => {
+  let busy: NoteExportFormat | null = null
+
+  await runNoteExport({
+    filePath: 'Notebooks/Work/Plan.md',
+    format: 'pdf',
+    isBusy: () => busy !== null,
+    setBusy: (f) => { busy = f },
+    onFallbackPrintPdf: async (toastId) => {
+      openPrintWindow('<html></html>', toastId, (() => null) as unknown as typeof window.open)
+    },
+    fetchExport: async () => {
+      throw new HqHttpError('no pdf engine', 503)
+    },
+  })
+
+  expect(busy).toBeNull()
+  const toasts = useToasts.getState().toasts
+  expect(toasts).toHaveLength(1)
+  expect(toasts[0].kind).toBe('alert')
+  expect(toasts[0].text.toLowerCase()).toContain('blocked')
+})
+
+test('runNoteExport replaces the Making toast with a retryable alert on failure', async () => {
+  let busy: NoteExportFormat | null = null
+
+  await runNoteExport({
+    filePath: 'Notebooks/Work/Plan.md',
+    format: 'csv',
+    isBusy: () => busy !== null,
+    setBusy: (f) => { busy = f },
+    onFallbackPrintPdf: async () => {},
+    fetchExport: async () => {
+      throw new Error('timeout')
+    },
+  })
+
+  expect(busy).toBeNull()
+  const toasts = useToasts.getState().toasts
+  expect(toasts).toHaveLength(1)
+  expect(toasts[0].kind).toBe('alert')
+  expect(toasts[0].action?.label).toBe('Try again')
 })
