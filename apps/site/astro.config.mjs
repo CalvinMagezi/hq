@@ -10,4 +10,7 @@ export default defineConfig({
   // Compression drops the space between a line-wrapped word and the inline element after it
   // ("needs<a>bun</a>"), so prose would glue words together.
   compressHTML: false,
+  // Lightning CSS folds `animation` plus `animation-timeline` into one shorthand that Chrome rejects,
+  // which silently kills every scroll-driven animation. esbuild leaves the longhands alone.
+  vite: { build: { cssMinify: 'esbuild' } },
 });

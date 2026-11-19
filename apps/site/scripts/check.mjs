@@ -193,6 +193,9 @@ for (const f of files.filter((p) => /\.(css|js|mjs)$/.test(p))) {
   if (/\b(fetch|XMLHttpRequest|WebSocket|sendBeacon)\b/.test(text)) fail(rel(f), 'script uses a network API');
   if (/\bhttps?:\/\//.test(text)) fail(rel(f), 'script or style mentions a remote URL');
   if (EM_DASH.test(text)) fail(rel(f), 'contains an em dash');
+  // Chrome rejects a scroll() or view() timeline inside the animation shorthand, so the minifier
+  // folding animation-timeline into it silently kills every scroll-driven animation.
+  if (f.endsWith('.css') && /animation:[^;}]*\b(scroll|view)\(/.test(text)) fail(rel(f), 'animation shorthand carries a scroll or view timeline');
 }
 
 // Site-level files.

@@ -8,9 +8,10 @@ interface Props {
   path: string;
   noindex?: boolean;
   jsonLd?: Record<string, unknown>;
+  intro?: boolean;
 }
 
-const { title, description, path, noindex = false, jsonLd } = Astro.props;
+const { title, description, path, noindex = false, jsonLd, intro = false } = Astro.props;
 const canonical = new URL(path, SITE_URL).href;
 const ogImage = `${SITE_URL}/og.png`;
 const fullTitle = title.includes('Agent HQ') ? title : `${title} | Agent HQ`;
@@ -66,9 +67,24 @@ const csp = [
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
     <meta name="twitter:image:alt" content="Agent HQ: an open-source AI assistant that lives on your phone and works with your computers." />
+    {intro && <script is:inline src="/js/intro.js"></script>}
     {jsonLd && <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
   </head>
   <body>
+    {
+      intro && (
+        <div class="intro" aria-hidden="true">
+          <div class="intro-in">
+            <svg class="intro-pair" viewBox="0 0 64 40" aria-hidden="true" focusable="false">
+              <circle class="c-blue intro-c1" cx="20" cy="20" r="20" />
+              <circle class="c-green intro-c2" cx="44" cy="20" r="20" />
+            </svg>
+            <p class="intro-word"><span>Agent HQ</span></p>
+            <span class="intro-rule"></span>
+          </div>
+        </div>
+      )
+    }
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <div class="navshell glass-heavy shine">
@@ -83,9 +99,18 @@ const csp = [
           }
           <a href={links.repo}>GitHub</a>
         </nav>
-        <a class="btn btn-primary btn-sm nav-cta" href={GET_PATH} aria-current={current === GET_PATH ? 'page' : undefined}>
-          Get HQ
-        </a>
+        <div class="nav-end">
+          <details class="menu">
+            <summary>Menu</summary>
+            <nav class="menu-list glass-heavy" aria-label="Menu">
+              {textLinks.map((item) => <a href={item.href}>{item.label}</a>)}
+              <a href={links.repo}>GitHub</a>
+            </nav>
+          </details>
+          <a class="btn btn-primary btn-sm nav-cta" href={GET_PATH} aria-current={current === GET_PATH ? 'page' : undefined}>
+            Get HQ
+          </a>
+        </div>
         <span class="progress" aria-hidden="true"></span>
       </div>
     </header>
