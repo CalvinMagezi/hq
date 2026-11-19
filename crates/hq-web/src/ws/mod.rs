@@ -792,7 +792,8 @@ impl ChatTurn {
         } else {
             hq_agent::builder::SessionRole::Implementor
         };
-        let automated = driver_turn || session_driver || followup_turn_id.is_some();
+        let is_followup = followup_turn_id.is_some();
+        let automated = driver_turn || session_driver || is_followup;
         let hooks = hq_agent::native_hq::NativeHqHooks {
             history,
             turn_id: followup_turn_id,
@@ -871,6 +872,15 @@ impl ChatTurn {
                 )
             }
         };
+        // The follow-up read these runs and answered: close them so none stays unverified.
+        if failure.is_none() && is_followup {
+            let run_ids = self
+                .record
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .followup_run_ids();
+            hq_agent::followup::close_after_turn(&self.db, &run_ids);
+        }
         // A failed turn offers nothing, and costs no query to find that out.
         if failure.is_none() && !content.trim().is_empty() {
             self.attach_offer(&config).await;
