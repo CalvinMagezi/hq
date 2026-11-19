@@ -4,6 +4,8 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ## [Unreleased]
 
+- Web: after a chat has read outside text, a session may fetch at most 30 pages; the next is refused with a message.
+
 - Helpers: starting, handing off to or delegating to a helper no longer waits for approval. After the chat has read outside text the helper starts narrowed: strict sandbox and a brief built from the task's stored text. The approval list is now a zone table (A never asked, B asked at the edge, C asked for HQ itself).
 
 - Agent host: `agent_host.sandbox.strict_paths` runs any session whose working directory lies under a listed folder under the `strict` profile, whatever the default profile is. `hq doctor` lists the strict paths and the network allowlist in force.
