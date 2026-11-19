@@ -304,5 +304,116 @@ fn a_refused_followup_is_not_retried_and_goes_to_the_owner() {
     )
     .unwrap()
     .expect("the owner hears about it");
-    assert!(item.body.contains("the chat is a guest's"), "{}", item.body);
+    assert_eq!(item.body, ESCALATION_BODY);
+}
+
+/// Settles a run as if it had finished `minutes` ago; returns that unix time.
+fn settle_minutes_ago(db: &Database, id: &str, accept: &str, minutes: i64) -> i64 {
+    let at = chrono::Utc::now().timestamp() - minutes * 60;
+    db.with_conn(|c| {
+        runs::settle(
+            c,
+            id,
+            &Settlement {
+                exec_status: runs::EXEC_COMPLETED.into(),
+                accept_status: accept.into(),
+                missing_deliverables: vec![],
+                blocker_reason: None,
+                next_action: None,
+                output_full: "out".into(),
+                output_preview: "out".into(),
+                error: None,
+                resolved_backend: "hq".into(),
+            },
+            at,
+            true,
+        )
+    })
+    .unwrap();
+    at
+}
+
+fn escalation(db: &Database, id: &str) -> Option<ValueItem> {
+    hq_db::value_items::find_active_by_dedup(
+        db,
+        ValueKind::ActionNeeded,
+        &format!("subagent-run-{id}"),
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_run_the_parent_already_reviewed_is_not_escalated() {
+    let db = db();
+    add_run(&db, "run-rrrrrr55", "t1", 1);
+    settle_minutes_ago(&db, "run-rrrrrr55", runs::ACCEPT_PARTIAL, 20);
+    db.with_conn(|c| {
+        runs::review(
+            c,
+            "run-rrrrrr55",
+            runs::ACCEPT_PARTIAL,
+            &["tests".into()],
+            Some("told the owner"),
+            chrono::Utc::now().timestamp(),
+        )
+    })
+    .unwrap();
+    assert_eq!(maintain(&db, |_| true).escalated, 0);
+    assert!(escalation(&db, "run-rrrrrr55").is_none());
+}
+
+#[test]
+fn an_unreviewed_run_escalates_in_plain_words_stamped_when_it_settled() {
+    let db = db();
+    add_run(&db, "run-ssssss66", "t1", 1);
+    let settled = settle_minutes_ago(&db, "run-ssssss66", runs::ACCEPT_BLOCKED, 20);
+    assert_eq!(maintain(&db, |_| true).escalated, 1);
+    let item = escalation(&db, "run-ssssss66").unwrap();
+    assert_eq!(
+        item.body,
+        "A background task did not finish. Open the chat to see what is missing."
+    );
+    for leaked in ["ssssss66", "general", "subagent_run_status", "blocked"] {
+        assert!(!item.body.contains(leaked) && !item.title.contains(leaked));
+    }
+    assert_eq!(item.created_at.timestamp(), settled);
+    assert_eq!(item.link.as_deref(), Some("/chat?thread=t1"));
+}
+
+#[test]
+fn close_consumed_accepts_a_clean_run_and_keeps_a_partial_one_partial() {
+    let db = db();
+    add_run(&db, "run-tttttt77", "t1", 1);
+    settle(&db, "run-tttttt77", runs::ACCEPT_UNVERIFIED, "done");
+    add_run(&db, "run-uuuuuu88", "t1", 1);
+    settle(&db, "run-uuuuuu88", runs::ACCEPT_PARTIAL, "half");
+    let at = chrono::Utc::now().timestamp();
+    for id in ["run-tttttt77", "run-uuuuuu88"] {
+        db.with_conn(|c| runs::close_consumed(c, id, at)).unwrap();
+    }
+    let get = |id: &str| db.with_conn(|c| runs::get(c, id)).unwrap().unwrap();
+    let clean = get("run-tttttt77");
+    assert_eq!(clean.accept_status, runs::ACCEPT_ACCEPTED);
+    assert_eq!(clean.reviewed_at, Some(at));
+    let partial = get("run-uuuuuu88");
+    assert_eq!(partial.accept_status, runs::ACCEPT_PARTIAL);
+    assert_eq!(partial.reviewed_at, Some(at));
+}
+
+#[test]
+fn an_explicit_verdict_is_not_overwritten_by_close_consumed() {
+    let db = db();
+    add_run(&db, "run-vvvvvv99", "t1", 1);
+    settle(&db, "run-vvvvvv99", runs::ACCEPT_UNVERIFIED, "done");
+    let at = chrono::Utc::now().timestamp();
+    db.with_conn(|c| runs::review(c, "run-vvvvvv99", runs::ACCEPT_BLOCKED, &[], None, at))
+        .unwrap();
+    db.with_conn(|c| runs::close_consumed(c, "run-vvvvvv99", at + 5))
+        .unwrap();
+    let run = db
+        .with_conn(|c| runs::get(c, "run-vvvvvv99"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.accept_status, runs::ACCEPT_BLOCKED);
+    assert_eq!(run.reviewed_at, Some(at));
 }

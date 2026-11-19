@@ -120,6 +120,10 @@ pub(crate) struct NotificationItem {
     /// Only the owner can decide it (sign-in, connector, owner approval, escalation, data loss).
     /// Set by the runtime that raised the item; the phone badge counts only these.
     pub(crate) owner_only: bool,
+    /// A dismiss-only notice: it says something happened and asks for no decision, so it never
+    /// counts toward Needs you unless the runtime marked it owner-only.
+    #[serde(skip)]
+    pub(crate) notice: bool,
     /// Who it is from: `you`, `helpers` or `system`.
     pub(crate) source_group: String,
     /// `owner` or `agent` (`hq_db::inbox_prefs::audience`): what decides the default list, the
@@ -186,6 +190,11 @@ const NOTICE_KEYS: &[&str] = &[
     "edge-worker-dispatch-",
     "subagent-run-",
 ];
+
+/// A pending action-needed item counts toward Needs you only when someone must decide it.
+fn needs_a_human(n: &NotificationItem) -> bool {
+    n.owner_only || !n.notice
+}
 
 fn is_notice(dedup_key: Option<&str>) -> bool {
     dedup_key.is_some_and(|k| NOTICE_KEYS.iter().any(|p| k.starts_with(p)))
@@ -315,6 +324,7 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
         topic: topic.to_string(),
         silenced: false,
         owner_only,
+        notice,
         source_group: hq_db::inbox_prefs::source_group(&source_for_group, owner_only).to_string(),
         audience: match hq_db::inbox_prefs::audience(&source_for_group, owner_only, needs_answer) {
             hq_db::inbox_prefs::Audience::Owner => "owner",
@@ -420,14 +430,16 @@ pub(crate) fn aggregate_notifications(
     let pending = || all.iter().filter(|n| n.state == NotificationState::Pending);
     // The badge: a silenced topic waits in the list without counting.
     let pending_approvals_count = pending()
-        .filter(|n| n.kind == NotificationKind::ActionNeeded && !n.silenced)
+        .filter(|n| n.kind == NotificationKind::ActionNeeded && !n.silenced && needs_a_human(n))
         .count();
     let unread_updates_count = pending()
         .filter(|n| n.kind == NotificationKind::ValueItem && !n.read && !n.silenced)
         .count();
     let unread_count = pending().count();
-    let waiting_decisions =
-        || pending().filter(|n| n.kind == NotificationKind::ActionNeeded && !n.silenced);
+    let waiting_decisions = || {
+        pending()
+            .filter(|n| n.kind == NotificationKind::ActionNeeded && !n.silenced && needs_a_human(n))
+    };
     let needs_you_owner_only = waiting_decisions().filter(|n| n.owner_only).count();
     let needs_you_helpers = waiting_decisions().filter(|n| !n.owner_only).count();
     let expired_count = restorable_expired_count(db)?;

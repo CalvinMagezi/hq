@@ -339,3 +339,33 @@ async fn followup_turn_children_inherit_depth_and_stop_waking_past_the_cap() {
     let events = db.with_conn(|c| runs::events_for_run(c, &run_id)).unwrap();
     assert_eq!(events[0].status, runs::EVENT_SUPPRESSED);
 }
+
+#[tokio::test]
+async fn a_blocking_spawn_leaves_no_unverified_run_behind() {
+    let db = temp_db();
+    let (service, _) = svc(&db);
+    let tool = SpawnSubagentsTool::new(Arc::new(service)).with_context(ctx_for("chat-a"));
+    crate::tools::AgentTool::execute(
+        &tool,
+        "call-1",
+        serde_json::json!({ "tasks": [
+            { "id": "a", "goal": "draft the dashboard" },
+            { "id": "b", "goal": "review it\nMISSING: the chart" }
+        ]}),
+    )
+    .await
+    .unwrap();
+
+    let filter = ListFilter {
+        scope: Some(origin("chat-a")),
+        limit: 10,
+        ..Default::default()
+    };
+    let all = db.with_conn(|c| runs::list(c, &filter)).unwrap();
+    assert_eq!(all.len(), 2);
+    for run in &all {
+        assert!(run.settled_at.is_some());
+        assert!(run.reviewed_at.is_some(), "{} never closed", run.run_id);
+        assert_ne!(run.accept_status, runs::ACCEPT_UNVERIFIED);
+    }
+}

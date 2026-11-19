@@ -197,6 +197,9 @@ impl AgentTool for SpawnSubagentsTool {
             ));
         }
 
+        if blocking {
+            self.service.close_consumed(&run_ids);
+        }
         let summary = ChildRunSummary::from_outcomes(mode, &outcomes);
 
         Ok(ToolResult {
