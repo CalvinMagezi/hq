@@ -40,6 +40,10 @@ import example.hq.spike.data.HqServices
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 import kotlinx.coroutines.launch
+import example.hq.spike.data.suiteBlocks
+import example.hq.spike.data.suiteDeleteBlock
+import example.hq.spike.data.suiteEditBlock
+import example.hq.spike.data.suiteInsertBlock
 
 /** What the person is doing to the list: changing one block, or adding one after a block (or at the end, or at the top). */
 private sealed interface BlockEdit {

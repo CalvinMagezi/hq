@@ -129,7 +129,7 @@ fn reads_and_notes_never_need_the_owner() {
     ));
     assert!(needs_owner(
         "mail_call",
-        hq_tools::remote_mcp::REMOTE_MCP_CATEGORY,
+        hq_tools_web::remote_mcp::REMOTE_MCP_CATEGORY,
         &json!({})
     ));
     assert!(!needs_owner("vault_write_note", "vault", &json!({})));
@@ -337,7 +337,7 @@ fn only_a_session_this_chat_drives_counts_as_its_own_send_target() {
 // A remote tool its server marked read-only runs; everything else keeps asking.
 #[test]
 fn remote_reads_run_and_remote_writes_ask() {
-    use hq_tools::remote_mcp::{REMOTE_MCP_CATEGORY, record_tool_list};
+    use hq_tools_web::remote_mcp::{REMOTE_MCP_CATEGORY, record_tool_list};
     record_tool_list(
         "agentpolicy",
         json!([

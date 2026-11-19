@@ -27,6 +27,8 @@ hq-vault = { workspace = true }
 hq-db = { workspace = true }
 hq-llm = { workspace = true }
 hq-tools = { workspace = true }
+hq-tools-web = { workspace = true }
+hq-tool-api = { workspace = true }
 hq-convert = { workspace = true }
 hq-export = { workspace = true }
 hq-update = { workspace = true }

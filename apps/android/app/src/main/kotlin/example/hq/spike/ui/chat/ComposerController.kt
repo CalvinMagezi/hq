@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import example.hq.spike.data.searchNotes
 
 /** What sits around the message field: the plus menu, the note and task pickers, attached items, and files going up. */
 class ComposerController(

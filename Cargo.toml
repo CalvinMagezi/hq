@@ -19,6 +19,7 @@ members = [
     "crates/hq-tool-api",
     "crates/hq-tools-office",
     "crates/hq-tools-web",
+    "crates/hq-tools-coding",
     "crates/hq-web",
 
     "crates/hq-memory",
@@ -40,6 +41,7 @@ members = [
     "crates/suite/hq-suite-calc",
     "crates/suite/hq-suite-docs",
     "crates/suite/hq-suite-slides",
+    "crates/suite/hq-suite-xlsx",
     "crates/suite/hq-suite-sinks",
     "crates/suite/hq-suite-adapter",
 ]
@@ -174,6 +176,7 @@ hq-tools = { path = "crates/hq-tools" }
 hq-tool-api = { path = "crates/hq-tool-api" }
 hq-tools-office = { path = "crates/hq-tools-office" }
 hq-tools-web = { path = "crates/hq-tools-web" }
+hq-tools-coding = { path = "crates/hq-tools-coding" }
 hq-web = { path = "crates/hq-web" }
 
 hq-memory = { path = "crates/hq-memory" }
@@ -194,6 +197,7 @@ hq-suite-governor = { path = "crates/suite/hq-suite-governor" }
 hq-suite-calc = { path = "crates/suite/hq-suite-calc" }
 hq-suite-docs = { path = "crates/suite/hq-suite-docs" }
 hq-suite-slides = { path = "crates/suite/hq-suite-slides" }
+hq-suite-xlsx = { path = "crates/suite/hq-suite-xlsx" }
 hq-suite-sinks = { path = "crates/suite/hq-suite-sinks" }
 hq-suite-adapter = { path = "crates/suite/hq-suite-adapter" }
 
