@@ -61,6 +61,9 @@ static OWNER_HOST: LazyLock<Regex> = LazyLock::new(|| {
 /// Called once, with the source, the first time a tracker becomes tainted.
 pub type MarkHook = Box<dyn Fn(&str) + Send + Sync>;
 
+/// Called with the addresses a tracker has just learned, so they outlive the turn.
+pub type SeenHook = Box<dyn Fn(&[String]) + Send + Sync>;
+
 /// Session-scoped taint flag, shared by every governed tool in a session and
 /// by the sub-agents it spawns, so delegation cannot launder it. It also
 /// carries the two facts the tainted-session rules need beside it: which hosts
@@ -70,6 +73,8 @@ pub struct TaintTracker {
     source: Arc<Mutex<Option<String>>>,
     on_first_mark: Arc<Mutex<Option<MarkHook>>>,
     owner_hosts: Arc<Mutex<HashSet<String>>>,
+    seen_urls: Arc<Mutex<HashSet<String>>>,
+    on_new_urls: Arc<Mutex<Option<SeenHook>>>,
     unattended: Arc<AtomicBool>,
 }
 
@@ -132,10 +137,53 @@ impl TaintTracker {
     /// Remember the hosts named in text the owner wrote themselves (their chat
     /// messages, a watch they created). Never text a tool returned or HQ wrote.
     pub fn note_owner_words(&self, text: &str) {
+        self.note_seen_text(text);
         let mut hosts = self.owner_hosts.lock().expect("TaintTracker lock poisoned");
         for m in OWNER_HOST.captures_iter(text).filter_map(|c| c.get(1)) {
             hosts.insert(m.as_str().to_ascii_lowercase());
         }
+    }
+
+    /// Remember every address in `text` that HQ saw arrive from outside: a search result, a
+    /// fetched page, the owner's own message. Never text the model wrote.
+    pub fn note_seen_text(&self, text: &str) {
+        let fresh: Vec<String> = {
+            let mut seen = self.seen_urls.lock().expect("TaintTracker lock poisoned");
+            super::seen_urls::extract(text)
+                .into_iter()
+                .filter(|u| seen.len() < super::seen_urls::MAX_SEEN && seen.insert(u.clone()))
+                .collect()
+        };
+        if fresh.is_empty() {
+            return;
+        }
+        if let Some(hook) = &*self.on_new_urls.lock().expect("TaintTracker lock poisoned") {
+            hook(&fresh);
+        }
+    }
+
+    /// Start with addresses an earlier turn of the thread saw. Not reported to the hook again.
+    pub fn load_seen(&self, urls: impl IntoIterator<Item = String>) {
+        let mut seen = self.seen_urls.lock().expect("TaintTracker lock poisoned");
+        for u in urls {
+            if seen.len() < super::seen_urls::MAX_SEEN {
+                seen.insert(u);
+            }
+        }
+    }
+
+    pub fn on_new_urls(&self, hook: SeenHook) {
+        *self.on_new_urls.lock().expect("TaintTracker lock poisoned") = Some(hook);
+    }
+
+    /// Whether `raw` is, after normalizing, exactly an address HQ saw arrive from outside.
+    pub fn url_seen(&self, raw: &str) -> bool {
+        super::seen_urls::normalize(raw).is_some_and(|n| {
+            self.seen_urls
+                .lock()
+                .expect("TaintTracker lock poisoned")
+                .contains(&n)
+        })
     }
 
     /// Whether `host` is one the owner named, or a subdomain of one.
