@@ -112,13 +112,13 @@
     "kind": "video",
     "src": "/media/guide-install-android.mp4",
     "poster": "/media/guide-install-android-poster.jpg",
-    "alt": "Screen recording of HQ opening for the first time on a phone: Set up a new HQ, paste an AI key, Start HQ, then the Chat screen.",
+    "alt": "Screen recording of HQ opening for the first time on a phone: Set up a new HQ, paste and check an AI key, Start HQ, then the Chat screen.",
     "caption": "The three first-run screens, after the app is installed.",
     "width": 480,
     "height": 1066,
     "recordedWith": "v0.9.1-main.606",
-    "bytes": 178125,
-    "duration": 27,
+    "bytes": 143320,
+    "duration": 38,
     "captions": "/media/guide-install-android.vtt"
   },
   {
@@ -126,13 +126,27 @@
     "kind": "video",
     "src": "/media/guide-ai-key.mp4",
     "poster": "/media/guide-ai-key-poster.jpg",
-    "alt": "Screen recording of HQ's AI model screen: choose OpenRouter, paste a key, and tap Next.",
-    "caption": "Pasting your AI key into HQ.",
+    "alt": "Screen recording of HQ's AI model screen: choose OpenRouter, paste a key, tap Check key and see that the service accepted it, then tap Next.",
+    "caption": "Pasting your AI key into HQ and checking it.",
     "width": 480,
     "height": 1066,
     "recordedWith": "v0.9.1-main.606",
-    "bytes": 126418,
-    "duration": 15,
+    "bytes": 96618,
+    "duration": 22,
     "captions": "/media/guide-ai-key.vtt"
+  },
+  {
+    "id": "guide-first-question",
+    "kind": "video",
+    "src": "/media/guide-first-question.mp4",
+    "poster": "/media/guide-first-question-poster.jpg",
+    "alt": "Screen recording of HQ on a phone: open Chat, type Summarise my Garden planner note in one sentence, send it, and read the answer HQ gives from the note.",
+    "caption": "Ask your first question and get an answer from your own note.",
+    "width": 480,
+    "height": 1066,
+    "recordedWith": "v0.9.1-main.606",
+    "bytes": 150961,
+    "duration": 19,
+    "captions": "/media/guide-first-question.vtt"
   }
 ]
