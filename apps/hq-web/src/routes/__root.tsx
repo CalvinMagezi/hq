@@ -53,6 +53,23 @@ import { fetchSetupStatus, shouldRedirectToSetup, showsNoSignIn } from '~/lib/se
 import { EMBED_HEAD_SCRIPT, readEmbedFlag } from '~/lib/embedHost'
 
 
+export function NotFoundPage() {
+  return (
+    <div role="status" className="flex flex-col items-start gap-3 p-6">
+      <h1 className="a-h1">{t('not_found_title')}</h1>
+      <p className="a-body">{t('not_found_body')}</p>
+      <div className="flex gap-2">
+        <button type="button" className="a-btn secondary" onClick={() => window.history.back()}>
+          {t('not_found_back')}
+        </button>
+        <Link to="/chat" className="a-btn">
+          {t('not_found_go_chat')}
+        </Link>
+      </div>
+    </div>
+  )
+}
+
 export const Route = createRootRoute({
   // Every old address (and `/`) goes to its new home before anything draws, keeping the item and the fragment.
   beforeLoad: ({ location }) => {
@@ -83,6 +100,7 @@ export const Route = createRootRoute({
     ],
   }),
   component: RootComponent,
+  notFoundComponent: NotFoundPage,
 })
 
 /** True inside the Android app's own screen (`?host=android`). The server render and the first client render say false, so hydration matches. */

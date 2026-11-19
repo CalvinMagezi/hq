@@ -290,6 +290,17 @@ export function makeExport(notePath: string, format: string): Promise<MadeExport
 }
 
 /** Saves a vault file through the browser's download. */
+const HTTP_NOT_FOUND = 404
+
+/** False only when HQ answers that the vault has no such file; a network error counts as present. */
+export async function vaultFileExists(path: string): Promise<boolean> {
+  try {
+    return (await hqFetch(assetUrl(path), { method: 'HEAD' })).status !== HTTP_NOT_FOUND
+  } catch {
+    return true
+  }
+}
+
 export async function downloadVaultFile(path: string, name: string): Promise<void> {
   const res = await hqFetch(assetUrl(path))
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
