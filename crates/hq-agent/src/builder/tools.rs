@@ -325,7 +325,9 @@ impl SessionBuilder {
                     .and_then(hq_tool_api::family_guest::FamilyGuestContext::from_identity),
             ),
         );
-        tools.extend(hq_tools::agent_host::tools::create_host_tools(db.clone()));
+        tools.extend(hq_tools::host_overview::create_host_tools_with_extras(
+            db.clone(),
+        ));
         let origin = self
             .identity
             .as_ref()

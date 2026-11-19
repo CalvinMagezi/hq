@@ -16,17 +16,15 @@
 
 allowed_back_edges = [
   "harness_session -> a2a",
-  "agent_host -> lane_quotas",
   "agent_host -> harness_session",
   "harness_session -> tasks",
-  "agent_host -> helper_setup",
-  "harness_session -> helper_setup",
   "harness_session -> lane_quotas",
 ]
 
 [layers]
 # 1: free of the tangle
 agent_comm = 1
+helper_catalog = 1
 write_policy = 1
 note_index = 1
 task_placement = 1
@@ -71,6 +69,7 @@ vault = 11
 lane_quotas = 12
 tasks = 13
 helper_setup = 14
+host_overview = 15
 skill_edit = 15
 skill_manage_tool = 16
 vault_reorg = 17

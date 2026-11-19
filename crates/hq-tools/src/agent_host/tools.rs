@@ -173,7 +173,7 @@ impl HqTool for HostAgentsTool {
 }
 
 /// (host, agent name) -> session id for every running HQ session.
-pub(super) fn managed_names(db: &Database) -> Result<Vec<(String, String, String)>> {
+pub(crate) fn managed_names(db: &Database) -> Result<Vec<(String, String, String)>> {
     let rows = db.with_conn(|c| hq_db::harness_sessions_registry::list(c, Some("running"), 200))?;
     Ok(rows
         .into_iter()
@@ -191,7 +191,7 @@ fn agents_on(h: &dyn HostBackend, managed: &[(String, String, String)]) -> Value
 }
 
 /// Agent rows with `hq_session_id` set for the ones HQ launched.
-pub(super) fn agent_rows(
+pub(crate) fn agent_rows(
     host: &str,
     agents: &[super::AgentInfo],
     managed: &[(String, String, String)],
@@ -430,10 +430,7 @@ pub fn create_host_tools(db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
         Box::new(HostAddTool),
         Box::new(HostCheckTool),
         Box::new(HostListTool),
-        Box::new(super::overview::HostOverviewTool::new(db.clone())),
-        Box::new(crate::lane_quotas::LaneQuotasTool::new(db.clone())),
         Box::new(HostLockdownTool),
-        Box::new(crate::helper_setup::HelperSetupTool::new(db.clone())),
         Box::new(HostAgentsTool { db }),
         Box::new(HostReadTool),
         Box::new(HostSendTool),
