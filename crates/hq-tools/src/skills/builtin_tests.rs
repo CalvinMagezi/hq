@@ -15,6 +15,7 @@ const READING: &str = CALENDAR_READING_SKILL;
 const EDITING: &str = CALENDAR_EDITING_SKILL;
 const CONTACTS: &str = CONTACTS_LOOKUP_SKILL;
 const OFFICE: &str = "office-authoring";
+const PRICE_RESEARCH: &str = "local-price-research";
 
 fn assets_dir() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/skills")
@@ -90,7 +91,8 @@ fn every_shipped_skill_is_valid_clean_and_marked_as_hq_s() {
     }
     assert!(
         validate_skills(dir.path()).is_empty(),
-        "an active built-in validates without a mirror"
+        "an active built-in validates without a mirror: {:?}",
+        validate_skills(dir.path())
     );
 }
 
@@ -110,6 +112,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             READING,
             EDITING,
             OFFICE,
+            PRICE_RESEARCH,
             CONTACTS
         ],
         "GitHub can be connected after start, with no repos listed"
@@ -128,6 +131,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             READING,
             EDITING,
             OFFICE,
+            PRICE_RESEARCH,
             CONTACTS
         ]
     );
@@ -144,6 +148,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             READING,
             EDITING,
             OFFICE,
+            PRICE_RESEARCH,
             CONTACTS
         ]
     );
@@ -642,4 +647,54 @@ fn contacts_lookup_ships_with_a_hash_and_fails_closed_when_off() {
     let _off = set_active_for_this_thread(Some(&[]));
     assert!(!is_active(CONTACTS));
     assert!(shipped_hash(CONTACTS).is_none());
+}
+
+#[test]
+fn local_price_research_covers_the_five_rules_without_naming_a_market() {
+    let _now = set_active_for_this_thread(Some(&[PRICE_RESEARCH]));
+    let text = shipped_file(PRICE_RESEARCH, SKILL_FILE).unwrap();
+    for rule in [
+        "trade unit",
+        "two independent sources",
+        "date seen",
+        "retail or wholesale",
+        "confidence",
+        "fetch every URL",
+        "`unverified`",
+        "next to the number",
+    ] {
+        assert!(text.contains(rule), "the skill must say: {rule}");
+    }
+    let lower = text.to_lowercase();
+    for market in ["uganda", "matooke", "ugx", "kampala", "mbarara"] {
+        assert!(!lower.contains(market), "general guidance names {market}");
+    }
+}
+
+#[test]
+fn local_price_research_fires_on_compare_requests_and_not_on_one_lookup() {
+    let dir = tempfile::tempdir().unwrap();
+    let _now = set_active_for_this_thread(Some(&[PRICE_RESEARCH]));
+    sync_builtin_skills(dir.path(), &[PRICE_RESEARCH]).unwrap();
+    let index = crate::skills::SkillHintIndex::build(dir.path());
+    let fires = |t: &str| index.matching(t).any(|n| n == PRICE_RESEARCH);
+    assert!(fires(
+        "research tomato prices in four regions and compare prices"
+    ));
+    assert!(fires("build a price comparison of rent by district"));
+    assert!(!fires("how much is a litre of petrol today"));
+}
+
+#[test]
+fn the_sheet_skill_asks_for_the_data_quality_columns() {
+    let _now = set_active_for_this_thread(Some(&[OFFICE]));
+    let text = shipped_file(OFFICE, SKILL_FILE).unwrap();
+    for col in [
+        "`source`",
+        "`as of`",
+        "`retail or wholesale`",
+        "`confidence`",
+    ] {
+        assert!(text.contains(col), "office-authoring must name {col}");
+    }
 }

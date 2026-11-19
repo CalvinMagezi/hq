@@ -131,6 +131,14 @@ pub const BUILTIN_SKILLS: &[Shipped] = &[
         applies: every_install,
     },
     Shipped {
+        name: "local-price-research",
+        files: &[(
+            SKILL_FILE,
+            include_str!("../../assets/skills/local-price-research/SKILL.md"),
+        )],
+        applies: every_install,
+    },
+    Shipped {
         name: CONTACTS_LOOKUP_SKILL,
         files: &[(
             SKILL_FILE,

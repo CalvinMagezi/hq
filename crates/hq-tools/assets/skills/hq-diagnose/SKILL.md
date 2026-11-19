@@ -1,6 +1,6 @@
 ---
 name: hq-diagnose
-description: How to find the cause of something broken, failing, flaky or slow in HQ. Build a fast, deterministic red feedback loop before theorising (a failing test at an existing seam, a script, a replay of real data, tool_usage failures, hq doctor, daemon logs, the vault), shrink it, test one hypothesis at a time, fix at the shared seam, lock it with a regression test, remove the debug code. Redact sensitive values from anything you quote. Use when asked to diagnose or debug, or when something throws, fails or regresses.
+description: How to find the cause of something broken, failing, flaky or slow in HQ. Build a fast, deterministic red feedback loop before theorising, test one hypothesis at a time, fix at the shared seam, lock it with a regression test. Redact sensitive values. Use when asked to diagnose or debug, or when something throws, fails or regresses.
 hints: [diagnose, diagnosing, debug this, feedback loop, minimal repro, root cause, flaky, bisect, regression test]
 provenance:
   mintedBy: hq

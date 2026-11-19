@@ -1,6 +1,6 @@
 ---
 name: hq-review-loop
-description: Run a bounded plan-implement-review-fix loop on a coding change, with a security checklist in every review round. Restate acceptance, take the smallest plan, implement, review the diff fresh (not from the author's summary), fix only confirmed findings, review again. Cap at 3 review rounds. Use when asked for a review loop, to review my changes, for a security review before a PR, or to plan then implement.
+description: Run a bounded plan-implement-review-fix loop on a coding change, with a security checklist in every review round. Review the diff fresh (not from the author's summary), fix only confirmed findings, review again. Cap at 3 rounds. Use when asked for a review loop, to review my changes, for a security review before a PR, or to plan then implement.
 hints: [review loop, review my changes, security review before pr, plan then implement, bounded review, fix then re-review]
 provenance:
   mintedBy: hq
