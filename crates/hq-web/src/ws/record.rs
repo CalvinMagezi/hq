@@ -377,6 +377,58 @@ mod tests {
         assert_eq!(files[0]["kind"], "sheet");
     }
 
+    /// The owner asks for a spreadsheet: the agent's two calls leave a note, an xlsx under
+    /// `Exports/`, one `files` card in the saved reply, and nothing outside the vault.
+    #[cfg(feature = "suite")]
+    #[tokio::test]
+    async fn a_spreadsheet_request_ends_with_a_note_a_file_in_exports_and_a_card() {
+        let vault = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        let tools = hq_tools_office::author::create_author_tools(vault.path().to_path_buf());
+        let tool = |name: &str| tools.iter().find(|t| t.name() == name).unwrap();
+        let mut rec = TurnRecord::default();
+        rec.set_vault(vault.path().to_path_buf());
+
+        let made = tool("office_create")
+            .execute(json!({
+                "kind": "sheet", "title": "AI stocks",
+                "sheets": [{"name": "Stocks", "columns": [
+                    {"name": "ticker"}, {"name": "price", "type": "usd"}, {"name": "source"}, {"name": "as of", "type": "date"}],
+                    "rows": [["NVDA", 120.5, "example.com/q", "2026-11-18"], ["AMD", null, "", ""]]}]
+            }))
+            .await
+            .unwrap();
+        rec.observe(&end_for("office_create", "1", &made.to_string()));
+        let note = made["note"].as_str().unwrap();
+        let exported = tool("office_export")
+            .execute(json!({"path": note, "format": "xlsx"}))
+            .await
+            .unwrap();
+        rec.observe(&end_for("office_export", "2", &exported.to_string()));
+
+        let saved = rec
+            .take(Some("Done: the sheet has two rows."), false)
+            .unwrap();
+        let files = saved.meta.unwrap()["files"].clone();
+        let card = &files[0];
+        assert_eq!(files.as_array().unwrap().len(), 1, "{files}");
+        assert!(
+            card["path"].as_str().unwrap().starts_with("Exports/"),
+            "{card}"
+        );
+        assert_eq!(
+            (card["kind"].as_str(), card["note"].as_str()),
+            (Some("sheet"), Some(note))
+        );
+        assert!(vault.path().join(note).is_file());
+        assert!(vault.path().join(card["path"].as_str().unwrap()).is_file());
+        assert_eq!(
+            std::fs::read_dir(scratch.path()).unwrap().count(),
+            0,
+            "nothing outside the vault"
+        );
+    }
+
     #[test]
     fn a_reply_that_only_made_a_file_is_still_saved() {
         let vault = tempfile::tempdir().unwrap();

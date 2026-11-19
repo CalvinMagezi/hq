@@ -24,7 +24,12 @@ fn every_catalog_tool_is_registered() {
         .filter(|entry| {
             let tool = entry.split(": ").nth(1).unwrap_or_default();
             // The HQ Suite's tool exists only in a build with the `suite` feature.
-            let optional = tool == hq_tool_api::office::OFFICE_TOOL && !cfg!(feature = "suite");
+            let suite_tool = [
+                hq_tool_api::office::OFFICE_TOOL,
+                "office_create",
+                "office_export",
+            ];
+            let optional = suite_tool.contains(&tool) && !cfg!(feature = "suite");
             !optional && registry.get(tool).is_none()
         })
         .collect();
