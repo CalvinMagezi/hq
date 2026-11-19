@@ -288,7 +288,7 @@ impl HqTool for HostSendTool {
         let target = arg_str(&args, "target");
         let text = arg_str(&args, "text");
         let keys = arg_str_list(&args, "keys");
-        crate::harness_session::spawned_may_target(&args, &target)?;
+        crate::spawned_marker::spawned_may_target(&args, &target)?;
         if host_arg.is_empty() || target.is_empty() {
             bail!("`host` and `target` are required; host_list and host_agents list them");
         }
@@ -324,7 +324,7 @@ pub(super) fn send_to(
         );
     }
     let note = if keys.is_empty() {
-        crate::harness_session::prompt_note(h.submit(target, text)?)
+        crate::agent_host::prompt_note(h.submit(target, text)?)
     } else {
         h.send_keys(target, keys)?;
         None
