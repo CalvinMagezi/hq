@@ -6,6 +6,7 @@ import { RouterProvider, createMemoryHistory, createRootRoute, createRouter } fr
 import { renderToStaticMarkup } from 'react-dom/server'
 import { NotesHomeView } from '~/routes/notes/index'
 import { FolderView, NoteBar, NoteLayout } from './NoteViews'
+import { ExportMenu } from '../ExportMenu'
 import { applyFormat } from '../NoteEditor'
 import { folderChoices, folderTrail, countNotes } from './noteRows'
 
@@ -155,5 +156,22 @@ describe('Notes helpers', () => {
   test('countNotes counts markdown at any depth', () => {
     const tree = { name: 'a', path: 'a', type: 'dir' as const, children: [{ name: 'x.md', path: 'a/x.md', type: 'file' as const }, { name: 'b', path: 'a/b', type: 'dir' as const, children: [{ name: 'y.md', path: 'a/b/y.md', type: 'file' as const }, { name: 'z.png', path: 'a/b/z.png', type: 'file' as const }] }] }
     expect(countNotes(tree)).toBe(2)
+  })
+
+  test('ExportMenu renders the note title once without unfilled {title} placeholders', () => {
+    const html = renderToStaticMarkup(
+      createElement(ExportMenu, {
+        menu: { x: 100, y: 100 },
+        options: [{ format: 'pdf', extension: 'pdf', group: 'document', label: 'PDF', hint: 'Print or share' }],
+        busy: null,
+        title: 'Quarterly Plan',
+        onPick: noop,
+        onClose: noop,
+      }),
+    )
+    expect(html).toContain('Export as · Quarterly Plan')
+    expect(html).not.toContain('Export as · Export as')
+    expect(html).not.toContain('{')
+    expect(read('routes/notes/$.tsx')).not.toContain("title={t('note_export_title')}")
   })
 })

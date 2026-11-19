@@ -35,7 +35,8 @@ import { OfferLine } from './OfferLine'
 import { ChatTitle } from './ChatTitle'
 import { WorkPane } from './WorkPane'
 import { useWorkPane, usePane } from '~/store/workPaneStore'
-import { madeNotes, type MadeNote, type ReplySource } from '~/lib/replySources'
+import { chatMadeItems, madeNotes, type MadeNote, type ReplySource } from '~/lib/replySources'
+import { extractHelperRuns } from '~/lib/subagentHelpers'
 import { readAutoOpened, shouldAutoOpen, writeAutoOpened } from '~/lib/workPane'
 import { readPaneMode } from '~/lib/paneMode'
 import { useQuery } from '@tanstack/react-query'
@@ -392,6 +393,12 @@ export function ChatView({ active, threadId }: Props) {
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
   const contextSteps = liveTurn?.toolSteps ?? lastAssistant?.toolSteps ?? []
   const contextCredits = liveTurn?.stepCredits ?? lastAssistant?.stepCredits
+  const allAssistantSteps = [
+    ...messages.flatMap((m) => (m.role === 'assistant' ? (m.toolSteps ?? []) : [])),
+    ...(liveTurn?.toolSteps ?? []),
+  ]
+  const madeInChat = chatMadeItems(messages, liveTurn?.toolSteps ?? [])
+  const chatHelpers = extractHelperRuns(allAssistantSteps)
 
   /** The last saved message of mine goes back in the box to be changed and sent again. */
   const editLast = () => {
@@ -573,8 +580,12 @@ export function ChatView({ active, threadId }: Props) {
       credits={contextCredits}
       running={!!liveTurn}
       onSelectSource={(ref) => panes().showSource(activeThreadId, ref)}
+      onSelectNote={(path) => panes().showNote(activeThreadId, path)}
       onAsk={askAbout}
       onTask={taskFromNote}
+      madeNotes={madeInChat.notes}
+      madeFiles={madeInChat.files}
+      chatHelpers={chatHelpers}
       helpers={
         <SessionsPanel
           sessions={watched.sessions}

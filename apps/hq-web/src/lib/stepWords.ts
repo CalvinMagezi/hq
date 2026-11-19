@@ -1,6 +1,7 @@
 // What a reply did, in plain words: one line per step instead of a tool name.
 // The phone has the same table in ToolWords (apps/android/.../ui/chat/ChatState.kt); keep the two in step.
 import { t, type StringKey } from '~/strings'
+import { formatHelpersSummary, helpersFromCall } from './subagentHelpers'
 
 /** One line of "What I did": a catalogue key and, when the step named something, that name. */
 export interface StepLine {
@@ -194,6 +195,18 @@ export function unwrap(name: string, args: Args): [string, Args] {
 /** The plain line for one tool call. */
 export function stepLine(toolName: string, inputArgs?: Record<string, unknown>): StepLine {
   const [name, args] = unwrap(toolName, inputArgs)
+  if (name === 'spawn_subagents' || name === 'agent_delegate') {
+    const helpers = helpersFromCall(name, args, 'done')
+    if (helpers.length === 1) {
+      const h = helpers[0]
+      return h.goal
+        ? { key: 'step_helper_one_goal', params: { name: h.name, goal: h.goal } }
+        : { key: 'step_helper_one', params: { name: h.name } }
+    }
+    if (helpers.length > 1) {
+      return { key: 'step_helpers_many', params: { n: String(helpers.length), summary: formatHelpersSummary(helpers) } }
+    }
+  }
   const named = NAMED[name]
   if (named) {
     const picked = PICK[named.slot](args)

@@ -1,11 +1,13 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { ExternalLink, ListChecks, MessageSquare, Maximize2, Pencil, Pin, PinOff, X } from 'lucide-react'
+import { ExternalLink, ListChecks, MessageSquare, Maximize2, ArrowLeft, Pencil, Pin, PinOff, X } from 'lucide-react'
 import { t, tn } from '~/strings'
 import type { ToolStep } from '~/store/threadStore'
 import { formatCredits, totalCredits, type StepCredit } from '~/lib/stepCredits'
-import { sourcesOf, type ReplySource } from '~/lib/replySources'
+import { sourcesOf, type MadeNote, type ReplySource } from '~/lib/replySources'
+import type { ReplyFile } from '~/lib/replyFiles'
+import type { ChatHelperRun } from '~/lib/subagentHelpers'
 import { secondsRunning } from '~/lib/liveLine'
 import { stripFrontmatter } from '~/lib/noteConflict'
 import { hasViewer, readHqmd } from '~/lib/hqmd'
@@ -13,7 +15,7 @@ import { getNote, togglePinNote } from '~/lib/vaultApi'
 import type { PaneState, PaneTab } from '~/lib/workPane'
 import { MarkdownViewer } from '../MarkdownViewer'
 import { NoteBody } from '../suite/NoteBody'
-import { SourceIcon } from './ReplyExtras'
+import { FileCard, MadeCard, SourceIcon } from './ReplyExtras'
 
 const TABS: { id: PaneTab; label: 'chat_pane_result' | 'chat_pane_context' | 'chat_pane_helpers' }[] = [
   { id: 'result', label: 'chat_pane_result' },
@@ -35,14 +37,20 @@ interface Props {
   credits?: StepCredit[]
   running: boolean
   onSelectSource: (ref: string | null) => void
+  onSelectNote?: (path: string | null) => void
   onAsk: (path: string) => void
   onTask: (path: string) => void
+  /** Notes and files made across this chat. */
+  madeNotes?: MadeNote[]
+  madeFiles?: ReplyFile[]
+  /** Sub-agent helpers asked in this chat. */
+  chatHelpers?: ChatHelperRun[]
   /** The Helpers tab: the sessions this chat watches. */
   helpers: ReactNode
 }
 
 /** The pane beside a chat: what HQ made (Result), what it is leaning on (Context), and the helpers it watches. */
-export function WorkPane({ pane, onTab, onClose, steps, startedAt, credits, running, onSelectSource, onAsk, onTask, helpers }: Props) {
+export function WorkPane({ pane, onTab, onClose, steps, startedAt, credits, running, onSelectSource, onSelectNote, onAsk, onTask, madeNotes = [], madeFiles = [], chatHelpers = [], helpers }: Props) {
   return (
     <>
       <div className="a-pane-head hq-pane-head">
@@ -77,11 +85,25 @@ export function WorkPane({ pane, onTab, onClose, steps, startedAt, credits, runn
         </button>
       </div>
       <div id="hq-pane-panel" role="tabpanel" aria-labelledby={`hq-pane-tab-${pane.tab}`} className="hq-pane-body">
-        {pane.tab === 'result' && <ResultTab path={pane.note} onAsk={onAsk} onTask={onTask} />}
+        {pane.tab === 'result' && (
+          <ResultTab
+            path={pane.note}
+            notes={madeNotes}
+            files={madeFiles}
+            onSelectNote={onSelectNote}
+            onAsk={onAsk}
+            onTask={onTask}
+          />
+        )}
         {pane.tab === 'context' && (
           <ContextTab steps={steps} startedAt={startedAt} credits={credits} running={running} selected={pane.source} onSelect={onSelectSource} />
         )}
-        {pane.tab === 'helpers' && helpers}
+        {pane.tab === 'helpers' && (
+          <>
+            {chatHelpers.length > 0 && <ChatHelpersSection helpers={chatHelpers} />}
+            {helpers}
+          </>
+        )}
       </div>
     </>
   )
@@ -91,8 +113,35 @@ function noteTitle(path: string): string {
   return (path.split('/').filter(Boolean).pop() ?? path).replace(/\.md$/, '')
 }
 
-function ResultTab({ path, onAsk, onTask }: { path: string | null; onAsk: (path: string) => void; onTask: (path: string) => void }) {
-  if (!path) {
+function ResultTab({
+  path,
+  notes,
+  files,
+  onSelectNote,
+  onAsk,
+  onTask,
+}: {
+  path: string | null
+  notes: MadeNote[]
+  files: ReplyFile[]
+  onSelectNote?: (path: string | null) => void
+  onAsk: (path: string) => void
+  onTask: (path: string) => void
+}) {
+  if (path) {
+    return (
+      <>
+        {onSelectNote && notes.length + files.length > 1 && (
+          <button type="button" className="a-btn quiet compact mb-2" onClick={() => onSelectNote(null)}>
+            <ArrowLeft className="a-ic xs" aria-hidden="true" />
+            {t('chat_pane_all_results')}
+          </button>
+        )}
+        <NoteResult key={path} path={path} onAsk={onAsk} onTask={onTask} />
+      </>
+    )
+  }
+  if (notes.length === 0 && files.length === 0) {
     return (
       <div className="hq-pane-empty">
         <p className="a-body-b">{t('chat_pane_empty_title')}</p>
@@ -100,7 +149,58 @@ function ResultTab({ path, onAsk, onTask }: { path: string | null; onAsk: (path:
       </div>
     )
   }
-  return <NoteResult key={path} path={path} onAsk={onAsk} onTask={onTask} />
+  return (
+    <div className="hq-ctx">
+      {notes.length > 0 && (
+        <section>
+          <h3 className="a-grp">{t('chat_pane_made_notes')}</h3>
+          <div className="hq-ctx-list">
+            {notes.map((n) => (
+              <MadeCard key={n.path} note={n} onOpen={(note) => onSelectNote?.(note.path)} />
+            ))}
+          </div>
+        </section>
+      )}
+      {files.length > 0 && (
+        <section>
+          <h3 className="a-grp">{t('chat_pane_made_files')}</h3>
+          <div className="hq-ctx-list">
+            {files.map((f) => (
+              <FileCard key={f.path} file={f} onOpenNote={(note) => onSelectNote?.(note.path)} />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}
+
+function ChatHelpersSection({ helpers }: { helpers: ChatHelperRun[] }) {
+  return (
+    <div className="hq-chat-side">
+      <p className="a-grp">
+        {t('chat_helpers_in_chat')} <em className="a-count">{helpers.length}</em>
+      </p>
+      <ul className="hq-ctx-list">
+        {helpers.map((h) => (
+          <li key={h.id} className="hq-made hq-made-col">
+            <div className="hq-made-row">
+              <span className="hq-made-main">
+                <b>{h.name}</b>
+                {h.goal && <span className="a-body-sm a-muted">{h.goal}</span>}
+                {h.background && h.status === 'done' && (
+                  <span className="a-cap a-muted">{t('chat_helper_background_note')}</span>
+                )}
+              </span>
+              <span className={h.status === 'working' ? 'a-state work' : 'a-state ok'}>
+                {t(h.status === 'working' ? 'chat_helper_working' : 'chat_helper_done')}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 function NoteResult({ path, onAsk, onTask }: { path: string; onAsk: (path: string) => void; onTask: (path: string) => void }) {

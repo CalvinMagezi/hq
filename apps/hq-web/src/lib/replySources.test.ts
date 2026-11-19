@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { madeNotes, sourcesOf } from './replySources'
+import { chatMadeItems, madeNotes, sourcesOf } from './replySources'
 
 const step = (toolName: string, inputArgs?: Record<string, unknown>, status: 'running' | 'done' = 'done') => ({ toolName, status, inputArgs })
 
@@ -40,7 +40,20 @@ describe('what a reply made', () => {
       step('vault_write_note', { path: '_system/x.md' }),
       step('vault_write_note', { path: 'Notebooks/B.md' }),
       step('vault_write_note', { path: 'Notebooks/B.md' }),
+      step('vault_write_note', { path: 'Notebooks/Report.html' }),
     ])
-    expect(made.map((m) => m.path)).toEqual(['Notebooks/B.md'])
+    expect(made.map((m) => m.path)).toEqual(['Notebooks/B.md', 'Notebooks/Report.html'])
+  })
+
+  test('chatMadeItems collects notes and files across all assistant replies', () => {
+    const items = chatMadeItems([
+      {
+        role: 'assistant',
+        toolSteps: [step('vault_write_note', { path: 'Notebooks/Report.html' })],
+        files: [{ path: 'Exports/2026-11/Budget.xlsx', name: 'Budget.xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', kind: 'sheet', size: 2048 }],
+      },
+    ])
+    expect(items.notes).toEqual([{ title: 'Report.html', path: 'Notebooks/Report.html' }])
+    expect(items.files.map((f) => f.name)).toEqual(['Budget.xlsx'])
   })
 })

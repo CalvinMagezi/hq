@@ -1948,6 +1948,14 @@
     <string name="chat_pane_empty_title">Nothing made yet</string>
     <string name="chat_pane_empty_line">When HQ makes a note in this chat, it shows here.</string>
     <string name="chat_pane_loading">Opening the note…</string>
+    <string name="chat_pane_all_results">All results</string>
+    <string name="chat_pane_made_notes">Notes</string>
+    <string name="chat_pane_made_files">Files</string>
+    <string name="chat_helpers_in_chat">In this chat</string>
+    <string name="chat_helper_default_name">Helper</string>
+    <string name="chat_helper_working">Working</string>
+    <string name="chat_helper_done">Done</string>
+    <string name="chat_helper_background_note">Sent to run in the background</string>
     <string name="suite_sheet_label">Sheet</string>
     <string name="suite_formula_bar">Formula</string>
     <string name="suite_rows_shown">Showing the first %1$s of %2$s rows.</string>
@@ -2058,6 +2066,9 @@
     <string name="step_chats_searched">Looked through earlier chats</string>
     <string name="step_earlier_result">Read back an earlier result</string>
     <string name="step_helper_asked">Asked a helper to work on it</string>
+    <string name="step_helper_one">Asked %1$s to work on it</string>
+    <string name="step_helper_one_goal">Asked %1$s: %2$s</string>
+    <string name="step_helpers_many">Asked %1$s helpers: %2$s</string>
     <string name="step_helper_started">Started a helper</string>
     <string name="step_helper_checked">Checked on a helper</string>
     <string name="step_command_ran">Ran a command</string>
@@ -2113,6 +2124,9 @@
     <string name="live_step_chats_searched">Looking through earlier chats…</string>
     <string name="live_step_earlier_result">Reading back an earlier result…</string>
     <string name="live_step_helper_asked">Asking a helper to work on it…</string>
+    <string name="live_step_helper_one">Asking %1$s to work on it…</string>
+    <string name="live_step_helper_one_goal">Asking %1$s: %2$s…</string>
+    <string name="live_step_helpers_many">Asking %1$s helpers: %2$s…</string>
     <string name="live_step_helper_started">Starting a helper…</string>
     <string name="live_step_helper_checked">Checking on a helper…</string>
     <string name="live_step_command_ran">Running a command…</string>
