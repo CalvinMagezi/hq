@@ -42,6 +42,7 @@ import { readAutoOpened, shouldAutoOpen, writeAutoOpened } from '~/lib/workPane'
 import { readPaneMode } from '~/lib/paneMode'
 import { useQuery } from '@tanstack/react-query'
 import { hasViewer, readHqmd } from '~/lib/hqmd'
+import { extractHtmlDocument } from '~/lib/htmlDashboard'
 
 const FOCUS_DELAY_MS = 50
 // A reply alert links here with the chat to open.
@@ -92,7 +93,12 @@ export function ChatView({ active, threadId }: Props) {
   const panes = useWorkPane.getState
   // A sheet, slides or dashboard needs more room than a note: the pane widens for it, from the copy already loaded.
   const shownNote = useQuery({ queryKey: ['pane-note', pane.note], enabled: false })
-  const wideKind = pane.open && pane.tab === 'result' && typeof (shownNote.data as { content?: string } | undefined)?.content === 'string' && hasViewer(readHqmd((shownNote.data as { content: string }).content))
+  const shownContent = (shownNote.data as { content?: string } | undefined)?.content
+  const wideKind =
+    pane.open &&
+    pane.tab === 'result' &&
+    typeof shownContent === 'string' &&
+    (hasViewer(readHqmd(shownContent)) || extractHtmlDocument(shownContent, pane.note) !== null)
   const [followSignal, setFollowSignal] = useState(0)
   const [editing, setEditing] = useState<Editing | null>(null)
   const sessionsOpen = pane.open && pane.tab === 'helpers'

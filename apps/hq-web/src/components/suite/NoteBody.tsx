@@ -1,6 +1,8 @@
 import { Suspense, lazy, useMemo } from 'react'
 import { t } from '~/strings'
 import { hasViewer, readHqmd } from '~/lib/hqmd'
+import { extractHtmlDocument } from '~/lib/htmlDashboard'
+import { HtmlDashboardView } from '../HtmlDashboardView'
 import { MarkdownViewer } from '../MarkdownViewer'
 
 // Each viewer is its own chunk, fetched only when a note of that kind opens, so Chat's first load does not grow.
@@ -24,6 +26,10 @@ interface Props {
  */
 export function NoteBody({ content, activePath, zoom, hash, onSaved }: Props) {
   const suite = useMemo(() => hasViewer(readHqmd(content)), [content])
+  const htmlDoc = useMemo(() => (suite ? null : extractHtmlDocument(content, activePath)), [content, activePath, suite])
+  if (htmlDoc) {
+    return <HtmlDashboardView html={htmlDoc} path={activePath} />
+  }
   if (!suite) {
     return <MarkdownViewer content={content} activePath={activePath} zoom={zoom} />
   }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { chatMadeItems, madeNotes, sourcesOf } from './replySources'
+import { chatMadeItems, madeNotes, relevantSources, sourcesOf } from './replySources'
 
 const step = (toolName: string, inputArgs?: Record<string, unknown>, status: 'running' | 'done' = 'done') => ({ toolName, status, inputArgs })
 
@@ -27,6 +27,23 @@ describe('what a reply read', () => {
   })
   test('skips a call that names nothing, and searches', () => {
     expect(sourcesOf([step('vault_read'), step('web_search', { query: 'x' }), step('web_fetch', { url: 'not a url' })])).toEqual([])
+  })
+
+  test('relevantSources filters out untouched/uncited notes while keeping cited or written notes', () => {
+    const steps = [
+      step('vault_read', { path: 'Notebooks/Projects/Unrelated Scope.md' }),
+      step('vault_read', { path: 'Notebooks/Shop/Stock rules.md' }),
+      step('vault_read', { path: 'Notebooks/Daily/Dashboard.md' }),
+      step('vault_write_note', { path: 'Notebooks/Daily/Dashboard.md' }),
+      step('web_fetch', { url: 'https://www.prices.example.com/quote?id=9' }),
+    ]
+    const answer = 'I built your dashboard using `Notebooks/Shop/Stock rules.md`.'
+    const filtered = relevantSources(steps, answer)
+    expect(filtered.map((s) => s.ref)).toEqual([
+      'Notebooks/Shop/Stock rules.md',
+      'Notebooks/Daily/Dashboard.md',
+      'https://www.prices.example.com/quote?id=9',
+    ])
   })
 })
 

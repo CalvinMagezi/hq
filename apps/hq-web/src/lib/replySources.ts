@@ -29,6 +29,14 @@ interface StepLike {
 const NOTE_READS = new Set(['vault_read', 'vault_read_section', 'vault_outline', 'context_packet'])
 const FILE_READS = new Set(['read_file', 'convert_to_markdown', 'ocr_extract_text'])
 const NOTE_WRITES = new Set(['vault_write_note'])
+const TURN_WRITES = new Set([
+  'vault_write_note',
+  'vault_append_note',
+  'vault_patch_section',
+  'vault_frontmatter_update',
+  'write_file',
+  'edit_file',
+])
 
 function text(args: Record<string, unknown> | undefined, key: string): string | null {
   const v = args?.[key]
@@ -81,6 +89,47 @@ export function sourcesOf(steps: StepLike[]): ReplySource[] {
     out.push({ kind, title, ref, reading })
   }
   return out
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function writtenPathsOf(steps: StepLike[]): Set<string> {
+  const written = new Set<string>()
+  for (const step of steps) {
+    const [name, args] = unwrap(step.toolName, step.inputArgs)
+    if (!TURN_WRITES.has(name)) continue
+    const path = text(args, 'path')
+    if (path) written.add(path)
+  }
+  return written
+}
+
+function isNoteCited(source: ReplySource, content: string): boolean {
+  if (!content) return false
+  const lower = content.toLowerCase()
+  const refLower = source.ref.toLowerCase()
+  const stemLower = refLower.replace(/\.md$/, '')
+  if (lower.includes(refLower) || lower.includes(stemLower)) return true
+  if (lower.includes(encodeURIComponent(source.ref).toLowerCase())) return true
+  const wikilink = new RegExp(`\\[\\[[^\\]]*\\b${escapeRegExp(source.title)}\\b[^\\]]*\\]\\]`, 'i')
+  if (wikilink.test(content)) return true
+  if (source.title.length >= 2) {
+    const titleRe = new RegExp(`(^|[^A-Za-z0-9_])${escapeRegExp(source.title)}([^A-Za-z0-9_]|$)`)
+    if (titleRe.test(content)) return true
+  }
+  return false
+}
+
+/**
+ * Sources relevant to an answer: keeps non-note sources, and keeps a note only when
+ * it is cited in the answer text or its path was written in this turn.
+ */
+export function relevantSources(steps: StepLike[], content: string): ReplySource[] {
+  const all = sourcesOf(steps)
+  const written = writtenPathsOf(steps)
+  return all.filter((s) => s.kind !== 'note' || written.has(s.ref) || isNoteCited(s, content))
 }
 
 /** The notes this reply wrote, newest last. A path under the Vault's notes is the only kind the pane can open. */

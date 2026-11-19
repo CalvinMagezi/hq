@@ -1925,7 +1925,11 @@
     <string name="chat_made_saved">Note · saved to %1$s</string>
     <string name="chat_made_open">Open</string>
     <string name="chat_file_open">Open</string>
+    <string name="chat_file_chip_open">Open file</string>
     <string name="chat_file_download">Download</string>
+    <string name="html_open_fullscreen">Open full screen</string>
+    <string name="html_save_file">Save as file</string>
+    <string name="html_dashboard_label">Interactive dashboard</string>
     <string name="chat_file_link_missing">File missing, ask HQ to remake it.</string>
     <string name="not_found_title">This page is not here</string>
     <string name="not_found_body">The address may be old or mistyped. Nothing was lost.</string>

@@ -38,7 +38,7 @@ export function ThinkingPanel({ content, live = false }: { content: string; live
       </button>
 
       {open && (
-        <div className="px-3 pb-2.5 pt-1 border-t border-amber-500/10 max-h-80 overflow-y-auto overscroll-contain">
+        <div className="px-3 pb-2.5 pt-1 border-t border-amber-500/10 max-h-80 overflow-y-auto">
           <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words opacity-80" style={{ color: 'var(--text-dim)' }}>
             {content}
           </p>

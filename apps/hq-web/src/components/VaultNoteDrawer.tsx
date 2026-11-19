@@ -8,7 +8,7 @@ import { fetchNoteForDrawer, type NoteDetailResponse } from '~/lib/vaultApi'
 import { folderTrail } from '~/lib/search'
 import { useEdition } from '~/lib/edition'
 import { toastAlert } from '~/lib/toast'
-import { MarkdownViewer } from './MarkdownViewer'
+import { NoteBody } from './suite/NoteBody'
 import { Sheet } from './ui/Sheet'
 import { t } from '~/strings'
 
@@ -148,7 +148,7 @@ export function VaultNoteDrawer() {
         </div>
       )}
 
-      {!loading && !error && isNote && <MarkdownViewer content={data.content || t('note_drawer_empty')} bare={false} />}
+      {!loading && !error && isNote && <NoteBody content={data.content || t('note_drawer_empty')} activePath={data.path} hash={data.hash} />}
     </Sheet>
   )
 }

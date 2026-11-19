@@ -52,7 +52,7 @@ export function ToolCallBlock({ steps, credits }: Props) {
       </button>
 
       {expanded && (
-        <div className="px-2 sm:px-3 pb-2.5 pt-1 space-y-1.5 border-t border-white/5 max-h-80 overflow-y-auto overscroll-contain">
+        <div className="px-2 sm:px-3 pb-2.5 pt-1 space-y-1.5 border-t border-white/5 max-h-80 overflow-y-auto">
           <ul className="text-[13px] space-y-1 py-1" style={{ color: 'var(--text-dim)' }}>
             {lines.map((line, i) => (
               <li key={i} className="flex items-start gap-2 min-h-6">

@@ -95,6 +95,7 @@ describe('Chat on the panes', () => {
 describe('A reply reads result first', () => {
   const steps = [
     { toolCallId: 'a', toolName: 'vault_read', status: 'done' as const, startedAt: 0, progressMessages: [], inputArgs: { path: 'Notebooks/Shop/Stock rules.md' } },
+    { toolCallId: 'c', toolName: 'vault_read', status: 'done' as const, startedAt: 0, progressMessages: [], inputArgs: { path: 'Notebooks/Projects/Unrelated Scope.md' } },
     { toolCallId: 'b', toolName: 'vault_write_note', status: 'done' as const, startedAt: 0, progressMessages: [], inputArgs: { path: 'Notebooks/Daily/Steps.md' } },
   ]
   const html = (live: boolean) =>
@@ -102,7 +103,7 @@ describe('A reply reads result first', () => {
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(ChatBubble, { live, startedAt: 1, message: { id: 'm', role: 'assistant', content: 'I wrote the steps down.', timestamp: 0, toolSteps: steps } }),
+        createElement(ChatBubble, { live, startedAt: 1, message: { id: 'm', role: 'assistant', content: 'I wrote the steps down from Stock rules.', timestamp: 0, toolSteps: steps } }),
       ),
     )
 
@@ -111,11 +112,12 @@ describe('A reply reads result first', () => {
     const at = (s: string) => out.indexOf(s)
     // The words render through the markdown viewer, so its box marks where they are.
     expect(at('markdown-viewer')).toBeGreaterThan(-1)
-    expect(at('What I did · 2 steps')).toBeGreaterThan(at('markdown-viewer'))
+    expect(at('What I did · 3 steps')).toBeGreaterThan(at('markdown-viewer'))
     expect(at('hq-made')).toBeGreaterThan(at('What I did'))
     expect(at('hq-sources')).toBeGreaterThan(at('hq-made'))
     expect(out).toContain('Note · saved to Vault › Daily')
     expect(out).toContain('Stock rules')
+    expect(out).not.toContain('Unrelated Scope')
   })
   test('a streaming reply shows one live line above its words and none of the saved extras', () => {
     const out = html(true)
@@ -193,5 +195,28 @@ describe('WorkPane Result and Helpers tabs', () => {
     expect(html).toContain('Draft HTML summary')
     expect(html).toContain('Done')
     expect(html).toContain('Sent to run in the background')
+  })
+
+  test('inner chat step and thinking lists do not trap wheel scroll with overscroll-contain', () => {
+    const toolBlock = readFileSync(new URL('./ToolCallBlock.tsx', import.meta.url), 'utf8')
+    const thinking = readFileSync(new URL('./ThinkingPanel.tsx', import.meta.url), 'utf8')
+    expect(toolBlock).not.toContain('overscroll-contain')
+    expect(thinking).not.toContain('overscroll-contain')
+  })
+
+  test('FileCard for an .html file opens in the side pane via button when onOpenNote is provided', async () => {
+    const { FileCard } = await import('./ReplyExtras')
+    const html = renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(FileCard, {
+          file: { path: 'Exports/2026-11/dash.html', name: 'dash.html', mime: 'text/html', kind: 'file', size: 1024 },
+          onOpenNote: () => {},
+        }),
+      ),
+    )
+    expect(html).toContain('<button')
+    expect(html).toContain('Open')
   })
 })
