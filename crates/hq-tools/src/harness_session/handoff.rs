@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use super::{GoalText, Liveness, NewWatch, SpawnRequest};
 use crate::agent_host::{Host, HostBackend};
-use crate::tasks::{Placement, create_task_in};
+use crate::task_placement::{Placement, create_task_in};
 use crate::util::generate_id;
 
 const CREATED_BY: &str = "mcp-handoff";

@@ -16,7 +16,6 @@ mod backend;
 pub mod bridge_hosts;
 #[cfg(unix)]
 mod native;
-pub mod overview;
 #[cfg(unix)]
 pub mod pairing;
 // Builds on the SSH transport, which is Unix-only.
@@ -691,6 +690,19 @@ fn shell_quote(arg: &str) -> String {
         format!("'{}'", arg.replace('\'', r"'\''"))
     }
 }
+
+pub fn prompt_note(outcome: PromptOutcome) -> Option<String> {
+    match outcome {
+        PromptOutcome::Resubmitted => Some(RESUBMITTED_NOTE.into()),
+        PromptOutcome::Stalled(_) => Some(
+            "The host saw no activity after the prompt; a fast agent can finish first. Read the output before resending.".into(),
+        ),
+        PromptOutcome::TimedOut(msg) => Some(format!("prompt wait timed out: {msg}")),
+        PromptOutcome::Submitted | PromptOutcome::Settled(_) => None,
+    }
+}
+
+const RESUBMITTED_NOTE: &str = "The host saw no activity after the prompt, so Enter was pressed once more. Read the output to confirm the agent started.";
 
 #[cfg(test)]
 mod tests {

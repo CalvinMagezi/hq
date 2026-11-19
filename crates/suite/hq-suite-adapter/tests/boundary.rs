@@ -225,6 +225,7 @@ const MAY_NAME_SUITE: &[&str] = &[
     "crates/hq-cli/src/commands/suite.rs",
     "crates/hq-tools-office/src/author.rs",
     "crates/hq-tools-office/src/lib.rs",
+    "crates/hq-tools-office/src/author.rs",
     "crates/hq-web/src/suite_api.rs",
 ];
 

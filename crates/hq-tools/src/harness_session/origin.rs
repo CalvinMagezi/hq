@@ -1,5 +1,9 @@
 use super::*;
 
+pub use crate::spawned_marker::{
+    SPAWNED_REFUSAL, SPAWNED_SESSION_ARG, spawned_may_target, spawned_session,
+};
+
 /// Set by governance on calls from a turn that has read untrusted content, so
 /// what that turn newly watches starts with Drive off. A caller setting it
 /// itself can only give up Drive, never gain it.
@@ -23,11 +27,6 @@ pub struct WatchingChat {
     pub from_ask: bool,
 }
 
-/// Set by the gateway when the caller says it runs inside a session HQ spawned
-/// (header `x-hq-session-id`, filled from the `HQ_SESSION_ID` the pane was
-/// launched with). A caller that sets it itself only restricts itself.
-pub const SPAWNED_SESSION_ARG: &str = "_hq_spawned_session";
-
 /// The environment variable HQ sets in every pane it launches, naming the session.
 pub const SESSION_ENV: &str = "HQ_SESSION_ID";
 
@@ -43,8 +42,6 @@ pub fn caller_session(args: &Value) -> Option<&str> {
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
 }
-
-pub const SPAWNED_REFUSAL: &str = "HQ-spawned sessions cannot resume, hand off or type into other sessions, or run full-mode asks; start a teammate with agent_delegate (or harness_session_spawn with from_session) and talk to it with agent_message_send";
 
 /// Argument a caller sets to say it runs inside HQ session `id` (the `HQ_SESSION_ID`
 /// its pane was launched with). Nothing attests it, so the spawn becomes a delegation
@@ -63,13 +60,6 @@ pub fn delegating_session(args: &Value) -> Option<String> {
                 .filter(|s| !s.is_empty())
         })
         .map(str::to_string)
-}
-
-/// The id of the HQ-spawned session this call came from, when the gateway marked it.
-pub fn spawned_session(args: &Value) -> Option<&str> {
-    args.get(SPAWNED_SESSION_ARG)
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
 }
 
 pub fn refuse_if_spawned(args: &Value) -> Result<()> {
@@ -175,14 +165,6 @@ pub fn tag_origin(db: &Arc<Database>, report: &Value, origin: &str) {
         && let Err(e) = db.with_conn(|c| registry::set_origin(c, id, origin))
     {
         tracing::warn!(session = id, error = %e, "could not record how a session started");
-    }
-}
-
-/// Whether a marked (HQ-spawned) caller may type into `target`: only its own session.
-pub fn spawned_may_target(args: &Value, target: &str) -> Result<()> {
-    match spawned_session(args) {
-        Some(own) if own != target => bail!(SPAWNED_REFUSAL),
-        _ => Ok(()),
     }
 }
 

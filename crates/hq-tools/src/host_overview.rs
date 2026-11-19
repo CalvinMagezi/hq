@@ -16,14 +16,15 @@ use hq_db::Database;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use super::tools::{agent_rows, managed_names};
-use super::{AgentHostError, AgentInfo, Host, all_hosts, blocking};
+use crate::agent_host::tools::{agent_rows, managed_names};
+use crate::agent_host::{AgentHostError, AgentInfo, Host, all_hosts, blocking};
 use crate::harness_session as harness;
 use crate::lane_quotas::{self, LaneView, Options};
 use crate::registry::HqTool;
 use crate::util::arg_str;
 use anyhow::{Result, bail};
 use async_trait::async_trait;
+use std::sync::Arc;
 
 /// Longest one host gets for all three checks. Native calls are bounded at 15s (quota 25s), so
 /// this lets one slow step finish without letting a dead host stall the answer.
@@ -448,3 +449,16 @@ impl HqTool for HostOverviewTool {
 
 #[cfg(test)]
 mod tests;
+
+/// The host tools together with the overview, lane quota and helper setup tools. The overview
+/// reads lane quotas and harness specs, so it lives above `agent_host` and callers use this
+/// function instead of `agent_host::tools::create_host_tools` alone.
+pub fn create_host_tools_with_extras(db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
+    let mut tools = crate::agent_host::tools::create_host_tools(db.clone());
+    tools.push(Box::new(HostOverviewTool::new(db.clone())));
+    tools.push(Box::new(crate::lane_quotas::LaneQuotasTool::new(
+        db.clone(),
+    )));
+    tools.push(Box::new(crate::helper_setup::HelperSetupTool::new(db)));
+    tools
+}

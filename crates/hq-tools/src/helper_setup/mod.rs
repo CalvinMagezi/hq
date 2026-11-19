@@ -2,7 +2,9 @@
 //! ones the owner wants, starts each sign-in on that computer, and remembers what is ready. One
 //! approval covers the whole batch. Design, security model and limits: `docs/HELPER_SETUP.md`.
 
-pub mod catalog;
+pub use crate::helper_catalog as catalog;
+#[cfg(test)]
+mod catalog_tests;
 pub mod runner;
 pub mod service;
 

@@ -514,7 +514,8 @@ impl HarnessSessionSpawnTool {
                 delegator.cwd
             );
         }
-        let report = crate::a2a::delegate_from_spawn(self.db.clone(), from, args).await?;
+        let report =
+            super::super::delegator::delegate_from_spawn(self.db.clone(), from, args).await?;
         crate::harness_session::tag_origin(&self.db, &report, origin);
         let brief =
             crate::harness_session::connector_brief(args, &["prompt", "goal", "done_criteria"]);

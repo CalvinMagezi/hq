@@ -152,8 +152,10 @@ impl SessionBuilder {
         shared_db: Option<Arc<hq_db::Database>>,
     ) -> Vec<Box<dyn hq_tools::HqTool>> {
         // Vault + memory tools — direct vault access without subagent overhead
-        let mut tools =
-            hq_tools::vault::create_vault_tools(vault_path.to_path_buf(), shared_db.clone());
+        let mut tools = hq_tools::vault_reorg::create_vault_tools_with_reorg(
+            vault_path.to_path_buf(),
+            shared_db.clone(),
+        );
         // Restricted audiences (FR-072) only see vault context labelled for them.
         if let (Some(id), Ok(vault)) = (
             self.identity.as_ref(),
@@ -323,7 +325,10 @@ impl SessionBuilder {
                     .and_then(hq_tool_api::family_guest::FamilyGuestContext::from_identity),
             ),
         );
-        tools.extend(hq_tools::agent_host::tools::create_host_tools(db.clone()));
+        hq_tools::a2a::install_delegation();
+        tools.extend(hq_tools::host_overview::create_host_tools_with_extras(
+            db.clone(),
+        ));
         let origin = self
             .identity
             .as_ref()
