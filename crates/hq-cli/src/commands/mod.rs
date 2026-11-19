@@ -7,6 +7,7 @@ pub mod content;
 pub mod copilot;
 pub mod cursor_mcp_config;
 pub mod daemon;
+pub mod decide;
 pub mod decisions;
 pub mod doctor;
 pub mod edge;

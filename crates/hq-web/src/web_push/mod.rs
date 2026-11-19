@@ -45,6 +45,8 @@ const ALWAYS_PUSHED_SOURCES: &[&str] = &[
     crate::device_auth::DEVICE_SIGN_IN_SOURCE,
     // A reminder the person asked for in chat: it is only useful if it reaches them.
     hq_core::types::DUE_REMINDER_SOURCE,
+    // A question with a deadline: a default may fire if it is not seen.
+    hq_db::owner_decisions::SOURCE,
 ];
 
 pub(crate) struct WebPush {
