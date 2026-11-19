@@ -51,6 +51,9 @@ pub enum Event {
     /// finish, so the task is blocked like an exit. A run is never resumed.
     RunFailed,
     Exited,
+    /// The agent stopped at an authentication or API error screen. Its turn did not run, so this
+    /// is not `Finished`: the task is blocked and the error line (the note) says why.
+    ErrorScreen,
     Stopped,
     /// The supervisor dismissed a known harmless prompt; commented once per session.
     PromptDismissed,
@@ -181,13 +184,19 @@ fn record_in(
         work_session_id: lease.as_deref(),
         ..Default::default()
     };
+    // A turn that ends after the session was stopped says nothing about the work: a stop that
+    // arrives first must not be followed by a move to review.
+    let stopped_since = matches!(event, Event::Finished | Event::RunEnded)
+        && registry::get(conn, &session.id)?
+            .is_some_and(|now| now.status == registry::STATUS_STOPPED);
     let moved = match (
         does_work,
-        target(event, siblings_running, session_running, task.long_horizon),
+        target(event, siblings_running, session_running, task.long_horizon)
+            .filter(|_| !stopped_since),
     ) {
         (true, Some((from, to))) => {
             let reason = match to == t::STATUS_BLOCKED {
-                true => Some(blocked_reason(conn, session, event)?),
+                true => Some(blocked_reason(conn, session, event, note)?),
                 false => None,
             };
             // A dialog at launch is a decision only the owner can make: the task says so.
@@ -283,6 +292,8 @@ fn target(
         Event::Exited | Event::RunFailed if !siblings_running => {
             Some((&[t::STATUS_IN_PROGRESS], t::STATUS_BLOCKED))
         }
+        // Nothing ran, whatever else is working on the task: the owner has to fix the login.
+        Event::ErrorScreen => Some((&[t::STATUS_IN_PROGRESS], t::STATUS_BLOCKED)),
         Event::BlockedAtLaunch if !siblings_running => {
             Some((&[t::STATUS_IN_PROGRESS], t::STATUS_BLOCKED))
         }
@@ -334,7 +345,7 @@ fn open_lease(
 /// time on the task counts work and not the wait for the next instruction.
 fn close_lease(conn: &Connection, session: &HarnessSessionRow, event: Event) -> Result<()> {
     let reason = match event {
-        Event::Finished | Event::RunEnded => t::END_RELEASED,
+        Event::Finished | Event::RunEnded | Event::ErrorScreen => t::END_RELEASED,
         Event::Exited | Event::RunFailed | Event::Stopped | Event::BlockedAtLaunch => {
             t::END_SESSION_ENDED
         }
@@ -372,7 +383,12 @@ fn advance(
 
 /// Why `event` blocks the task, in the style of the stack's run-time limit, so a
 /// blocked task always says why without a trip to the logs.
-fn blocked_reason(conn: &Connection, session: &HarnessSessionRow, event: Event) -> Result<String> {
+fn blocked_reason(
+    conn: &Connection,
+    session: &HarnessSessionRow,
+    event: Event,
+    note: Option<&str>,
+) -> Result<String> {
     let who = format!("session `{}` ({})", session.id, session.harness);
     let reason = match event {
         Event::RunFailed => {
@@ -389,6 +405,13 @@ fn blocked_reason(conn: &Connection, session: &HarnessSessionRow, event: Event) 
         }
         Event::BlockedAtLaunch => {
             format!("{who} stopped at a startup dialog before its prompt was typed")
+        }
+        Event::ErrorScreen => {
+            let base = format!("{who} stopped at an authentication or API error, so nothing ran");
+            let quoted = note
+                .map(|line| format!("{base}; the agent's error line: \"{line}\""))
+                .filter(|r| r.chars().count() <= t::MAX_BLOCK_TEXT_CHARS);
+            quoted.unwrap_or(base)
         }
         _ => format!("{who} exited and no other session is working on the task"),
     };
@@ -458,6 +481,12 @@ fn comment(session: &HarnessSessionRow, event: Event, moved: Option<&Task>) -> O
             "{who} exited. No other session is working on this task, so it is blocked until someone resumes the session (`harness_session_resume`) or reviews its last output (`harness_session_logs`)."
         ),
         Event::Exited => format!("{who} exited."),
+        Event::ErrorScreen if moved.is_some() => format!(
+            "{who} stopped at an authentication or API error screen, so nothing ran and the task is blocked (not ready for review). Fix the login or key, then resume the session (`harness_session_resume`); its screen is in `harness_session_logs`."
+        ),
+        Event::ErrorScreen => format!(
+            "{who} stopped at an authentication or API error screen; its screen is in `harness_session_logs`."
+        ),
         Event::Stopped => format!("{who} was stopped."),
         Event::PromptDismissed => format!(
             "{who} showed a known harmless prompt (the feedback survey) and HQ dismissed it with a fixed key. This is noted once per session; later dismissals are in the session's event log."
@@ -659,6 +688,62 @@ mod tests {
         assert_eq!(open, ["hs-2"]);
         apply(&db, &b, Event::Stopped);
         assert!(leases(&db, &task).iter().all(|l| l.ended_at.is_some()));
+    }
+
+    #[test]
+    fn an_error_screen_blocks_the_task_with_the_error_line_and_never_reviews_it() {
+        let (db, task) = setup();
+        let s = session(&db, "hs-err", Some(&task));
+        apply(&db, &s, Event::Launched);
+        let link = db
+            .with_conn(|c| {
+                record_with_note(
+                    c,
+                    &s,
+                    Event::ErrorScreen,
+                    Some("API Error: 401 authentication_error"),
+                )
+            })
+            .unwrap()
+            .unwrap();
+        assert!(link.moved);
+        assert_eq!(status(&db, &task), t::STATUS_BLOCKED);
+        let reason = db
+            .with_conn(|c| Ok(t::get_task(c, &task)?.unwrap().blocked_reason))
+            .unwrap()
+            .unwrap();
+        assert!(reason.contains("authentication_error"), "{reason}");
+        assert!(
+            comments(&db, &task)
+                .pop()
+                .unwrap()
+                .contains("not ready for review")
+        );
+    }
+
+    #[test]
+    fn stopping_a_session_with_no_work_leaves_the_task_where_it_was() {
+        let (db, task) = setup();
+        let s = session(&db, "hs-stop", Some(&task));
+        apply(&db, &s, Event::Launched);
+        assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS);
+        // No commit, no checkpoint: the stop is a comment, not a move to review.
+        let link = apply(&db, &s, Event::Stopped).unwrap();
+        assert!(!link.moved);
+        assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS);
+    }
+
+    #[test]
+    fn a_turn_that_ends_after_the_stop_does_not_put_the_task_up_for_review() {
+        let (db, task) = setup();
+        let s = session(&db, "hs-late", Some(&task));
+        apply(&db, &s, Event::Launched);
+        db.with_conn(|c| registry::set_status(c, &s.id, registry::STATUS_STOPPED))
+            .unwrap();
+        // The supervisor still holds the row it read before the stop.
+        let link = apply(&db, &s, Event::Finished).unwrap();
+        assert!(!link.moved);
+        assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS);
     }
 
     #[test]

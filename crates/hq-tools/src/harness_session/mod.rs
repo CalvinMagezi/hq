@@ -21,6 +21,7 @@ pub mod decisions;
 mod delegator;
 pub use delegator::{Delegator, install_delegator};
 pub mod dismiss;
+pub mod error_screen;
 pub mod events;
 mod fallback;
 pub mod fleet;
