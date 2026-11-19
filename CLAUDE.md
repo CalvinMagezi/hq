@@ -55,6 +55,9 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 - On a conflict in a generated file (`Cargo.lock`, or the strings outputs `en.gen.ts` and
   `strings_catalogue.xml`), never merge it by hand: run `scripts/resolve-generated.sh`, then `git add`
   what it lists. Rebase onto current `main` before the final push.
+- No Rust file grows past 1,500 production lines (inline `#[cfg(test)]` code does not count);
+  `scripts/ci/file-size.py` fails the lint job on one, and the files already over are capped in
+  `scripts/ci/file-size-allow.toml`, which can only shrink. Split by concern, not by line count.
 - This root file is loaded into every session, so it stays under 20 KB (`scripts/claude-md-check.py`). Notes about one area go in the `CLAUDE.md` beside that code and are listed in "Where things live" below.
 - Do not hand-deploy to a server. Servers update themselves from signed releases
   (`docs/UPDATE_SYSTEM.md`, `deploy/README.md`).

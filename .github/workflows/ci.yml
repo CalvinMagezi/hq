@@ -94,6 +94,11 @@ jobs:
       - name: clippy (tunnel feature)
         run: cargo clippy -p hq-cli --all-targets --features tunnel --locked -- -D warnings
 
+      # No file grows past 1,500 production lines (inline tests do not count); the few already over
+      # are capped in scripts/ci/file-size-allow.toml and can only shrink.
+      - name: File size ratchet
+        run: python3 -I scripts/ci/file-size.py
+
   rust-test:
     name: Rust (test)
     needs: changes
@@ -433,6 +438,8 @@ jobs:
         run: bash scripts/release/pick-promotable-test.sh
       - name: Changed-areas script fails open and skips only what it should
         run: bash scripts/ci/changed-areas-test.sh
+      - name: File size ratchet catches a 1,501 line file and leaves tests alone
+        run: bash scripts/ci/file-size-test.sh
       - name: Changelog fragments are well formed, and the compile script works
         run: |
           bash scripts/changelog-compile.sh --check

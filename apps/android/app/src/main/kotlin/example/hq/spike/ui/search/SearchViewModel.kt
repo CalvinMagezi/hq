@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import example.hq.spike.data.searchNoteHits
 
 /** Why the notes could not be searched, one per failure line of wave-4/02-search.md section 5. */
 enum class NotesFail(val line: Int) {
