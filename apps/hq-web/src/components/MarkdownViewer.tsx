@@ -10,7 +10,8 @@ import { useVaultNoteStore } from '~/store/vaultNoteStore'
 import { blockRemoteImages } from '~/lib/remoteImages'
 import { chartSlot, fillChartSlots } from '~/lib/chartSlots'
 import { parseChart, parseMermaidPie, renderChartHtml } from '~/lib/chart'
-import { codespanHtml, vaultLinkTarget } from '~/lib/noteRefs'
+import { codespanHtml, vaultFileLinkTarget, vaultLinkTarget } from '~/lib/noteRefs'
+import { downloadVaultFile, vaultFileExists } from '~/lib/vaultApi'
 
 // Lazy-load shiki only when first needed (avoids bundling all grammars eagerly)
 let highlighterPromise: Promise<any> | null = null
@@ -190,6 +191,26 @@ export function MarkdownViewer({ content, activePath, zoom, bare }: { content: s
         return () => { active = false }
     }, [content, bare])
 
+    // A link to a file HQ says it made may name one that was never written: flag it before it is clicked.
+    useEffect(() => {
+        const container = containerRef.current
+        if (!container) return
+        let active = true
+        container.querySelectorAll<HTMLAnchorElement>('a.md-link').forEach((link) => {
+            const file = vaultFileLinkTarget(link.getAttribute('href'))
+            if (!file) return
+            void vaultFileExists(file).then((exists) => {
+                if (!active || exists) return
+                link.classList.add('md-link-missing')
+                const note = document.createElement('span')
+                note.className = 'md-link-missing-note a-cap a-muted'
+                note.textContent = ` ${t('chat_file_link_missing')}`
+                link.after(note)
+            })
+        })
+        return () => { active = false }
+    }, [html])
+
     // Delegated handler for code-copy buttons and vault note links
     useEffect(() => {
         const container = containerRef.current
@@ -229,6 +250,13 @@ export function MarkdownViewer({ content, activePath, zoom, bare }: { content: s
                 if (target) {
                     e.preventDefault()
                     useVaultNoteStore.getState().openNote(target, link)
+                    return
+                }
+                const file = vaultFileLinkTarget(link.getAttribute('href'))
+                if (file) {
+                    e.preventDefault()
+                    const name = file.split('/').pop() ?? file
+                    downloadVaultFile(file, name).catch(() => toastNotice(t('chat_file_link_missing')))
                 }
             }
         }

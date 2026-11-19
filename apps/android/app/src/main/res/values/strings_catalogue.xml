@@ -1921,6 +1921,11 @@
     <string name="chat_made_open">Open</string>
     <string name="chat_file_open">Open</string>
     <string name="chat_file_download">Download</string>
+    <string name="chat_file_link_missing">File missing, ask HQ to remake it.</string>
+    <string name="not_found_title">This page is not here</string>
+    <string name="not_found_body">The address may be old or mistyped. Nothing was lost.</string>
+    <string name="not_found_back">Back</string>
+    <string name="not_found_go_chat">Go to chat</string>
     <string name="chat_file_export">Export</string>
     <string name="chat_file_exporting">Making the file</string>
     <string name="chat_file_export_failed">HQ could not make that file just now</string>

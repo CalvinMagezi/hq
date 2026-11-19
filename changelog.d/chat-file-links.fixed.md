@@ -1,0 +1,1 @@
+**A link to a file HQ just made now opens it.** Links such as "Download the spreadsheet" in a chat reply used to open a blank "Not Found" page. They now download the file from your vault, and an address HQ does not know shows a plain page with Back and Go to chat.

@@ -44,6 +44,30 @@ export function vaultLinkTarget(href: string | null | undefined): string | null 
   return sanitizeVaultPath(safeDecode(withoutFragment))
 }
 
+const EXTERNAL_HREF = /^(https?|mailto|tel|blob|data|javascript):|^\/\//i
+const FILE_EXTENSION = /\.[A-Za-z0-9]{1,8}$/
+const VAULT_ASSET_ROUTE = '/api/vault-asset'
+const EXPORTS_SEGMENT = '/Exports/'
+
+/**
+ * The vault path of a non-note file a link names, or null for an ordinary link. A model often
+ * links the file it just made with a bare path, `sandbox:` or `file:` address. Left alone those
+ * resolve against the app's own address and land on a page that is not there, so the chat opens
+ * them as a download instead.
+ */
+export function vaultFileLinkTarget(href: string | null | undefined): string | null {
+  if (!href) return null
+  const h = href.trim()
+  if (!h || h.startsWith('#') || EXTERNAL_HREF.test(h)) return null
+  if (h.startsWith(VAULT_ASSET_ROUTE)) return sanitizeVaultPath(new URLSearchParams(h.split('?')[1] ?? '').get('path'))
+  if (h.startsWith('/api/')) return null
+  const bare = safeDecode(h.replace(/^(sandbox|file|vault|note):(\/\/)?/i, '').split(/[?#]/)[0])
+  if (!FILE_EXTENSION.test(bare) || /\.md$/i.test(bare)) return null
+  const exportsAt = bare.indexOf(EXPORTS_SEGMENT)
+  const relative = exportsAt >= 0 ? bare.slice(exportsAt + 1) : bare.replace(/^\/+/, '')
+  return sanitizeVaultPath(relative)
+}
+
 /** Inline code as HTML: a tappable note reference when it names a vault note, plain `<code>` otherwise. */
 export function codespanHtml(text: string): string {
   const escaped = escapeAttr(text)
