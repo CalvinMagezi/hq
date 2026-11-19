@@ -13,6 +13,7 @@ suite = ["dep:hq-tools-office"]
 [dependencies]
 hq-core = { workspace = true }
 hq-tools = { workspace = true }
+hq-tools-coding = { workspace = true }
 hq-tools-web = { workspace = true }
 hq-tool-api = { workspace = true }
 hq-tools-office = { workspace = true, optional = true }

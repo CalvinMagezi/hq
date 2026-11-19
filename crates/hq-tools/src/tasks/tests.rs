@@ -273,7 +273,7 @@ async fn update_to_ready_for_review_emits_a_value_item_once() {
 
     let create = tools.iter().find(|t| t.name() == "task_create").unwrap();
     let created = create
-        .execute(json!({ "title": "Review my PR" }))
+        .execute(json!({ "title": "Review my PR", "assignees": ["owner"] }))
         .await
         .unwrap();
     let display_id = created["display_id"].as_str().unwrap().to_string();
@@ -1694,7 +1694,7 @@ async fn the_tasks_scope_emits_no_review_item_and_cannot_force_an_index_rebuild(
     // Control: the owner's own transition does raise one.
     let other = fx
         .tool("task_create")
-        .execute(json!({"title": "owner reviewable"}))
+        .execute(json!({"title": "owner reviewable", "assignees": ["owner"]}))
         .await
         .unwrap();
     fx.tool("task_update")
@@ -3415,9 +3415,13 @@ async fn with_verification_off_complete_means_complete_as_it_always_did() {
 #[tokio::test]
 async fn task_get_shows_how_a_task_was_verified() {
     let (tools, db) = tools_verifying(hq_core::config::VerificationMode::Shadow);
-    let task = call_tool(&tools, "task_create", json!({ "title": "Write the note" }))
-        .await
-        .unwrap();
+    let task = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Write the note", "assignees": ["owner"] }),
+    )
+    .await
+    .unwrap();
     let id = task["display_id"].as_str().unwrap().to_string();
     let internal = task["id"].as_str().unwrap().to_string();
     db.with_conn(|c| {
@@ -4485,7 +4489,7 @@ async fn the_tasks_scope_works_a_task_under_a_lease_named_for_the_scope() {
 }
 
 #[tokio::test]
-async fn a_scope_release_raises_no_review_item_but_an_owner_release_does() {
+async fn a_scope_release_raises_no_review_item_but_an_owner_task_release_does() {
     let fx = ScopeFixture::new(&[]);
     let scoped_task = fx
         .tool("task_create")
@@ -4527,8 +4531,28 @@ async fn a_scope_release_raises_no_review_item_but_an_owner_release_does() {
         .unwrap();
     assert_eq!(
         pending_review_items(&fx),
+        0,
+        "an agent's task going to review is not the owner's to look at"
+    );
+
+    let mine = fx
+        .tool("task_create")
+        .execute(json!({"title": "c", "assignees": ["owner"]}))
+        .await
+        .unwrap();
+    let claim = fx
+        .tool("task_claim")
+        .execute(json!({"task_id": mine["id"], "actor": "builder"}))
+        .await
+        .unwrap();
+    fx.tool("task_release")
+        .execute(json!({"lease": claim["lease"], "status": "ready_for_review", "summary": "s"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        pending_review_items(&fx),
         1,
-        "a release to review reaches the owner like an update"
+        "a task assigned to the owner reaches them"
     );
 }
 
@@ -4822,9 +4846,13 @@ async fn the_owner_is_asked_to_review_only_what_hq_will_not_verify() {
             },
             Arc::new(crate::tasks::verify::remote::fake::FakeGitHub::default()),
         );
-        let task = call_tool(&tools, "task_create", json!({ "title": "Write the note" }))
-            .await
-            .unwrap();
+        let task = call_tool(
+            &tools,
+            "task_create",
+            json!({ "title": "Write the note", "assignees": ["owner"] }),
+        )
+        .await
+        .unwrap();
         let claim = call_tool(
             &tools,
             "task_claim",
