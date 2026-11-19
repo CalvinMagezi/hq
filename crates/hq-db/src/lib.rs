@@ -32,6 +32,7 @@ pub mod migrations;
 pub mod moved;
 pub mod note_keep;
 pub mod note_marks;
+pub mod nudge_ledger;
 pub mod offers;
 pub mod owner_approvals;
 pub mod owner_folder_grants;

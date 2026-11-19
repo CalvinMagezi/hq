@@ -11,6 +11,10 @@ const FILES: &[(&str, &str)] = &[
         include_str!("../../hq-db/src/adoption.rs"),
     ),
     (
+        "hq-db/src/nudge_ledger.rs",
+        include_str!("../../hq-db/src/nudge_ledger.rs"),
+    ),
+    (
         "hq-tools/src/capabilities/mod.rs",
         include_str!("../src/capabilities/mod.rs"),
     ),

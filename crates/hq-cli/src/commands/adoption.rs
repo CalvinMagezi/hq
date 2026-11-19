@@ -58,7 +58,29 @@ pub fn run_adoption(config: &HqConfig, as_json: bool) -> Result<()> {
         writeln!(out, "{}", serde_json::to_string_pretty(&r.to_json())?)?;
     } else {
         render_adoption(&r, &mut out)?;
+        let counts = db.with_conn(|c| hq_db::nudge_ledger::counts(c, now()))?;
+        render_nudges(&counts, &mut out)?;
     }
+    Ok(())
+}
+
+/// Nudges over the last month by what became of them. Silent when none were considered.
+fn render_nudges(
+    counts: &std::collections::BTreeMap<String, usize>,
+    out: &mut dyn Write,
+) -> Result<()> {
+    if counts.is_empty() {
+        return Ok(());
+    }
+    let n = |k: &str| counts.get(k).copied().unwrap_or(0);
+    writeln!(
+        out,
+        "\nNudges this month: shown {}, withheld {}, expired {}, answered {}",
+        n("shown"),
+        n("withheld"),
+        n("expired"),
+        n("answered")
+    )?;
     Ok(())
 }
 
@@ -220,6 +242,20 @@ fn render_pass(heading: &str, r: &ReplayReport, out: &mut dyn Write) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nudge_counts_print_only_when_something_was_considered() {
+        let mut buf = Vec::new();
+        render_nudges(&Default::default(), &mut buf).unwrap();
+        assert!(buf.is_empty());
+        let counts = [("shown".to_string(), 2), ("withheld".to_string(), 1)].into();
+        render_nudges(&counts, &mut buf).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(
+            text.contains("shown 2, withheld 1, expired 0, answered 0"),
+            "{text}"
+        );
+    }
     use hq_tools::capabilities::offers::{Detector, DetectorCount};
 
     #[test]
