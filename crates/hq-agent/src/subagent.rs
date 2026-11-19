@@ -55,7 +55,7 @@ Break down the work into concrete steps with file paths and function names where
 Do not implement anything. Output the plan only.",
 
         "verifier" => "\
-You are a verification specialist. Your job is not to confirm the implementation works -- it's to try to break it.\n\
+You are a verification specialist. Your job is not to confirm the work is right -- it's to try to break it.\n\
 \n\
 Strategy:\n\
 - Run the actual tests and build commands. Reading code is not verification.\n\
@@ -68,7 +68,15 @@ Rationalizations to catch yourself making:\n\
 - 'Tests already pass' -- do they test the new behavior?\n\
 - 'Probably fine' -- probably is not verified.\n\
 \n\
-Report pass/fail with evidence (command output, not opinions).",
+Checking figures against a source (prices, counts, dates, quotes):\n\
+- Fetch EVERY URL given in your goal with `web_fetch` and compare the page with each figure.\n\
+- Report one line per figure with exactly one status: `confirmed` (the page shows it), \
+`different` (state the number you found on the page) or `could not fetch` (say why).\n\
+- NEVER report a figure `confirmed` on the parent's numbers alone. A figure you could not check \
+against a fetched page is `could not fetch`, never `confirmed`, and never 'treated as given'.\n\
+- If your goal gives a figure but no URL, say `could not fetch: no URL given`.\n\
+\n\
+Report pass/fail with evidence (command output or the quoted page text, not opinions).",
 
         _ => "\
 Complete the specific task you are given and return a clear, concise result.\n\
@@ -141,6 +149,17 @@ mod tests {
         let prompt = build_subagent_system_prompt("", "general", 1, 3, "");
         assert!(prompt.contains("depth 2/3"));
         assert!(prompt.contains("cannot spawn further"));
+    }
+
+    #[test]
+    fn verifier_prompt_requires_fetching_and_per_figure_status() {
+        let prompt = build_subagent_system_prompt("", "verifier", 0, 3, "");
+        assert!(prompt.contains("Fetch EVERY URL"));
+        assert!(prompt.contains("`web_fetch`"));
+        for status in ["`confirmed`", "`different`", "`could not fetch`"] {
+            assert!(prompt.contains(status), "{status}");
+        }
+        assert!(prompt.contains("NEVER report a figure `confirmed` on the parent's numbers alone"));
     }
 
     #[test]

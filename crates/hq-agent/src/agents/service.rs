@@ -530,6 +530,7 @@ impl AgentService {
                     &self.provider,
                     &self.allowed_paths,
                     self.confined,
+                    child_wants_web(req),
                 )
                 .iter()
                 .map(|t| t.name().to_string())
@@ -733,6 +734,7 @@ impl AgentService {
                 &provider,
                 &resolution.allowed_paths,
                 confined,
+                child_wants_web(req),
             )
         };
         // External children are tool-free, so a catalog they cannot load from is noise.
@@ -825,6 +827,7 @@ impl AgentService {
         provider: &Arc<dyn LlmProvider>,
         allowed_paths: &[PathBuf],
         confined: bool,
+        wants_web: bool,
     ) -> Vec<Box<dyn crate::tools::AgentTool>> {
         let state_cache = hq_tools_coding::file_edit::FileStateCache::default();
         let history = hq_tools_coding::file_edit::FileHistory::default();
@@ -855,6 +858,12 @@ impl AgentService {
                 )),
             }),
         ];
+
+        // A child that must read a page (a verifier, or any goal naming a URL) needs
+        // `web_fetch`; without it the verifier could only echo the parent's numbers.
+        if wants_web {
+            tools.push(Box::new(crate::web::WebFetchTool));
+        }
 
         let lsp_manager = crate::lsp_tools::shared_lsp_manager();
         crate::lsp_tools::register_lsp_tools(&mut tools, lsp_manager);
@@ -963,6 +972,14 @@ impl AgentService {
 /// every other role touches the local tree.
 fn role_needs_local_tools(role: &str) -> bool {
     !matches!(role, "planner")
+}
+
+/// Whether a child needs the web fetch tool: every verifier gets it, and so does any
+/// child whose goal names a URL.
+fn child_wants_web(req: &ChildRequest) -> bool {
+    req.agent_type == hq_core::types::SubagentType::Verifier
+        || req.goal.contains("http://")
+        || req.goal.contains("https://")
 }
 
 /// Fraction of the parent's USD budget a child of this role receives.

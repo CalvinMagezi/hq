@@ -68,8 +68,10 @@ impl AgentTool for SpawnSubagentsTool {
          concurrently), 'race' (first success wins, the rest are cancelled), or \
          'graph' (children with `depends_on` scheduled in dependency order). Each \
          task has a role (general/explorer/planner/verifier/coder), optional \
-         `backend` preference, `depends_on`, budget and timeout. Returns a summary \
-         plus per-child results."
+         `backend` preference, `depends_on`, budget and timeout. A verifier checks \
+         claims by fetching sources, so put every URL it must check, and each \
+         figure to compare, in its goal; it cannot see this conversation. Returns \
+         a summary plus per-child results."
     }
 
     fn parameters(&self) -> Value {
@@ -344,7 +346,7 @@ pub(super) fn task_schema() -> Value {
         "role": {
             "type": "string",
             "enum": ["general", "explorer", "planner", "verifier", "coder"],
-            "description": "Child role: coder=implementation, explorer=read-only search, planner=design, verifier=checking, general=default."
+            "description": "Child role: coder=implementation, explorer=read-only search, planner=design, verifier=checks figures against fetched pages (put the URLs in its goal), general=default."
         },
         "agent_type": { "type": "string", "enum": ["general", "explorer", "planner", "verifier", "coder"], "description": "Alias for `role`." },
         "backend": { "type": "string", "description": "Backend/harness preference. 'hq' or omitted = in-process; any other name resolves against configured backends." },

@@ -988,3 +988,19 @@ async fn report_progress_tool_noop_without_sink() {
         .expect("empty-args call must not fail");
     assert!(result.content[0].text.contains("No `message` provided"));
 }
+
+#[test]
+fn spawn_guidance_tells_the_parent_to_put_urls_in_a_verifier_goal() {
+    use crate::tools::AgentTool;
+
+    let svc = Arc::new(service_with(
+        MarkerProvider::new("hq-mock"),
+        0,
+        3,
+        vec![std::env::temp_dir()],
+    ));
+    let tool = SpawnSubagentsTool::new(svc);
+    let text = tool.description().to_string() + &tool.parameters().to_string();
+    assert!(text.contains("every URL it must check"), "{text}");
+    assert!(text.contains("put the URLs in its goal"), "{text}");
+}
