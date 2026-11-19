@@ -547,6 +547,12 @@ pub struct SandboxConfig {
     #[serde(default)]
     pub agent_readable: BTreeMap<String, Vec<String>>,
 
+    /// Folders whose code is confidential, as paths or globs (`~/clients/*`). A session whose
+    /// working directory lies under one runs under the `strict` profile whatever `profile` says,
+    /// so it reaches only `allow_domains` and sees no credentials. Empty by default.
+    #[serde(default)]
+    pub strict_paths: Vec<String>,
+
     /// Ports on the agent's own machine it may connect to, such as a local
     /// model server or the adb server. HTTP through the proxy works on every
     /// platform; a direct connection (any protocol) only under macOS.
@@ -568,6 +574,7 @@ impl Default for SandboxConfig {
             writable: Vec::new(),
             readable: Vec::new(),
             agent_readable: BTreeMap::new(),
+            strict_paths: Vec::new(),
             loopback_ports: Vec::new(),
         }
     }

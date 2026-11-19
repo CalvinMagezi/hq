@@ -266,6 +266,25 @@ applies the strict policy; HQ sends the strict allowlist along in either case so
 still reaches the model. `hq host status` shows each agent as `process/open`, `process/strict`
 or `none`.
 
+#### Client folders: `strict_paths`
+
+Folders whose code is confidential run under `strict` even when the default profile is `open`:
+
+```yaml
+agent_host:
+  sandbox:
+    strict_paths: ["~/clients/*"]   # a path or a glob; `*` matches inside one folder name
+    allow_domains: ["registry.npmjs.org", "github.com", "crates.io", "static.crates.io"]
+```
+
+A session whose working directory (or worktree) lies under a listed path gets the strict
+profile: the network is the allowlist, credential stores are hidden and writes stay in the
+project. The allowlist is `api.anthropic.com`, the HQ MCP endpoint and `allow_domains`; add the
+package registries, the git host and the model APIs your project needs, then read the denied
+hosts the proxy logs. If the strict sandbox cannot be applied the launch fails; it never falls
+back to `open`. The list is empty by default. `hq doctor` prints the strict paths and the
+allowlist in force.
+
 #### The open profile
 
 An open agent can read and write anything your user can, use the machine's network directly

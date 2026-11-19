@@ -533,6 +533,7 @@ fn build(cfg: &AgentHostConfig, name: &str) -> anyhow::Result<Host> {
             .with_launch_bound(Duration::from_secs(launch))
             .with_command_timeout(Duration::from_secs(cfg.command_timeout_secs))
             .with_sandbox(sandbox::plan(cfg))
+            .with_strict_paths(cfg.sandbox.strict_paths.clone(), sandbox::strict_plan(cfg))
             .with_idle_ttl(sandbox::idle_ttl_secs(cfg));
         return Ok(Arc::new(host));
     }
@@ -565,6 +566,7 @@ fn remote_native(
         ))
         .with_command_timeout(Duration::from_secs(cfg.command_timeout_secs))
         .with_sandbox(sandbox::plan(cfg))
+        .with_strict_paths(cfg.sandbox.strict_paths.clone(), sandbox::strict_plan(cfg))
         .with_idle_ttl(sandbox::idle_ttl_secs(cfg)))
 }
 

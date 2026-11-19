@@ -45,6 +45,8 @@ pub struct NativeBackend {
     command_timeout: Duration,
     /// Sent with every `agent.spawn`; None leaves the host's own default (none).
     sandbox: Option<Value>,
+    /// The strict plan and the folders that get it instead of `sandbox` (`strict_paths`).
+    strict: Option<(Vec<String>, Value)>,
     /// Sent with every `agent.spawn`: the host stops an agent idle this long.
     idle_ttl_secs: Option<u64>,
 }
@@ -156,6 +158,7 @@ impl NativeBackend {
             launch_bound: DEFAULT_LAUNCH_BOUND,
             command_timeout: DEFAULT_COMMAND_TIMEOUT,
             sandbox: None,
+            strict: None,
             idle_ttl_secs: None,
         }
     }
@@ -169,6 +172,20 @@ impl NativeBackend {
     pub fn with_sandbox(mut self, plan: Value) -> Self {
         self.sandbox = Some(plan);
         self
+    }
+
+    /// Launches whose working directory lies under `paths` get `plan` in place of the default one.
+    pub fn with_strict_paths(mut self, paths: Vec<String>, plan: Value) -> Self {
+        self.strict = (!paths.is_empty()).then_some((paths, plan));
+        self
+    }
+
+    /// The sandbox request for a launch in `cwd`.
+    fn sandbox_for(&self, cwd: &str) -> Option<Value> {
+        match &self.strict {
+            Some((paths, plan)) if super::sandbox::is_strict_path(paths, cwd) => Some(plan.clone()),
+            _ => self.sandbox.clone(),
+        }
     }
 
     pub fn with_launch_bound(mut self, bound: Duration) -> Self {
@@ -301,7 +318,7 @@ impl NativeBackend {
     /// Starts an agent over ACP. The host completes the handshake and opens the session before
     /// it answers, so a started agent is ready: there is no screen to wait for.
     fn launch_acp(&self, req: &LaunchRequest, argv: &[String]) -> Result<Launched, AgentHostError> {
-        let params = acp_spawn_params(req, argv, &self.sandbox, self.idle_ttl_secs);
+        let params = acp_spawn_params(req, argv, &self.sandbox_for(&req.cwd), self.idle_ttl_secs);
         let within = req.start_timeout + self.command_timeout;
         self.call_within("agent.spawn", params, within)
             .map_err(|e| older_host_hint(e, self.name().to_string()))?;
@@ -644,7 +661,7 @@ impl HostBackend for NativeBackend {
         let params = json!({
             "name": req.name, "argv": argv_for(req), "cwd": req.cwd,
             "agent": req.kind, "resume_argv": resume, "env": env,
-            "sandbox": self.sandbox,
+            "sandbox": self.sandbox_for(&req.cwd),
             "idle_ttl_secs": self.idle_ttl_secs,
         });
         let spawned = self.call("agent.spawn", params)?;
