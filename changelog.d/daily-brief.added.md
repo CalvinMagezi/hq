@@ -1,0 +1,1 @@
+**A daily "Your day" card.** HQ writes one inbox card a day with the next step of each focus lane (`hq focus`). It stays on your devices, is never pushed and is silent when you have no lanes. Turn it off with `daemon.daily_brief: false`.

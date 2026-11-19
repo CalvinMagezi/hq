@@ -66,6 +66,7 @@ impl Topic {
             "due_reminder" => Topic::Tasks,
             s if s.starts_with("task_") => Topic::Tasks,
             "adoption_digest"
+            | "daily_brief"
             | "collection_tip"
             | "scheduled_offer"
             | "tool_failure_digest"

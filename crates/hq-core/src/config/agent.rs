@@ -66,6 +66,11 @@ pub struct DaemonConfig {
     /// A daily tidy that moves stale helper requests out of Needs you (restorable for 30 days).
     #[serde(default = "default_true")]
     pub inbox_tidy: bool,
+
+    /// One inbox card a day with the next step of each focus lane (`hq focus`). Silent when there
+    /// are no lanes or nothing to say.
+    #[serde(default = "default_true")]
+    pub daily_brief: bool,
 }
 
 /// How chat turns are turned into memories.
@@ -114,6 +119,7 @@ impl Default for DaemonConfig {
             adoption_digest: true,
             helper_setup_offer: true,
             inbox_tidy: true,
+            daily_brief: true,
         }
     }
 }

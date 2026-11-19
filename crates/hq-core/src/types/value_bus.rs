@@ -125,7 +125,11 @@ pub const FLEET_DIGEST_SOURCE: &str = "fleet-digest";
 /// Source of the item that says a coding-agent lane's allowance is running low. How much of a
 /// vendor allowance the owner has used stays on their own devices too.
 pub const LANE_QUOTA_SOURCE: &str = "lane-quota";
+
+/// Source of the daily brief: the next step of each focus lane. Shown on the owner's devices only.
+pub const DAILY_BRIEF_SOURCE: &str = "daily_brief";
 pub const DEVICE_ONLY_SOURCES: &[&str] = &[
+    DAILY_BRIEF_SOURCE,
     LANE_QUOTA_SOURCE,
     FLEET_DIGEST_SOURCE,
     ADOPTION_DIGEST_SOURCE,
