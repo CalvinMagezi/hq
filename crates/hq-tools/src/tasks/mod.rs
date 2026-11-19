@@ -52,6 +52,7 @@ use tools_links::*;
 use tools_ops::{InitiativeProgressTool, TaskRoutingAuditTool, TaskStaleTool};
 use tools_org::*;
 use tools_shelf::*;
+pub use tools_task::TAINTED_SESSION_ARG;
 use tools_task::*;
 use tools_time::TaskTimeReportTool;
 

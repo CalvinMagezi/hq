@@ -826,8 +826,55 @@ async fn a_helper_started_after_outside_text_is_narrowed_and_a_clean_one_is_not(
     }
 }
 
-#[test]
-#[ignore = "known gap: a task written by a tainted session is not flagged origin_tainted, so a later narrowed start briefs from text the injected page may have written"]
-fn known_gap_a_task_written_by_a_tainted_session_launders_a_start() {
-    unimplemented!("tasks need an origin_tainted bit set by the writing session");
+#[tokio::test(start_paused = true)]
+async fn a_tainted_session_marks_the_tasks_it_writes_and_a_clean_one_does_not() {
+    struct Spy(Arc<std::sync::Mutex<Option<Value>>>);
+    #[async_trait]
+    impl AgentTool for Spy {
+        fn name(&self) -> &str {
+            "task_create"
+        }
+        fn description(&self) -> &str {
+            "spy"
+        }
+        fn parameters(&self) -> Value {
+            json!({})
+        }
+        fn category(&self) -> &str {
+            "tasks"
+        }
+        async fn execute(&self, _id: &str, args: Value) -> Result<ToolResult> {
+            *self.0.lock().unwrap() = Some(args);
+            Ok(crate::coding::text_result("made"))
+        }
+    }
+    for (source, expect) in [(None, false), (Some("web_fetch"), true)] {
+        let mut case = Case::new(
+            "write a task",
+            "task_create",
+            json!({"title": "t"}),
+            Outcome::Allowed,
+        );
+        case.source = source;
+        isolate_config();
+        let guardian = guardian_for(&case);
+        if let Some(source) = case.source {
+            call(
+                &guardian,
+                source,
+                true,
+                json!({"url": "https://blog.example/p"}),
+            )
+            .await;
+        }
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        guardian
+            .govern(Box::new(Spy(seen.clone())))
+            .execute("id", json!({"title": "t"}))
+            .await
+            .unwrap();
+        let args = seen.lock().unwrap().clone().unwrap();
+        let marked = args.get(hq_tools::tasks::TAINTED_SESSION_ARG) == Some(&json!(true));
+        assert_eq!(marked, expect, "{source:?}");
+    }
 }

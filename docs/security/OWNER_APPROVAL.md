@@ -186,9 +186,7 @@ card, and can list and stop each allowed folder in the chat's details.
 A helper start in a chat that has read outside text is not asked about but **narrowed**
 (`harness_session::narrow`): the strict sandbox (no credentials, the egress allowlist), and a
 brief built from the stored task text, so the start needs a `task_id` and no free text from the
-chat reaches the helper. Unattended sessions still never start helpers. Known gap: a task written
-by a tainted session is not yet flagged, so its text can reach a later narrowed brief
-(`known_gap_a_task_written_by_a_tainted_session_launders_a_start`). Pairing this with
+chat reaches the helper. Unattended sessions still never start helpers. A task written, or whose title or description was edited, by a tainted session is flagged `origin_tainted` (never cleared), and a helper started from it is narrowed even in a clean chat. Pairing this with
 `agent_host.sandbox.strict_paths` keeps client folders on a bounded network.
 ## Audience: what reaches the owner
 
