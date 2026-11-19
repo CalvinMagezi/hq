@@ -499,6 +499,54 @@ async fn a_finished_turn_puts_the_task_up_for_review_not_complete() {
 }
 
 #[tokio::test]
+async fn an_agent_at_an_auth_error_screen_blocks_the_task_instead_of_finishing_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    let task = seed_with_task(&db, "hs-auth");
+    // The host reads a quiet pane as `done`; the screen says the login failed.
+    let done = fake_host(
+        tmp.path(),
+        &[("hs-auth", "done", 3)],
+        "apiKeyHelper failed: exit status 1\nAPI Error: 401 authentication_error",
+    );
+
+    sweep(&db, &done, None).await;
+    sweep(&db, &done, None).await;
+
+    assert_eq!(
+        task_state(&db, &task).0,
+        hq_db::tasks::STATUS_BLOCKED,
+        "never ready for review"
+    );
+    let reason: String = db
+        .with_conn(|c| {
+            Ok(hq_db::tasks::get_task(c, &task)?
+                .unwrap()
+                .blocked_reason
+                .unwrap_or_default())
+        })
+        .unwrap();
+    assert!(reason.contains("authentication_error"), "{reason}");
+    let items: Vec<String> = db
+        .with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT kind FROM value_items WHERE dedup_key LIKE 'session-error-screen-%'",
+            )?;
+            let rows = stmt
+                .query_map([], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .unwrap();
+    assert_eq!(
+        items,
+        [hq_core::types::ValueKind::ActionNeeded.as_str()],
+        "the owner is told once, as something to act on, however many sweeps"
+    );
+    assert!(notices(&db).is_empty(), "no \"finished its task\" notice");
+}
+
+#[tokio::test]
 async fn a_task_session_blocked_on_a_dialog_raises_one_action_item() {
     let tmp = tempfile::tempdir().unwrap();
     let db = Database::open_memory().unwrap();

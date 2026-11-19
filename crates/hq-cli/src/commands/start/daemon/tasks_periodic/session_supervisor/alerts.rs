@@ -152,6 +152,11 @@ pub(super) fn alert_finished(
         Ok(true) => {}
         _ => return,
     }
+    // A login or key failure goes quiet like a finished turn, but nothing ran.
+    if let Some(error_line) = hq_tools::harness_session::error_screen::detect(screen) {
+        alert_error_screen(db, row, seq, &error_line);
+        return;
+    }
     let note = agent.acp.as_ref().and_then(mission::turn_note);
     let link = record_on_task_with_note(db, row, Event::Finished, note.as_deref());
     record_event(db, &row.id, "finished", serde_json::json!({ "seq": seq }));
@@ -204,6 +209,45 @@ pub(super) fn alert_finished(
     .with_dedup_key(format!("session-finished-{}", row.id));
     let _ = hq_db::value_items::emit(db, &item);
     tracing::info!(session = %row.id, host = %row.host, "session-supervisor: agent finished, alert sent");
+}
+
+/// The agent sits at an authentication or API error screen the host reported as `done`. The task
+/// is blocked with the error line, never sent to review, and the owner hears it needs them: no
+/// helper can fix its own login.
+fn alert_error_screen(
+    db: &Database,
+    row: &registry::HarnessSessionRow,
+    seq: u64,
+    error_line: &str,
+) {
+    let link = record_on_task_with_note(db, row, Event::ErrorScreen, Some(error_line));
+    record_event(
+        db,
+        &row.id,
+        "error_screen",
+        serde_json::json!({ "seq": seq, "line": error_line }),
+    );
+    let excerpt = format!("It stopped at an error: {error_line}");
+    if let Err(e) = hq_tools::a2a::report_to_parent(db, row, "stopped at an error screen", &excerpt)
+    {
+        tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not report to the parent");
+    }
+    report_to_observers(db, row, "error", "stopped at an error screen", &excerpt);
+    let label = session_label(row);
+    let item = ValueItem::new(
+        "session-supervisor",
+        ValueKind::ActionNeeded,
+        format!("Harness session '{label}' cannot sign in"),
+        format!(
+            "Session {} on {} stopped at an authentication or API error, so nothing ran. Fix the login or key on that machine, then resume it with `harness_session_resume`. Its screen is in `harness_session_logs`.{}",
+            row.id,
+            row.host,
+            task_line(link.as_ref()),
+        ),
+    )
+    .with_dedup_key(format!("session-error-screen-{}", row.id));
+    let _ = hq_db::value_items::emit(db, &item);
+    tracing::warn!(session = %row.id, host = %row.host, "session-supervisor: agent stopped at an error screen");
 }
 
 /// Rewrites today's fleet digest. Logged, never raised.
