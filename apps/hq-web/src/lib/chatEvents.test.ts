@@ -1,4 +1,5 @@
 import { beforeEach, expect, test } from 'bun:test'
+import { useHelperRunsStore } from '~/store/helperRunsStore'
 import { useThreadStore } from '~/store/threadStore'
 import { flushPendingDeltas, handleChatEvent } from './chatEvents'
 
@@ -119,4 +120,49 @@ test('a tool being prepared shows as a running step and its start fills in the a
   handleChatEvent({ type: 'tool_start', thread_id: 't', tool_call_id: 'c1', tool_name: 'vault_write_note', args: '{"path":"A.md"}' })
   expect(live('t').toolSteps).toHaveLength(1)
   expect(live('t').toolSteps[0].inputArgs).toEqual({ path: 'A.md' })
+})
+
+test('subagent_start, subagent_end, and spawn_subagents tool_end.helpers update helperRunsStore', () => {
+  useHelperRunsStore.setState({ runsByThread: {}, loadedByThread: {}, unavailableByThread: {} })
+  const run = {
+    id: 'run-1',
+    thread_id: 't',
+    task: 't1',
+    role: 'researcher',
+    goal: 'Check prices',
+    state: 'running',
+    detached: true,
+    started_at: 100,
+    settled_at: null,
+    result_link: null,
+    result_preview: null,
+    error: null,
+    blocker: null,
+  }
+  expect(handleChatEvent({ type: 'subagent_start', thread_id: 't', run })).toBe(true)
+  expect(useHelperRunsStore.getState().runsByThread.t).toHaveLength(1)
+  expect(useHelperRunsStore.getState().runsByThread.t[0].state).toBe('running')
+
+  expect(
+    handleChatEvent({
+      type: 'subagent_end',
+      thread_id: 't',
+      run_id: 'run-1',
+      state: 'done',
+      run: { ...run, state: 'done', settled_at: 120, result_link: 'Notebooks/Prices.md' },
+    }),
+  ).toBe(true)
+  expect(useHelperRunsStore.getState().runsByThread.t[0].state).toBe('done')
+  expect(useHelperRunsStore.getState().runsByThread.t[0].result_link).toBe('Notebooks/Prices.md')
+
+  handleChatEvent({ type: 'turn_start', thread_id: 't' })
+  handleChatEvent({ type: 'tool_start', thread_id: 't', tool_call_id: 'c2', tool_name: 'spawn_subagents' })
+  handleChatEvent({
+    type: 'tool_end',
+    thread_id: 't',
+    tool_call_id: 'c2',
+    result: 'Dispatched',
+    helpers: [{ ...run, id: 'run-2', role: 'coder', state: 'queued', started_at: 200 }],
+  })
+  expect(useHelperRunsStore.getState().runsByThread.t.map((r) => r.id)).toEqual(['run-2', 'run-1'])
 })

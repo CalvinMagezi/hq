@@ -1,5 +1,7 @@
 import { useHQStore } from '~/store/hqStore'
+import { useHelperRunsStore } from '~/store/helperRunsStore'
 import { useThreadStore } from '~/store/threadStore'
+import { isHelperRun, type HelperRunState } from './helperRunsApi'
 import { loadMessages, parseToolArgs, refreshThreads, toThreadMessage, type ApiMessage } from './threadApi'
 import { alertReplyDone, chatOnScreen } from './replyAlerts'
 import { restoreDraft } from '~/components/chat/draftStore'
@@ -23,6 +25,8 @@ const CHAT_EVENTS = new Set([
   'relay_message',
   'stream_lag',
   'reply_so_far',
+  'subagent_start',
+  'subagent_end',
 ])
 
 const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
@@ -149,9 +153,27 @@ function applyEvent(type: string, msg: ChatEvent, tid: string) {
       if (callId) store.updateToolStepProgress(tid, callId, str(msg.message) ?? '')
       break
     }
-    case 'tool_end':
+    case 'tool_end': {
       store.endToolStep(tid, str(msg.tool_call_id), str(msg.result))
+      if (Array.isArray(msg.helpers)) {
+        const runs = msg.helpers.filter(isHelperRun)
+        if (runs.length > 0) useHelperRunsStore.getState().upsertRuns(tid, runs)
+      }
       break
+    }
+    case 'subagent_start':
+      if (isHelperRun(msg.run)) useHelperRunsStore.getState().upsertRun(tid, msg.run)
+      break
+    case 'subagent_end': {
+      if (isHelperRun(msg.run)) {
+        useHelperRunsStore.getState().upsertRun(tid, msg.run)
+      } else {
+        const runId = str(msg.run_id)
+        const state = str(msg.state) as HelperRunState | undefined
+        if (runId && state) useHelperRunsStore.getState().settleRun(tid, runId, state)
+      }
+      break
+    }
     case 'step_credits':
       store.addStepCredit(tid, typeof msg.turn === 'number' ? msg.turn : 0, typeof msg.delta === 'number' ? msg.delta : null)
       break

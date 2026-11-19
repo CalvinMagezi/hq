@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Square } from 'lucide-react'
-import { t } from '~/strings'
+import { t, tn } from '~/strings'
 import type { ToolStep } from '~/store/threadStore'
 import { idleLine, liveSentence, liveText, secondsRunning, stopOffered } from '~/lib/liveLine'
 
@@ -21,6 +21,8 @@ interface Props {
   writing: boolean
   /** The model's reasoning is arriving but no answer words yet. */
   thinking?: boolean
+  /** Helpers still working in real state. */
+  runningHelpers?: number
   onStop?: () => void
 }
 
@@ -28,11 +30,12 @@ interface Props {
  * The one line above a streaming reply: the step running now as a sentence, replaced by the next step
  * and never stacked. The answer's own words arrive below it. After ten seconds Stop sits on the line.
  */
-export function LiveLine({ steps, startedAt, writing, thinking = false, onStop }: Props) {
+export function LiveLine({ steps, startedAt, writing, thinking = false, runningHelpers = 0, onStop }: Props) {
   const now = useNow(1000)
   const sentence = liveSentence(steps)
-  const idle = idleLine(steps, thinking)
-  const text = liveText(sentence) ?? (writing ? t('chat_live_writing') : t(idle.key, idle.params))
+  const idle = idleLine(steps, thinking, runningHelpers)
+  const idleText = 'plural' in idle ? tn(idle.plural, idle.count) : t(idle.key, idle.params)
+  const text = liveText(sentence) ?? (writing ? t('chat_live_writing') : idleText)
   const seconds = secondsRunning(startedAt, now)
   return (
     <p className="hq-live" role="status">

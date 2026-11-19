@@ -1172,9 +1172,9 @@
     <string name="approved_when">approved %1$s for %2$s</string>
     <string name="helper_started">Started · %1$s</string>
     <string name="helper_last_seen">Last seen · %1$s</string>
-    <string name="place_helpers">Helpers</string>
+    <string name="place_helpers">Coding tools</string>
     <string name="helpers_new_aria">Start a helper</string>
-    <string name="helpers_back">Back to Helpers</string>
+    <string name="helpers_back">Back to Coding tools</string>
     <string name="helpers_details_aria">Helper details</string>
     <string name="helpers_waiting_for_you">Needs your OK</string>
     <string name="helpers_answer_in_terminal">Nothing is answered for you. Use the terminal to choose.</string>
@@ -1196,7 +1196,7 @@
     <string name="inbox_tab_done">Done</string>
     <string name="inbox_doors_label">Where HQ and its helpers work</string>
     <string name="inbox_door_tasks">Tasks</string>
-    <string name="inbox_door_helpers">Helpers</string>
+    <string name="inbox_door_helpers">Coding tools</string>
     <string name="inbox_updates_unread">Unread updates</string>
     <string name="inbox_helpers_fold">From helpers · %1$s</string>
     <string name="inbox_helpers_fold_line">Their requests wait here until someone answers them.</string>
@@ -1917,6 +1917,10 @@
     <string name="chat_live_thinking">Thinking it through…</string>
     <string name="chat_live_next_step">Deciding the next step (%1$s done)…</string>
     <string name="chat_live_after_helpers">Helpers have reported back. Putting it together (%1$s steps done)…</string>
+    <plurals name="chat_live_helpers_working">
+        <item quantity="one">%1$s helper working…</item>
+        <item quantity="other">%1$s helpers working…</item>
+    </plurals>
     <string name="chat_sources_label">Sources</string>
     <string name="chat_source_open">Show %1$s in the pane</string>
     <string name="chat_kind_note">Vault note</string>
@@ -1969,6 +1973,9 @@
     <string name="chat_helper_default_name">Helper</string>
     <string name="chat_helper_working">Working</string>
     <string name="chat_helper_done">Done</string>
+    <string name="chat_helper_needs_look">Needs a look</string>
+    <string name="chat_helper_failed">Failed</string>
+    <string name="chat_helper_open_result">Open %1$s</string>
     <string name="chat_helper_background_note">Sent to run in the background</string>
     <string name="suite_sheet_label">Sheet</string>
     <string name="suite_formula_bar">Formula</string>
@@ -2878,7 +2885,7 @@
     <string name="helpers_chip_working">Working</string>
     <string name="helpers_chip_finished">Finished</string>
     <string name="helpers_filters_aria">Filter the helpers</string>
-    <string name="helpers_list_aria">Helpers</string>
+    <string name="helpers_list_aria">Coding tools</string>
     <string name="helpers_group_lost">Lost contact</string>
     <string name="helpers_group_offline">Computer offline</string>
     <string name="helpers_group_past">Finished and stopped</string>
@@ -4177,8 +4184,8 @@
         <item quantity="other">Ran %1$s calls without asking</item>
     </plurals>
     <string name="chat_folders_revoke">Stop allowing</string>
-    <string name="helper_setup_title">Set up your helpers</string>
-    <string name="helper_setup_intro">Helpers do coding work for you. HQ installs the ones you pick with each vendor\'s own installer. Sign-in pages open on that computer, and you only sign in.</string>
+    <string name="helper_setup_title">Set up your coding tools</string>
+    <string name="helper_setup_intro">Coding tools do coding work for you. HQ installs the ones you pick with each vendor\'s own installer. Sign-in pages open on that computer, and you only sign in.</string>
     <string name="helper_setup_computer">On %1$s</string>
     <string name="helper_setup_state_ready">Ready</string>
     <string name="helper_setup_state_signed_out">Installed, not signed in</string>
@@ -4192,7 +4199,7 @@
     <string name="helper_setup_running">Working on it. Pages to sign in open on that computer.</string>
     <string name="helper_setup_link">Open sign-in page</string>
     <string name="helper_setup_failed">That did not finish</string>
-    <string name="helper_setup_none_connected">No computer is connected yet. Start HQ\'s host on this one, or pair another. Its helpers then show up here.</string>
+    <string name="helper_setup_none_connected">No computer is connected yet. Start HQ\'s host on this one, or pair another. Its coding tools then show up here.</string>
     <string name="helper_setup_checked">Checked %1$s</string>
     <string name="sites_trusted_title">Sites HQ reads without asking</string>
     <string name="sites_trusted_body">You allowed these in three or more chats. Removing one makes HQ ask again.</string>
