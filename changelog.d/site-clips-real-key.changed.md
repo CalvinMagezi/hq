@@ -1,0 +1,1 @@
+**The public site's setup clips now show a real key check and a real answer.** The AI key clip shows the service accepting the key, there is a first-question clip that gets an answer from a note, and the Chat screenshot on Home shows that answer.
