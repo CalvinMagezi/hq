@@ -692,6 +692,10 @@ pub(crate) enum Commands {
         site: Option<String>,
     },
 
+    /// The few lanes of work you chose to move forward: list, add, park, remove
+    #[command(subcommand)]
+    Focus(commands::focus::FocusAction),
+
     /// Tidy the inbox: `hq inbox tidy` counts (and with --apply moves) stale helper requests,
     /// `hq inbox restore` brings them back
     #[command(subcommand)]
