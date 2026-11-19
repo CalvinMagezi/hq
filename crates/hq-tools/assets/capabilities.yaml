@@ -64,6 +64,34 @@
   tools: [vault_import]
   needs: [model]
 
+- id: make-spreadsheet
+  group: documents
+  says: Make a spreadsheet you can share
+  example: Make a sheet of my monthly costs
+  tools: [office_create, office_export]
+  needs: [model]
+
+- id: write-document
+  group: documents
+  says: Write a document as a Word file
+  example: Write a one page supplier brief
+  tools: [office_create, office_export]
+  needs: [model]
+
+- id: build-deck
+  group: documents
+  says: Build a deck as a PowerPoint file
+  example: Make a 3 slide fees plan deck
+  tools: [office_create, office_export]
+  needs: [model]
+
+- id: share-file
+  group: documents
+  says: Hand over a file you can send
+  example: Put that report in a file I can send
+  tools: [file_deliver]
+  needs: [model]
+
 - id: shrink-document
   group: documents
   says: Make a document take less room

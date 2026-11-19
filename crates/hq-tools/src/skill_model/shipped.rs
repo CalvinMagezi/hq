@@ -123,6 +123,14 @@ pub const BUILTIN_SKILLS: &[Shipped] = &[
         applies: every_install,
     },
     Shipped {
+        name: "office-authoring",
+        files: &[(
+            SKILL_FILE,
+            include_str!("../../assets/skills/office-authoring/SKILL.md"),
+        )],
+        applies: every_install,
+    },
+    Shipped {
         name: CONTACTS_LOOKUP_SKILL,
         files: &[(
             SKILL_FILE,

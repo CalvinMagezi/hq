@@ -14,6 +14,7 @@ const CALENDAR: &str = CALENDAR_CREATION_SKILL;
 const READING: &str = CALENDAR_READING_SKILL;
 const EDITING: &str = CALENDAR_EDITING_SKILL;
 const CONTACTS: &str = CONTACTS_LOOKUP_SKILL;
+const OFFICE: &str = "office-authoring";
 
 fn assets_dir() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/skills")
@@ -108,6 +109,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             CALENDAR,
             READING,
             EDITING,
+            OFFICE,
             CONTACTS
         ],
         "GitHub can be connected after start, with no repos listed"
@@ -125,6 +127,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             CALENDAR,
             READING,
             EDITING,
+            OFFICE,
             CONTACTS
         ]
     );
@@ -140,6 +143,7 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             CALENDAR,
             READING,
             EDITING,
+            OFFICE,
             CONTACTS
         ]
     );
