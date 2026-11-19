@@ -23,6 +23,10 @@ const NO_ASK_DENIED_TOOLS: &[&str] = &[
 /// addresses (an article slug, a few tracking parameters) fit well under it; a paragraph of
 /// notes or a key encoded into the URL does not.
 const MAX_UNASKED_URL_DATA_BYTES: usize = 200;
+/// Fetches a session may make once tainted. A cost brake and a bound on what choosing among
+/// seen addresses can carry out.
+const MAX_TAINTED_FETCHES_PER_SESSION: usize = 30;
+
 /// Characters a tainted `web_search` query may carry. What people type into a search box rarely
 /// passes 100; a query over this is more likely text the model is carrying, so it is refused.
 const MAX_QUERY_CHARS: usize = 300;
@@ -122,7 +126,17 @@ pub(super) fn web_refusal(tool: &str, args: &Value, taint: &TaintTracker) -> Opt
         return None;
     }
     match tool {
-        "web_fetch" => fetch_refusal(args.get("url").and_then(Value::as_str)?, taint),
+        "web_fetch" => {
+            let url = args.get("url").and_then(Value::as_str)?;
+            if let Some(refusal) = fetch_refusal(url, taint) {
+                return Some(refusal);
+            }
+            (taint.count_fetch() > MAX_TAINTED_FETCHES_PER_SESSION).then(|| {
+                format!(
+                    "Not fetched: {MAX_TAINTED_FETCHES_PER_SESSION} pages were already fetched in this turn after the chat read outside text. Summarize what you have, or ask the owner to continue."
+                )
+            })
+        }
         "web_search" => {
             let chars = args.get("query").and_then(Value::as_str)?.chars().count();
             (chars > MAX_QUERY_CHARS).then(|| {
@@ -274,6 +288,16 @@ mod tests {
             ),
             None,
             "a clean session is not held to it"
+        );
+        let capped = tainted();
+        capped.note_seen_text("https://found.example/a");
+        let fetch = json!({"url": "https://found.example/a"});
+        for _ in 0..MAX_TAINTED_FETCHES_PER_SESSION {
+            assert_eq!(web_refusal("web_fetch", &fetch, &capped), None);
+        }
+        assert!(
+            web_refusal("web_fetch", &fetch, &capped).is_some(),
+            "the 31st is refused"
         );
         let long_seen = format!("https://found.example/p?d={}", "b".repeat(400));
         taint.note_seen_text(&format!("see {long_seen}"));
