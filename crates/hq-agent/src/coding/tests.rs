@@ -1,6 +1,6 @@
 use super::*;
 use crate::tools::AgentTool;
-use hq_tools::file_edit::{FileHistory, FileStateCache};
+use hq_tools_coding::file_edit::{FileHistory, FileStateCache};
 use serde_json::json;
 
 #[test]

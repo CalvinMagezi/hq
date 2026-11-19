@@ -10,7 +10,7 @@
 #
 # Layer 0 is empty: the foundation (`registry`, `util`, `family_guest`, `family_confirm`) moved to the
 # hq-tool-api crate, `web`, `remote_mcp` and `imagegen` to hq-tools-web, and `coding` and `file_edit` to
-# hq-tools-coding (all re-exported by hq-tools), so those are no longer modules of this crate. Layer 1
+# hq-tools-coding (consumers import those crates directly), so those are no longer modules of this crate. Layer 1
 # is free of the tangle (no path into it). Layers 2 to 18 are the tangle, ordered by `module-graph.py`
 # to have the fewest upward references. Layer 19 depends on the tangle and nothing depends back on it.
 

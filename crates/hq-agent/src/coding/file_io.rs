@@ -9,7 +9,7 @@ use tracing::debug;
 use crate::tools::AgentTool;
 
 use super::text_result;
-use hq_tools::file_edit::{FileHistory, FileStateCache};
+use hq_tools_coding::file_edit::{FileHistory, FileStateCache};
 use std::path::Path;
 
 /// Read a file with line numbers (cat -n style).
@@ -321,12 +321,12 @@ impl AgentTool for EditTool {
             return Ok(text_result(format!("File not found: {}", file_path)));
         }
 
-        // Shared validation in hq_tools::file_edit: staleness
+        // Shared validation in hq_tools_coding::file_edit: staleness
         // detection (must read_file before editing, and re-read if the file
         // changed on disk since), quote normalization (curly vs straight
         // quotes), and a no-op guard — this tool's own inline checks below
         // only covered "not found" and "found N times", not those three.
-        let validation = hq_tools::file_edit::validate_file_edit(
+        let validation = hq_tools_coding::file_edit::validate_file_edit(
             path,
             old_string,
             new_string,
@@ -343,11 +343,11 @@ impl AgentTool for EditTool {
         // count must operate on what's really there, or a quote-normalized
         // match reports "not found" here despite validate_file_edit having
         // just accepted it.
-        let resolved_old =
-            hq_tools::file_edit::find_actual_string(&content, old_string).unwrap_or(old_string);
+        let resolved_old = hq_tools_coding::file_edit::find_actual_string(&content, old_string)
+            .unwrap_or(old_string);
         let occurrences = content.matches(resolved_old).count();
         let new_content =
-            hq_tools::file_edit::apply_edit(&content, resolved_old, new_string, replace_all);
+            hq_tools_coding::file_edit::apply_edit(&content, resolved_old, new_string, replace_all);
 
         // Snapshot before write (for rollback).
         self.history.snapshot(path);
