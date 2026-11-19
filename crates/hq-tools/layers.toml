@@ -17,7 +17,6 @@
 allowed_back_edges = [
   "harness_session -> a2a",
   "agent_host -> harness_session",
-  "harness_session -> tasks",
   "harness_session -> lane_quotas",
 ]
 
