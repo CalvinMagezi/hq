@@ -176,7 +176,7 @@ pub fn slides_text(m: &SlidesMade) -> String {
 }
 
 /// The note without its frontmatter block.
-fn body_of(text: &str) -> &str {
+pub(crate) fn body_of(text: &str) -> &str {
     let parsed = Document::parse(text);
     let front = parsed.frontmatter();
     text.strip_prefix(front).unwrap_or(text)

@@ -242,6 +242,82 @@ async fn office_files_download_with_their_own_type_and_a_safe_name() {
     );
 }
 
+#[cfg(feature = "suite")]
+#[tokio::test]
+async fn the_preview_route_reads_a_note_and_refuses_private_folders_and_missing_files() {
+    let (app, _v, _w) =
+        app_with_vault(&[("n.md", "---\ntitle: \"Plan\"\n---\n\n# Plan\n\nhello\n")]);
+    let ok = get(&app, "/api/suite/preview?path=n.md").await;
+    assert_eq!(ok.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(ok.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["title"], "Plan");
+    assert!(json["markdown"].as_str().unwrap().contains("hello"));
+    for bad in ["_system/x.md", "missing.xlsx", "../n.md"] {
+        let res = get(&app, &format!("/api/suite/preview?path={bad}")).await;
+        assert!(res.status().is_client_error(), "{bad}: {}", res.status());
+    }
+}
+
+#[cfg(feature = "suite")]
+#[tokio::test]
+async fn the_export_routes_list_a_notes_formats_and_make_the_file_in_exports() {
+    let sheet = "---\ntitle: \"Stock\"\nsuite_kind: sheet\nsuite_fidelity: native\n---\n\n# Stock\n\n```sheet name=Stock types=\"text,int\"\n| item | qty |\n|------|-----|\n| Sugar | 4 |\n```\n";
+    let (app, vault, _w) = app_with_vault(&[("stock.md", sheet)]);
+    let listed = get(&app, "/api/suite/export-formats?path=stock.md").await;
+    let body = axum::body::to_bytes(listed.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["formats"], serde_json::json!(["xlsx", "csv", "pdf"]));
+
+    let post = |format: &str| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/suite/export")
+            .header("content-type", "application/json")
+            .body(Body::from(format!(
+                r#"{{"path":"stock.md","format":"{format}"}}"#
+            )))
+            .unwrap()
+    };
+    let ok = app.clone().oneshot(post("xlsx")).await.unwrap();
+    assert_eq!(ok.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(ok.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let made: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let rel = made["files"][0]["path"].as_str().unwrap();
+    assert!(
+        rel.starts_with("Exports/") && vault.path().join(rel).exists(),
+        "{made}"
+    );
+    assert!(made["fidelity"].as_str().unwrap().contains("kept"));
+    // The note page's own Export gives the same workbook and says what it kept.
+    let direct = get(&app, "/api/note/export?path=stock.md&format=xlsx").await;
+    assert_eq!(direct.status(), StatusCode::OK);
+    assert!(
+        direct.headers()["x-export-note"]
+            .to_str()
+            .unwrap()
+            .contains("Formulas")
+            || direct.headers()["x-export-note"]
+                .to_str()
+                .unwrap()
+                .contains("Values")
+    );
+    assert!(
+        direct.headers()["content-disposition"]
+            .to_str()
+            .unwrap()
+            .contains("stock.xlsx")
+    );
+    let wrong = app.clone().oneshot(post("pptx")).await.unwrap();
+    assert!(wrong.status().is_client_error());
+}
+
 #[tokio::test]
 async fn vault_status_says_how_many_notes_are_indexed() {
     let (app, _v, _w) = app_with_vault(&[]);

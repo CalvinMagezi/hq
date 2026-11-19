@@ -22,14 +22,12 @@
     "framer-motion": "^12.16.0",
     "idb-keyval": "^6.3.0",
     "lucide-react": "^0.525.0",
-    "mammoth": "^1.9.0",
     "marked": "^15.0.12",
     "pdfjs-dist": "^5.5.207",
     "qrcode": "1.5.4",
     "react": "^19",
     "react-dom": "^19",
     "shiki": "^4.0.2",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zustand": "^5.0.12"
   },
   "devDependencies": {

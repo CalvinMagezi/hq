@@ -23,9 +23,9 @@ const NO_ASK_DENIED_TOOLS: &[&str] = &[
 /// addresses (an article slug, a few tracking parameters) fit well under it; a paragraph of
 /// notes or a key encoded into the URL does not.
 const MAX_UNASKED_URL_DATA_BYTES: usize = 200;
-/// Characters a tainted `web_search` query may carry unasked. What people type into a search
-/// box rarely passes 100; a longer query is more likely text the model is carrying.
-const MAX_UNASKED_QUERY_CHARS: usize = 150;
+/// Characters a tainted `web_search` query may carry. What people type into a search box rarely
+/// passes 100; a query over this is more likely text the model is carrying, so it is refused.
+const MAX_QUERY_CHARS: usize = 300;
 
 /// `agent_host.drive_after_untrusted_reads`, read when a send is judged so a config change applies at once.
 pub(super) fn drive_after_untrusted_reads() -> bool {
@@ -78,13 +78,7 @@ pub(super) fn tainted_reason_for(
         hq_tools::github::coder::CODER_TOOL if coder_write(args) => {
             Some("would start or steer a coding job".into())
         }
-        "web_fetch" => fetch_reason(args.get("url").and_then(Value::as_str)?, taint),
-        "web_search" => {
-            let query = args.get("query").and_then(Value::as_str)?;
-            let chars = query.chars().count();
-            (chars > MAX_UNASKED_QUERY_CHARS)
-                .then(|| format!("would send a {chars}-character search query out"))
-        }
+        // `web_fetch` and `web_search` never ask: `web_refusal` decides them mechanically.
         _ => hq_tools::device_actions::tainted_reason(tool, args),
     }
 }
@@ -117,24 +111,40 @@ pub fn fetch_site(tool: &str, args: &Value) -> Option<String> {
     Some(host.strip_prefix("www.").unwrap_or(&host).to_string())
 }
 
-fn fetch_reason(raw: &str, taint: &TaintTracker) -> Option<String> {
+/// Why a tainted `web_fetch` or `web_search` is refused, or `None` when it may run. Never an
+/// approval: what matters is whether the call can carry bytes the model wrote out of HQ, which
+/// code can judge. A fetch of exactly an address HQ saw arrive from outside carries none. An
+/// address on a host the owner named in this chat, or a site the owner allowed, may still be
+/// composed, up to [`MAX_UNASKED_URL_DATA_BYTES`] of path and query. A search query may be long
+/// up to [`MAX_QUERY_CHARS`].
+pub(super) fn web_refusal(tool: &str, args: &Value, taint: &TaintTracker) -> Option<String> {
+    if !taint.is_tainted() {
+        return None;
+    }
+    match tool {
+        "web_fetch" => fetch_refusal(args.get("url").and_then(Value::as_str)?, taint),
+        "web_search" => {
+            let chars = args.get("query").and_then(Value::as_str)?.chars().count();
+            (chars > MAX_QUERY_CHARS).then(|| {
+                format!(
+                    "Not searched: a {chars}-character query is more than a search needs, and this chat has read outside text. Ask with fewer words."
+                )
+            })
+        }
+        _ => None,
+    }
+}
+
+fn fetch_refusal(raw: &str, taint: &TaintTracker) -> Option<String> {
     let Ok(url) = url::Url::parse(raw.trim()) else {
-        return Some("would fetch an address HQ cannot read".into());
+        return Some("Not fetched: HQ cannot read that address.".into());
     };
-    let carried = data_bytes(&url);
-    if carried > MAX_UNASKED_URL_DATA_BYTES {
-        return Some(format!(
-            "would send {carried} bytes of path and query to {}",
-            url.host_str().unwrap_or("a server")
-        ));
+    if taint.url_seen(raw) {
+        return None;
     }
-    match url.host_str() {
-        Some(host) if taint.owner_named_host(host) => None,
-        Some(host) => Some(format!(
-            "would fetch {host}, a site the owner has not named in this chat"
-        )),
-        None => Some("would fetch an address with no host".into()),
-    }
+    let named_and_short = url.host_str().is_some_and(|h| taint.owner_named_host(h))
+        && data_bytes(&url) <= MAX_UNASKED_URL_DATA_BYTES;
+    (!named_and_short).then(|| super::seen_urls::REFUSAL.to_string())
 }
 
 /// Why this call must not run in a session with no approval store, or `None`. `needs_owner`
@@ -212,21 +222,66 @@ mod tests {
     }
 
     #[test]
-    fn a_tainted_fetch_needs_the_owner_for_a_new_host_or_a_long_address() {
+    fn a_tainted_fetch_runs_only_for_an_address_that_came_from_outside_the_model() {
         let taint = tainted();
         taint.note_owner_words("Summarise https://docs.example.com/guide and news.example.org");
-        let reason = |url: &str| tainted_reason("web_fetch", &json!({ "url": url }), &taint);
-        assert_eq!(reason("https://docs.example.com/other-page"), None);
-        assert_eq!(reason("https://www.news.example.org/today?ref=home"), None);
+        taint.note_seen_text("result: https://found.example/article?id=7#top");
+        let refusal = |url: &str| web_refusal("web_fetch", &json!({ "url": url }), &taint);
+        assert_eq!(
+            refusal("https://docs.example.com/guide"),
+            None,
+            "owner pasted"
+        );
+        assert_eq!(
+            refusal("https://docs.example.com/other-page"),
+            None,
+            "named host"
+        );
+        assert_eq!(refusal("https://www.news.example.org/today?ref=home"), None);
+        assert_eq!(
+            refusal("HTTPS://Found.Example:443/article?id=7"),
+            None,
+            "seen, normalized"
+        );
         assert!(
-            reason("https://evil.example/c")
-                .unwrap()
-                .contains("evil.example"),
-            "a host only the injected text named"
+            refusal("https://evil.example/c").is_some(),
+            "composed, unseen host"
         );
         let long = format!("https://docs.example.com/x?d={}", "a".repeat(250));
-        assert!(reason(&long).unwrap().contains("bytes of path and query"));
-        assert!(reason("not a url").is_some());
+        assert!(
+            refusal(&long).is_some(),
+            "a long composed address on a named host"
+        );
+        assert!(
+            refusal("https://found.example/article?id=7&d=notes").is_some(),
+            "seen path, new query"
+        );
+        assert!(
+            refusal("https://found.example/").is_some(),
+            "same host, other path"
+        );
+        assert!(
+            refusal("https://c2VjcmV0.found.example/article?id=7").is_some(),
+            "host label carries data"
+        );
+        assert!(refusal("https://user@found.example/article?id=7").is_some());
+        assert!(refusal("not a url").is_some());
+        assert_eq!(
+            web_refusal(
+                "web_fetch",
+                &json!({"url": "https://evil.example/c"}),
+                &TaintTracker::new()
+            ),
+            None,
+            "a clean session is not held to it"
+        );
+        let long_seen = format!("https://found.example/p?d={}", "b".repeat(400));
+        taint.note_seen_text(&format!("see {long_seen}"));
+        assert_eq!(
+            refusal(&long_seen),
+            None,
+            "a long address HQ saw is still fine"
+        );
     }
 
     #[test]
@@ -321,11 +376,12 @@ mod tests {
     }
 
     #[test]
-    fn a_long_tainted_search_query_needs_the_owner() {
+    fn a_tainted_search_query_is_refused_only_above_the_cap() {
         let taint = tainted();
-        let q = |query: String| tainted_reason("web_search", &json!({ "query": query }), &taint);
+        let q = |query: String| web_refusal("web_search", &json!({ "query": query }), &taint);
         assert_eq!(q("tokio release notes".into()), None);
-        assert!(q("note ".repeat(40)).is_some());
+        assert_eq!(q("note ".repeat(40)), None, "200 characters is fine");
+        assert!(q("note ".repeat(70)).is_some());
     }
 
     #[test]
@@ -352,8 +408,10 @@ mod tests {
             unasked_denial("vault_read", &json!({}), &taint, false),
             None
         );
+        // The web is decided by `web_refusal`, in every context: nothing to leave for the owner.
         let fetch = json!({"url": "https://evil.example/c"});
-        assert!(unasked_denial("web_fetch", &fetch, &taint, false).is_some());
+        assert_eq!(unasked_denial("web_fetch", &fetch, &taint, false), None);
+        assert!(web_refusal("web_fetch", &fetch, &taint).is_some());
 
         let clean = TaintTracker::new();
         clean.set_unattended();

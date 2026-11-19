@@ -4,7 +4,10 @@ import org.json.JSONArray
 import org.json.JSONException
 
 /** A file saved in the vault for a chat message; [path] is vault-relative. */
-data class Attachment(val name: String, val path: String, val mime: String, val size: Long) {
+data class Attachment(val name: String, val path: String, val mime: String, val size: Long, val note: String? = null, val fidelity: String? = null) {
+    /** The formats the server can make from this file's source note, by what the file is; none when it has no note. */
+    val exportFormats: List<String> get() = if (note == null) emptyList() else EXPORTS[name.substringAfterLast('.', "").lowercase()].orEmpty()
+
     /** "Word document", "Picture" and so on, from the file name; the mime type only when the name says nothing. */
     val kind: String get() = KINDS[name.substringAfterLast('.', "").lowercase()] ?: if (mime.startsWith("image/")) "Picture" else "File"
 
@@ -15,6 +18,10 @@ data class Attachment(val name: String, val path: String, val mime: String, val 
     }
 
     private companion object {
+        val EXPORTS = mapOf(
+            "xlsx" to listOf("xlsx", "csv", "pdf"), "csv" to listOf("xlsx", "csv", "pdf"),
+            "docx" to listOf("docx", "pdf", "md"), "pptx" to listOf("pptx", "pdf"),
+        )
         const val KB = 1024L
         const val MB = KB * KB
         val KINDS = mapOf(

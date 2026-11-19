@@ -818,6 +818,20 @@ fn carry_thread_taint(
             taint.mark(thread_taint::UNREADABLE_SOURCE);
         }
     }
+    match db.with_conn(|conn| hq_db::thread_seen_urls::load(conn, thread_id)) {
+        Ok(urls) => taint.load_seen(urls),
+        Err(e) => {
+            tracing::warn!(%e, "seen addresses unreadable; fetches that need one will be refused")
+        }
+    }
+    let (seen_db, seen_thread) = (db.clone(), thread_id.to_string());
+    taint.on_new_urls(Box::new(move |urls| {
+        if let Err(e) =
+            seen_db.with_conn(|conn| hq_db::thread_seen_urls::add(conn, &seen_thread, urls))
+        {
+            tracing::warn!(%e, "could not record the addresses this chat saw");
+        }
+    }));
     let (db, thread_id) = (db.clone(), thread_id.to_string());
     taint.on_first_mark(Box::new(move |source| {
         if let Err(e) = db.with_conn(|conn| thread_taint::mark(conn, &thread_id, source)) {
