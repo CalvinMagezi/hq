@@ -1,0 +1,1 @@
+**Where a chat reply's time went is now recorded.** Each reply saves the duration, start and size of every model call, tool call and compaction, and each tool call is timed from its own start (a call that waited behind another in a batch no longer looks slow). `GET /api/threads/{id}/timings` returns them for the recent replies.

@@ -11,6 +11,7 @@ pub(crate) mod role_denial;
 pub mod routing;
 mod skills;
 mod stream;
+mod timing;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -213,6 +214,9 @@ pub struct AgentSession {
     pub(super) total_cache_write_tokens: u64,
     pub(super) total_cost: f64,
     pub(super) tool_call_count: u32,
+    /// When each tool call of the current batch started and how long it ran, by call id, read
+    /// by `process_tool_results` to emit `SessionEvent::Timing`.
+    pub(super) tool_timings: std::sync::Mutex<std::collections::HashMap<String, (u64, u64)>>,
     pub(super) tool_count: usize,
     pub(super) precomputed: Arc<Mutex<Option<PrecomputedSummary>>>,
     /// Bumped by every compaction, so a background summary of an older layout is not applied.
@@ -302,6 +306,7 @@ impl AgentSession {
             total_cache_write_tokens: 0,
             total_cost: 0.0,
             tool_call_count: 0,
+            tool_timings: Default::default(),
             tool_count,
             precomputed: Arc::new(Mutex::new(None)),
             compaction_generation: 0,

@@ -98,6 +98,37 @@ pub(crate) async fn get_thread_messages_handler(
     }
 }
 
+/// `GET /api/threads/{id}/timings`: where the time went in this chat's recent replies, newest
+/// last. Each entry is the reply's saved `timings` (offsets, per-call durations and bytes, totals
+/// per kind, `unaccounted_ms`) with its message id; replies from before timings were saved, and
+/// user messages, are left out. One query, no model involved.
+pub(crate) async fn thread_timings_handler(
+    State(state): State<Arc<WsState>>,
+    Path(thread_id): Path<String>,
+    Query(q): Query<MessagesQuery>,
+) -> Response {
+    let limit = q.limit.unwrap_or(30).clamp(1, MAX_MESSAGE_PAGE);
+    match state
+        .db
+        .with_conn(|conn| hq_db::chat::get_messages_page(conn, &thread_id, limit, None))
+    {
+        Ok(messages) => {
+            let replies: Vec<serde_json::Value> = messages
+                .iter()
+                .filter(|m| m.message.role == "assistant")
+                .filter_map(|m| {
+                    let timings = m.meta.as_ref()?.get("timings")?;
+                    Some(serde_json::json!({
+                        "message_id": m.message.message_id, "created_at": m.message.created_at, "timings": timings,
+                    }))
+                })
+                .collect();
+            Json(serde_json::json!({ "replies": replies })).into_response()
+        }
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
 /// How long after an archive or a clear HQ still takes its Undo (resolutions.md A6).
 pub(crate) const UNDO_WINDOW_SECS: i64 = 10 * 60;
 /// What an Undo past the window, or after a change elsewhere, answers.

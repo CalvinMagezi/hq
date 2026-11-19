@@ -192,16 +192,40 @@ impl AgentSession {
                 return Ok(result);
             }
 
-            let _ = self.check_compaction().await;
+            let compaction_clock = super::timing::Clock::start();
+            if self.check_compaction().await {
+                self.emit(SessionEvent::Timing(compaction_clock.finish(
+                    hq_core::types::TimingKind::Compaction,
+                    "compaction",
+                    None,
+                    0,
+                    0,
+                )));
+            }
 
             // Start the backend stream. Startup failure is owned here only for
             // context overflow (compact + retry once); everything else — including
             // provider failover — is the backend/chain's responsibility.
+            let model_clock = super::timing::Clock::start();
+            let bytes_in = self.messages.iter().map(|m| m.content.len() as u64).sum();
             let event_stream = self
                 .start_backend_turn(hq_managed_tools, want_stream)
                 .await?;
 
             let mut out = self.consume_backend_stream(event_stream).await;
+            let bytes_out = out.content.len() as u64
+                + out
+                    .tool_calls
+                    .iter()
+                    .map(|t| t.arguments.to_string().len() as u64)
+                    .sum::<u64>();
+            self.emit(SessionEvent::Timing(model_clock.finish(
+                hq_core::types::TimingKind::Model,
+                &out.model,
+                None,
+                bytes_in,
+                bytes_out,
+            )));
 
             if out.cancelled {
                 return Ok(SessionResult::Cancelled(self.build_cancel_summary()));
@@ -615,6 +639,22 @@ impl AgentSession {
         for (tc, (result_text, ctx_mod)) in tool_calls.iter().zip(tool_results) {
             self.record_file_if_applicable(&tc.name, &tc.arguments);
 
+            let timed = self
+                .tool_timings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&tc.id);
+            if let Some((started_at_ms, duration_ms)) = timed {
+                self.emit(SessionEvent::Timing(hq_core::types::CallTiming {
+                    kind: hq_core::types::TimingKind::Tool,
+                    name: tc.name.clone(),
+                    call_id: Some(tc.id.clone()),
+                    started_at_ms,
+                    duration_ms,
+                    bytes_in: tc.arguments.to_string().len() as u64,
+                    bytes_out: result_text.len() as u64,
+                }));
+            }
             self.emit(SessionEvent::ToolEnd {
                 tool_name: tc.name.clone(),
                 tool_call_id: tc.id.clone(),
