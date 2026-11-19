@@ -74,7 +74,7 @@ test('codespanHtml keeps plain code plain and escapes markup', () => {
 test('vaultFileLinkTarget maps a generated file link to its vault path', () => {
   expect(vaultFileLinkTarget('Exports/2026-11/Sales%20Report.xlsx')).toBe('Exports/2026-11/Sales Report.xlsx')
   expect(vaultFileLinkTarget('sandbox:/mnt/out/Exports/2026-11/dash.html')).toBe('Exports/2026-11/dash.html')
-  expect(vaultFileLinkTarget('/Users/x/vault/Exports/2026-11/a.pdf')).toBe('Exports/2026-11/a.pdf')
+  expect(vaultFileLinkTarget('/srv/vault/Exports/2026-11/a.pdf')).toBe('Exports/2026-11/a.pdf')
   expect(vaultFileLinkTarget('/api/vault-asset?path=Exports%2Fa.xlsx')).toBe('Exports/a.xlsx')
 })
 
