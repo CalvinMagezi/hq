@@ -2374,7 +2374,10 @@
     <string name="note_export_kind_json">JSON file</string>
     <string name="note_export_making">Making your %1$s…</string>
     <string name="note_export_making_body">HQ is laying out the pages. Large notes take a little longer.</string>
+    <string name="note_export_busy">Exporting…</string>
     <string name="note_export_done">%1$s is in your downloads</string>
+    <string name="note_export_shared_done">%1$s is ready to share</string>
+    <string name="note_export_print_blocked">Your browser blocked the print window. Allow pop-ups for HQ and try again.</string>
     <string name="note_export_failed">Couldn\'t make the %1$s. HQ didn\'t answer in time. Try again.</string>
     <string name="note_export_try_again">Try again</string>
     <string name="note_export_away">Exporting needs HQ. Your HQ can\'t be reached.</string>

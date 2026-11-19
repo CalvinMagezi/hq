@@ -114,6 +114,15 @@ describe('Notes on the aligned boards', () => {
     expect(read('components/CopyPathMenu.tsx')).toContain("t('notes_copy_link')")
   })
 
+  test('the note bar keeps the export busy state visible outside the menu', () => {
+    const html = renderToStaticMarkup(
+      createElement(NoteBar, { editing: false, pinned: false, pinning: false, exporting: true, exportOpen: false, onEdit: noop, onAsk: noop, onTask: noop, onPin: noop, onExport: noop }),
+    )
+    expect(html).toContain('disabled=""')
+    expect(html).toContain('aria-busy="true"')
+    expect(html).toContain('Exporting…')
+  })
+
   test('About this note sits in the side pane', async () => {
     const html = await inRouter(
       createElement(NoteLayout, { filePath: 'Notebooks/Work/Plan.md', side: createElement('b', null, 'about'), sideOpen: true, onToggleSide: noop, onMore: noop, children: 'text' }),
