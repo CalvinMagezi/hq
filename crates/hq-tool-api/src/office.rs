@@ -14,20 +14,6 @@ pub fn moves_original(action: &str) -> bool {
     !SAFE_ACTIONS.contains(&action)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_confirm_moves_an_original() {
-        for a in SAFE_ACTIONS {
-            assert!(!moves_original(a), "{a}");
-        }
-        assert!(moves_original("confirm"));
-        assert!(moves_original("anything-new"), "an unknown action asks");
-    }
-}
-
 /// Where an office tool's note writes go through, so the runtime can lock the note, keep the text
 /// it replaces (the owner's Undo) and record who wrote it. `hq-tools` implements it over its
 /// provenance recorder; with none, a tool writes directly (a bare test or a build with no database).
@@ -45,3 +31,17 @@ pub trait NoteWriteSeam: Send + Sync {
 }
 
 pub type SharedSeam = std::sync::Arc<dyn NoteWriteSeam>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_confirm_moves_an_original() {
+        for a in SAFE_ACTIONS {
+            assert!(!moves_original(a), "{a}");
+        }
+        assert!(moves_original("confirm"));
+        assert!(moves_original("anything-new"), "an unknown action asks");
+    }
+}
