@@ -1,0 +1,13 @@
+[package]
+name = "hq-finance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Local-only parsing of mobile-money messages into reviewable transaction drafts"
+
+# Deliberately no dependency on hq-llm, hq-memory, hq-vault or hq-db: personal finance data must not
+# have a path to a model, an index or a sync layer. tests/boundary.rs fails if that changes.
+[dependencies]
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

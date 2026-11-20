@@ -3682,6 +3682,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hq-finance"
+version = "0.9.1"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "hq-gate"
 version = "0.9.1"
 dependencies = [
