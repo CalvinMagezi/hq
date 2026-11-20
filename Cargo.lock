@@ -3470,6 +3470,7 @@ dependencies = [
  "hq-db",
  "hq-edge",
  "hq-export",
+ "hq-finance",
  "hq-gate",
  "hq-host",
  "hq-llm",
