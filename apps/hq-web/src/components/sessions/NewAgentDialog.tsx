@@ -17,6 +17,13 @@ import { ErrorText } from './ErrorText'
 import { FolderPicker } from './FolderPicker'
 import { LockdownBanner } from './EmergencyStop'
 import { Sheet } from '../ui/Sheet'
+import { AccessProfilePicker } from '../tasks/AccessProfilePicker'
+import {
+  NO_PROFILE,
+  bindSandboxProfile,
+  listSandboxGrants,
+  taskProfileFromGrants,
+} from '~/lib/sandboxGrantsApi'
 
 const FIELD_CLASS = 'a-input'
 const PURPOSE_WORDS: Record<Purpose, 'helpers_new_purpose_general' | 'helpers_new_purpose_research' | 'helpers_new_purpose_review' | 'helpers_new_purpose_monitor'> = {
@@ -64,6 +71,8 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
   const [branch, setBranch] = useState('')
   const [note, setNote] = useState(NOTHING_ATTACHED)
   const [attachedTask, setAttachedTask] = useState(NOTHING_ATTACHED)
+  const [grantProfile, setGrantProfile] = useState(NO_PROFILE)
+  const [grantProfileDirty, setGrantProfileDirty] = useState(false)
   const [repo, setRepo] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -95,12 +104,34 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
     if (hosts) setHarness((current) => fitAgent(current, agentsOn(selected, hosts.harnesses)))
   }, [hosts, selected])
   const taskId = task?.id ?? attachedTask?.id
+  useEffect(() => {
+    if (!taskId) {
+      setGrantProfile(NO_PROFILE)
+      setGrantProfileDirty(false)
+      return
+    }
+    let live = true
+    listSandboxGrants(`task:${taskId}`)
+      .then((res) => {
+        if (live) {
+          setGrantProfile(taskProfileFromGrants(res.grants, taskId))
+          setGrantProfileDirty(false)
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [taskId])
   // A general-purpose agent is started for a stated purpose; a coding agent's purpose is code.
   const generalPurpose = agentCategory(hosts, harness) === 'general_purpose'
   const start = async () => {
     setBusy(true)
     setError(null)
     try {
+      if (taskId && grantProfileDirty) {
+        await bindSandboxProfile({ scope: 'task', id: taskId, name: grantProfile })
+      }
       const launched = await workbenchApi.spawn({
         harness,
         host,
@@ -189,6 +220,16 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
 
               <AttachSearch id="agent-note" label={t('helpers_attach_note')} placeholder={t('helpers_attach_search_notes')} value={note} onChange={setNote} search={attachSearch.notes} />
               {!task && <AttachSearch id="agent-task" label={t('helpers_attach_task')} placeholder={t('helpers_attach_search_tasks')} value={attachedTask} onChange={setAttachedTask} search={attachSearch.tasks} />}
+              {taskId && (
+                <AccessProfilePicker
+                  id="agent-access-profile"
+                  value={grantProfile}
+                  onChange={(name) => {
+                    setGrantProfile(name)
+                    setGrantProfileDirty(true)
+                  }}
+                />
+              )}
               <div className="a-field">
                 <label htmlFor="agent-repo" className={LABEL_CLASS}>
                   {t('helpers_attach_repo')}

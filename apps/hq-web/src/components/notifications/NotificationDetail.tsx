@@ -5,6 +5,13 @@ import { PaneHead } from '~/components/ui/Panes'
 import { allowLabel, allowTone, quoteArgs } from '~/components/ui/ApprovalCard'
 import { answerErrorLine, lapsed, REQUEST_LIFETIME_MS, serverHqLine } from '~/lib/inboxCard'
 import { silenceTopicOf, type NotificationItem, type SilenceTopic } from '~/lib/notificationsApi'
+import {
+  SANDBOX_GRANTS_QUERY_KEY,
+  capabilityModeKey,
+  isSandboxGrantNotification,
+  listSandboxGrants,
+  parseSandboxGrantNotification,
+} from '~/lib/sandboxGrantsApi'
 import { t, type StringKey } from '~/strings'
 import { useQuery } from '@tanstack/react-query'
 import { listDevices, signOutDevice } from '~/lib/deviceSignIn'
@@ -41,7 +48,14 @@ const formatWhen = (ms: number) => new Intl.DateTimeFormat(undefined, WHEN_FORMA
 export function NotificationDetail({ notification, onAction, onAnswered, loadingAction, onOpenLink, onSilence, onLater }: Props) {
   const [failure, setFailure] = useState<string | null>(null)
   const signInId = notification?.metadata.sign_in?.device_id
+  const isSandboxGrant = notification ? isSandboxGrantNotification(notification) : false
   const devices = useQuery({ queryKey: ['auth-devices'], queryFn: listDevices, enabled: !!signInId && notification?.state === 'pending' })
+  const sandboxGrants = useQuery({
+    queryKey: SANDBOX_GRANTS_QUERY_KEY,
+    queryFn: () => listSandboxGrants(),
+    enabled: isSandboxGrant && notification?.state === 'pending',
+    retry: false,
+  })
   const device = devices.data?.devices.find((d) => d.id === signInId)?.label ?? null
   const back = (
     <Link to="/inbox" className="a-ib a-back" aria-label={t('inbox_back')}>
@@ -65,8 +79,9 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
   const dialog = openDialog(n)
   const isPending = n.state === 'pending'
   const approval = n.metadata.approval
+  const parsedGrant = isSandboxGrant ? parseSandboxGrantNotification(n, sandboxGrants.data?.grants) : null
   const approvable = n.actions.includes('approve')
-  const isRequest = !!approval || !!n.metadata.dialog
+  const isRequest = !!approval || !!n.metadata.dialog || isSandboxGrant
   const made = new Date(n.created_at).getTime()
   const server = serverHqLine(n)
   const link = n.metadata.link
@@ -75,8 +90,8 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
   const busy = loadingAction !== null
   // What the footer offers: a dialog and a sign-in have their own answers; a plain request is allowed or declined; an update is cleared.
   const plainBody = signInId ? <SignInBody device={device} createdAt={n.created_at} /> : <p className="hq-inbox-text">{n.description}</p>
-  const askable = !dialog && !signInId && approvable
-  const clearable = !dialog && !signInId && !approvable
+  const askable = !dialog && !signInId && !isSandboxGrant && approvable
+  const clearable = !dialog && !signInId && !isSandboxGrant && !approvable
   const act = async (action: string) => {
     setFailure(null)
     try {
@@ -86,6 +101,28 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
     }
   }
 
+  const detailBody = parsedGrant ? (
+    <>
+      <blockquote className="a-quote" data-testid="grant-resource">
+        <span className="a-cap a-muted">{t(capabilityModeKey(parsedGrant.capability))}</span>{' '}
+        <code className="a-mono">{parsedGrant.resource}</code>
+      </blockquote>
+      {parsedGrant.taskId && (
+        <div className="a-drow">
+          <span>{t('grants_task_label')}</span>
+          <span className="a-mono">{parsedGrant.taskId}</span>
+        </div>
+      )}
+      <p className="a-cap a-muted">{t('grants_expires_day')}</p>
+      {parsedGrant.helperReason && (
+        <div className="flex flex-col gap-1" data-testid="grant-helper-reason">
+          <p className="a-cap a-muted">{t('grants_helper_words')}</p>
+          <blockquote className="a-quote a-muted">{parsedGrant.helperReason}</blockquote>
+        </div>
+      )}
+    </>
+  ) : null
+
   return (
     <>
       <PaneHead title={t('inbox_details')} back={back} />
@@ -93,21 +130,22 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
         <div className="a-wrap hq-inbox-wrap">
           {server && <p className="a-body-sm a-muted">{server}</p>}
           <p className="a-h2">{n.title}</p>
-          {approval ? (
-            <>
-              <p className="a-label">{t('approval_quote_inbox')}</p>
-              <pre className="a-quote">
-                {approval.tool}
-                {'\n'}
-                {quoteArgs(approval.args)}
-              </pre>
-              <p className="hq-inbox-text">
-                <i>{t('approval_in_words')}:</i> {n.description}
-              </p>
-            </>
-          ) : (
-            plainBody
-          )}
+          {detailBody ??
+            (approval ? (
+              <>
+                <p className="a-label">{t('approval_quote_inbox')}</p>
+                <pre className="a-quote">
+                  {approval.tool}
+                  {'\n'}
+                  {quoteArgs(approval.args)}
+                </pre>
+                <p className="hq-inbox-text">
+                  <i>{t('approval_in_words')}:</i> {n.description}
+                </p>
+              </>
+            ) : (
+              plainBody
+            ))}
           {lapsed(n) && <p className="a-cap a-muted">{t('inbox_request_ran_out')}</p>}
           {link && onOpenLink && (
             <button type="button" className="a-btn secondary" onClick={() => onOpenLink(link)}>
@@ -165,6 +203,22 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
                 onAnswered(n.id, 'decline')
               }}
             />
+          )}
+          {isSandboxGrant && (
+            <>
+              <button type="button" className="a-btn secondary" disabled={busy} onClick={() => void act('dismiss')}>
+                {t('grants_decline')}
+              </button>
+              <button
+                type="button"
+                className="a-btn secondary"
+                disabled={busy}
+                aria-busy={answering('approve') || undefined}
+                onClick={() => void act('approve')}
+              >
+                {answering('approve') ? t('approval_answering') : t('grants_allow')}
+              </button>
+            </>
           )}
           {askable && (
             <>

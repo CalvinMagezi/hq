@@ -1,10 +1,17 @@
 import { ApprovalCard } from '~/components/ui/ApprovalCard'
+import { SandboxGrantCard } from '~/components/ui/SandboxGrantCard'
 import { t } from '~/strings'
-import { useState, type ComponentType } from 'react'
+import { useState, type ComponentType, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { answerErrorLine, cardKind, lapsed, serverHqLine, taskCheckId, type CardKind } from '~/lib/inboxCard'
 import { ClipboardCheck, LifeBuoy, ShieldAlert, Sparkles, TriangleAlert } from 'lucide-react'
 import type { NotificationItem } from '~/lib/notificationsApi'
+import {
+  SANDBOX_GRANTS_QUERY_KEY,
+  isSandboxGrantNotification,
+  listSandboxGrants,
+  parseSandboxGrantNotification,
+} from '~/lib/sandboxGrantsApi'
 import { relTime } from '~/lib/time'
 import { DialogAnswer, openDialog } from './DialogAnswer'
 import { SignInActions, SignInBody } from './SignInItem'
@@ -39,12 +46,15 @@ export function NotificationCard({ notification, selected, onAction, onAnswered,
   const kind = cardKind(notification)
   const ranOut = lapsed(notification)
   const stuckOpen = kind === 'stuck' && isPending && !ranOut
+  const sandboxGrant = isSandboxGrantNotification(notification)
   const act = async (id: string, action: string) => {
     setFailure(null)
     setRefused(false)
     try {
       await onAction(id, action)
-      if (action === 'approve' || action === 'reject') setSent({ answer: t(action === 'approve' ? 'inbox_answer_allowed' : 'inbox_answer_declined'), at: new Date() })
+      if (action === 'approve' || action === 'reject' || (sandboxGrant && action === 'dismiss')) {
+        setSent({ answer: t(action === 'approve' ? 'inbox_answer_allowed' : 'inbox_answer_declined'), at: new Date() })
+      }
     } catch (e) {
       setFailure(answerErrorLine(e))
       setRefused((e as { status?: number } | null)?.status === 409)
@@ -53,6 +63,12 @@ export function NotificationCard({ notification, selected, onAction, onAnswered,
   const dialog = openDialog(notification)
   const signInId = notification.metadata.sign_in?.device_id
   const devices = useQuery({ queryKey: ['auth-devices'], queryFn: listDevices, enabled: !!signInId && isPending })
+  const sandboxGrants = useQuery({
+    queryKey: SANDBOX_GRANTS_QUERY_KEY,
+    queryFn: () => listSandboxGrants(),
+    enabled: sandboxGrant && isPending,
+    retry: false,
+  })
   const device = devices.data?.devices.find((d) => d.id === signInId)?.label ?? null
   const helperId = notification.metadata.extra?.session_id ?? notification.id
   const Icon = KIND_ICON[kind]
@@ -76,37 +92,58 @@ export function NotificationCard({ notification, selected, onAction, onAnswered,
       />
     ) : null
 
-  const quoted = !ranOut && !stuckOpen && !dialog && !signInActions && approvable
-  const answer = ranOut || stuckOpen ? null : dialog ? (
-    <DialogAnswer notification={notification} dialog={dialog} onAnswered={onAnswered} />
-  ) : signInActions ? (
-    signInActions
-  ) : taskCheck && isPending ? (
-    <div className="a-card-actions">
-      <Link to="/tasks" search={checkTaskId ? { task: checkTaskId } : {}} className="a-btn">
-        {t('tasks_check_it')}
-      </Link>
-    </div>
-  ) : approvable ? (
-    <ApprovalCard
-      quoteTitle={t('approval_quote_inbox')}
-      tool={notification.metadata.approval?.tool}
-      args={notification.metadata.approval?.args}
-      inWords={notification.description}
-      loses={notification.metadata.approval?.loses}
-      verb={notification.metadata.approval?.verb}
-      busy={loadingAction !== null}
-      error={failure}
-      onDecline={() => void act(notification.id, 'reject')}
-      onAllow={() => void act(notification.id, 'approve')}
-    />
-  ) : (
-    <div className="a-card-actions">
-      <button type="button" className="a-btn secondary" disabled={loadingAction !== null} onClick={() => void act(notification.id, 'dismiss')}>
-        {t('inbox_clear')}
-      </button>
-    </div>
-  )
+  const parsedGrant = sandboxGrant ? parseSandboxGrantNotification(notification, sandboxGrants.data?.grants) : null
+  const quoted = !ranOut && !stuckOpen && !dialog && !signInActions && (sandboxGrant || approvable)
+  let answer: ReactNode = null
+  if (!ranOut && !stuckOpen) {
+    if (dialog) {
+      answer = <DialogAnswer notification={notification} dialog={dialog} onAnswered={onAnswered} />
+    } else if (signInActions) {
+      answer = signInActions
+    } else if (sandboxGrant && parsedGrant && isPending) {
+      answer = (
+        <SandboxGrantCard
+          grant={parsedGrant}
+          showTitle={false}
+          busy={loadingAction !== null}
+          error={failure}
+          onAllow={() => void act(notification.id, 'approve')}
+          onDecline={() => void act(notification.id, 'dismiss')}
+        />
+      )
+    } else if (taskCheck && isPending) {
+      answer = (
+        <div className="a-card-actions">
+          <Link to="/tasks" search={checkTaskId ? { task: checkTaskId } : {}} className="a-btn">
+            {t('tasks_check_it')}
+          </Link>
+        </div>
+      )
+    } else if (approvable) {
+      answer = (
+        <ApprovalCard
+          quoteTitle={t('approval_quote_inbox')}
+          tool={notification.metadata.approval?.tool}
+          args={notification.metadata.approval?.args}
+          inWords={notification.description}
+          loses={notification.metadata.approval?.loses}
+          verb={notification.metadata.approval?.verb}
+          busy={loadingAction !== null}
+          error={failure}
+          onDecline={() => void act(notification.id, 'reject')}
+          onAllow={() => void act(notification.id, 'approve')}
+        />
+      )
+    } else {
+      answer = (
+        <div className="a-card-actions">
+          <button type="button" className="a-btn secondary" disabled={loadingAction !== null} onClick={() => void act(notification.id, 'dismiss')}>
+            {t('inbox_clear')}
+          </button>
+        </div>
+      )
+    }
+  }
 
   return (
     <article className="a-card needs" aria-current={selected ? 'true' : undefined}>

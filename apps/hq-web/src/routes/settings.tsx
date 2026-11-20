@@ -42,6 +42,14 @@ import {
   revokeSessionFolder,
   type FolderGrant,
 } from '~/lib/sessionFoldersApi'
+import { AccessView } from '~/components/settings/AccessView'
+import {
+  SANDBOX_GRANTS_QUERY_KEY,
+  SANDBOX_PROFILES_QUERY_KEY,
+  listSandboxGrants,
+  listSandboxProfiles,
+  revokeSandboxGrant,
+} from '~/lib/sandboxGrantsApi'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsLayout,
@@ -212,6 +220,59 @@ export function FoldersPage() {
   return <SessionFoldersSection />
 }
 
+const retryUnlessMissing = (failureCount: number, err: unknown) => !isMissingRoute(err) && failureCount === 0
+
+export function AccessSection() {
+  const client = useQueryClient()
+  const reachable = useSharedConnection() === 'connected'
+  const grants = useQuery({
+    queryKey: SANDBOX_GRANTS_QUERY_KEY,
+    queryFn: () => listSandboxGrants(),
+    retry: retryUnlessMissing,
+  })
+  const profiles = useQuery({
+    queryKey: SANDBOX_PROFILES_QUERY_KEY,
+    queryFn: listSandboxProfiles,
+    retry: retryUnlessMissing,
+  })
+  const [revokeError, setRevokeError] = useState<string | null>(null)
+  const act = useMutation({
+    mutationFn: (id: string) => revokeSandboxGrant(id),
+    onMutate: () => setRevokeError(null),
+    onError: (e) => setRevokeError(e instanceof Error ? e.message : t('grants_revoke_failed')),
+    onSettled: () => client.invalidateQueries({ queryKey: SANDBOX_GRANTS_QUERY_KEY }),
+  })
+
+  if (isMissingRoute(grants.error) && isMissingRoute(profiles.error)) return null
+  if (!grants.data || !profiles.data) {
+    return grants.error || profiles.error ? (
+      <LoadFailed
+        onRetry={() => {
+          void client.invalidateQueries({ queryKey: SANDBOX_GRANTS_QUERY_KEY })
+          void client.invalidateQueries({ queryKey: SANDBOX_PROFILES_QUERY_KEY })
+        }}
+      />
+    ) : (
+      <SettingsSkeleton label={t('settings_loading')} />
+    )
+  }
+
+  return (
+    <AccessView
+      grants={grants.data.grants}
+      profiles={profiles.data.profiles}
+      canChange={reachable}
+      revokingId={act.isPending ? (act.variables ?? null) : null}
+      error={revokeError}
+      onRevoke={(id) => act.mutate(id)}
+    />
+  )
+}
+
+export function AccessPage() {
+  return <AccessSection />
+}
+
 export function BackupPage() {
   const status = useBackupStatus()
   const hello = useQuery({ queryKey: ['hello'], queryFn: ({ signal }) => fetchHello(signal) }).data
@@ -237,6 +298,7 @@ const TITLES: Record<string, StringKey> = {
   '/settings/spending': 'row_spending',
   '/settings/safety': 'row_safety',
   '/settings/folders': 'row_folders',
+  '/settings/access': 'row_access',
   '/settings/backup': 'row_backup',
 }
 
