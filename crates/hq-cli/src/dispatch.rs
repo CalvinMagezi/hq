@@ -85,6 +85,8 @@ pub(crate) fn lite_rule(command: &Commands) -> LiteRule {
         | Commands::Lite { .. }
         | Commands::Backup { .. }
         | Commands::Restore(_)
+        // Finance reads a file you name and writes one vault file; it has no network code at all.
+        | Commands::Finance { .. }
         // The suite reads and writes only the vault and its own folders; it calls out to nothing.
         | Commands::Suite { .. }
         | Commands::Env { .. }
@@ -272,6 +274,7 @@ pub(crate) async fn dispatch(command: Commands, config: &HqConfig) -> Result<()>
         Commands::Lite { sub, folder } => commands::lite::lite(config, &sub, folder.as_deref()),
         Commands::Backup { command } => commands::backup::run(config, command),
         Commands::Restore(args) => commands::backup::restore(config, &args),
+        Commands::Finance { command } => commands::finance::run(config, command),
         Commands::Suite { command } => commands::suite::run(config, command).await,
         Commands::Pair { platform } => commands::pair::run(config, &platform),
         Commands::Env { action: None } => commands::env::run(config).await,

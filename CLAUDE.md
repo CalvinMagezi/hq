@@ -107,6 +107,7 @@ assistant loads when it works there. Start from the file nearest the code you ar
 | `crates/hq-db/CLAUDE.md` | The database, search and vault events |
 | `crates/hq-desktop/CLAUDE.md` | The macOS desktop app |
 | `crates/hq-edge/CLAUDE.md` | The public forwarder |
+| `crates/hq-finance/CLAUDE.md` | Personal finance from mobile-money messages |
 | `crates/hq-export/CLAUDE.md` | Note export |
 | `crates/hq-mcp/CLAUDE.md` | The MCP server |
 | `crates/hq-memory/CLAUDE.md` | The memory system |

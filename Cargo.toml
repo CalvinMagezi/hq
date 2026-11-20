@@ -183,6 +183,7 @@ hq-web = { path = "crates/hq-web" }
 hq-memory = { path = "crates/hq-memory" }
 hq-update = { path = "crates/hq-update" }
 hq-backup = { path = "crates/hq-backup" }
+hq-finance = { path = "crates/hq-finance" }
 hq-host = { path = "crates/hq-host" }
 hq-gate = { path = "crates/hq-gate" }
 hq-bridge = { path = "crates/hq-bridge" }
