@@ -187,16 +187,26 @@ impl GrantProfile {
 pub const STARTER_PROFILES: &[&str] = &["mobile-dev", "node-build", "rust-build"];
 
 /// The contents of a starter profile, or `None` for an unknown name.
+///
+/// Kept narrow on purpose. A directory the owner's own tools run code from later (cargo's
+/// `registry/src`, npm's `_npx`, a pnpm store hard-linked into every project, gradle's `init.d`, the
+/// pub `bin`) is never listed, since writing there would plant code that runs outside the sandbox;
+/// a helper builds with a cache inside its worktree (`CARGO_HOME`, `npm_config_cache`) instead.
+/// Broad hosts that serve anyone's files (`storage.googleapis.com`, `github.com`) and the adb
+/// server's port are left out: a helper asks for those one at a time.
 pub fn starter_profile(name: &str) -> Option<GrantProfile> {
     let list = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     match name {
         "mobile-dev" => Some(GrantProfile {
-            writable: list(&["~/.gradle", "~/.pub-cache", "~/.dart-tool"]),
+            writable: list(&[
+                "~/.gradle/caches",
+                "~/.gradle/wrapper",
+                "~/.pub-cache/hosted",
+            ]),
             readable: list(&["~/Library/Android/sdk", "~/Android/Sdk"]),
-            loopback_ports: vec![5037],
+            loopback_ports: Vec::new(),
             egress: list(&[
                 "pub.dev",
-                "storage.googleapis.com",
                 "dl.google.com",
                 "maven.google.com",
                 "repo.maven.apache.org",
@@ -206,21 +216,16 @@ pub fn starter_profile(name: &str) -> Option<GrantProfile> {
             ]),
         }),
         "node-build" => Some(GrantProfile {
-            writable: list(&["~/.npm", "~/.bun/install/cache", "~/.pnpm-store"]),
+            writable: Vec::new(),
             readable: Vec::new(),
             loopback_ports: Vec::new(),
             egress: list(&["registry.npmjs.org", "registry.yarnpkg.com"]),
         }),
         "rust-build" => Some(GrantProfile {
-            writable: list(&["~/.cargo/registry", "~/.cargo/git"]),
+            writable: Vec::new(),
             readable: Vec::new(),
             loopback_ports: Vec::new(),
-            egress: list(&[
-                "crates.io",
-                "index.crates.io",
-                "static.crates.io",
-                "github.com",
-            ]),
+            egress: list(&["crates.io", "index.crates.io", "static.crates.io"]),
         }),
         _ => None,
     }
@@ -795,11 +800,26 @@ mod tests {
             Some("node-build")
         );
         assert_eq!(
-            starter_for(
-                &r(Capability::FsWrite, "/home/user/.cargo/registry/x"),
-                home
-            ),
+            starter_for(&r(Capability::Egress, "index.crates.io:443"), home),
             Some("rust-build")
+        );
+        // Places the owner's own tools run code from, the adb port and broad hosts are in no starter.
+        for risky in [
+            "/home/user/.cargo/registry/src",
+            "/home/user/.npm/_npx",
+            "/home/user/.gradle/init.d",
+            "/home/user/.pub-cache/bin",
+        ] {
+            assert_eq!(
+                starter_for(&r(Capability::FsWrite, risky), home),
+                None,
+                "{risky}"
+            );
+        }
+        assert_eq!(starter_for(&r(Capability::Loopback, "5037"), home), None);
+        assert_eq!(
+            starter_for(&r(Capability::Egress, "github.com:443"), home),
+            None
         );
         assert_eq!(
             starter_for(&r(Capability::FsWrite, "/home/user/projects"), home),

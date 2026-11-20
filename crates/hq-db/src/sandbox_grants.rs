@@ -211,12 +211,25 @@ pub fn clear_restart_due(db: &Database, session_id: &str) -> Result<()> {
     })
 }
 
+/// The `decision_note` a request approved under standing access carries: which rule approved it.
+pub fn rule_note(rule_id: &str) -> String {
+    format!("rule:{rule_id}")
+}
+
+/// Revokes a request or a standing rule. Revoking a rule also revokes what it approved, so the
+/// access stops at the next launch instead of lingering for the life of those grants.
 pub fn revoke(db: &Database, id: &str, now: i64) -> Result<bool> {
     db.with_conn(|c| {
         let n = c.execute(
             "UPDATE sandbox_grants SET state = ?2, revoked_at = ?3 WHERE id = ?1 AND state IN (?4, ?5)",
             params![id, REVOKED, now, ACTIVE, PENDING],
         )?;
+        if n == 1 {
+            c.execute(
+                "UPDATE sandbox_grants SET state = ?2, revoked_at = ?3 WHERE decision_note = ?1 AND state IN (?4, ?5)",
+                params![rule_note(id), REVOKED, now, ACTIVE, PENDING],
+            )?;
+        }
         Ok(n == 1)
     })
 }
@@ -458,6 +471,7 @@ pub fn add_rule(
     delta: &SandboxDelta,
     note: &str,
     now: i64,
+    expires_at: Option<i64>,
 ) -> Result<Option<String>> {
     if open_for(db, scope, capability, resource, now)?.is_some() {
         return Ok(None);
@@ -476,7 +490,7 @@ pub fn add_rule(
             decided_by: BY_OWNER,
             helper_reason: "",
             decision_note: note,
-            expires_at: None,
+            expires_at,
         },
         now,
     )
@@ -701,7 +715,8 @@ mod tests {
                 "/repo/cache",
                 &d,
                 "always",
-                1
+                1,
+                None
             )
             .unwrap()
             .is_some()
@@ -714,7 +729,8 @@ mod tests {
                 "/repo/cache",
                 &d,
                 "always",
-                2
+                2,
+                None
             )
             .unwrap()
             .is_none(),
@@ -728,6 +744,7 @@ mod tests {
             &delta("/repo/t"),
             "task",
             3,
+            None,
         )
         .unwrap();
         let scopes = |s: &str| {
@@ -775,7 +792,7 @@ mod tests {
         file(&db, &at("/r/2", owner), 100).unwrap();
         file(&db, &at("/r/3", new("s1", &d, PENDING)), 100).unwrap();
         file(&db, &at("/r/4", new("s1", &d, REFUSED)), 100).unwrap();
-        add_rule(&db, "repo:/r", "fs_write", "/r", &d, "x", 100).unwrap();
+        add_rule(&db, "repo:/r", "fs_write", "/r", &d, "x", 100, None).unwrap();
         bind_profile(&db, "task:t", "mobile", 100).unwrap();
         let s = summary(&db, 50, 200).unwrap();
         assert_eq!(
@@ -792,5 +809,33 @@ mod tests {
             "the pending one and the owner-approved one"
         );
         assert_eq!(summary(&db, 500, 600).unwrap().approved_by_policy, 0);
+    }
+
+    #[test]
+    fn revoking_a_rule_revokes_what_it_approved_so_the_access_stops_at_the_next_launch() {
+        let db = Database::open_memory().unwrap();
+        let d = delta("/repo/cache");
+        let rule = add_rule(
+            &db,
+            "repo:/repo",
+            "fs_write",
+            "/repo",
+            &SandboxDelta::default(),
+            "x",
+            1,
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        let mut derived = new("s1", &d, ACTIVE);
+        let note = rule_note(&rule);
+        derived.decision_note = &note;
+        file(&db, &at("/repo/cache", derived), 2).unwrap();
+        assert!(!delta_for_session(&db, "s1", 5).unwrap().is_empty());
+        assert!(revoke(&db, &rule, 6).unwrap());
+        assert!(
+            delta_for_session(&db, "s1", 7).unwrap().is_empty(),
+            "the derived grant went with its rule"
+        );
     }
 }

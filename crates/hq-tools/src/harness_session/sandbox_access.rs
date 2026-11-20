@@ -13,6 +13,9 @@ use hq_db::Database;
 use hq_db::sandbox_grants::{self as store, Grant};
 
 const KEY_PREFIX: &str = "sandbox-grant:";
+const SOURCE: &str = "sandbox-grants";
+/// How long a standing rule lasts unless the owner revokes it first.
+const RULE_TTL_SECS: i64 = 90 * 24 * 3600;
 
 /// The inbox answers that widen access beyond the one request.
 pub const ALLOW_TASK: &str = "allow_task";
@@ -26,15 +29,20 @@ pub fn is_access_action(action: &str) -> bool {
 
 /// The access request an inbox item stands for, when it is one: its dedup key names the grant.
 pub fn grant_of_item(db: &Database, item_id: &str) -> Option<Grant> {
-    let key: Option<String> = db
+    // The item must be HQ's own: its source is checked as well as its key, so a notification a
+    // helper wrote under a guessed key is never taken for an access request.
+    let (key, source): (Option<String>, Option<String>) = db
         .with_conn(|c| {
             Ok(c.query_row(
-                "SELECT dedup_key FROM value_items WHERE id = ?1",
+                "SELECT dedup_key, source_task FROM value_items WHERE id = ?1",
                 [item_id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )?)
         })
         .ok()?;
+    if source.as_deref() != Some(SOURCE) {
+        return None;
+    }
     let id = key?.strip_prefix(KEY_PREFIX)?.to_string();
     store::get(db, &id).ok().flatten()
 }
@@ -51,6 +59,10 @@ struct Plan {
 fn plan(grant: &Grant, action: &str, starter: Option<&str>) -> Result<Plan> {
     if grant.capability == store::PROFILE || grant.scope != "session" {
         bail!("that is not a helper's access request");
+    }
+    // A request the owner revoked, or that lapsed, cannot leave a permanent rule behind.
+    if grant.state != store::PENDING && grant.state != store::ACTIVE {
+        bail!("that request is no longer open");
     }
     let scope = match action {
         ALLOW_TASK => match grant.task_id.as_deref() {
@@ -147,6 +159,7 @@ pub fn apply_answer(
             &SandboxDelta::default(),
             &note,
             now,
+            Some(now + RULE_TTL_SECS),
         )?
         .is_some()
         {
@@ -262,7 +275,11 @@ mod tests {
                 .iter()
                 .any(|r| r.capability == "egress" && r.resource == "pub.dev:443")
         );
-        assert!(rules.iter().any(|r| r.resource == "~/.gradle"));
+        assert!(rules.iter().any(|r| r.resource == "~/.gradle/caches"));
+        assert!(
+            rules.iter().all(|r| r.expires_at.is_some()),
+            "rules lapse unless renewed"
+        );
     }
 
     #[test]
@@ -271,5 +288,28 @@ mod tests {
         let g = store::bind_profile(&db, "s1", "mobile", 1).unwrap();
         let grant = store::get(&db, &g).unwrap().unwrap();
         assert!(plan(&grant, ALLOW_REPO, None).is_err());
+    }
+
+    #[test]
+    fn a_notification_a_helper_wrote_under_a_guessed_key_is_not_an_access_request() {
+        let db = Database::open_memory().unwrap();
+        let (id, _) = pending(&db, Some("t1"), "/repo", "fs_write", "/repo/x");
+        let decoy = ValueItem::new("notify_owner", ValueKind::Insight, "Looks official", "body")
+            .with_dedup_key(format!("{KEY_PREFIX}{id}"));
+        let decoy_id = decoy.id.clone();
+        hq_db::value_items::insert(&db, &decoy).unwrap();
+        assert!(grant_of_item(&db, &decoy_id).is_none());
+        assert!(check_answer(&db, &decoy_id, ALLOW_REPO, None).is_err());
+        assert!(hq_core::grants::STARTER_PROFILES.len() == 3);
+    }
+
+    #[test]
+    fn a_revoked_or_lapsed_request_cannot_leave_a_permanent_rule() {
+        let db = Database::open_memory().unwrap();
+        let (id, item) = pending(&db, Some("t1"), "/repo", "fs_write", "/repo/x");
+        assert!(check_answer(&db, &item, ALLOW_REPO, None).is_ok());
+        store::revoke(&db, &id, 5).unwrap();
+        assert!(check_answer(&db, &item, ALLOW_REPO, None).is_err());
+        assert!(apply_answer(&db, &item, ALLOW_REPO, None, 6).is_err());
     }
 }

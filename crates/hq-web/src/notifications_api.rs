@@ -822,6 +822,9 @@ pub(crate) async fn notification_action_handler(
     let answer = record_action(&state.db, val_id, engagement);
     // A repeat of an answer already given must not count as another approval.
     let first_answer = matches!(answer, Ok(Answered::Recorded));
+    // The owner can upgrade an answer already given (Allow, then Allow for the repository), and a
+    // failed rule write must be retryable, so standing access applies on a repeat too.
+    let answered = matches!(answer, Ok(Answered::Recorded | Answered::AlreadySo));
     match answer {
         Err(e) => {
             warn!(id = %id, action = %body.action, error = %e, "notification action failed");
@@ -832,6 +835,27 @@ pub(crate) async fn notification_action_handler(
             return ApiError::Conflict(settled_message(s)).into_response();
         }
         Ok(Answered::Recorded | Answered::AlreadySo) => {}
+    }
+    // Standing access for the task or repository, and what it added, so the owner is told when the
+    // rule did not land instead of believing it did.
+    let mut rules_added: Option<usize> = None;
+    if answered && hq_tools::harness_session::sandbox_access::is_access_action(&body.action) {
+        match hq_tools::harness_session::sandbox_access::apply_answer(
+            &state.db,
+            val_id,
+            &body.action,
+            body.starter.as_deref(),
+            chrono::Utc::now().timestamp(),
+        ) {
+            Ok(n) => rules_added = Some(n),
+            Err(e) => {
+                warn!(id = %id, error = %e, "recording standing sandbox access failed");
+                return ApiError::internal(format!(
+                    "Your answer was recorded, but the standing access was not saved: {e}. Try again."
+                ))
+                .into_response();
+            }
+        }
     }
     if first_answer {
         let whole_site = body.action == ALLOW_SITE_ACTION;
@@ -847,17 +871,6 @@ pub(crate) async fn notification_action_handler(
             )
         {
             warn!(id = %id, error = %e, "recording a folder allow failed");
-        }
-        if hq_tools::harness_session::sandbox_access::is_access_action(&body.action)
-            && let Err(e) = hq_tools::harness_session::sandbox_access::apply_answer(
-                &state.db,
-                val_id,
-                &body.action,
-                body.starter.as_deref(),
-                chrono::Utc::now().timestamp(),
-            )
-        {
-            warn!(id = %id, error = %e, "recording standing sandbox access failed");
         }
         if let Err(e) = note_helper_offer_answer(&state.db, val_id, engagement) {
             warn!(id = %id, error = %e, "starting the offered helper setup failed");
@@ -886,7 +899,10 @@ pub(crate) async fn notification_action_handler(
     Json(NotificationActionResponse {
         success: true,
         new_state: engagement.to_string(),
-        message: format!("Value item {engagement}"),
+        message: match rules_added {
+            Some(n) => format!("Value item {engagement}; {n} standing access rule(s) added"),
+            None => format!("Value item {engagement}"),
+        },
     })
     .into_response()
 }

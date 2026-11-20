@@ -97,7 +97,7 @@ fn covered_by_rule(
     asker: &Asker,
     req: &GrantRequest,
     now: i64,
-) -> Result<Option<SandboxDelta>> {
+) -> Result<Option<(SandboxDelta, String)>> {
     let scopes = rule_scopes(db, asker.session, asker.task, &asker.cwd.to_string_lossy());
     let home = paths.home();
     for rule in store::rules_for(db, &scopes, now)? {
@@ -109,7 +109,7 @@ fn covered_by_rule(
             resource = paths.canonical(&resource);
         }
         if rule_covers(cap, &resource, req) {
-            return Ok(Some(delta_for_owner_approval(req)));
+            return Ok(Some((delta_for_owner_approval(req), rule.id)));
         }
     }
     Ok(None)
@@ -336,10 +336,11 @@ pub(super) fn decide(
     // A request outside the profile that the owner's standing access covers is approved without
     // asking; a refusal is never overridden.
     if matches!(decision, Decision::Ask(_))
-        && let Some(d) = covered_by_rule(db, paths, asker, &req, now)?
+        && let Some((d, rule_id)) = covered_by_rule(db, paths, asker, &req, now)?
     {
         decision = Decision::Approve(d);
-        approved_note = "standing access".to_string();
+        // The rule that approved it, so revoking the rule revokes this grant too.
+        approved_note = store::rule_note(&rule_id);
     }
     let (state, by, note, delta, expires) = match decision {
         Decision::Approve(d) => (
@@ -966,6 +967,7 @@ mod tests {
             &empty,
             "starter mobile-dev",
             1,
+            None,
         )
         .unwrap();
         store::add_rule(
@@ -976,6 +978,7 @@ mod tests {
             &empty,
             "starter mobile-dev",
             1,
+            None,
         )
         .unwrap();
         // The rule's `~` means the session computer's home, so a cache under it is covered.
@@ -987,7 +990,7 @@ mod tests {
         assert!(
             grants
                 .iter()
-                .all(|g| g.decided_by == store::BY_POLICY && g.decision_note == "standing access")
+                .all(|g| g.decided_by == store::BY_POLICY && g.decision_note.starts_with("rule:"))
         );
         // Not covered: another host, and a sibling directory.
         assert!(matches!(
@@ -999,7 +1002,7 @@ mod tests {
             Outcome::Pending { .. }
         ));
         // A rule naming a credential directory cannot open it.
-        store::add_rule(&f.db, &repo, "fs_read", "~/.ssh", &empty, "oops", 2).unwrap();
+        store::add_rule(&f.db, &repo, "fs_read", "~/.ssh", &empty, "oops", 2, None).unwrap();
         let out = ask(&f, Capability::FsRead, &f.at(".ssh/id_ed25519"));
         assert!(matches!(out, Outcome::Refused(_)), "{out:?}");
     }
@@ -1015,6 +1018,7 @@ mod tests {
             &SandboxDelta::default(),
             "x",
             1,
+            None,
         )
         .unwrap();
         store::add_rule(
@@ -1025,6 +1029,7 @@ mod tests {
             &SandboxDelta::default(),
             "x",
             1,
+            None,
         )
         .unwrap();
         assert!(matches!(
