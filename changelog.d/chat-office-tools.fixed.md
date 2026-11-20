@@ -1,0 +1,1 @@
+Chat sessions can now make spreadsheets, documents and decks: `office_create`, `office_export` and `office_file` were only on the MCP server, so the chat said the tools were unavailable. `tool_search` also now splits a long query into words and ranks by how many match, instead of needing the whole sentence to appear in a tool's name.

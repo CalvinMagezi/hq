@@ -3379,6 +3379,7 @@ dependencies = [
  "hq-tool-api",
  "hq-tools",
  "hq-tools-coding",
+ "hq-tools-office",
  "hq-tools-web",
  "hq-vault",
  "libc",

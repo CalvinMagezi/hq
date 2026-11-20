@@ -193,6 +193,13 @@ impl SessionBuilder {
             vault_path.to_path_buf(),
         ));
 
+        // Office authoring (`office_create`, `office_export`, `office_file`): the same set the MCP
+        // registry has under its `suite` feature. Without it a chat could not make a sheet.
+        #[cfg(feature = "suite")]
+        tools.extend(hq_tools_office::create_office_tools(
+            vault_path.to_path_buf(),
+        ));
+
         // Mechanical AI-slop check for document/report drafts.
         tools.extend(hq_tools::prose_lint::create_prose_lint_tools());
 

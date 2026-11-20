@@ -3,7 +3,12 @@ name = "hq-agent"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# The office authoring tools (`office_create`, `office_export`, `office_file`) in the native catalogue.
+suite = ["dep:hq-tools-office"]
+
 [dependencies]
+hq-tools-office = { workspace = true, optional = true }
 hq-core = { workspace = true }
 hq-vault = { workspace = true }
 hq-db = { workspace = true }
