@@ -1,0 +1,1 @@
+The access request card in the web app now lets you allow a helper once, for the task, for the repository, or as a starter set, Settings lists the standing access you have given with Revoke, and the access profile preview no longer collapses to one character wide in a narrow window.
