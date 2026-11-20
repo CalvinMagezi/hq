@@ -65,11 +65,11 @@ class HqClientGrantsTest {
 
     private fun client() = HqClient({ "t-owner" }, "http://127.0.0.1:${server.localPort}")
 
-    @Test fun listsAllGrantsAndFiltersBySession() = runBlocking {
+    @Test fun listsAllGrantsWithScopeAndSuggestedStarterAndFiltersBySession() = runBlocking {
         val payload = """
             {"grants":[
-              {"id":"g-1","session_id":"hs 1","task_id":"FR-42","host":"local","repo":"/home/user/app","capability":"fs_write","resource":"/home/user/.gradle","state":"active","decided_by":"policy","helper_reason":"need cache","decision_note":"","requested_at":1700000000,"decided_at":1700000001,"applied_at":1700000002,"expires_at":1700086400,"revoked_at":null},
-              {"id":"g-2","session_id":"hs 1","task_id":null,"host":"local","repo":"/home/user/app","capability":"egress","resource":"example.org:443","state":"refused","decided_by":"system","helper_reason":"fetch docs","decision_note":"outside profile","requested_at":1700000100,"decided_at":null,"applied_at":null,"expires_at":null,"revoked_at":null}
+              {"id":"g-1","session_id":"hs 1","task_id":"FR-42","host":"local","repo":"/work/app","capability":"fs_write","resource":"/home/user/.gradle","state":"pending","decided_by":"policy","helper_reason":"need cache","decision_note":"","requested_at":1700000000,"decided_at":null,"applied_at":null,"expires_at":1700086400,"revoked_at":null,"scope":"session","suggested_starter":"mobile-dev"},
+              {"id":"g-2","session_id":"hs 1","task_id":null,"host":"local","repo":"/work/app","capability":"egress","resource":"example.org:443","state":"refused","decided_by":"system","helper_reason":"fetch docs","decision_note":"outside profile","requested_at":1700000100,"decided_at":null,"applied_at":null,"expires_at":null,"revoked_at":null,"scope":"session","suggested_starter":null}
             ]}
         """.trimIndent()
         answer = { _, _ -> 200 to payload }
@@ -79,18 +79,88 @@ class HqClientGrantsTest {
         assertEquals(2, all.size)
         assertEquals("g-1", all[0].id)
         assertEquals("FR-42", all[0].taskId)
+        assertEquals("/work/app", all[0].repo)
         assertEquals("/home/user/.gradle", all[0].resource)
-        assertTrue(all[0].isActive && all[0].isResource)
+        assertEquals("session", all[0].scope)
+        assertEquals("mobile-dev", all[0].suggestedStarter)
+        assertTrue(all[0].isPending && all[0].isResource && !all[0].isStandingRule)
         assertNull(all[0].revokedAt)
         assertEquals(1700086400L, all[0].expiresAt)
 
         assertNull(all[1].taskId)
+        assertNull(all[1].suggestedStarter)
         assertEquals("example.org:443", all[1].resource)
         assertEquals("outside profile", all[1].decisionNote)
         assertFalse(all[1].isActive)
 
         client().sandboxGrants("hs 1")
         assertEquals("GET /api/sandbox-grants?session=hs+1 HTTP/1.1", requestLines[1])
+    }
+
+    @Test fun listsStandingRulesStartersAndSummary() = runBlocking {
+        val rulesJson = """
+            {"rules":[
+              {"id":"r-1","session_id":"repo:/work/app","task_id":null,"host":"local","repo":"/work/app","capability":"fs_write","resource":"~/.gradle","state":"active","decided_by":"owner","helper_reason":"","decision_note":"mobile-dev starter","requested_at":1700000000,"decided_at":1700000001,"applied_at":null,"expires_at":null,"revoked_at":null,"scope":"repo"},
+              {"id":"r-2","session_id":"task:FR-42","task_id":"FR-42","host":"local","repo":"/work/app","capability":"egress","resource":"example.org:443","state":"active","decided_by":"owner","helper_reason":"","decision_note":"","requested_at":1700000002,"decided_at":1700000003,"applied_at":null,"expires_at":null,"revoked_at":null,"scope":"task"}
+            ]}
+        """.trimIndent()
+        answer = { _, _ -> 200 to rulesJson }
+        val rules = client().sandboxGrantRules()
+        assertEquals("GET /api/sandbox-grants/rules HTTP/1.1", requestLines[0])
+        assertEquals(2, rules.size)
+        assertTrue(rules[0].isStandingRule)
+        assertEquals("repo", rules[0].scope)
+        assertEquals("~/.gradle", rules[0].resource)
+        assertTrue(rules[1].isStandingRule)
+        assertEquals("task", rules[1].scope)
+        assertEquals("FR-42", rules[1].taskId)
+
+        val startersJson = """
+            {"starters":[
+              {"name":"mobile-dev","writable":["~/.gradle","~/.pub-cache"],"readable":["~/Library/Android/sdk"],"loopback_ports":[5037],"egress":["example.org:443"]}
+            ]}
+        """.trimIndent()
+        answer = { _, _ -> 200 to startersJson }
+        val starters = client().sandboxGrantStarters()
+        assertEquals("GET /api/sandbox-grants/starters HTTP/1.1", requestLines[1])
+        assertEquals(1, starters.size)
+        assertEquals("mobile-dev", starters[0].name)
+        assertEquals(listOf("~/.gradle", "~/.pub-cache"), starters[0].writable)
+        assertEquals(listOf("~/Library/Android/sdk"), starters[0].readable)
+        assertEquals(listOf(5037), starters[0].loopbackPorts)
+        assertEquals(listOf("example.org:443"), starters[0].egress)
+
+        val summaryJson = """
+            {"days":7,"summary":{"approved_by_policy":5,"approved_by_owner":2,"asked_owner":3,"declined":1,"refused":1,"standing_rules":4}}
+        """.trimIndent()
+        answer = { _, _ -> 200 to summaryJson }
+        val summary = client().sandboxGrantSummary(7)
+        assertEquals("GET /api/sandbox-grants/summary?days=7 HTTP/1.1", requestLines[2])
+        assertEquals(7, summary.days)
+        assertEquals(5, summary.summary.approvedByPolicy)
+        assertEquals(2, summary.summary.approvedByOwner)
+        assertEquals(3, summary.summary.askedOwner)
+        assertEquals(1, summary.summary.declined)
+        assertEquals(1, summary.summary.refused)
+        assertEquals(4, summary.summary.standingRules)
+    }
+
+    @Test fun answersNotificationWithStarterAndSurfaces400ErrorMessage() = runBlocking {
+        answer = { _, _ -> 200 to """{"success":true,"new_state":"approved","message":"ok"}""" }
+        client().answerNotification("val_sg_1", "allow_starter", "mobile-dev")
+        assertEquals("POST /api/notifications/val_sg_1/action HTTP/1.1", requestLines[0])
+        val sent = JSONObject(requestBodies[0])
+        assertEquals("allow_starter", sent.getString("action"))
+        assertEquals("mobile-dev", sent.getString("starter"))
+
+        answer = { _, _ -> 400 to """{"error":"this request has no repository to attach a rule to"}""" }
+        try {
+            client().answerNotification("val_sg_1", "allow_repo")
+            fail("400 must throw HqUnavailable")
+        } catch (e: HqUnavailable) {
+            assertEquals(400, e.status)
+            assertEquals("this request has no repository to attach a rule to", e.serverMessage)
+        }
     }
 
     @Test fun revokesGrantAndSurfaces404() = runBlocking {
@@ -104,6 +174,7 @@ class HqClientGrantsTest {
             fail("404 must throw HqUnavailable")
         } catch (e: HqUnavailable) {
             assertEquals(404, e.status)
+            assertEquals("no live grant g-1", e.serverMessage)
         }
     }
 

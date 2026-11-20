@@ -43,9 +43,11 @@ suspend fun HqClient.notifications(state: String?, limit: Int = 50): HqClient.In
         )
     }
 
-/** Records the owner's answer: approve, reject or dismiss. The thing that asked acts on it. */
-suspend fun HqClient.answerNotification(id: String, action: String) {
-    send(authed("/api/notifications/${java.net.URLEncoder.encode(id, "UTF-8")}/action").post(JSONObject().put("action", action).toString().toRequestBody("application/json".toMediaType())).build()) { }
+/** Records the owner's answer: approve, allow_task, allow_repo, allow_starter, reject or dismiss. */
+suspend fun HqClient.answerNotification(id: String, action: String, starter: String? = null) {
+    val body = JSONObject().put("action", action)
+    if (!starter.isNullOrBlank()) body.put("starter", starter)
+    send(authed("/api/notifications/${java.net.URLEncoder.encode(id, "UTF-8")}/action").post(json(body)).build()) { }
 }
 
 /**

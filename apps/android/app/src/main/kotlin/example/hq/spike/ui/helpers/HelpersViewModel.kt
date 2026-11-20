@@ -34,6 +34,9 @@ import example.hq.spike.data.renameHelper
 import example.hq.spike.data.startHelper
 import example.hq.spike.data.helperHosts
 import example.hq.spike.data.SandboxGrant
+import example.hq.spike.data.SandboxSummaryResponse
+import example.hq.spike.data.sandboxGrantRules
+import example.hq.spike.data.sandboxGrantSummary
 import example.hq.spike.data.sandboxGrants
 import example.hq.spike.data.revokeSandboxGrant
 
@@ -97,6 +100,8 @@ data class HelperOpen(
     val grantsOpen: Boolean = false,
     val grantsLoading: Boolean = false,
     val grants: List<SandboxGrant> = emptyList(),
+    val standingRules: List<SandboxGrant> = emptyList(),
+    val grantsSummary: SandboxSummaryResponse? = null,
     val grantsError: String? = null,
     val revokingGrantId: String? = null,
 )
@@ -304,7 +309,18 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val list = client.sandboxGrants(sessionId)
-                editFor(sessionId) { it.copy(grants = list, grantsLoading = false, grantsError = null) }
+                // Rules and summary are best-effort so an older HQ still shows session grants.
+                val rules = try { client.sandboxGrantRules() } catch (e: HqUnavailable) { emptyList() }
+                val summary = try { client.sandboxGrantSummary() } catch (e: HqUnavailable) { null }
+                editFor(sessionId) {
+                    it.copy(
+                        grants = list,
+                        standingRules = rules,
+                        grantsSummary = summary,
+                        grantsLoading = false,
+                        grantsError = null,
+                    )
+                }
             } catch (e: HqUnavailable) {
                 editFor(sessionId) { it.copy(grantsLoading = false, grantsError = w().s(R.string.grants_load_failed)) }
             }
@@ -320,7 +336,16 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.revokeSandboxGrant(grantId)
                 val list = try { client.sandboxGrants(sessionId) } catch (e: HqUnavailable) { null }
-                editFor(sessionId) { it.copy(revokingGrantId = null, grants = list ?: it.grants) }
+                val rules = try { client.sandboxGrantRules() } catch (e: HqUnavailable) { null }
+                val summary = try { client.sandboxGrantSummary() } catch (e: HqUnavailable) { null }
+                editFor(sessionId) {
+                    it.copy(
+                        revokingGrantId = null,
+                        grants = list ?: it.grants,
+                        standingRules = rules ?: it.standingRules,
+                        grantsSummary = summary ?: it.grantsSummary,
+                    )
+                }
             } catch (e: HqUnavailable) {
                 editFor(sessionId) { it.copy(revokingGrantId = null, grantsError = w().s(R.string.grants_revoke_failed)) }
             }

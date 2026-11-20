@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import example.hq.spike.R
+import example.hq.spike.data.SandboxGrantProfile
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.shell.consumeTouches
@@ -144,7 +145,7 @@ private fun NeedsFeed(ui: InboxUi, actions: InboxActions, onTakeLook: (InboxCard
         ui.banner?.let { b -> item(key = "notif-banner") { NotifBanner(b, actions) } }
         if (ui.offline) item { Text(if (cards.isEmpty()) "HQ hasn't answered yet, so what is waiting on you cannot be shown." else "HQ has stopped. These are the last things it asked.", style = HqType.BodySm, color = Mts.Amber) }
         if (!NeedsLayout.grouped(cards)) {
-            items(cards, key = { it.id }) { card -> NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook) }
+            items(cards, key = { it.id }) { card -> NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook, ui.sandboxStarters) }
             return@LazyColumn
         }
         groupedNeeds(state, ui, cards, actions, onTakeLook)
@@ -155,12 +156,12 @@ private fun NeedsFeed(ui: InboxUi, actions: InboxActions, onTakeLook: (InboxCard
 private fun androidx.compose.foundation.lazy.LazyListScope.groupedNeeds(state: NeedsState, ui: InboxUi, cards: List<InboxCard>, actions: InboxActions, onTakeLook: (InboxCard) -> Unit) {
     val layout = NeedsLayout.of(cards, state.focus, state.showAll)
     if (ui.catchUp) item(key = "catch-up") { CatchUpCard(cards.size, NeedsLayout.oldHelpers(cards).size, cards.count { !it.fromHelpers }, actions) }
-    layout.hero?.let { hero -> item(key = "hero-${hero.id}") { NeedCard(hero, ui.answering[hero.id], ui.offline, actions, onTakeLook) } }
+    layout.hero?.let { hero -> item(key = "hero-${hero.id}") { NeedCard(hero, ui.answering[hero.id], ui.offline, actions, onTakeLook, ui.sandboxStarters) } }
     items(layout.rows, key = { "row-${it.id}" }) { card -> NeedRow(card, onOpen = { state.focus = card.id }) }
     if (layout.folded > 0) item(key = "folded") { FoldedRow(layout.folded) { state.showAll = true } }
     if (layout.helpers.isNotEmpty()) {
         item(key = "helper-group") { HelperGroupRow(layout.helpers.size, NeedsLayout.oldHelpers(layout.helpers).isNotEmpty(), state.helpersOpen, onOpen = { state.helpersOpen = !state.helpersOpen }, onClear = actions.onClearHelpers) }
-        if (state.helpersOpen) items(layout.helpers, key = { "helper-${it.id}" }) { card -> NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook) }
+        if (state.helpersOpen) items(layout.helpers, key = { "helper-${it.id}" }) { card -> NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook, ui.sandboxStarters) }
     }
 }
 
@@ -256,7 +257,7 @@ fun ChatNeeds(cards: List<InboxCard>, ui: InboxUi, actions: InboxActions) {
     if (cards.isEmpty()) return
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.chat_needs_ok_title), style = SmallText, color = Mts.InkMuted)
-        for (card in cards) NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook = { actions.onDetails(it) })
+        for (card in cards) NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook = { actions.onDetails(it) }, starters = ui.sandboxStarters)
     }
 }
 
@@ -265,7 +266,7 @@ fun needsOfChat(needs: List<InboxCard>, threadId: String?): List<InboxCard> =
     if (threadId == null) emptyList() else needs.filter { it.kind == CardKind.Approval && it.threadId == threadId }
 
 @Composable
-private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit) {
+private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit, starters: List<SandboxGrantProfile> = emptyList()) {
     val shape = RoundedCornerShape(16.dp)
     val waiting = card.kind == CardKind.HelperAsks
     Column(
@@ -287,7 +288,7 @@ private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions
             Text(if (card.kind == CardKind.SignIn) signInBody(card) else card.body, style = HqType.BodySm.copy(fontSize = 15.sp, lineHeight = 22.sp), color = Mts.Ink, maxLines = BODY_LINES, overflow = TextOverflow.Ellipsis)
         }
         (answer as? Answer.Failed)?.let { Text(it.reason, style = HqType.BodySm, color = Mts.Amber) }
-        AnswerRow(card, answer, offline, actions, onTakeLook)
+        AnswerRow(card, answer, offline, actions, onTakeLook, starters = starters)
     }
 }
 
@@ -308,6 +309,12 @@ private fun SandboxGrantBody(grant: ParsedSandboxGrant) {
                 Text(taskId, style = SmallText.copy(fontFamily = FontFamily.Monospace), color = Mts.Ink)
             }
         }
+        if (grant.repo.isNotBlank()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.grants_repo_label), style = SmallText, color = Mts.InkMuted)
+                Text(grant.repo, style = SmallText.copy(fontFamily = FontFamily.Monospace), color = Mts.Ink)
+            }
+        }
         Text(stringResource(R.string.grants_expires_day), style = SmallText, color = Mts.InkMuted)
         val clippedReason = SandboxGrantWords.clipReason(grant.helperReason)
         if (clippedReason.isNotEmpty()) {
@@ -322,24 +329,85 @@ private fun SandboxGrantBody(grant: ParsedSandboxGrant) {
 }
 
 @Composable
-private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit, modifier: Modifier = Modifier, onDetailsPage: Boolean = false) {
+private fun SandboxGrantActionsColumn(
+    card: InboxCard,
+    starters: List<SandboxGrantProfile>,
+    sending: Boolean,
+    offline: Boolean,
+    actions: InboxActions,
+) {
+    val grant = card.sandboxGrant
+    val enabled = !sending && !offline
+    val starterName = grant?.suggestedStarter?.takeIf { it.isNotBlank() && grant.repo.isNotBlank() }
+    val starterProfile = starterName?.let { name -> starters.firstOrNull { it.name == name } }
+    val resources = androidx.compose.ui.platform.LocalContext.current.resources
+
+    PrimaryButton(
+        label = stringResource(if (sending) R.string.approval_answering else R.string.grants_allow_once),
+        modifier = Modifier.fillMaxWidth(),
+        enabled = enabled,
+        maxLines = Int.MAX_VALUE,
+    ) { actions.onSandboxGrantAnswer(card, SandboxGrantAnswer.AllowOnce) }
+
+    if (!grant?.taskId.isNullOrBlank()) {
+        example.hq.spike.ui.helpers.OutlineButton(
+            label = stringResource(R.string.grants_allow_task),
+            modifier = Modifier.fillMaxWidth(),
+            enabled = enabled,
+            maxLines = Int.MAX_VALUE,
+        ) { actions.onSandboxGrantAnswer(card, SandboxGrantAnswer.AllowTask) }
+    }
+
+    if (!grant?.repo.isNullOrBlank()) {
+        example.hq.spike.ui.helpers.OutlineButton(
+            label = stringResource(R.string.grants_allow_repo),
+            modifier = Modifier.fillMaxWidth(),
+            enabled = enabled,
+            maxLines = Int.MAX_VALUE,
+        ) { actions.onSandboxGrantAnswer(card, SandboxGrantAnswer.AllowRepo) }
+    }
+
+    if (starterName != null) {
+        val buttonLabel = if (SandboxGrantWords.starterButtonRes(starterName) == R.string.grants_allow_starter_generic) {
+            stringResource(R.string.grants_allow_starter_generic, starterName)
+        } else {
+            stringResource(SandboxGrantWords.starterButtonRes(starterName))
+        }
+        val starterDesc = SandboxGrantWords.starterDescriptionRes(starterName)?.let { stringResource(it) } ?: starterName
+        val allowLines = starterProfile?.let { p -> SandboxGrantWords.profileAllowLines(p) { res, items -> resources.getString(res, items) } }.orEmpty()
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            example.hq.spike.ui.helpers.OutlineButton(
+                label = buttonLabel,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
+                maxLines = Int.MAX_VALUE,
+            ) { actions.onSandboxGrantAnswer(card, SandboxGrantAnswer.AllowStarter(starterName)) }
+            Column(Modifier.padding(start = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(stringResource(R.string.grants_starter_includes, starterDesc), style = SmallText, color = Mts.InkMuted)
+                for (line in allowLines) {
+                    Text(line, style = SmallText.copy(fontFamily = FontFamily.Monospace), color = Mts.InkMuted)
+                }
+            }
+        }
+    }
+
+    example.hq.spike.ui.helpers.OutlineButton(
+        label = stringResource(R.string.grants_decline),
+        modifier = Modifier.fillMaxWidth(),
+        enabled = enabled,
+        maxLines = Int.MAX_VALUE,
+    ) { actions.onSandboxGrantAnswer(card, SandboxGrantAnswer.Decline) }
+}
+
+@Composable
+private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit, modifier: Modifier = Modifier, onDetailsPage: Boolean = false, starters: List<SandboxGrantProfile> = emptyList()) {
     val sending = answer == Answer.Sending
     val wholeSite = card.site?.takeIf { (card.canAllow || onDetailsPage) && card.offersWholeSite }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
     wholeSite?.let { site -> example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.approval_allow_site, site), Modifier.fillMaxWidth(), enabled = !sending && !offline) { actions.onAllowSite(card) } }
     val pair = card.kind != CardKind.SignIn && (card.canAllow || (onDetailsPage && card.kind == CardKind.Approval))
     if (card.kind == CardKind.SandboxGrant) {
-        val allowText = stringResource(if (sending) R.string.approval_answering else R.string.grants_allow)
-        val declineText = stringResource(R.string.grants_decline)
-        if (AnswerLayout.stacked(androidx.compose.ui.platform.LocalDensity.current.fontScale)) {
-            example.hq.spike.ui.helpers.OutlineButton(declineText, Modifier.fillMaxWidth(), enabled = !sending && !offline, maxLines = Int.MAX_VALUE) { actions.onNotNow(card) }
-            PrimaryButton(allowText, Modifier.fillMaxWidth(), enabled = !sending && !offline, maxLines = Int.MAX_VALUE) { actions.onAllow(card) }
-        } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                example.hq.spike.ui.helpers.OutlineButton(declineText, Modifier.weight(1f), enabled = !sending && !offline) { actions.onNotNow(card) }
-                PrimaryButton(allowText, Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
-            }
-        }
+        SandboxGrantActionsColumn(card, starters, sending, offline, actions)
     } else if (pair && AnswerLayout.stacked(androidx.compose.ui.platform.LocalDensity.current.fontScale)) {
         // Large text: one button per line, the safe answer first, labels wrapping rather than clipping.
         val label = if (card.allowLabel == "Allow") "Allow once" else card.allowLabel
@@ -549,7 +617,7 @@ private fun Snack(line: InboxLine, actions: InboxActions, modifier: Modifier) {
 
 /** A question on its own page: what is asked, what each answer does, who asked and when, and the answers at the foot. */
 @Composable
-fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit = { actions.onDetails(null) }) {
+fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, starters: List<SandboxGrantProfile> = emptyList(), onTakeLook: (InboxCard) -> Unit = { actions.onDetails(null) }) {
     BackHandler { actions.onDetails(null) }
     Column(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -583,7 +651,7 @@ fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: In
         }
         Column(Modifier.fillMaxWidth().background(Mts.Surface100).drawBehind { drawLine(Mts.Hairline, Offset.Zero, Offset(size.width, 0f), 1.dp.toPx()) }.padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp)) {
             (answer as? Answer.Failed)?.let { Text(it.reason, style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(bottom = 8.dp)) }
-            AnswerRow(card, answer, offline, actions, onTakeLook = onTakeLook, onDetailsPage = true)
+            AnswerRow(card, answer, offline, actions, onTakeLook = onTakeLook, onDetailsPage = true, starters = starters)
         }
     }
 }

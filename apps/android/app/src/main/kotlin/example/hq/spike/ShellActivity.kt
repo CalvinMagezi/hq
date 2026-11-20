@@ -699,7 +699,7 @@ class ShellActivity : ComponentActivity() {
             }
         }
         ChatOverlays(chatState, chat.actions) { path -> notes.openNote(path) }
-        inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions) { card -> inbox.actions.onDetails(null); openFromInbox(card, go) } }
+        inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions, starters = inboxState.sandboxStarters) { card -> inbox.actions.onDetails(null); openFromInbox(card, go) } }
         SignOutAsk(inboxState, inbox.actions)
         inboxState.allowed?.let { a -> AllowedPage(a, inbox.actions) { thread -> inbox.actions.onAllowedDone(); chat.actions.onOpenChat(thread); go(Place.Chat) } }
         tasksState.detail?.let { TaskPage(it, tasksState.today, tasks.actions) }
