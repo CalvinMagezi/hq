@@ -134,15 +134,18 @@ impl HqTool for OfficeCreateTool {
          cell starting with `=` is a formula, a blank cell stays blank) or `content` (Markdown, \
          for a document; for slides one `## heading` per slide). The note is the truth; call \
          `office_export` next to make the .xlsx, .docx or .pptx file the owner opens. Never \
-         write a deliverable anywhere else."
+         write a deliverable anywhere else. To start from a ready-made note instead, give \
+         `template` (invoice, stock, savings-group, school-fees, sales-dashboard or board-deck) \
+         and a `title`; money is in UGX and the owner overwrites the sample rows."
     }
 
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["kind", "title"],
+            "required": ["title"],
             "properties": {
-                "kind": { "type": "string", "enum": ["sheet", "doc", "slides"] },
+                "kind": { "type": "string", "enum": ["sheet", "doc", "slides"], "description": "Needed unless `template` is given." },
+                "template": { "type": "string", "enum": hq_suite_adapter::templates::NAMES },
                 "title": { "type": "string" },
                 "folder": { "type": "string", "description": "Vault-relative folder, default Notebooks/Office." },
                 "content": { "type": "string", "description": "Markdown body for doc or slides." },
@@ -179,12 +182,27 @@ impl HqTool for OfficeCreateTool {
 
     async fn execute(&self, args: Value) -> Result<Value> {
         use hq_suite_adapter::author::{Kind, SheetInput, create_note};
-        let kind = Kind::parse(text(&args, "kind")?)?;
         let title = text(&args, "title")?.to_string();
         let folder = args
             .get("folder")
             .and_then(Value::as_str)
             .map(str::to_string);
+        if let Some(name) = args.get("template").and_then(Value::as_str) {
+            let vault = self.vault.clone();
+            let name = name.to_string();
+            let rel = tokio::task::spawn_blocking(move || {
+                hq_suite_adapter::templates::create(&vault, &name, &title, folder.as_deref())
+            })
+            .await??;
+            if let Some(seam) = &self.seam {
+                seam.created(&rel, &args);
+            }
+            return Ok(json!({
+                "note": rel,
+                "next": "Open the note and replace the sample rows. Call office_export to make the file the owner opens.",
+            }));
+        }
+        let kind = Kind::parse(text(&args, "kind")?)?;
         let content = args
             .get("content")
             .and_then(Value::as_str)
@@ -294,6 +312,28 @@ mod tests {
                 ]
             }]
         })
+    }
+
+    #[tokio::test]
+    async fn a_template_makes_a_working_note_the_owner_can_export() {
+        let vault = tempfile::tempdir().unwrap();
+        let (create, export) = author_tools(vault.path());
+        let made = create
+            .execute(json!({"template": "stock", "title": "Shop stock"}))
+            .await
+            .unwrap();
+        let note = made["note"].as_str().unwrap().to_string();
+        assert!(vault.path().join(&note).exists());
+        let out = export
+            .execute(json!({"path": note, "format": "xlsx"}))
+            .await
+            .unwrap();
+        assert!(out["files"][0]["path"].as_str().unwrap().ends_with(".xlsx"));
+        let bad = create
+            .execute(json!({"template": "nope", "title": "x"}))
+            .await
+            .unwrap_err();
+        assert!(bad.to_string().contains("not a template"));
     }
 
     #[tokio::test]

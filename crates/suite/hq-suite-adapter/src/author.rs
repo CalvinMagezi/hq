@@ -187,10 +187,21 @@ pub fn create_note(
             }
         }
     };
+    write_note(vault, kind.name(), title, folder, &body)
+}
+
+/// Writes a note of `suite_kind` `kind` (`sheet`, `doc`, `slides` or `dashboard`) whose text after the
+/// frontmatter is `body`, checks that it is valid hqmd, and never replaces a note.
+pub(crate) fn write_note(
+    vault: &Path,
+    kind: &str,
+    title: &str,
+    folder: Option<&str>,
+    body: &str,
+) -> Result<String> {
     let note = format!(
-        "---\ntitle: {}\nsuite_kind: {}\nsuite_fidelity: native\n---\n\n{body}",
+        "---\ntitle: {}\nsuite_kind: {kind}\nsuite_fidelity: native\n---\n\n{body}",
         yaml_quoted(title),
-        kind.name()
     );
     let doc = Document::parse(&note);
     let problems = validate(&doc);

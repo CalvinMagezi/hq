@@ -39,8 +39,7 @@ number here comes with the command that reproduces it.
 
 ## What is not built
 
-The editor, the grid on the phone, number formats (UGX), the sidecar for large sheets and
-references between sheets. This is the engine and its measurement, milestone M4's first step.
+Inserting a column in the middle, deleting a column, pivots, array results (`FILTER`, `SORT`, `UNIQUE`), table references (`Table1[Column]`), conditional formatting, and the sidecar for very large sheets. Editing, UGX formats, references between sheets and charts are built; see the sections below.
 
 ## On the phone
 

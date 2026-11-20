@@ -85,6 +85,13 @@
   tools: [office_create, office_export]
   needs: [model]
 
+- id: start-from-template
+  group: documents
+  says: Start from a ready-made sheet, deck or dashboard
+  example: Make me a savings group ledger
+  tools: [office_create, office_export]
+  needs: [model]
+
 - id: edit-document
   group: documents
   says: Change a sheet, document, deck or dashboard you already have

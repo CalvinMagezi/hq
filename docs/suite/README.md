@@ -4,9 +4,12 @@ A small office suite inside HQ for people whose phone is their only computer. It
 documents in the smallest form that is still faithful, helps them put the originals somewhere
 they own, and shares work back out as Word, Excel, PDF and PowerPoint files.
 
-Status: milestone M0 (spec, corpus, measurement) is built apart from the numbers from real files and
-the reference phone; milestone M1 has its storage layer and the shrink pipeline, and is missing the
-storage governor. Everything is on the command line; nothing is in the web app yet.
+Status: the storage layer (shrink, governor, sinks and recovery), the docx, xlsx and pptx writers, a
+formula engine, and editors on the web and the phone for sheets, decks and dashboards are built. HQ itself
+can make a note (`office_create`, with starter templates), change part of one (`office_edit`), leave
+review comments, and export it as Word, Excel (with native charts), PowerPoint, PDF or a PNG snapshot.
+The plan's status log (`docs/plans/hq-suite.md`) is the full record, and what is not done yet is
+listed under "Next" there.
 
 ## The problem
 
