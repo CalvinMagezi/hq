@@ -37,3 +37,37 @@ export function suiteSourceOf(text: string): string | null {
   if (!source || !keys.get('source_sha256')) return null
   return keys.get('suite_original_state') === 'gone' ? null : source
 }
+
+// ---- Sheet values worked out by hq (added for the web grid; kept apart from the file calls above) ----
+
+/** One window of `GET /api/suite/sheet`: hq's own answer for cells, header row included at row 0. */
+export interface ServerSheetView {
+  name: string
+  row0: number
+  col0: number
+  row_count: number
+  col_count: number
+  rows: { text: string; raw: string; formula: boolean; number: boolean; error: boolean }[][]
+}
+
+export const fetchSheetWindow = (path: string, index: number, row: number, col: number) =>
+  hqJson<ServerSheetView>(`/api/suite/sheet?path=${encodeURIComponent(path)}&index=${index}&row=${row}&col=${col}`)
+
+/** One block of a note as `GET /api/suite/blocks` lists it. */
+export interface SuiteBlock {
+  index: number
+  hash: string
+  kind: string
+  src: string
+}
+export interface SuiteBlocks {
+  revision: string
+  blocks: SuiteBlock[]
+}
+export const fetchBlocks = (path: string) => hqJson<SuiteBlocks>(`/api/suite/blocks?path=${encodeURIComponent(path)}`)
+export const editBlock = (path: string, index: number, hash: string, markdown: string) =>
+  hqJson<SuiteBlocks>('/api/suite/blocks/edit', 'POST', { path, index, hash, markdown })
+export const insertBlock = (path: string, markdown: string, after?: { index: number; hash: string }) =>
+  hqJson<SuiteBlocks>('/api/suite/blocks/insert', 'POST', { path, markdown, ...(after ?? {}) })
+export const deleteBlock = (path: string, index: number, hash: string) =>
+  hqJson<SuiteBlocks>('/api/suite/blocks/delete', 'POST', { path, index, hash })

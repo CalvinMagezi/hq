@@ -14,11 +14,19 @@ export interface TypedBlock {
   close?: number
 }
 
-export interface Slide {
-  title: string
-  /** The card's markdown, without its heading and layout comment. */
-  body: string
+export interface CardMeta {
   layout: string | null
+  /** `fade`, or `push slow`: the name and an optional speed. */
+  transition: string | null
+  background: string | null
+  color: string | null
+  notes: string | null
+}
+
+export interface Slide extends CardMeta {
+  title: string
+  /** The card's markdown, without its heading and its layout, transition, colour and notes comments. */
+  body: string
 }
 
 export interface HqmdNote {
@@ -28,6 +36,8 @@ export interface HqmdNote {
   title: string | null
   blocks: TypedBlock[]
   slides: Slide[]
+  /** The deck's own transition and colours, for a slides note. */
+  deck: CardMeta | null
   /** The note without its frontmatter. */
   body: string
 }
@@ -91,24 +101,62 @@ export function slidesOf(body: string): Slide[] {
   return slides
 }
 
-function card(c: { title: string; lines: string[] }): Slide {
-  let layout: string | null = null
-  const kept = c.lines.filter((l) => {
-    const m = /^<!--\s*layout:\s*([a-z0-9-]+)\s*-->$/.exec(l.trim())
-    if (m && layout === null) {
-      layout = m[1]
-      return false
+const META_KEYS = ['layout', 'transition', 'background', 'color', 'notes'] as const
+export type MetaKey = (typeof META_KEYS)[number]
+
+/** A card's comment lines (outside code) taken out: where each one sits (line, count of lines), and the rest. */
+export function cardComments(lines: string[]): { spans: { key: MetaKey; start: number; end: number; value: string }[] } {
+  const spans: { key: MetaKey; start: number; end: number; value: string }[] = []
+  let fenced = false
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^(`{3,}|~{3,})/.test(lines[i])) fenced = !fenced
+    if (fenced) continue
+    const m = /^<!--\s*(layout|transition|background|color|notes):\s?([\s\S]*)$/.exec(lines[i].trim())
+    if (!m) continue
+    let end = i
+    let text = m[2]
+    while (!text.includes('-->') && end + 1 < lines.length) {
+      end += 1
+      text += `\n${lines[end]}`
     }
-    return true
-  })
-  return { title: c.title, body: kept.join('\n').trim(), layout }
+    if (!text.includes('-->')) continue
+    const value = text.slice(0, text.indexOf('-->')).trim()
+    if (text.slice(text.indexOf('-->') + 3).trim() !== '') continue
+    spans.push({ key: m[1] as MetaKey, start: i, end, value })
+    i = end
+  }
+  return { spans }
+}
+
+/** Splits a card's lines into its meta comments and the rest. The first comment of a key wins, as the pptx writer reads it. */
+export function splitCard(lines: string[]): { meta: CardMeta; rest: string[] } {
+  const { spans } = cardComments(lines)
+  const meta: CardMeta = { layout: null, transition: null, background: null, color: null, notes: null }
+  const drop = new Set<number>()
+  for (const s of spans) {
+    if (meta[s.key] === null) meta[s.key] = s.value
+    for (let i = s.start; i <= s.end; i += 1) drop.add(i)
+  }
+  return { meta, rest: lines.filter((_, i) => !drop.has(i)) }
+}
+
+function card(c: { title: string; lines: string[] }): Slide {
+  const { meta, rest } = splitCard(c.lines)
+  return { title: c.title, body: rest.join('\n').trim(), ...meta }
+}
+
+/** The deck's own transition and colours: comments before the first card. */
+export function deckMeta(body: string): CardMeta {
+  const lines = body.split(/\r?\n/)
+  const first = lines.findIndex((l) => /^##\s+\S/.test(l))
+  return splitCard(first < 0 ? lines : lines.slice(0, first)).meta
 }
 
 export function readHqmd(text: string): HqmdNote {
   const { meta, body } = splitFrontmatter(text)
   const kind = KINDS.includes(meta.suite_kind) ? (meta.suite_kind as SuiteKind) : null
   const h1 = /^#\s+(.+?)\s*#*\s*$/m.exec(body)
-  return { kind, fidelity: meta.suite_fidelity ?? null, title: h1?.[1] ?? null, blocks: typedBlocks(body), slides: kind === 'slides' ? slidesOf(body) : [], body }
+  return { kind, fidelity: meta.suite_fidelity ?? null, title: h1?.[1] ?? null, blocks: typedBlocks(body), slides: kind === 'slides' ? slidesOf(body) : [], deck: kind === 'slides' ? deckMeta(body) : null, body }
 }
 
 /** Whether the pane and the Vault page draw this note with a suite viewer instead of as plain markdown. */

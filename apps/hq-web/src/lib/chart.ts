@@ -30,8 +30,12 @@ const MAX_TICK_LABEL = 10
 const SERIES_COLORS = ['var(--brand-blue)', 'var(--brand-sky)', 'var(--ink)', 'var(--ink-muted)', 'var(--brand-indigo)']
 const DASH = '6 4'
 const color = (i: number) => SERIES_COLORS[i % SERIES_COLORS.length]
+/** The colour of the nth series; the same palette the chat's charts use. It never includes the border colour. */
+export const seriesColor = color
 /** The first line is solid and the others dashed, so colour is never the only difference. */
 const isDashed = (i: number) => i > 0
+export const seriesDashed = isDashed
+export const SERIES_DASH = DASH
 
 const VIEW_W = 360
 const VIEW_H = 240
@@ -95,6 +99,7 @@ export function parseChart(source: string): ChartParse {
   }
 }
 
+export const compactNumber = (n: number) => n.toLocaleString('en', { notation: 'compact', maximumFractionDigits: 1 })
 const compact = (n: number) => n.toLocaleString('en', { notation: 'compact', maximumFractionDigits: 1 })
 const round = (n: number) => Math.round(n * 100) / 100
 const clip = (s: string) => (s.length > MAX_TICK_LABEL ? `${s.slice(0, MAX_TICK_LABEL - 1)}…` : s)
@@ -120,7 +125,7 @@ export function yScale(values: number[]): { min: number; max: number; ticks: num
 }
 
 const axisText = (x: number, y: number, s: string, anchor: string, extra = '') =>
-  `<text x="${round(x)}" y="${round(y)}" text-anchor="${anchor}" style="fill:var(--text-dim);font-size:10px" ${extra}>${escapeHtml(s)}</text>`
+  `<text x="${round(x)}" y="${round(y)}" text-anchor="${anchor}" style="fill:var(--ink-muted);font-size:10px" ${extra}>${escapeHtml(s)}</text>`
 
 function cartesianSvg(spec: ChartSpec): string {
   const { left, right, top, bottom } = MARGIN
@@ -133,7 +138,7 @@ function cartesianSvg(spec: ChartSpec): string {
   const parts: string[] = []
 
   for (const tick of scale.ticks) {
-    parts.push(`<line x1="${left}" x2="${VIEW_W - right}" y1="${round(y(tick))}" y2="${round(y(tick))}" style="stroke:var(--text-dim);opacity:0.25"/>`)
+    parts.push(`<line x1="${left}" x2="${VIEW_W - right}" y1="${round(y(tick))}" y2="${round(y(tick))}" style="stroke:var(--ink-muted);opacity:0.25"/>`)
     parts.push(axisText(left - 6, y(tick) + 3, compact(tick), 'end'))
   }
   const every = Math.ceil(spec.labels.length / 8)
@@ -195,7 +200,7 @@ function pieSvg(spec: ChartSpec): string {
     const sweep = (v / total) * FULL_TURN
     const d = v > 0 ? wedge(cx, cy, inner, PIE_RADIUS, angle, angle + sweep) : ''
     angle += sweep
-    return d ? `<path d="${d}" style="fill:${color(i)};stroke:var(--bg-solid-surface);stroke-width:1.5"/>` : ''
+    return d ? `<path d="${d}" style="fill:${color(i)};stroke:var(--surface-100);stroke-width:1.5"/>` : ''
   })
   return svgWrap(spec, slices.join(''))
 }
@@ -233,7 +238,7 @@ export function renderChartHtml(spec: ChartSpec): string {
     : ''
   const legend = legendHtml(spec)
   const legendBlock = legend
-    ? `<ul style="list-style:none;padding:0;margin:8px 0 0;display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--text-dim)">${legend}</ul>`
+    ? `<ul style="list-style:none;padding:0;margin:8px 0 0;display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--ink-muted)">${legend}</ul>`
     : ''
   return `<figure class="chart-block" style="max-width:560px;margin:12px 0">${title}${svg}${legendBlock}</figure>`
 }
