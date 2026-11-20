@@ -639,6 +639,19 @@ pub(crate) enum Commands {
         host: Option<String>,
     },
 
+    // ─── Sandbox grants ──────────────────────────────────────────────
+    /// List or revoke the sandbox access helpers asked HQ for
+    Grants {
+        /// Subcommand: list, revoke
+        #[arg(default_value = "list")]
+        sub: String,
+        /// For revoke: a grant id, or a session id to revoke all of its grants
+        target: Option<String>,
+        /// Print the grants as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     // ─── Usage ───────────────────────────────────────────────────────
     /// Show LLM cost and tokens from recorded calls
     Usage {
