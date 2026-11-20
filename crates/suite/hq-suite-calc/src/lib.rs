@@ -12,10 +12,12 @@ mod parse;
 mod sheet;
 mod value;
 
-pub use eval::FUNCTIONS;
+pub use eval::{FUNCTIONS, NOT_PLANNED, why_unsupported};
 pub use parse::{CellRef, Expr, ParseError, RefContext, parse_formula, parse_formula_in};
 pub use sheet::{Sheet, Workbook, column_name, parse_cell_ref};
 pub use value::{CalcError, Value, format_number};
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_more;

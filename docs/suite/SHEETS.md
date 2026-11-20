@@ -5,7 +5,7 @@ precedence (`-2^2` is 4, `50%` is 0.5), errors that travel through a calculation
 as `#CIRC!` instead of looping, and a work stack so a chain of thousands of dependent formulas
 cannot overflow. Functions: `SUM PRODUCT AVERAGE MIN MAX COUNT COUNTA IF IFS IFERROR SWITCH AND OR
 NOT ABS INT SQRT ROUND ROUNDUP ROUNDDOWN MOD LEN CONCATENATE CONCAT ISNUMBER ISTEXT ISBLANK ISERROR
-LEFT RIGHT UPPER LOWER TRIM ROW INDEX VLOOKUP PMT EDATE COUNTIF SUMIF SEARCH FIND SUBSTITUTE N XLOOKUP TEXT POWER QUOTIENT CHAR ROWS TEXTJOIN`, plus references between sheets (`=Stock!B2`, `='Price list'!A1:A9`). Anything else is `#NAME?`; it is never guessed.
+LEFT RIGHT UPPER LOWER TRIM ROW INDEX VLOOKUP PMT EDATE COUNTIF SUMIF SEARCH FIND SUBSTITUTE N XLOOKUP TEXT POWER QUOTIENT CHAR ROWS TEXTJOIN LET`, and since the second batch (see "Second batch of functions" below) `TRUE FALSE IFNA COUNTIFS SUMIFS AVERAGEIF AVERAGEIFS MAXIFS MINIFS MEDIAN LARGE SMALL RANK RANK.EQ MATCH LOOKUP HLOOKUP VALUE REPT PROPER MID EXACT TRUNC SIGN CEILING FLOOR DATE YEAR MONTH DAY WEEKDAY EOMONTH DATEDIF`, plus references between sheets (`=Stock!B2`, `='Price list'!A1:A9`). Anything else is `#NAME?`; it is never guessed.
 
 ## How good it is: measured, not assumed
 
@@ -93,3 +93,42 @@ On a **tile**, a `where` makes the range's first row the column names and takes 
 On a **plot**, `group=region` draws one series per value of that column (up to six, over the labels in the order they first appear, a label a group lacks counts as 0); it needs a bar or line chart. `where` filters the rows before anything is drawn.
 
 A tile takes no `group` (it shows one number); a pie or donut takes none either. Anything that cannot be read or drawn says why instead of guessing: an unknown column, a condition without a value, more than four conditions, more than six groups.
+
+## Second batch of functions
+
+Added to `hq-suite-calc` from the list of what the owner's workbooks still miss. **Not re-measured**: no real workbook was available when this was written, so the match rates above are the ones measured before it, and the effect of this batch on them is unknown until `hq suite calc-check` is run again. Every new function has unit tests that assert Excel's documented answers, error cases included (`crates/suite/hq-suite-calc/src/tests_more.rs`).
+
+**Added:** `TRUE()`/`FALSE()` (the bare words `TRUE` and `FALSE` already worked), `IFNA`, `COUNTIFS`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `MAXIFS`, `MINIFS`, `MEDIAN`, `LARGE`, `SMALL`, `RANK` and `RANK.EQ`, `MATCH` (types 0, 1 and -1), `LOOKUP` (vector form), `HLOOKUP`, `VALUE`, `REPT`, `PROPER`, `MID`, `EXACT`, `TRUNC`, `SIGN`, `CEILING`, `FLOOR`, `DATE`, `YEAR`, `MONTH`, `DAY`, `WEEKDAY` (types 1, 2, 3 and 11 to 17), `EOMONTH`, `DATEDIF` (`Y`, `M`, `D`, `YM`).
+
+**`TEXT`** now reproduces date formats (`yyyy-mm-dd`, `dd/mm/yyyy`, `dd.mm.yyyy`, `mmm yyyy`, `d mmmm`, `dddd`, `ddd`, `yy`, `m/d/yy`), currency-like number formats (`$#,##0.00`, `"UGX "#,##0`, `#,##0 "UGX"`, `\U\G\X #,##0`, a currency sign such as the euro), `0`, `#`, `#,##0`, `0.##` (with Excel's trailing point, `2.`), zero padding (`000`), percent, a second section for negatives (`#,##0;(#,##0)`) and a third for zero. A text that is not a number comes back unchanged and a truth value as `TRUE` or `FALSE`, as in Excel.
+
+**Rounding** now works on the 15 significant digits Excel keeps instead of on the binary number underneath, so `ROUND(1.005,2)` is 1.01 and `ROUNDUP(2.3*3,0)` is 7 (the first used to give 1). `TEXT` uses the same rule.
+
+**Whole-column ranges** (`$B:$B`, `B:B`, `Sheet!A:C`, `B2:B1048576`) are read. The engine stops at the last row anything is written in, in the whole workbook, so a million empty cells are never copied. Cutting a column back changes nothing for sums, counts, lookups or `INDEX` (`INDEX(B:B, 500000)` is still an empty cell), but it would change a count of blanks, so `COUNTIF(A:A,"")`, `COUNTIF(A:A,"=")` and the same in `COUNTIFS`/`SUMIF` are refused as "cannot calculate". `ROWS(A:A)` is 1,048,576.
+
+**Behaviour fixed on the way**, each of which could have given another answer before: `COUNTIF(range, 0)` no longer counts blank cells; `COUNTIF(range, "<>")` counts the cells that are not blank, `"="` only blank ones, and `""` blank cells and empty texts; the text `"inf"` or `"nan"` is no longer read as a number; `VLOOKUP` with approximate matching ignores the blank rows below a table.
+
+### What stays "cannot calculate", and why
+
+The rule is unchanged: an unsupported thing is `#NAME?` ("cannot calculate"), never a plausible number. `hq_suite_calc::NOT_PLANNED` lists the functions left out on purpose with the reason, and `why_unsupported(name)` returns it; they are also absent from `FUNCTIONS`, so the calc-check report counts each by name.
+
+| Left out | Why |
+|----------|-----|
+| `TODAY`, `NOW`, `RAND`, `RANDBETWEEN` | The answer depends on the clock or chance, so a saved value cannot be repeated. |
+| `OFFSET`, `INDIRECT` | Volatile: what they read depends on a calculation or a text. |
+| `SUMPRODUCT` | Works on whole arrays, and the engine has no array values. |
+| `CHOOSE` | Not built yet. |
+| `UNIQUE`, `SORT`, `FILTER` | They return an array that spills over several cells; a cell here holds one value, so there is no safe result to show. |
+| Table references (`Table1[Column]`) | The workbook model has no tables (the loader reads cells, not table definitions), so nothing can resolve the name. They fail to parse and stay "cannot calculate". |
+
+Smaller refusals inside functions that exist:
+
+- `MATCH` with type 1 or -1, `LOOKUP` and an approximate `HLOOKUP` need sorted data. Excel's binary search over an unsorted list, or one that mixes texts and numbers, depends on how it probes, so such a list gives "cannot calculate". A trailing run of blank cells is allowed. `MATCH(x, range, -1)` with repeated values, `MATCH` with `~` escapes, `LOOKUP` over a table (array form) and a blank lookup value are refused too.
+- `LARGE` and `SMALL` with a fractional `k`, `AVERAGEIF` with a sum range of another shape.
+- `DATEDIF` with `"MD"` or `"YD"` (Excel's own answers are inconsistent around month ends and leap days).
+- A date given as text other than `2024-03-15` (`15/03/2024`, `March 5`), and `VALUE` of a text with a currency sign, a time, odd thousands commas or another date style: Excel's reading depends on the locale.
+- `TEXT` with a time (`hh:mm`), colours (`[Red]`), currency tags (`[$USD]`), fractions, scientific, a scaling comma (`0,`), fill characters, an unquoted letter, or a small negative that shows as zero (`-0.001` as `0.00`, which Excel shows with a sign).
+
+### Left for the web mirror
+
+`apps/hq-web/src/lib/sheetCalc.ts` is a separate TypeScript calculator for the grid and has only five functions. It does not follow this engine, so a cell it shows can differ from the one hq calculates until it either learns these functions or asks hq for the values.
