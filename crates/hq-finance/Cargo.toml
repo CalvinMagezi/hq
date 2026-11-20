@@ -8,6 +8,7 @@ description = "Local-only parsing of mobile-money messages into reviewable trans
 # Deliberately no dependency on hq-llm, hq-memory, hq-vault or hq-db: personal finance data must not
 # have a path to a model, an index or a sync layer. tests/boundary.rs fails if that changes.
 [dependencies]
+chrono = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
