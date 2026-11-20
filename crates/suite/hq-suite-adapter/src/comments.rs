@@ -102,12 +102,6 @@ fn patch_doc(doc: &Document, op: Op) -> Result<Document> {
     apply(doc, &patch).map_err(|e| anyhow::anyhow!("that edit was refused: {e}"))
 }
 
-fn write(file: &Path, doc: &Document, op: Op) -> Result<CommentsView> {
-    let patched = patch_doc(doc, op)?;
-    fsx::atomic_write(file, patched.render().as_bytes())?;
-    Ok(view_of(&patched))
-}
-
 /// The comments of a note already read, as [`list`] returns them.
 pub fn view(doc: &Document) -> CommentsView {
     view_of(doc)
