@@ -4,6 +4,7 @@
 
 use crate::egress::{Egress, Rule};
 use crate::error::HostError;
+use crate::linked_git::{linked_git_dirs, linked_protected, linked_writable};
 use crate::server;
 use hq_sandbox::{
     AgentSandbox, Backend, HiddenDir, Network, ReadRestriction, Relay, backend, canonical, wrap,
@@ -843,13 +844,15 @@ fn strict_policy(
     let own_tmp = canonical([tmp])
         .into_iter()
         .filter(|d| !private_tmp.iter().any(|p| d.starts_with(p)));
+    let linked = linked_git_dirs(&project);
     let writable = canonical(
         under(home, HOME_WRITABLE)
             .into_iter()
             .chain([claude_dir.to_path_buf()])
             .chain(shared_tmp)
             .chain(own_tmp)
-            .chain(spec.writable.iter().cloned()),
+            .chain(spec.writable.iter().cloned())
+            .chain(linked.iter().flat_map(|(g, c)| linked_writable(g, c))),
     );
     // A writable root that contains HOME, the run directory or a secret directory
     // would let the agent rename or rewrite them, which no read rule survives.
@@ -884,9 +887,16 @@ fn strict_policy(
             inside.display()
         )));
     }
+    let linked_guard: Vec<PathBuf> = linked
+        .iter()
+        .flat_map(|(gitdir, _)| linked_protected(&project, gitdir))
+        .collect();
     let (project_files, project_dirs): (Vec<_>, Vec<_>) = under(&project, PROJECT_READONLY)
         .into_iter()
-        .partition(|p| p.extension().is_some() || p.ends_with("config"));
+        .chain(linked_guard)
+        .partition(|p| {
+            p.extension().is_some() || p.ends_with("config") || p.ends_with("config.worktree")
+        });
     // Seatbelt denies writes to a path whether or not it exists; a bubblewrap
     // mount needs something to mount over, so only existing paths are protected.
     let keep = |paths: Vec<PathBuf>| -> Vec<PathBuf> {
