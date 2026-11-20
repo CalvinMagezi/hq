@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { CHANGE_EVENTS, sharedWithSubscribers } from './WebSocketContext'
 
 test('rule 5: every change event reaches subscribers, and so do the chat events the outbox waits on', () => {
-  for (const type of ['inbox:change', 'notes:change', 'helpers:change', 'budget:change', 'settings:change', 'task:sync', 'sessions:sync']) {
+  for (const type of ['inbox:change', 'notes:change', 'helpers:change', 'budget:change', 'settings:change', 'task:sync', 'sessions:sync', 'note_changed']) {
     expect(CHANGE_EVENTS.has(type), type).toBe(true)
     expect(sharedWithSubscribers(type), type).toBe(true)
   }

@@ -93,3 +93,17 @@ On a **tile**, a `where` makes the range's first row the column names and takes 
 On a **plot**, `group=region` draws one series per value of that column (up to six, over the labels in the order they first appear, a label a group lacks counts as 0); it needs a bar or line chart. `where` filters the rows before anything is drawn.
 
 A tile takes no `group` (it shows one number); a pie or donut takes none either. Anything that cannot be read or drawn says why instead of guessing: an unknown column, a condition without a value, more than four conditions, more than six groups.
+
+## Editing more than a cell: `office_edit` and `POST /api/suite/edit`
+
+The agent's `office_edit` tool and the apps' `POST /api/suite/edit` run the same code (`hq-suite-adapter::edit`). Every action reads the note, builds the note as it would be after the change, and writes it back as one hqmd patch, so a block that changed since it was read is refused and every other byte of the note stays as it was.
+
+Sheet actions (`sheet` is the sheet block's number from 0; row 0 is the header row): `set_cells` (a rectangle of `values` with the `expected` text of each cell), `add_rows` (at the end, or before `at`), `delete_rows`, `add_column` (on the right: `name`, `type`, `default`), `set_column_type` (declares the type; cells are not converted) and `add_sheet`. The structural ones quote the sheet block's `hash`. Cell text follows the single-cell rules (2,000 characters, no `|` or line break); a formula must pass the xlsx writer's safety check and parse in the engine; a sheet holds at most 100,000 cells and 16,384 columns; a sheet with a `data=` sidecar is not edited.
+
+**Formulas that read rows.** Adding rows in the middle and deleting rows move every row below them, and references are not rewritten. The edit is refused, naming the formula (or the tile or plot) that reads those rows, and nothing is written. Adding rows at the end and adding a column on the right move nothing and are always allowed. This is the tracked shortcut in `docs/techdebt/office-edit-row-shift-refs.md`.
+
+**Preview then apply.** An agent's call that deletes anything, or touches more than 50 cells, writes nothing and answers with a summary and a `token`. The same call with the `token` applies it, and only if the note is still at the revision the preview was made from. A single-cell or single-block edit is one step. The apps' calls (the owner's own) are one step; `dry_run: true` asks what a call would do.
+
+**Dashboards.** `add_tile` and `add_plot` build the block from structured arguments, draw it with the evaluators above before writing, and refuse with the evaluator's own sentence if it would not draw.
+
+**Telling open pages.** Every suite write sends `{"type": "note_changed", "path", "hash"}` on the socket, and the web app reloads the note it has open. The existing `notes:change` event is coarser (a count and a time from the search index) and still arrives.

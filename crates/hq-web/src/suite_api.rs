@@ -45,6 +45,8 @@ pub(crate) fn routes() -> Router<Arc<WsState>> {
         .route("/api/suite/blocks/delete", post(block_delete_handler))
         .route("/api/suite/plot", get(plot_handler))
         .route("/api/suite/sheet/cell", post(sheet_cell_handler))
+        .route("/api/suite/cards", get(cards_handler))
+        .route("/api/suite/edit", post(edit_handler))
 }
 
 #[derive(Deserialize)]
@@ -366,6 +368,7 @@ pub(crate) async fn sheet_cell_handler(
     Json(b): Json<CellEdit>,
 ) -> Result<impl IntoResponse, ApiError> {
     let vault = state.vault_path.clone();
+    let path = b.path.clone();
     let view = blocking(move || {
         hq_suite_adapter::sheets::edit_cell(
             &vault,
@@ -379,6 +382,7 @@ pub(crate) async fn sheet_cell_handler(
         hq_suite_adapter::sheets::view(&vault, &b.path, b.index, 0, 0)
     })
     .await?;
+    announce_written(&state, &path);
     Ok(Json(view))
 }
 
@@ -462,10 +466,12 @@ pub(crate) async fn block_edit_handler(
             "an edit names the block, its hash and the new text",
         ));
     };
-    Ok(Json(
+    let path = b.path.clone();
+    let view =
         blocking(move || hq_suite_adapter::blocks::edit(&vault, &b.path, index, &hash, &markdown))
-            .await?,
-    ))
+            .await?;
+    announce_written(&state, &path);
+    Ok(Json(view))
 }
 
 pub(crate) async fn block_insert_handler(
@@ -476,17 +482,18 @@ pub(crate) async fn block_insert_handler(
     let markdown = b.markdown.clone().unwrap_or_default();
     let after = b.index.zip(b.hash.clone());
     let path = b.path.clone();
-    Ok(Json(
-        blocking(move || {
-            hq_suite_adapter::blocks::insert(
-                &vault,
-                &path,
-                after.as_ref().map(|(i, h)| (*i, h.as_str())),
-                &markdown,
-            )
-        })
-        .await?,
-    ))
+    let announced = b.path.clone();
+    let view = blocking(move || {
+        hq_suite_adapter::blocks::insert(
+            &vault,
+            &path,
+            after.as_ref().map(|(i, h)| (*i, h.as_str())),
+            &markdown,
+        )
+    })
+    .await?;
+    announce_written(&state, &announced);
+    Ok(Json(view))
 }
 
 pub(crate) async fn block_delete_handler(
@@ -499,9 +506,72 @@ pub(crate) async fn block_delete_handler(
             "a delete names the block and its hash",
         ));
     };
-    Ok(Json(
-        blocking(move || hq_suite_adapter::blocks::delete(&vault, &b.path, index, &hash)).await?,
-    ))
+    let path = b.path.clone();
+    let view =
+        blocking(move || hq_suite_adapter::blocks::delete(&vault, &b.path, index, &hash)).await?;
+    announce_written(&state, &path);
+    Ok(Json(view))
+}
+
+/// Tells open pages the note at `path` was just written, with the revision it is at now.
+fn announce_written(state: &WsState, path: &str) {
+    if let Some(revision) = hq_suite_adapter::edit::note_revision(&state.vault_path, path) {
+        state.announce_note(path, &revision);
+    }
+}
+
+/// A slides note's cards (number, hash, notes, look), for the card editor.
+pub(crate) async fn cards_handler(
+    State(state): State<Arc<WsState>>,
+    Query(q): Query<PathQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    if !state.path_allowed(&q.path) {
+        return Err(ApiError::not_found());
+    }
+    let vault = state.vault_path.clone();
+    let args = serde_json::json!({"action": "cards", "note": q.path});
+    let out = blocking(move || {
+        hq_suite_adapter::edit::run(&vault, &args, hq_suite_adapter::edit::Gate::Owner)
+    })
+    .await?;
+    Ok(Json(out))
+}
+
+/// Every `office_edit` action for the apps: the body is the action's arguments with `path` in
+/// place of `note`. The owner's edit is one step; `dry_run: true` returns what it would do and
+/// writes nothing. A refusal (a stale block, a formula that reads moved rows) comes back as a
+/// sentence, and nothing is written.
+pub(crate) async fn edit_handler(
+    State(state): State<Arc<WsState>>,
+    Json(mut body): Json<serde_json::Value>,
+) -> Result<impl IntoResponse, ApiError> {
+    let path = body
+        .get("path")
+        .and_then(|p| p.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| ApiError::bad_request("an edit names the note as `path`"))?;
+    if !state.path_allowed(&path) || !path.ends_with(".md") {
+        return Err(ApiError::not_found());
+    }
+    if let Some(o) = body.as_object_mut() {
+        o.remove("path");
+        // A token belongs to an agent's preview; the owner's call is one step.
+        o.remove("token");
+        // Nothing the app sends can claim to be another caller.
+        o.retain(|k, _| !k.starts_with("_hq_"));
+        o.insert("note".into(), serde_json::Value::String(path.clone()));
+    }
+    let vault = state.vault_path.clone();
+    let out = blocking(move || {
+        hq_suite_adapter::edit::run(&vault, &body, hq_suite_adapter::edit::Gate::Owner)
+    })
+    .await?;
+    if out["changed"] == true
+        && let Some(revision) = out["revision"].as_str()
+    {
+        state.announce_note(&path, revision);
+    }
+    Ok(Json(out))
 }
 
 pub(crate) async fn storage_handler(
@@ -521,6 +591,150 @@ pub(crate) async fn storage_handler(
 mod tests {
     use super::*;
     use axum::body::to_bytes;
+
+    async fn body_json(reply: impl IntoResponse) -> serde_json::Value {
+        let bytes = to_bytes(reply.into_response().into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_app_edit_is_one_step_and_open_pages_hear_which_note_changed() {
+        let vault = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(vault.path().join("Notebooks")).unwrap();
+        let note = "# S\n\n```sheet name=S\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n";
+        std::fs::write(vault.path().join("Notebooks/s.md"), note).unwrap();
+        let state = Arc::new(WsState::new(vault.path().to_path_buf(), None));
+        let mut heard = state.tx.subscribe();
+
+        let listed = body_json(
+            blocks_handler(
+                State(state.clone()),
+                Query(PathQuery {
+                    path: "Notebooks/s.md".into(),
+                }),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        let hash = listed["blocks"][1]["hash"].clone();
+
+        // A delete is one step for the owner (no token), and the page that has the note open is told.
+        let done = body_json(
+            edit_handler(
+                State(state.clone()),
+                Json(serde_json::json!({"path": "Notebooks/s.md", "action": "delete_rows",
+                    "sheet": 0, "hash": hash, "row": 1, "token": "ignored", "_hq_caller_session": "x"})),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(done["changed"], true);
+        assert!(
+            !std::fs::read_to_string(vault.path().join("Notebooks/s.md"))
+                .unwrap()
+                .contains("| 1 | 2 |")
+        );
+        let frame: serde_json::Value = serde_json::from_str(&heard.try_recv().unwrap()).unwrap();
+        assert_eq!(frame["type"], "note_changed");
+        assert_eq!(frame["path"], "Notebooks/s.md");
+        assert_eq!(frame["hash"], done["revision"]);
+
+        // A dry run, a refused edit and a stale one say so and announce nothing.
+        let stale = serde_json::json!({"path": "Notebooks/s.md", "action": "add_rows", "hash": hash, "rows": [["3", "4"]]});
+        assert!(
+            edit_handler(State(state.clone()), Json(stale))
+                .await
+                .is_err(),
+            "the sheet changed since the hash was read"
+        );
+        let dry = body_json(
+            edit_handler(
+                State(state.clone()),
+                Json(serde_json::json!({"path": "Notebooks/s.md", "action": "set_cells", "dry_run": true,
+                    "row": 0, "col": 0, "values": [["z"]], "expected": [["a"]]})),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(dry["preview"], true);
+        assert!(
+            heard.try_recv().is_err(),
+            "nothing was written, so nothing is announced"
+        );
+
+        // Only notes are edited, and a path with no note names no note.
+        for bad in [
+            serde_json::json!({"path": "Notebooks/s.docx", "action": "blocks"}),
+            serde_json::json!({"action": "blocks"}),
+        ] {
+            assert!(edit_handler(State(state.clone()), Json(bad)).await.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn the_existing_block_routes_announce_the_note_they_wrote() {
+        let vault = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(vault.path().join("Notebooks")).unwrap();
+        std::fs::write(vault.path().join("Notebooks/d.md"), "# D\n\nOne.\n").unwrap();
+        let state = Arc::new(WsState::new(vault.path().to_path_buf(), None));
+        let mut heard = state.tx.subscribe();
+        let listed = body_json(
+            blocks_handler(
+                State(state.clone()),
+                Query(PathQuery {
+                    path: "Notebooks/d.md".into(),
+                }),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        block_edit_handler(
+            State(state.clone()),
+            Json(BlockBody {
+                path: "Notebooks/d.md".into(),
+                index: Some(1),
+                hash: listed["blocks"][1]["hash"].as_str().map(str::to_string),
+                markdown: Some("Two.".into()),
+            }),
+        )
+        .await
+        .unwrap();
+        let frame: serde_json::Value = serde_json::from_str(&heard.try_recv().unwrap()).unwrap();
+        assert_eq!(frame["type"], "note_changed");
+        assert_eq!(frame["path"], "Notebooks/d.md");
+        assert!(frame["hash"].as_str().is_some_and(|h| h.len() >= 8));
+    }
+
+    #[tokio::test]
+    async fn the_cards_of_a_deck_are_listed_for_the_card_editor() {
+        let vault = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(vault.path().join("Notebooks")).unwrap();
+        std::fs::write(
+            vault.path().join("Notebooks/k.md"),
+            "# T\n\n## A\n\nOne.\n\n## B\n\nTwo.\n",
+        )
+        .unwrap();
+        let state = Arc::new(WsState::new(vault.path().to_path_buf(), None));
+        let out = body_json(
+            cards_handler(
+                State(state),
+                Query(PathQuery {
+                    path: "Notebooks/k.md".into(),
+                }),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(out["cards"][1]["title"], "B");
+        assert!(out["cards"][0]["hash"].as_str().is_some());
+    }
 
     #[tokio::test]
     async fn a_file_nothing_was_done_to_is_ready_and_a_missing_one_is_refused() {

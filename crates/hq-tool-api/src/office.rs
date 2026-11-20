@@ -32,9 +32,48 @@ pub trait NoteWriteSeam: Send + Sync {
 
 pub type SharedSeam = std::sync::Arc<dyn NoteWriteSeam>;
 
+/// Told when an office tool changed a note: its vault path and the note's new revision. The web
+/// server installs one so open pages can reload the note; with none, nothing is announced.
+pub type NoteChangedListener = Box<dyn Fn(&str, &str) + Send + Sync>;
+
+static NOTE_LISTENER: std::sync::Mutex<Option<NoteChangedListener>> = std::sync::Mutex::new(None);
+
+/// Installs the one listener (a later call replaces it) or removes it with `None`.
+pub fn set_note_listener(listener: Option<NoteChangedListener>) {
+    if let Ok(mut slot) = NOTE_LISTENER.lock() {
+        *slot = listener;
+    }
+}
+
+/// Announces that the note `rel` was changed and is now at `revision`.
+pub fn notify_note_changed(rel: &str, revision: &str) {
+    if let Ok(slot) = NOTE_LISTENER.lock()
+        && let Some(listener) = slot.as_ref()
+    {
+        listener(rel, revision);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_listener_hears_a_changed_note_until_it_is_removed() {
+        use std::sync::{Arc, Mutex};
+        let heard: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+        let sink = heard.clone();
+        set_note_listener(Some(Box::new(move |n, r| {
+            sink.lock().unwrap().push((n.into(), r.into()));
+        })));
+        notify_note_changed("Notebooks/a.md", "r1");
+        set_note_listener(None);
+        notify_note_changed("Notebooks/a.md", "r2");
+        assert_eq!(
+            *heard.lock().unwrap(),
+            vec![("Notebooks/a.md".to_string(), "r1".to_string())]
+        );
+    }
 
     #[test]
     fn only_confirm_moves_an_original() {
