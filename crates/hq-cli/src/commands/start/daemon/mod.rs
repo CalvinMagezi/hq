@@ -509,6 +509,9 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("helper-setup-offer", Duration::from_secs(1800)),
         // How HQ was used (capabilities, corrections, return), once a week; `daemon.adoption_digest`.
         DaemonTask::with_default_timeout("adoption-digest", Duration::from_secs(604800)),
+        // A reminder to review finance rows and import new messages, once a week, only for a
+        // person with a ledger; `daemon.finance_nudge`.
+        DaemonTask::with_default_timeout("finance-nudge", Duration::from_secs(604800)),
         // Decisions past their deadline take their default, or are held; see `hq decide`.
         DaemonTask::with_default_timeout("owner-decisions", Duration::from_secs(600)),
         // Stale helper requests leave Needs you (restorable); `daemon.inbox_tidy`.
@@ -692,6 +695,7 @@ async fn dispatch_task(
         "daily-brief" => tasks_periodic::run_daily_brief(db, config).await,
         "tool-failure-digest" => tasks_periodic::run_tool_failure_digest(db, config).await,
         "adoption-digest" => tasks_periodic::run_adoption_digest(db, config).await,
+        "finance-nudge" => tasks_periodic::run_finance_nudge(db, config, vault_path).await,
         "helper-setup-offer" => tasks_periodic::run_helper_setup_offer(db, config).await,
         "inbox-tidy" => tasks_periodic::run_inbox_tidy(db, config).await,
         "owner-decisions" => tasks_periodic::run_owner_decisions(db).await,

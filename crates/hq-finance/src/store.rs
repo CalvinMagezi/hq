@@ -77,6 +77,30 @@ pub fn import_messages(
     })
 }
 
+/// What the owner may be reminded of: numbers and a date, never an amount, a name or an id.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Summary {
+    pub rows: usize,
+    pub waiting_for_review: usize,
+    /// The date of the newest transaction in the ledger, `YYYY-MM-DD`.
+    pub latest_date: Option<String>,
+}
+
+/// None when there is no ledger yet: a person who never imported is never nudged.
+pub fn summary(vault: &Path) -> Option<Summary> {
+    let note = std::fs::read_to_string(ledger_path(vault)).ok()?;
+    let rows = ledger::parse_rows(&note);
+    Some(Summary {
+        rows: rows.len(),
+        waiting_for_review: rows.iter().filter(|r| r.cells[6] == STATUS_DRAFT).count(),
+        latest_date: rows
+            .iter()
+            .map(|r| r.cells[0].clone())
+            .filter(|d| !d.is_empty())
+            .max(),
+    })
+}
+
 fn count_waiting(note: &str) -> usize {
     ledger::parse_rows(note)
         .iter()
@@ -149,6 +173,16 @@ mod tests {
             .mode();
         assert_eq!(mode & 0o077, 0, "group and other have no access");
         assert!(!dir.path().join("_data/finance/.ledger.md.tmp").exists());
+    }
+
+    #[test]
+    fn a_summary_is_counts_and_a_date_and_none_before_the_first_import() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(summary(dir.path()).is_none());
+        import_messages(dir.path(), &[msg("MTNMobMoney", SENT)], &["MTNMobMoney"]).unwrap();
+        let s = summary(dir.path()).unwrap();
+        assert_eq!((s.rows, s.waiting_for_review), (1, 1));
+        assert_eq!(s.latest_date.as_deref(), Some("2026-03-04"));
     }
 
     #[test]
