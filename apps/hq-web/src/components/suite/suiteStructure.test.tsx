@@ -60,7 +60,7 @@ describe('slides as a 16:9 stage and a strip of small cards', () => {
 })
 
 describe('the dashboard', () => {
-  const DASH = `---\nsuite_kind: dashboard\n---\n${SALES}\n\`\`\`tile from=C2:C5 fn=sum label="Total"\n\`\`\`\n\n\`\`\`plot type=bar from=A1:C5 x=month y=amount group=region title="By month"\n\`\`\`\n`
+  const DASH = `---\nsuite_kind: dashboard\n---\n${SALES}\n\`\`\`tile from=C2:C5 fn=sum label="Total" trend=yes\n\`\`\`\n\n\`\`\`plot type=bar from=A1:C5 x=month y=amount group=region title="By month"\n\`\`\`\n`
   test('filters from a column, a tile with its trend, and a chart with axes, two series and a legend', () => {
     const html = draw(DASH)
     expect(html).toContain('Filters')
@@ -72,6 +72,11 @@ describe('the dashboard', () => {
     expect(html).toContain('South')
     expect(html).toContain('Tap the chart')
     expect(html).toContain('only what you see here')
+  })
+  test('a tile shows no trend unless it asks for one', () => {
+    const html = draw(DASH.replace(' trend=yes', ''))
+    expect(html).not.toContain('su-delta')
+    expect(html).not.toContain('su-spark')
   })
   test('no data colour is the border colour', () => {
     const html = draw(DASH)

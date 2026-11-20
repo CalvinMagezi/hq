@@ -204,9 +204,10 @@ function Tile({ block, sheets, filters }: { block: TypedBlock; sheets: Sheet[]; 
   const type = block.attrs.format ?? 'num'
   // A tile that cannot be worked out says why, in words, and never shows a zero.
   const why = reading.ok ? (value === null ? 'fn' : null) : reading.why
-  // A single column of three or more numbers has a direction: draw it and say how the last step went.
+  // Only when the tile asks (`trend=yes`): a single column of three or more numbers has a direction, so
+  // draw it and say how the last step went. A total or an average has no "row before", so it never shows one unasked.
   const range = parseRange(from)
-  const trend = reading.ok && !block.attrs.where && range && range.c1 === range.c2 && reading.numbers.length >= 3 ? reading.numbers : null
+  const trend = block.attrs.trend === 'yes' && reading.ok && !block.attrs.where && range && range.c1 === range.c2 && reading.numbers.length >= 3 ? reading.numbers : null
   const delta = trend ? trend[trend.length - 1] - trend[trend.length - 2] : null
   const sign = delta === null || delta === 0 ? '■' : Math.sign(delta) === 1 ? '▲' : '▼'
   return (

@@ -74,7 +74,8 @@
 .su-slides{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
 .su-slides:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
 .su-strip{margin:0;padding:4px 0;list-style:none;display:flex;flex-direction:row;gap:8px;overflow-x:auto;max-width:100%}
-.su-strip li{flex:none;width:132px;border-radius:var(--radius-md)}
+.su-strip li{flex:none;width:132px;border-radius:var(--radius-md);list-style:none}
+.su-strip li::marker{content:none}
 .su-strip li.is-dragging{opacity:.5}
 .su-strip li.is-over{outline:2px dashed var(--focus-ring);outline-offset:2px}
 .su-thumb{display:flex;flex-direction:column;gap:2px;width:100%;min-height:44px;padding:0;border:0;background:transparent;text-align:left;color:var(--ink)}

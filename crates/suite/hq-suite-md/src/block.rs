@@ -63,7 +63,7 @@ impl BlockType {
         match self {
             BlockType::Sheet => &["id", "name", "types", "data", "rows"],
             BlockType::Tile => &[
-                "id", "from", "fn", "label", "format", "where", "group", "size",
+                "id", "from", "fn", "label", "format", "where", "group", "size", "trend",
             ],
             BlockType::Plot => &[
                 "id", "type", "from", "x", "y", "title", "where", "group", "size",

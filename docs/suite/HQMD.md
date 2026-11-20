@@ -159,7 +159,7 @@ from the block's opening fence. A size equal to the block's default is written a
 only a hint for viewers: exports and the evaluator ignore it, and a block that carries an attribute a
 version does not know keeps it as written.
 
-The checker knows `size` and warns (`block.bad_size`) for a value other than those three.
+A `tile` over one column of three or more numbers can add `trend=yes` to show a small line of the values and how the last one moved against the one before; without it a tile is just its number. The checker knows `size` and `trend`, and warns (`block.bad_size`) for a value other than those three.
 
 #### `chart`
 
