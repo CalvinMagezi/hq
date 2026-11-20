@@ -4,4 +4,5 @@ pub mod export;
 pub mod ledger;
 pub mod parse;
 pub mod redact;
+pub mod store;
 pub mod validate;

@@ -14,10 +14,30 @@ automatic capture exists.
    `confirmed`. Only confirmed rows are totalled.
 4. The tiles and chart in the note are computed by the Suite.
 
+## From the phone
+
+Ask HQ in the phone chat where your mobile money went, and HQ calls `finance_import_messages`.
+
+1. The tool is a `Modify`, so you are asked to approve every import. The approval line says what
+   will be read: your MTN and Airtel Money transaction messages, from the last N days or since the
+   last import.
+2. The phone reads only the senders in `hq_finance::parse::TRANSACTION_SENDERS`. The query names
+   them, so no other message is loaded.
+3. The phone posts the messages to `POST /api/finance/import/{action_id}`. The id is random, single
+   use and valid only for an approved, acknowledged action. The route drops any sender the action
+   did not name, parses, adds new rows to the ledger and settles the action with five counts.
+4. The model is told the counts and a link. It never sees a message, an amount or an id.
+
+The first time, the phone has no permission to read messages. Android grants it only from
+Settings, Finance: the chat answers `not_set_up` or `permission_missing` and points there. It is
+never requested in the middle of a chat.
+
 ## Where a copy can be, and why it goes no further
 
 | Place | Holds | Kept closed by |
 |-------|-------|----------------|
+| The phone's message store | Raw messages | Read-only: only the allowlisted senders are queried, and the app keeps no copy |
+| The import request | Raw messages, in transit to HQ | Single-use action id, signed-in routes only, the MCP key does not pass, body size capped, body not logged. If HQ runs on another machine they cross your paired link, not the internet |
 | The export file | Raw messages | You made it and you delete it. HQ never copies it |
 | `hq-finance` | Parsed drafts in memory | The crate has no dependency on a model, vault, database or network crate (`tests/boundary.rs`) |
 | `_data/finance/ledger.md` | Amounts, dates, ids. No names or phone numbers: the parser does not keep them | `_data` is a private vault folder: `vault_read`, `vault_list` and the other read tools refuse it, and the vault listing skips it |

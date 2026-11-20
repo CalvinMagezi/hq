@@ -3690,6 +3690,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -4037,6 +4038,7 @@ dependencies = [
  "hq-core",
  "hq-db",
  "hq-export",
+ "hq-finance",
  "hq-gate",
  "hq-host",
  "hq-llm",
@@ -4218,6 +4220,7 @@ dependencies = [
  "hq-db",
  "hq-edge",
  "hq-export",
+ "hq-finance",
  "hq-llm",
  "hq-mcp",
  "hq-suite-adapter",

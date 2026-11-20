@@ -6,6 +6,11 @@ use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
 pub const PARSER_VERSION: u32 = 1;
+
+/// The senders whose messages are transactions. A phone reads only these: promotions, banks and
+/// everyone else are never loaded, so there is nothing to forget. A sender name can be spoofed, so
+/// this limits what is read, it does not prove who wrote it; the owner confirms every row.
+pub const TRANSACTION_SENDERS: &[&str] = &["MTNMobMoney", "MTNMoMo", "AIRTELMONEY", "AirtelMoney"];
 const CENTS_PER_UNIT: i64 = 100;
 const EAT_OFFSET_SECS: i32 = 3 * 3600;
 
