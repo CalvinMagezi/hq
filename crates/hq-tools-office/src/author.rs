@@ -20,10 +20,14 @@ fn text<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
         .with_context(|| format!("`{key}` is needed for this action"))
 }
 
-pub fn create_author_tools(vault: PathBuf) -> Vec<Box<dyn HqTool>> {
+pub fn create_author_tools(
+    vault: PathBuf,
+    seam: Option<hq_tool_api::office::SharedSeam>,
+) -> Vec<Box<dyn HqTool>> {
     vec![
         Box::new(OfficeCreateTool {
             vault: vault.clone(),
+            seam,
         }),
         Box::new(OfficeExportTool { vault }),
     ]
@@ -101,6 +105,7 @@ async fn export_pdf(
 /// `office_create`: a native sheet, document or deck note, written from structured content.
 pub struct OfficeCreateTool {
     vault: PathBuf,
+    seam: Option<hq_tool_api::office::SharedSeam>,
 }
 
 #[async_trait]
@@ -187,6 +192,9 @@ impl HqTool for OfficeCreateTool {
             )
         })
         .await??;
+        if let Some(seam) = &self.seam {
+            seam.created(&rel, &args);
+        }
         Ok(json!({
             "note": rel,
             "next": "Call office_export with this note to make the file the owner opens.",
@@ -248,7 +256,7 @@ mod tests {
     }
 
     fn author_tools(vault: &std::path::Path) -> (Box<dyn HqTool>, Box<dyn HqTool>) {
-        let mut t = create_author_tools(vault.to_path_buf());
+        let mut t = create_author_tools(vault.to_path_buf(), None);
         let export = t.pop().unwrap();
         let create = t.pop().unwrap();
         (create, export)

@@ -18,6 +18,7 @@ const EXCERPT_CHARS: usize = 400;
 
 pub struct OfficeEditTool {
     pub(crate) vault: PathBuf,
+    pub(crate) seam: Option<hq_tool_api::office::SharedSeam>,
 }
 
 fn text<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
@@ -142,7 +143,24 @@ impl HqTool for OfficeEditTool {
 
     async fn execute(&self, args: Value) -> Result<Value> {
         let vault = self.vault.clone();
-        tokio::task::spawn_blocking(move || run(&vault, &args)).await?
+        let seam = self.seam.clone();
+        tokio::task::spawn_blocking(move || {
+            let reads = args.get("action").and_then(Value::as_str) == Some("blocks");
+            let note = args.get("note").and_then(Value::as_str).unwrap_or_default();
+            match (&seam, reads) {
+                (Some(seam), false) if !note.is_empty() => {
+                    // A write: under the note's lock, keeping the text it replaces and recording the caller.
+                    let mut out = None;
+                    seam.write(note, &args, &mut || {
+                        out = Some(run(&vault, &args)?);
+                        Ok(())
+                    })?;
+                    out.context("the edit produced no result")
+                }
+                _ => run(&vault, &args),
+            }
+        })
+        .await?
     }
 }
 
@@ -166,6 +184,7 @@ mod tests {
         note(d.path());
         let tool = OfficeEditTool {
             vault: d.path().to_path_buf(),
+            seam: None,
         };
         let read = tool
             .execute(json!({"action": "blocks", "note": "Notebooks/plan.md"}))
@@ -204,6 +223,7 @@ mod tests {
         note(d.path());
         let tool = OfficeEditTool {
             vault: d.path().to_path_buf(),
+            seam: None,
         };
         let e = tool
             .execute(json!({"action": "explode", "note": "Notebooks/plan.md"}))

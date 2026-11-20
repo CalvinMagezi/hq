@@ -22,14 +22,18 @@ pub struct OfficeFileTool {
     vault: PathBuf,
 }
 
-pub fn create_office_tools(vault: PathBuf) -> Vec<Box<dyn HqTool>> {
+pub fn create_office_tools(
+    vault: PathBuf,
+    seam: Option<hq_tool_api::office::SharedSeam>,
+) -> Vec<Box<dyn HqTool>> {
     let mut tools: Vec<Box<dyn HqTool>> = vec![Box::new(OfficeFileTool {
         vault: vault.clone(),
     })];
     tools.push(Box::new(edit::OfficeEditTool {
         vault: vault.clone(),
+        seam: seam.clone(),
     }));
-    tools.extend(author::create_author_tools(vault));
+    tools.extend(author::create_author_tools(vault, seam));
     tools
 }
 
