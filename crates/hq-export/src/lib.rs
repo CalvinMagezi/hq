@@ -19,6 +19,7 @@ pub mod markdown;
 mod note;
 mod notebook;
 pub mod render;
+mod svg;
 mod tables;
 pub mod theme;
 mod typst_markup;

@@ -1,0 +1,1 @@
+Exporting a note to HTML now keeps a chart written as inline SVG. The exporter used to drop all raw HTML, so a bar chart vanished. It now rebuilds each `<svg>` from an allowlist of shapes, text and presentation attributes, and still removes scripts, `foreignObject`, event handlers, external links and `url(...)` values. Other formats do not draw the chart.

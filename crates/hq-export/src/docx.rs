@@ -248,6 +248,7 @@ impl Writer {
                     out.push(Child::p(d::Paragraph::new()));
                 }
             }
+            Block::Svg(_) => {}
             Block::Rule => out.push(Child::p(
                 d::Paragraph::new().align(d::AlignmentType::Center).add_run(
                     d::Run::new()
