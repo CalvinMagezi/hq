@@ -11,7 +11,8 @@ use hq_suite_md::{BlockType, Document, Op, TypedBlock};
 use serde_json::{Value, json};
 
 use crate::edit_plan::{Planned, opt_str, patch, place_after, req_str};
-use crate::sheets::{plot_of, tile_of};
+use crate::sheets::{plot_in, tile_in};
+use std::path::Path;
 
 /// Longest label, title or `where` a block header may carry.
 const MAX_ATTR_CHARS: usize = 200;
@@ -60,7 +61,7 @@ fn ordinal(doc: &Document, ty: BlockType, index: usize) -> usize {
 }
 
 /// Adds a tile: one number computed from a range (`from`, `fn`, `where`, `label`, `format`).
-pub fn add_tile(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
+pub fn add_tile(vault: &Path, doc: &Document, note: &str, args: &Value) -> Result<Planned> {
     let from = req_str(args, "from")?.trim();
     let function = opt_str(args, "fn").unwrap_or("sum").trim();
     let mut attrs: Vec<(&str, &str)> = vec![("from", from), ("fn", function)];
@@ -70,7 +71,12 @@ pub fn add_tile(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
         }
     }
     let (new, index) = put(doc, args, BlockType::Tile, &attrs)?;
-    let view = tile_of(&new, note, ordinal(&new, BlockType::Tile, index))?;
+    let view = tile_in(
+        Some(vault),
+        &new,
+        note,
+        ordinal(&new, BlockType::Tile, index),
+    )?;
     let hash = new.node(index).map(|n| n.hash()).unwrap_or_default();
     let summary = format!("Added the tile `{}`, which shows {}", view.label, view.text);
     Ok(Planned::new(new, summary).with(json!({
@@ -81,7 +87,7 @@ pub fn add_tile(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
 }
 
 /// Adds a plot: a chart from a range (`type`, `from`, `x`, `y`, `where`, `group`, `title`).
-pub fn add_plot(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
+pub fn add_plot(vault: &Path, doc: &Document, note: &str, args: &Value) -> Result<Planned> {
     let kind = req_str(args, "type")?.trim();
     let from = req_str(args, "from")?.trim();
     let (x, y) = (req_str(args, "x")?.trim(), req_str(args, "y")?.trim());
@@ -99,7 +105,12 @@ pub fn add_plot(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
         }
     }
     let (new, index) = put(doc, args, BlockType::Plot, &attrs)?;
-    let drawn = plot_of(&new, note, ordinal(&new, BlockType::Plot, index))?;
+    let drawn = plot_in(
+        Some(vault),
+        &new,
+        note,
+        ordinal(&new, BlockType::Plot, index),
+    )?;
     let chart: Value = serde_json::from_str(&drawn)?;
     let count = |k: &str| chart[k].as_array().map_or(0, Vec::len);
     let hash = new.node(index).map(|n| n.hash()).unwrap_or_default();

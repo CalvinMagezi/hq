@@ -54,6 +54,9 @@ fn one(
         "line" => ChartKind::Line,
         "pie" => ChartKind::Pie,
         "donut" => ChartKind::Donut,
+        "area" => ChartKind::Area,
+        "stacked" => ChartKind::StackedBar,
+        "scatter" => ChartKind::Scatter,
         _ => return None,
     };
     let from = RangeRef::parse(plot.info.get("from")?).ok()?;
@@ -97,10 +100,10 @@ fn one(
             values,
         }],
         first_row: from.start.row as usize + 1,
-        x_title: matches!(kind, ChartKind::Bar | ChartKind::Line)
+        x_title: (!matches!(kind, ChartKind::Pie | ChartKind::Donut))
             .then(|| plot.info.get("x").map(str::to_string))
             .flatten(),
-        y_title: matches!(kind, ChartKind::Bar | ChartKind::Line)
+        y_title: (!matches!(kind, ChartKind::Pie | ChartKind::Donut))
             .then(|| plot.info.get("y").map(str::to_string))
             .flatten(),
     })
@@ -122,6 +125,20 @@ mod tests {
         assert_eq!(c.series[0].col, 1);
         assert_eq!(c.series[0].values, [40.0, 10.0]);
         assert_eq!(c.series[0].name, "qty");
+    }
+
+    #[test]
+    fn area_stacked_and_scatter_plots_become_native_charts_and_one_in_another_note_is_left_out() {
+        let note = "```sheet name=P types=\"num,int\"\n| x | qty |\n|---|---|\n| 1.5 | 4 |\n| 3 | 9 |\n```\n\n```plot type=area from=\"A1:B3\" x=x y=qty\n```\n\n```plot type=stacked from=\"A1:B3\" x=x y=qty\n```\n\n```plot type=scatter from=\"A1:B3\" x=x y=qty\n```\n\n```plot type=scatter from=\"[[Other]]!A1:B3\" x=x y=qty\n```\n";
+        let got = native_charts(note, "Notebooks/s.md");
+        assert_eq!((got.charts.len(), got.left_out), (3, 1));
+        let kinds: Vec<_> = got.charts.iter().map(|c| c.kind).collect();
+        assert_eq!(
+            kinds,
+            [ChartKind::Area, ChartKind::StackedBar, ChartKind::Scatter]
+        );
+        assert_eq!(got.charts[2].labels, ["1.5", "3"]);
+        assert!(got.charts[2].x_title.is_some());
     }
 
     #[test]

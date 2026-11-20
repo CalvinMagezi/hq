@@ -43,7 +43,17 @@ Inserting a column in the middle, deleting a column, pivots, array results (`FIL
 
 ## On the phone
 
-A `sheet` block in a note draws as a grid and a `tile` block as a labelled number, both computed by hq (`GET /api/suite/sheet`, `GET /api/suite/tile`). A tile reads a sheet in its own note for now: `from="[[Note]]!D2:D40"` with `fn` of `sum`, `count`, `avg`, `min`, `max` or `median`, and `format` such as `ugx`.
+A `sheet` block in a note draws as a grid and a `tile` block as a labelled number, both computed by hq (`GET /api/suite/sheet`, `GET /api/suite/tile`). A tile reads a sheet in its own note, or in one other note of the same vault (see "Tiles and plots over another note" below): `from="[[Note]]!D2:D40"` with `fn` of `sum`, `count`, `avg`, `min`, `max` or `median`, and `format` such as `ugx`.
+
+## Tiles and plots over another note
+
+`from="[[Stock]]!D2:D40"` reads the `sheet` blocks of the note called Stock, `[[Stock#Prices]]!A1:C9` one of them by `name=`. `where`, `group`, `fn`, `format` and the chart kinds all work the same as over a sheet in the note itself.
+
+- **Which note.** A name without a `/` is a file name (`Stock.md`, case does not matter) searched under the vault, skipping folders that start with `.` or `_` and never following a link. If two notes share the name the block is refused and the sentence lists both paths; write the folder to pick one, `[[Archive/Stock]]!...`. A name with a `/` is a vault-relative path without `.md`. Everything goes through `SuitePaths`, so an absolute path, `..` or a link out of the vault is refused.
+- **One note deep.** Only the other note's `sheet` blocks are read. A tile or plot that sits in that note is not followed, and its formulas see its own note only.
+- **Caps.** The other note must be 2 MB or less, and a name lookup visits at most 50,000 entries, 16 folders deep.
+- **Missing things.** "There is no note called `X` in this vault", "the note `X` has no sheet called `Y`" and "`X` has no sheet" are said plainly, and `add_tile` / `add_plot` refuse to write such a block.
+- **The web mirror.** The web and the phone do not resolve notes: they call `GET /api/suite/tile` and `GET /api/suite/plot`, which read the vault through the same code, so a cross-note block draws the same everywhere and a client must never try to read the other note itself. Dashboard snapshots (`hq-suite-adapter::snapshot`) use the same route into the code. The native `.xlsx` export leaves a plot over another note out (its points are not cells of the exported sheet) and counts it in the statement.
 
 ## Accuracy after the first fixes
 
@@ -77,9 +87,11 @@ Not built: adding or deleting rows and columns, column types, and an undo for an
 
 ## Charts from a sheet: `plot`
 
-A `plot` block draws a chart from a range of a sheet in the same note: `type` is `bar`, `line`, `pie` or `donut`, `from` is a range whose first row names the columns, `x` is the column of labels and `y` the column of values (names are not case sensitive). hq calculates the values (a formula column is drawn as its results) and sends the chart in the format the chat already draws, so the phone uses its existing chart card. `GET /api/suite/plot?path=&index=`.
+A `plot` block draws a chart from a range of a sheet in the same note (or another note, see below): `type` is `bar`, `line`, `pie`, `donut`, `area`, `stacked` or `scatter`, `from` is a range whose first row names the columns, `x` is the column of labels and `y` the column of values (names are not case sensitive). hq calculates the values (a formula column is drawn as its results) and sends the chart in the format the chat already draws, so the phone uses its existing chart card. `GET /api/suite/plot?path=&index=`.
 
-A plot that cannot be drawn says why instead of guessing: an unknown column, a value that is not a number, no rows, or more rows than a chart takes (50 for bar and line, 12 for pie and donut). One series per plot for now; `where` and `group` are reserved for the dashboard.
+A plot that cannot be drawn says why instead of guessing: an unknown column, a value that is not a number, no rows, or more rows than a chart takes (50 for bar and line, 12 for pie and donut). One series per plot unless `group` is used (below).
+
+`area` and `stacked` (stacked bars) draw like `line` and `bar` over the labels, and take `group`. `scatter` places points by a numeric x: the `x` column must hold numbers, it takes no `group`, and the chart JSON carries the numbers as `xValues` (the same values, as text, are also in `labels`, so a reader that only knows categories still shows something). The chat's chart card does not draw `area`, `stacked` or `scatter` yet; see `docs/techdebt/chart-kinds-clients.md`.
 
 ## The dashboard: `where` and `group`
 
@@ -89,7 +101,7 @@ Tiles and plots take two more attributes, so a note can hold a small dashboard o
 
 On a **tile**, a `where` makes the range's first row the column names and takes the number from the range's **last column**: `from="A1:C6" fn=sum where="region=North"` adds the `amount` of the North rows. Without a `where` the tile reads every number in the range, as before.
 
-On a **plot**, `group=region` draws one series per value of that column (up to six, over the labels in the order they first appear, a label a group lacks counts as 0); it needs a bar or line chart. `where` filters the rows before anything is drawn.
+On a **plot**, `group=region` draws one series per value of that column (up to six, over the labels in the order they first appear, a label a group lacks counts as 0); it needs a bar, line, area or stacked chart. `where` filters the rows before anything is drawn.
 
 A tile takes no `group` (it shows one number); a pie or donut takes none either. Anything that cannot be read or drawn says why instead of guessing: an unknown column, a condition without a value, more than four conditions, more than six groups.
 
@@ -134,7 +146,7 @@ Smaller refusals inside functions that exist:
 
 ## Charts in the `.xlsx`
 
-A `plot` block that reads a plain range (no `where`, no `group`) is written as a native chart: bar, line, pie or donut, with the chart reading the sheet's own cells (so changing a cell in Excel moves the chart) and carrying a cached copy so a viewer that does not recalculate still draws it. Series colours are written explicitly so every program draws the same chart. A plot that filters or groups has no single range, so it is left out and the export's one-line statement says how many. `hq-suite-xlsx::write_xlsx_with_charts` is the writer; `hq-suite-adapter::charts` maps a note's plots onto it. Checked in LibreOffice (`cargo test -p hq-suite-xlsx --test libreoffice -- --ignored`, set `XLSX_KEEP=<dir>` to keep the PDF); not yet opened in Excel.
+A `plot` block that reads a plain range (no `where`, no `group`) is written as a native chart: bar, line, pie, donut, area (`c:areaChart`), stacked bar (`c:barChart` with `grouping=stacked`, `overlap=100`) or scatter (`c:scatterChart` with a numeric x), with the chart reading the sheet's own cells (so changing a cell in Excel moves the chart) and carrying a cached copy so a viewer that does not recalculate still draws it. Series colours are written explicitly so every program draws the same chart. A plot that filters or groups has no single range, so it is left out and the export's one-line statement says how many. `hq-suite-xlsx::write_xlsx_with_charts` is the writer; `hq-suite-adapter::charts` maps a note's plots onto it. Checked in LibreOffice (`cargo test -p hq-suite-xlsx --test libreoffice -- --ignored`, set `XLSX_KEEP=<dir>` to keep the PDF); not yet opened in Excel.
 ## Editing more than a cell: `office_edit` and `POST /api/suite/edit`
 
 The agent's `office_edit` tool and the apps' `POST /api/suite/edit` run the same code (`hq-suite-adapter::edit`). Every action reads the note, builds the note as it would be after the change, and writes it back as one hqmd patch, so a block that changed since it was read is refused and every other byte of the note stays as it was.

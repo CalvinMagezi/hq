@@ -139,7 +139,7 @@ impl HqTool for OfficeEditTool {
             (
                 "type",
                 "string",
-                "add_column, set_column_type: text, int, num, bool, date, pct or a currency code. add_plot: bar, line, pie or donut.",
+                "add_column, set_column_type: text, int, num, bool, date, pct or a currency code. add_plot: bar, line, pie, donut, area, stacked or scatter.",
             ),
             (
                 "default",

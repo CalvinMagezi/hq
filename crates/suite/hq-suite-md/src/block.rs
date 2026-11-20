@@ -360,11 +360,11 @@ impl TypedBlock {
     fn validate_plot(&self, out: &mut Vec<Problem>) {
         self.check_from(out);
         if let Some(t) = self.require("type", "plot.missing_type", out)
-            && !["bar", "line", "pie", "donut"].contains(&t)
+            && !["bar", "line", "pie", "donut", "area", "stacked", "scatter"].contains(&t)
         {
             out.push(Problem::error(
                 "plot.bad_type",
-                format!("`{t}` is not one of bar, line, pie, donut"),
+                format!("`{t}` is not one of bar, line, pie, donut, area, stacked, scatter"),
             ));
         }
         self.require("x", "plot.missing_x", out);

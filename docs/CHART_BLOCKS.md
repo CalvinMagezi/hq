@@ -31,11 +31,15 @@ renders as normal markdown.
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes | `line`, `bar`, `pie` or `donut` |
+| `type` | yes | `line`, `bar`, `pie` or `donut` in a chat reply. HQ's Sheets dashboards also emit `area`, `stacked` and `scatter`; see below. |
 | `labels` | yes | Category names (x axis, or one per slice). Strings or numbers. |
 | `series` | yes | Array of `{ "name": string, "values": number[] }`. Each `values` array must have exactly one number per label. |
 | `title` | no | Shown above the chart. |
 | `xLabel`, `yLabel` | no | Axis titles for line and bar charts. |
+
+## Kinds only the dashboard emits
+
+A `plot` block in a note (`docs/suite/SHEETS.md`) is served as this same JSON by `GET /api/suite/plot`, with three more types: `area` (filled lines over the labels), `stacked` (stacked bars, one series per group) and `scatter` (points; `xValues` holds the numeric x of each point, and `labels` repeats them as text). The limits below apply to them. The chat's `chart` block parser does not accept these three yet, so a reply should keep to `line`, `bar`, `pie` and `donut`; which clients cannot draw the new kinds is in `docs/techdebt/chart-kinds-clients.md`.
 
 ## Limits
 

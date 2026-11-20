@@ -26,6 +26,12 @@ pub enum ChartKind {
     Line,
     Pie,
     Donut,
+    /// Filled area under each series, drawn over the categories like a line.
+    Area,
+    /// Bars of the series stacked on one another.
+    StackedBar,
+    /// Points placed by a numeric x (the spec's labels, which must read as numbers) and a numeric y.
+    Scatter,
 }
 
 /// One series: the column its values sit in (zero-based) and their cached numbers.
@@ -64,6 +70,15 @@ impl ChartSpec {
                 .iter()
                 .all(|s| s.values.len() == self.labels.len())
             && !(matches!(self.kind, ChartKind::Pie | ChartKind::Donut) && self.series.len() != 1)
+            && (self.kind != ChartKind::Scatter || self.x_numbers().is_some())
+    }
+
+    /// The labels as numbers, for a scatter chart's x. `None` when one does not read as a number.
+    fn x_numbers(&self) -> Option<Vec<f64>> {
+        self.labels
+            .iter()
+            .map(|l| l.trim().parse::<f64>().ok().filter(|v| v.is_finite()))
+            .collect()
     }
 }
 
@@ -102,24 +117,34 @@ fn title_xml(text: &str) -> String {
 fn series_xml(spec: &ChartSpec, sheet: &str, i: usize) -> String {
     let s = &spec.series[i];
     let last = spec.first_row + spec.labels.len() - 1;
-    let mut cats = format!(
-        r#"<c:cat><c:strRef><c:f>{}</c:f><c:strCache><c:ptCount val="{}"/>"#,
-        esc(&range(sheet, spec.x_col, spec.first_row, last)),
-        spec.labels.len()
-    );
-    for (n, l) in spec.labels.iter().enumerate() {
-        cats.push_str(&format!(r#"<c:pt idx="{n}"><c:v>{}</c:v></c:pt>"#, esc(l)));
-    }
-    cats.push_str("</c:strCache></c:strRef></c:cat>");
-    let mut vals = format!(
-        r#"<c:val><c:numRef><c:f>{}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="{}"/>"#,
-        esc(&range(sheet, s.col, spec.first_row, last)),
-        s.values.len()
-    );
-    for (n, v) in s.values.iter().enumerate() {
-        vals.push_str(&format!(r#"<c:pt idx="{n}"><c:v>{v}</c:v></c:pt>"#));
-    }
-    vals.push_str("</c:numCache></c:numRef></c:val>");
+    let scatter = spec.kind == ChartKind::Scatter;
+    let numeric = |tag: &str, col: u32, values: &[f64]| {
+        let mut out = format!(
+            r#"<c:{tag}><c:numRef><c:f>{}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="{}"/>"#,
+            esc(&range(sheet, col, spec.first_row, last)),
+            values.len()
+        );
+        for (n, v) in values.iter().enumerate() {
+            out.push_str(&format!(r#"<c:pt idx="{n}"><c:v>{v}</c:v></c:pt>"#));
+        }
+        out.push_str(&format!("</c:numCache></c:numRef></c:{tag}>"));
+        out
+    };
+    let cats = if scatter {
+        numeric("xVal", spec.x_col, &spec.x_numbers().unwrap_or_default())
+    } else {
+        let mut cats = format!(
+            r#"<c:cat><c:strRef><c:f>{}</c:f><c:strCache><c:ptCount val="{}"/>"#,
+            esc(&range(sheet, spec.x_col, spec.first_row, last)),
+            spec.labels.len()
+        );
+        for (n, l) in spec.labels.iter().enumerate() {
+            cats.push_str(&format!(r#"<c:pt idx="{n}"><c:v>{}</c:v></c:pt>"#, esc(l)));
+        }
+        cats.push_str("</c:strCache></c:strRef></c:cat>");
+        cats
+    };
+    let vals = numeric(if scatter { "yVal" } else { "val" }, s.col, &s.values);
     // The series name points at the header cell of its column.
     let name = format!(
         r#"<c:tx><c:strRef><c:f>{}</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>{}</c:v></c:pt></c:strCache></c:strRef></c:tx>"#,
@@ -132,7 +157,14 @@ fn series_xml(spec: &ChartSpec, sheet: &str, i: usize) -> String {
         ChartKind::Line => {
             format!(r#"<c:spPr><a:ln w="28575" cap="rnd">{fill}<a:round/></a:ln></c:spPr><c:marker><c:symbol val="circle"/><c:size val="6"/><c:spPr>{fill}</c:spPr></c:marker>"#)
         }
-        ChartKind::Bar => format!(r#"<c:spPr>{fill}</c:spPr><c:invertIfNegative val="0"/>"#),
+        ChartKind::Bar | ChartKind::StackedBar => {
+            format!(r#"<c:spPr>{fill}</c:spPr><c:invertIfNegative val="0"/>"#)
+        }
+        ChartKind::Area => format!(r#"<c:spPr>{fill}</c:spPr>"#),
+        // Points only: the line between them is switched off.
+        ChartKind::Scatter => format!(
+            r#"<c:spPr><a:ln w="19050"><a:noFill/></a:ln></c:spPr><c:marker><c:symbol val="circle"/><c:size val="7"/><c:spPr>{fill}</c:spPr></c:marker>"#
+        ),
         // A pie or donut colours each slice, not the series.
         ChartKind::Pie | ChartKind::Donut => (0..spec.labels.len())
             .map(|n| {
@@ -143,7 +175,10 @@ fn series_xml(spec: &ChartSpec, sheet: &str, i: usize) -> String {
             })
             .collect(),
     };
-    format!(r#"<c:ser><c:idx val="{i}"/><c:order val="{i}"/>{name}{paint}{cats}{vals}</c:ser>"#)
+    let tail = if scatter { "<c:smooth val=\"0\"/>" } else { "" };
+    format!(
+        r#"<c:ser><c:idx val="{i}"/><c:order val="{i}"/>{name}{paint}{cats}{vals}{tail}</c:ser>"#
+    )
 }
 
 fn axis_xml(spec: &ChartSpec) -> String {
@@ -151,6 +186,15 @@ fn axis_xml(spec: &ChartSpec) -> String {
     let val_title = spec.y_title.as_deref().map(title_xml).unwrap_or_default();
     format!(
         r#"<c:catAx><c:axId val="111"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/>{cat_title}<c:numFmt formatCode="General" sourceLinked="0"/><c:tickLblPos val="nextTo"/><c:crossAx val="222"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/></c:catAx><c:valAx><c:axId val="222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines/>{val_title}<c:numFmt formatCode="General" sourceLinked="1"/><c:tickLblPos val="nextTo"/><c:crossAx val="111"/><c:crosses val="autoZero"/></c:valAx>"#
+    )
+}
+
+/// Two value axes, for a scatter chart: x along the bottom, y up the side.
+fn scatter_axes(spec: &ChartSpec) -> String {
+    let x_title = spec.x_title.as_deref().map(title_xml).unwrap_or_default();
+    let y_title = spec.y_title.as_deref().map(title_xml).unwrap_or_default();
+    format!(
+        r#"<c:valAx><c:axId val="111"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/>{x_title}<c:numFmt formatCode="General" sourceLinked="0"/><c:tickLblPos val="nextTo"/><c:crossAx val="222"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx><c:valAx><c:axId val="222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines/>{y_title}<c:numFmt formatCode="General" sourceLinked="0"/><c:tickLblPos val="nextTo"/><c:crossAx val="111"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx>"#
     )
 }
 
@@ -167,6 +211,18 @@ pub(crate) fn chart_xml(spec: &ChartSpec, sheet: &str) -> String {
         ChartKind::Line => format!(
             r#"<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>{series}<c:marker val="1"/><c:axId val="111"/><c:axId val="222"/></c:lineChart>{}"#,
             axis_xml(spec)
+        ),
+        ChartKind::StackedBar => format!(
+            r#"<c:barChart><c:barDir val="col"/><c:grouping val="stacked"/><c:varyColors val="0"/>{series}<c:overlap val="100"/><c:axId val="111"/><c:axId val="222"/></c:barChart>{}"#,
+            axis_xml(spec)
+        ),
+        ChartKind::Area => format!(
+            r#"<c:areaChart><c:grouping val="standard"/><c:varyColors val="0"/>{series}<c:axId val="111"/><c:axId val="222"/></c:areaChart>{}"#,
+            axis_xml(spec)
+        ),
+        ChartKind::Scatter => format!(
+            r#"<c:scatterChart><c:scatterStyle val="lineMarker"/><c:varyColors val="0"/>{series}<c:axId val="111"/><c:axId val="222"/></c:scatterChart>{}"#,
+            scatter_axes(spec)
         ),
         ChartKind::Pie => {
             format!(r#"<c:pieChart><c:varyColors val="1"/>{series}</c:pieChart>"#)

@@ -89,7 +89,10 @@ fn a_tile_that_would_not_draw_is_refused_with_the_evaluators_own_sentence() {
         .contains("one number")
     );
     assert!(err(&d, json!({"action": "add_tile", "from": "not a range"})).contains("from"));
-    assert!(err(&d, json!({"action": "add_tile", "from": "[[other]]!C2:C4"})).contains("own note"));
+    assert!(
+        err(&d, json!({"action": "add_tile", "from": "[[other]]!C2:C4"}))
+            .contains("no note called")
+    );
     assert!(err(&d, json!({"action": "add_tile"})).contains("`from`"));
     assert!(
         err(
@@ -149,8 +152,11 @@ fn a_plot_that_would_not_draw_is_refused_and_nothing_is_written() {
             .extend(extra.as_object().unwrap().clone());
         a
     };
-    let e = err(&d, base(json!({"type": "area"})));
-    assert!(e.contains("not one of bar, line, pie, donut"), "{e}");
+    let e = err(&d, base(json!({"type": "radar"})));
+    assert!(
+        e.contains("not one of bar, line, pie, donut, area, stacked, scatter"),
+        "{e}"
+    );
     assert!(err(&d, base(json!({"y": "region"}))).contains("not a number"));
     assert!(err(&d, base(json!({"y": "weight"}))).contains("no column called `weight`"));
     assert!(err(&d, base(json!({"type": "pie", "group": "region"}))).contains("no group"));

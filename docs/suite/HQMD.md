@@ -137,7 +137,7 @@ A chart drawn from a range. The body is empty.
 
 | Attribute | Meaning |
 |-----------|---------|
-| `type` | Required: `bar`, `line`, `pie` or `donut`. |
+| `type` | Required: `bar`, `line`, `pie`, `donut`, `area`, `stacked` or `scatter` (x numeric). |
 | `from` | Required. A range, header row first. |
 | `x`, `y` | Required. Column names from the header row (the label and the value). |
 | `title` | Optional. |

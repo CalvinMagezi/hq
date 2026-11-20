@@ -102,7 +102,7 @@ fn block_listing(doc: &Document) -> Value {
 }
 
 /// Plans one write action against the note as it is now.
-fn plan(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
+fn plan(vault: &Path, doc: &Document, note: &str, args: &Value) -> Result<Planned> {
     let action = req_str(args, "action")?;
     let index = |key: &str| -> Result<usize> { Ok(req_u64(args, key)? as usize) };
     Ok(match action {
@@ -187,8 +187,8 @@ fn plan(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
         "delete_card" => slide_ops::delete_card(doc, args)?,
         "set_notes" => slide_ops::set_notes(doc, args)?,
         "set_card_style" => slide_ops::set_card_style(doc, args)?,
-        "add_tile" => dash_ops::add_tile(doc, note, args)?,
-        "add_plot" => dash_ops::add_plot(doc, note, args)?,
+        "add_tile" => dash_ops::add_tile(vault, doc, note, args)?,
+        "add_plot" => dash_ops::add_plot(vault, doc, note, args)?,
         "add_comment" => {
             // The label is typed text, never an identity; an agent's defaults to "HQ".
             let by = opt_str(args, "by").unwrap_or("HQ");
@@ -261,7 +261,7 @@ pub fn first_step(vault: &Path, args: &Value, gate: Gate) -> Result<Step> {
                 check_focus(vault, f)?;
             }
             let (_, doc) = load(vault, note)?;
-            let planned = plan(&doc, note, args)?;
+            let planned = plan(vault, &doc, note, args)?;
             let dry = args.get("dry_run").and_then(Value::as_bool) == Some(true);
             let wants = gate == Gate::Agent && planned.needs_preview();
             if dry || (wants && args.get("token").is_none()) {
@@ -287,7 +287,7 @@ pub fn apply(vault: &Path, args: &Value, gate: Gate) -> Result<Value> {
         None => None,
     };
     let (file, doc) = load(vault, note)?;
-    let planned = plan(&doc, note, args)?;
+    let planned = plan(vault, &doc, note, args)?;
     if gate == Gate::Agent && planned.needs_preview() {
         let given = args
             .get("token")

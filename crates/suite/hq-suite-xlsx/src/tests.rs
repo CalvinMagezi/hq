@@ -297,3 +297,47 @@ async fn the_importer_still_reads_a_workbook_that_has_charts() {
         done.markdown
     );
 }
+
+#[test]
+fn area_stacked_and_scatter_charts_are_well_formed_parts_of_the_right_kind() {
+    let mut scatter = stock_chart(ChartKind::Scatter, 1);
+    scatter.labels = vec!["1.5".into(), "20".into()];
+    let charts = [
+        stock_chart(ChartKind::Area, 2),
+        stock_chart(ChartKind::StackedBar, 2),
+        scatter,
+    ];
+    let (bytes, report) = write_xlsx_with_charts(&[stock_sheet()], &charts).unwrap();
+    assert_eq!(report.charts, 3);
+    for n in 1..=3 {
+        let name = format!("xl/charts/chart{n}.xml");
+        roxmltree::Document::parse(&part(&bytes, &name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+    }
+    let area = part(&bytes, "xl/charts/chart1.xml");
+    assert!(
+        area.contains("<c:areaChart>") && area.contains("<c:catAx>"),
+        "{area}"
+    );
+    let stacked = part(&bytes, "xl/charts/chart2.xml");
+    assert!(
+        stacked.contains(r#"<c:grouping val="stacked"/>"#)
+            && stacked.contains(r#"<c:overlap val="100"/>"#),
+        "{stacked}"
+    );
+    let xy = part(&bytes, "xl/charts/chart3.xml");
+    assert!(
+        xy.contains("<c:scatterChart>")
+            && xy.contains("<c:xVal>")
+            && xy.contains("<c:yVal>")
+            && xy.contains("<c:v>1.5</c:v>")
+            && !xy.contains("<c:catAx>"),
+        "{xy}"
+    );
+}
+
+#[test]
+fn a_scatter_chart_whose_x_is_not_a_number_is_left_out() {
+    let words = stock_chart(ChartKind::Scatter, 1);
+    let (_, report) = write_xlsx_with_charts(&[stock_sheet()], &[words]).unwrap();
+    assert_eq!(report.charts, 0);
+}
