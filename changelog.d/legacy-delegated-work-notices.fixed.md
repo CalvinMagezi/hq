@@ -1,0 +1,1 @@
+Old "Delegated work needs attention" alerts no longer sit in Needs you. Ones about work that was already reviewed, or is over a day old, move to Done, and any that remain read in plain words with no run id or tool name.

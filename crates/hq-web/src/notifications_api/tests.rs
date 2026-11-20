@@ -1021,3 +1021,24 @@ fn a_background_task_notice_does_not_count_as_needs_you() {
     assert_eq!(res.needs_you_owner_only, 1);
     assert_eq!(res.needs_you_helpers, 1);
 }
+
+#[tokio::test]
+async fn a_legacy_delegated_work_notice_is_read_in_plain_words() {
+    use hq_core::types::{ValueItem, ValueKind};
+    let db = hq_db::Database::open_memory().unwrap();
+    let item = ValueItem::new(
+        "subagent_runs",
+        ValueKind::ActionNeeded,
+        "Delegated work needs attention",
+        "Sub-agent run ee68156e (verifier) is partial and completed: it ended without a finished deliverable. Details: subagent_run_status.",
+    )
+    .with_dedup_key("subagent-run-ee68156e-0000");
+    hq_db::value_items::insert(&db, &item).unwrap();
+    let res = aggregate_notifications(&db, Some("pending"), None, 50, true).unwrap();
+    let n = &res.notifications[0];
+    let text = format!("{} {}", n.title, n.description);
+    assert!(text.contains("A background task did not finish"), "{text}");
+    for leaked in ["ee68156e", "verifier", "subagent_run_status", "Sub-agent"] {
+        assert!(!text.contains(leaked), "{text}");
+    }
+}

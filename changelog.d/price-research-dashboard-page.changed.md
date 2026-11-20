@@ -1,0 +1,1 @@
+The price research skill now says a dashboard is one offline HTML page with a bar chart per comparison, a source table and "no figure found" for gaps, with the spreadsheet kept separate, and it checks the figures with a helper before the final answer.

@@ -425,13 +425,15 @@ fn comment_key(run: &RunRow, event: TaskEvent) -> String {
 }
 
 fn comment_body(run: &RunRow, event: TaskEvent, marker: &str) -> String {
-    let who = format!("Sub-agent run `{}` ({})", short(&run.run_id), run.role);
+    // Read by the owner on the task: no role words or tool names. The marker keeps the call
+    // idempotent and is the only place the run id appears.
     let body = match event {
-        TaskEvent::Stale => format!(
-            "{who} has gone quiet. It is still open; check it with `subagent_run_status` before reporting on it."
-        ),
+        TaskEvent::Stale => {
+            "A background task has gone quiet. It is still open; check it before reporting on it."
+                .to_string()
+        }
         TaskEvent::Reviewed => format!(
-            "{who} was reviewed: {}. Missing deliverables: {}.",
+            "A background task was reviewed: {}. Missing deliverables: {}.",
             run.accept_status,
             if run.missing_deliverables.is_empty() {
                 "none".to_string()
@@ -440,15 +442,11 @@ fn comment_body(run: &RunRow, event: TaskEvent, marker: &str) -> String {
             }
         ),
         TaskEvent::Settled => format!(
-            "{who} ended as {} and is {}. The child's own report is not verification: read it with `subagent_run_result` and check the real deliverable before accepting.",
+            "A background task ended as {} and is {}. Its own report is not verification: check the real deliverable before accepting.",
             run.exec_status, run.accept_status
         ),
     };
     format!("{body} {marker}")
-}
-
-fn short(run_id: &str) -> &str {
-    run_id.get(..8).unwrap_or(run_id)
 }
 
 #[cfg(test)]

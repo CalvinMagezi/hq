@@ -196,6 +196,26 @@ fn needs_a_human(n: &NotificationItem) -> bool {
     n.owner_only || !n.notice
 }
 
+/// A sub-agent run's alert is read in plain words whatever text the row was stored with: rows
+/// written before the wording changed carry a run id, a role and a tool name.
+fn owner_wording(
+    source: &str,
+    dedup_key: Option<&str>,
+    title: String,
+    body: String,
+) -> (String, String) {
+    let delegated =
+        source == "subagent_runs" && dedup_key.is_some_and(|k| k.starts_with("subagent-run-"));
+    if delegated {
+        (
+            "A background task did not finish".to_string(),
+            "A background task did not finish. Open the chat to see what is missing.".to_string(),
+        )
+    } else {
+        (title, body)
+    }
+}
+
 fn is_notice(dedup_key: Option<&str>) -> bool {
     dedup_key.is_some_and(|k| NOTICE_KEYS.iter().any(|p| k.starts_with(p)))
 }
@@ -278,6 +298,8 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
         (true, true) => &["approve", "reject"],
         (true, false) => &["dismiss", "acknowledge"],
     };
+    let (title, description) =
+        owner_wording(&source_task, dedup_key.as_deref(), row.get(3)?, row.get(4)?);
     let topic = hq_db::inbox_prefs::Topic::of_source(&source_task).as_str();
     let source_for_group = source_task.clone();
     let owner_only = row.get::<_, i64>(22)? != 0;
@@ -302,8 +324,8 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
         id: format!("val_{id}"),
         kind,
         category: category.to_string(),
-        title: row.get(3)?,
-        description: row.get(4)?,
+        title,
+        description,
         state,
         created_at: created_at_str
             .parse::<DateTime<Utc>>()
