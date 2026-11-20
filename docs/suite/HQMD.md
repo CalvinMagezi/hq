@@ -153,6 +153,23 @@ chart from a chat answer is valid hqmd as it stands.
 The dashboard's chart over a sheet is `plot`, not `chart`, because `chart` already means "JSON
 body" in the chat renderer and the two must not be told apart by guessing.
 
+#### `comment`
+
+A review note on another block. The body is the comment text.
+
+| Attribute | Meaning |
+|-----------|---------|
+| `on` | Required. The 12-character hash of the block it is about (the hash an edit quotes). |
+| `by` | Optional. Free text the writer typed. It is a label, never an identity. |
+| `at` | Optional. ISO 8601 date or timestamp. |
+| `state` | `open` (the default) or `resolved`. |
+
+When the block it is about is edited, its hash changes and the comment becomes **orphaned**. The
+checker reports that as `comment.orphaned` (information, not an error); the comment stays in the
+note until someone resolves or deletes it. Attributes the version does not know are kept as
+written. Comments never leave the note: the Word, PDF, PowerPoint and Excel exports omit them, so
+a shared file carries no review notes.
+
 ## References
 
 A range names cells, optionally in another note: `[[Stock]]!D2:D40`, `[[Notebooks/Shop/Stock#q3]]!B2`,
@@ -183,6 +200,8 @@ only strings, numbers, booleans and lists. Keys HQ's importer already writes (`s
 | `suite_original_bytes` | whole number | Size of the original |
 | `suite_shrunk_at` | ISO 8601 date or timestamp | When it was shrunk |
 | `suite_saved_bytes` | whole number | Net bytes saved (may be negative) |
+| `suite_toc` | `true`, `false` | Word export only: put a table of contents (heading levels 1 to 3) after the title. It is a real Word field; Word offers to refresh it with page numbers on open |
+| `suite_header` | plain text | Word export only: text for the page header. Markup is not interpreted; it is cut at 200 characters |
 
 A `view` note must keep its original. Changing one key changes one line: every other line of
 the frontmatter is returned as it was, and a key that holds a list or a multi-line value is

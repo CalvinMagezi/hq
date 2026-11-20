@@ -1,5 +1,5 @@
 frontmatter: 53 bytes
-meta: SuiteMeta { kind: None, fidelity: None, original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None }
+meta: SuiteMeta { kind: None, fidelity: None, original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None, toc: None, header: None }
 meta problem: suite_kind `spreadsheet` is not one of doc, sheet, slides, dashboard, drive-item
  0 Typed(Sheet) | ```sheet name="never closed
      header error: a quoted value is never closed
@@ -21,6 +21,9 @@ meta problem: suite_kind `spreadsheet` is not one of doc, sheet, slides, dashboa
  6 Typed(Sheet) | ```sheet id=dup
      header: sheet id=dup
      closed: true
+ 7 Typed(Comment) | ```comment on=short state=maybe
+     header: comment on=short state=maybe
+     closed: true
 diag Error meta.invalid [note] suite_kind: `spreadsheet` is not one of doc, sheet, slides, dashboard, drive-item
 diag Error block.bad_header [block 0] a quoted value is never closed
 diag Error sheet.ragged_row [block 1] row 1 has 1 cells but the header has 2
@@ -32,3 +35,5 @@ diag Error plot.missing_x [block 3] plot needs x=
 diag Error plot.missing_y [block 3] plot needs y=
 diag Error chart.not_object [block 4] a chart body must be one JSON object
 diag Error block.duplicate_id [block 6] id `dup` is already used by block 5
+diag Error comment.bad_on [block 7] on= `short` is not a block hash (12 lowercase hex characters)
+diag Error comment.bad_state [block 7] state= `maybe` is not open or resolved

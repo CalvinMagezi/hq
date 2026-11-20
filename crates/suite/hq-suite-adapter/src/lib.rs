@@ -11,6 +11,7 @@ pub mod author;
 pub mod blocks;
 pub mod calc;
 pub mod charts;
+pub mod comments;
 pub mod dash_ops;
 pub mod docs;
 pub mod edit;

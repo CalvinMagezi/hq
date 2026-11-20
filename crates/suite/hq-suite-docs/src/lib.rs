@@ -19,6 +19,26 @@ pub enum DocsError {
     Render(String),
 }
 
+/// What the note's frontmatter asks of the Word file (`suite_toc`, `suite_header`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DocxOptions {
+    /// A table of contents after the title.
+    pub toc: bool,
+    /// Plain text for the page header.
+    pub header: String,
+}
+
+impl DocxOptions {
+    /// Reads the two keys from a raw frontmatter block. A bad value counts as unset.
+    pub fn from_frontmatter(raw: &str) -> Self {
+        let (meta, _) = hq_suite_md::SuiteMeta::read(raw);
+        DocxOptions {
+            toc: meta.toc.unwrap_or(false),
+            header: meta.header.unwrap_or_default(),
+        }
+    }
+}
+
 /// A record as a Word file. `asset_root` is the folder pictures are read from: the note's own
 /// folder for a note whose pictures are linked by relative paths, which also stops a link from
 /// reaching any picture outside it.
@@ -27,10 +47,27 @@ pub fn render_docx(
     markdown: &str,
     asset_root: Option<&std::path::Path>,
 ) -> Result<Vec<u8>, DocsError> {
-    let doc = Document::from_markdown(title, markdown);
+    render_docx_with(title, markdown, asset_root, &DocxOptions::default())
+}
+
+/// [`render_docx`] with the note's own Word options. Review comments never reach the file: the
+/// `comment` blocks are cut from the record before it is rendered.
+pub fn render_docx_with(
+    title: &str,
+    markdown: &str,
+    asset_root: Option<&std::path::Path>,
+    options: &DocxOptions,
+) -> Result<Vec<u8>, DocsError> {
+    let markdown = hq_suite_md::strip_comments(markdown);
+    let doc = Document::from_markdown(title, &markdown);
     let opts = ExportOptions {
         render: RenderOptions {
             asset_root: asset_root.map(std::path::Path::to_path_buf),
+            theme: hq_export::Theme {
+                toc: options.toc,
+                header: options.header.clone(),
+                ..hq_export::Theme::default()
+            },
             ..RenderOptions::default()
         },
         ..ExportOptions::default()

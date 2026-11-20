@@ -31,6 +31,8 @@ pub enum BlockType {
     Plot,
     /// A chart with its data inline, as HQ chat already draws (`docs/CHART_BLOCKS.md`).
     Chart,
+    /// A review note anchored to another block by its hash. Never part of an export.
+    Comment,
 }
 
 impl BlockType {
@@ -39,6 +41,7 @@ impl BlockType {
         BlockType::Tile,
         BlockType::Plot,
         BlockType::Chart,
+        BlockType::Comment,
     ];
 
     pub fn name(self) -> &'static str {
@@ -47,6 +50,7 @@ impl BlockType {
             BlockType::Tile => "tile",
             BlockType::Plot => "plot",
             BlockType::Chart => "chart",
+            BlockType::Comment => "comment",
         }
     }
 
@@ -61,6 +65,7 @@ impl BlockType {
             BlockType::Tile => &["id", "from", "fn", "label", "format", "where", "group"],
             BlockType::Plot => &["id", "type", "from", "x", "y", "title", "where", "group"],
             BlockType::Chart => &["id"],
+            BlockType::Comment => &["id", "on", "by", "at", "state"],
         }
     }
 }
@@ -243,6 +248,7 @@ impl TypedBlock {
             BlockType::Tile => self.validate_tile(&mut out),
             BlockType::Plot => self.validate_plot(&mut out),
             BlockType::Chart => self.validate_chart(&mut out),
+            BlockType::Comment => self.validate_comment(&mut out),
         }
         out
     }
@@ -371,6 +377,37 @@ impl TypedBlock {
         }
     }
 
+    fn validate_comment(&self, out: &mut Vec<Problem>) {
+        if let Some(on) = self.require("on", "comment.missing_on", out)
+            && !is_block_hash(on)
+        {
+            out.push(Problem::error(
+                "comment.bad_on",
+                format!("on= `{on}` is not a block hash (12 lowercase hex characters)"),
+            ));
+        }
+        if let Some(at) = self.info.get("at")
+            && chrono::NaiveDate::parse_from_str(at, "%Y-%m-%d").is_err()
+            && chrono::DateTime::parse_from_rfc3339(at).is_err()
+        {
+            out.push(Problem::warn(
+                "comment.bad_at",
+                format!("at= `{at}` is not an ISO 8601 date"),
+            ));
+        }
+        if let Some(state) = self.info.get("state")
+            && !["open", "resolved"].contains(&state)
+        {
+            out.push(Problem::error(
+                "comment.bad_state",
+                format!("state= `{state}` is not open or resolved"),
+            ));
+        }
+        if self.body.trim().is_empty() {
+            out.push(Problem::warn("comment.empty", "the comment has no text"));
+        }
+    }
+
     fn validate_chart(&self, out: &mut Vec<Problem>) {
         match serde_json::from_str::<serde_json::Value>(&self.body) {
             Ok(serde_json::Value::Object(_)) => {}
@@ -396,6 +433,13 @@ fn table_code(e: &TableError) -> &'static str {
         TableError::TooManyCells(_) => "sheet.too_many_cells",
         TableError::DuplicateHeader(_) => "sheet.duplicate_header",
     }
+}
+
+/// Twelve lowercase hex characters, the shape of [`crate::hash::block_hash`].
+pub fn is_block_hash(s: &str) -> bool {
+    s.len() == crate::hash::BLOCK_HASH_LEN
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// `[a-z0-9][a-z0-9_-]{0,63}`
@@ -568,5 +612,26 @@ mod tests {
             TypedBlock::parse("```sheet stock\n```"),
             Err(BlockError::Info(InfoError::BareWord(_)))
         ));
+    }
+
+    #[test]
+    fn comments_are_checked_and_keep_unknown_attributes() {
+        let src = "```comment on=0123456789ab by=\"Sam\" at=2026-11-20 state=open mood=hopeful\nCheck this figure.\n```";
+        let b = TypedBlock::parse(src).unwrap();
+        assert_eq!(b.ty, BlockType::Comment);
+        assert_eq!(codes(&b), ["block.unknown_attr"]);
+        assert_eq!(b.render("\n"), src, "unknown attributes survive as written");
+        let bad = TypedBlock::parse("```comment on=XYZ state=maybe at=soon\n```").unwrap();
+        assert_eq!(
+            codes(&bad),
+            [
+                "comment.bad_on",
+                "comment.bad_at",
+                "comment.bad_state",
+                "comment.empty"
+            ]
+        );
+        let none = TypedBlock::parse("```comment\nhi\n```").unwrap();
+        assert_eq!(codes(&none), ["comment.missing_on"]);
     }
 }
