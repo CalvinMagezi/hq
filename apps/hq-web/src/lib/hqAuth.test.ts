@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { adoptLinkToken, hasWebToken, hqFetch, needsSignIn, onSignInChange, saveWebToken, takeLinkCode } from './hqAuth'
+import { adoptLinkToken, hasWebToken, hqFetch, needsSignIn, onSignInChange, saveWebToken, takeLinkCode, wasSignedOut } from './hqAuth'
 
 const TOKEN = 'a'.repeat(64)
 const globals = globalThis as unknown as Record<string, unknown>
@@ -73,6 +73,18 @@ test('a 401 from the server asks for sign-in, and the next good answer clears it
   expect(needsSignIn()).toBe(false)
   expect(changes).toBe(2)
   off()
+})
+
+test('the signed-out reason ends with the spell: a working sign-in clears it', async () => {
+  browser('https://hq.example.ts.net/')
+  saveWebToken(TOKEN)
+  serverAnswers(401)
+  await hqFetch('/api/spaces')
+  expect(wasSignedOut()).toBe(true)
+  serverAnswers(200)
+  await hqFetch('/api/spaces')
+  expect(needsSignIn()).toBe(false)
+  expect(wasSignedOut()).toBe(false)
 })
 
 test('a copy the service worker served from its cache says nothing about sign-in', async () => {
