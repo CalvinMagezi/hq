@@ -4098,6 +4098,7 @@ dependencies = [
  "hq-export",
  "hq-suite-adapter",
  "hq-tool-api",
+ "hq-vault",
  "serde_json",
  "tempfile",
  "tokio",
