@@ -958,13 +958,11 @@ mod tests {
     fn a_standing_repo_rule_approves_what_it_covers_without_asking_and_never_a_refusal() {
         let f = fixture(false);
         let repo = format!("{}{}", store::REPO_SCOPE, f.cwd.display());
-        let empty = SandboxDelta::default();
         store::add_rule(
             &f.db,
             &repo,
             "fs_write",
             "~/.gradle",
-            &empty,
             "starter mobile-dev",
             1,
             None,
@@ -975,7 +973,6 @@ mod tests {
             &repo,
             "egress",
             "pub.dev:443",
-            &empty,
             "starter mobile-dev",
             1,
             None,
@@ -1002,7 +999,7 @@ mod tests {
             Outcome::Pending { .. }
         ));
         // A rule naming a credential directory cannot open it.
-        store::add_rule(&f.db, &repo, "fs_read", "~/.ssh", &empty, "oops", 2, None).unwrap();
+        store::add_rule(&f.db, &repo, "fs_read", "~/.ssh", "oops", 2, None).unwrap();
         let out = ask(&f, Capability::FsRead, &f.at(".ssh/id_ed25519"));
         assert!(matches!(out, Outcome::Refused(_)), "{out:?}");
     }
@@ -1015,23 +1012,12 @@ mod tests {
             "repo:/somewhere/else",
             "fs_write",
             "~/.gradle",
-            &SandboxDelta::default(),
             "x",
             1,
             None,
         )
         .unwrap();
-        store::add_rule(
-            &f.db,
-            "task:t-other",
-            "fs_write",
-            "~/.gradle",
-            &SandboxDelta::default(),
-            "x",
-            1,
-            None,
-        )
-        .unwrap();
+        store::add_rule(&f.db, "task:t-other", "fs_write", "~/.gradle", "x", 1, None).unwrap();
         assert!(matches!(
             ask(&f, Capability::FsWrite, &f.at(".gradle")),
             Outcome::Pending { .. }

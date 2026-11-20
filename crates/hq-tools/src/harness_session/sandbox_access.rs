@@ -6,8 +6,7 @@
 use super::sandbox_request::HostPaths;
 use anyhow::{Result, bail};
 use hq_core::grants::{
-    Capability, GrantRequest, STARTER_PROFILES, SandboxDelta, normalize, starter_for,
-    starter_profile,
+    Capability, GrantRequest, STARTER_PROFILES, normalize, starter_for, starter_profile,
 };
 use hq_db::Database;
 use hq_db::sandbox_grants::{self as store, Grant};
@@ -156,7 +155,6 @@ pub fn apply_answer(
             &scope,
             &capability,
             &resource,
-            &SandboxDelta::default(),
             &note,
             now,
             Some(now + RULE_TTL_SECS),
@@ -188,6 +186,7 @@ pub fn suggested_starter(grant: &Grant) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hq_core::grants::SandboxDelta;
     use hq_core::types::{ValueItem, ValueKind};
 
     fn pending(

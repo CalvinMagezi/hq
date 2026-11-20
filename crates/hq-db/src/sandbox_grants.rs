@@ -468,7 +468,6 @@ pub fn add_rule(
     scope: &str,
     capability: &str,
     resource: &str,
-    delta: &SandboxDelta,
     note: &str,
     now: i64,
     expires_at: Option<i64>,
@@ -485,7 +484,9 @@ pub fn add_rule(
             repo: "",
             capability,
             resource,
-            delta,
+            // The rule carries no delta of its own: what it opens is worked out against the
+            // session computer's home each time a session starts or asks.
+            delta: &SandboxDelta::default(),
             state: ACTIVE,
             decided_by: BY_OWNER,
             helper_reason: "",
@@ -704,16 +705,14 @@ mod tests {
     }
 
     #[test]
-    fn standing_rules_reach_every_session_in_their_scope_and_are_listed_apart() {
+    fn standing_rules_are_found_by_scope_listed_apart_and_stop_when_revoked() {
         let db = Database::open_memory().unwrap();
-        let d = delta("/repo/cache");
         assert!(
             add_rule(
                 &db,
                 "repo:/repo",
                 "fs_write",
                 "/repo/cache",
-                &d,
                 "always",
                 1,
                 None
@@ -727,7 +726,6 @@ mod tests {
                 "repo:/repo",
                 "fs_write",
                 "/repo/cache",
-                &d,
                 "always",
                 2,
                 None
@@ -736,49 +734,32 @@ mod tests {
             .is_none(),
             "idempotent"
         );
-        add_rule(
-            &db,
-            "task:t1",
-            "fs_write",
-            "/repo/t",
-            &delta("/repo/t"),
-            "task",
-            3,
-            None,
-        )
-        .unwrap();
-        let scopes = |s: &str| {
-            vec![
-                s.to_string(),
-                "task:t1".to_string(),
-                "repo:/repo".to_string(),
-            ]
-        };
-        let got = delta_for_scopes(&db, &scopes("s1"), 10).unwrap();
-        assert_eq!(got.writable.len(), 2);
-        let other = delta_for_scopes(
-            &db,
-            &[
-                "s2".to_string(),
-                "task:t9".to_string(),
-                "repo:/else".to_string(),
-            ],
-            10,
-        )
-        .unwrap();
-        assert!(other.is_empty(), "another repo and task get nothing");
-        let rules = rules_for(&db, &scopes("s1"), 10).unwrap();
+        add_rule(&db, "task:t1", "fs_write", "/repo/t", "task", 3, None).unwrap();
+        let both = ["task:t1".to_string(), "repo:/repo".to_string()];
+        let rules = rules_for(&db, &both, 10).unwrap();
         assert_eq!(
             rules.iter().map(|r| r.scope.as_str()).collect::<Vec<_>>(),
             vec!["task", "repo"]
         );
+        let other = ["task:t9".to_string(), "repo:/else".to_string()];
+        assert!(
+            rules_for(&db, &other, 10).unwrap().is_empty(),
+            "another repo and task get nothing"
+        );
+        assert_eq!(all_rules(&db, 10).unwrap().len(), 2);
         assert!(revoke(&db, &rules[1].id, 20).unwrap());
+        assert_eq!(rules_for(&db, &both, 30).unwrap().len(), 1);
+        let mut lapsing = add_rule(&db, "repo:/r2", "fs_write", "/r2", "x", 1, Some(50)).unwrap();
+        assert!(lapsing.take().is_some());
         assert_eq!(
-            delta_for_scopes(&db, &scopes("s1"), 30)
-                .unwrap()
-                .writable
-                .len(),
+            rules_for(&db, &["repo:/r2".to_string()], 40).unwrap().len(),
             1
+        );
+        assert!(
+            rules_for(&db, &["repo:/r2".to_string()], 60)
+                .unwrap()
+                .is_empty(),
+            "a rule lapses"
         );
     }
 
@@ -792,7 +773,7 @@ mod tests {
         file(&db, &at("/r/2", owner), 100).unwrap();
         file(&db, &at("/r/3", new("s1", &d, PENDING)), 100).unwrap();
         file(&db, &at("/r/4", new("s1", &d, REFUSED)), 100).unwrap();
-        add_rule(&db, "repo:/r", "fs_write", "/r", &d, "x", 100, None).unwrap();
+        add_rule(&db, "repo:/r", "fs_write", "/r", "x", 100, None).unwrap();
         bind_profile(&db, "task:t", "mobile", 100).unwrap();
         let s = summary(&db, 50, 200).unwrap();
         assert_eq!(
@@ -815,18 +796,9 @@ mod tests {
     fn revoking_a_rule_revokes_what_it_approved_so_the_access_stops_at_the_next_launch() {
         let db = Database::open_memory().unwrap();
         let d = delta("/repo/cache");
-        let rule = add_rule(
-            &db,
-            "repo:/repo",
-            "fs_write",
-            "/repo",
-            &SandboxDelta::default(),
-            "x",
-            1,
-            None,
-        )
-        .unwrap()
-        .unwrap();
+        let rule = add_rule(&db, "repo:/repo", "fs_write", "/repo", "x", 1, None)
+            .unwrap()
+            .unwrap();
         let mut derived = new("s1", &d, ACTIVE);
         let note = rule_note(&rule);
         derived.decision_note = &note;

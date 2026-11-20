@@ -349,18 +349,7 @@ mod tests {
     async fn the_owner_reads_starters_rules_and_the_summary() {
         let (state, _vault) = state(Some("s3cret"));
         filed(&state.db, "s1", "/r/a");
-        let d = hq_core::grants::SandboxDelta::default();
-        store::add_rule(
-            &state.db,
-            "repo:/r",
-            "fs_write",
-            "~/.gradle",
-            &d,
-            "x",
-            1,
-            None,
-        )
-        .unwrap();
+        store::add_rule(&state.db, "repo:/r", "fs_write", "~/.gradle", "x", 1, None).unwrap();
         let app = crate::create_router(state.clone());
         let owner = Some("Bearer s3cret");
         let (_, starters) = call(&app, "GET", "/api/sandbox-grants/starters", owner, None).await;
