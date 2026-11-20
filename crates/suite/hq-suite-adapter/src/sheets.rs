@@ -103,7 +103,7 @@ fn show(value: &Value, kind: &str) -> String {
 pub(crate) struct NoteBook {
     pub(crate) book: Workbook,
     /// The table of each sheet block, in note order; its number here is its sheet number.
-    tables: Vec<Vec<Vec<String>>>,
+    pub(crate) tables: Vec<Vec<Vec<String>>>,
 }
 
 impl NoteBook {
@@ -203,9 +203,9 @@ pub fn view(vault: &Path, note: &str, index: usize, row0: u32, col0: u32) -> Res
 }
 
 /// Excel's last column is XFD, the 16,384th.
-const MAX_EDIT_COLUMN: u32 = 16_384;
+pub(crate) const MAX_EDIT_COLUMN: u32 = 16_384;
 /// Longest text one cell may hold when edited from the phone.
-const MAX_CELL_CHARS: usize = 2000;
+pub(crate) const MAX_CELL_CHARS: usize = 2000;
 
 /// The table lines of a sheet block's text: the lines that start with `|`, other than the rule
 /// under the header, as indexes into `lines`.
@@ -237,17 +237,32 @@ pub fn edit_cell(
     expected: &str,
     text: &str,
 ) -> Result<()> {
+    let paths = SuitePaths::new(vault);
+    let file = paths.resolve(note)?;
+    let source =
+        std::fs::read_to_string(&file).with_context(|| format!("{note} cannot be read"))?;
+    let doc = Document::parse(&source);
+    let patched = cell_patched(&doc, index, row, col, expected, text)?;
+    fsx::atomic_write(&file, patched.render().as_bytes())?;
+    Ok(())
+}
+
+/// The note with one cell of its `index`th `sheet` block set to `text`, nothing written. The checks
+/// of [`edit_cell`] apply.
+pub fn cell_patched(
+    doc: &Document,
+    index: usize,
+    row: u32,
+    col: u32,
+    expected: &str,
+    text: &str,
+) -> Result<Document> {
     if text.chars().count() > MAX_CELL_CHARS {
         bail!("a cell holds at most {MAX_CELL_CHARS} characters");
     }
     if text.contains('|') || text.contains('\n') || text.contains('\r') {
         bail!("a cell cannot hold a | or a line break");
     }
-    let paths = SuitePaths::new(vault);
-    let file = paths.resolve(note)?;
-    let source =
-        std::fs::read_to_string(&file).with_context(|| format!("{note} cannot be read"))?;
-    let doc = Document::parse(&source);
     let (node, _) = doc
         .typed_blocks()
         .filter_map(|(i, b)| b.ok().map(|b| (i, b)))
@@ -291,10 +306,7 @@ pub fn edit_cell(
             markdown: out.join("\n"),
         }],
     };
-    let patched =
-        apply(&doc, &patch).map_err(|e| anyhow::anyhow!("the note could not be changed: {e}"))?;
-    fsx::atomic_write(&file, patched.render().as_bytes())?;
-    Ok(())
+    apply(doc, &patch).map_err(|e| anyhow::anyhow!("the note could not be changed: {e}"))
 }
 
 /// The column (one-based, in the sheet) each condition names, found in the range's first row.
@@ -338,12 +350,11 @@ pub fn plot(vault: &Path, note: &str, index: usize) -> Result<String> {
     let paths = SuitePaths::new(vault);
     let text = std::fs::read_to_string(paths.resolve(note)?)
         .with_context(|| format!("{note} cannot be read"))?;
-    plot_in(&text, note, index)
+    plot_of(&Document::parse(&text), note, index)
 }
 
-/// As [`plot`], over the note's text, which the caller has already read.
-pub(crate) fn plot_in(text: &str, note: &str, index: usize) -> Result<String> {
-    let doc = Document::parse(text);
+/// [`plot`] over a note already read, so a block can be tried before it is written.
+pub fn plot_of(doc: &Document, note: &str, index: usize) -> Result<String> {
     let blocks: Vec<_> = doc.typed_blocks().filter_map(|(_, b)| b.ok()).collect();
     let Some(plot) = blocks.iter().filter(|b| b.ty == BlockType::Plot).nth(index) else {
         bail!("that note has no plot number {}", index + 1);
@@ -526,7 +537,11 @@ pub fn tile(vault: &Path, note: &str, index: usize) -> Result<TileView> {
     let paths = SuitePaths::new(vault);
     let text = std::fs::read_to_string(paths.resolve(note)?)
         .with_context(|| format!("{note} cannot be read"))?;
-    let doc = Document::parse(&text);
+    tile_of(&Document::parse(&text), note, index)
+}
+
+/// [`tile`] over a note already read, so a block can be tried before it is written.
+pub fn tile_of(doc: &Document, note: &str, index: usize) -> Result<TileView> {
     let blocks: Vec<_> = doc.typed_blocks().filter_map(|(_, b)| b.ok()).collect();
     let Some(tile) = blocks.iter().filter(|b| b.ty == BlockType::Tile).nth(index) else {
         bail!("that note has no tile number {}", index + 1);

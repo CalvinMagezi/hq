@@ -7,7 +7,7 @@
 use hq_suite_md::{BlockType, Document, RangeRef};
 use hq_suite_xlsx::{ChartKind, ChartSeries, ChartSpec};
 
-use crate::sheets::{NoteBook, plot_in, sheet_of_range};
+use crate::sheets::{NoteBook, plot_of, sheet_of_range};
 
 /// The charts a workbook can carry, and how many plots were left out (they filter, group, or would
 /// not draw).
@@ -30,7 +30,7 @@ pub fn native_charts(text: &str, note: &str) -> NativeCharts {
         .filter(|b| b.ty == BlockType::Plot)
         .enumerate()
     {
-        match one(&blocks, &book, plot, text, note, index) {
+        match one(&blocks, &book, plot, &doc, note, index) {
             Some(spec) => out.charts.push(spec),
             None => out.left_out += 1,
         }
@@ -42,7 +42,7 @@ fn one(
     blocks: &[hq_suite_md::TypedBlock],
     book: &NoteBook,
     plot: &hq_suite_md::TypedBlock,
-    text: &str,
+    doc: &Document,
     note: &str,
     index: usize,
 ) -> Option<ChartSpec> {
@@ -73,7 +73,7 @@ fn one(
     let x = column_of(plot.info.get("x")?)?;
     let y = column_of(plot.info.get("y")?)?;
     // The values come from the same evaluation the phone's chart uses, so the cached numbers match.
-    let drawn: serde_json::Value = serde_json::from_str(&plot_in(text, note, index).ok()?).ok()?;
+    let drawn: serde_json::Value = serde_json::from_str(&plot_of(doc, note, index).ok()?).ok()?;
     let labels: Vec<String> = drawn["labels"]
         .as_array()?
         .iter()

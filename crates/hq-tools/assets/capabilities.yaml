@@ -87,7 +87,7 @@
 
 - id: edit-document
   group: documents
-  says: Change a sheet, document or deck you already have
+  says: Change a sheet, document, deck or dashboard you already have
   example: Add June's sales to my stock sheet
   tools: [office_edit, office_export]
   needs: [model]

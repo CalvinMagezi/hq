@@ -60,3 +60,57 @@ async fn an_agent_edit_keeps_the_earlier_text_and_records_the_writer() {
         .expect("the write is recorded");
     assert_eq!(who.source_kind, hq_db::provenance::SourceKind::Agent);
 }
+
+#[tokio::test]
+async fn a_preview_records_nothing_and_the_applied_call_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path();
+    std::fs::create_dir_all(vault.join("Notebooks")).unwrap();
+    let before = "---\nsuite_kind: doc\n---\n# Plan\n\nFirst.\n\nSecond.\n";
+    std::fs::write(vault.join("Notebooks/plan.md"), before).unwrap();
+    let db = Arc::new(hq_db::Database::open_memory().unwrap());
+    let client = Arc::new(hq_vault::VaultClient::new(vault.to_path_buf()).unwrap());
+    let registry = create_default_registry(
+        client,
+        db.clone(),
+        vault.join("skills"),
+        vault.join("Agents"),
+        None,
+    );
+    let tool = registry.get("office_edit").unwrap();
+    let caller = json!({"_hq_native_session": "s1", "_hq_native_agent": "hq"});
+    let listed = tool
+        .execute(json!({"action": "blocks", "note": "Notebooks/plan.md"}))
+        .await
+        .unwrap();
+    let second = listed["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["src"].as_str().unwrap().contains("Second"))
+        .unwrap();
+    let mut call = json!({"action": "delete_block", "note": "Notebooks/plan.md",
+        "index": second["index"], "hash": second["hash"]});
+    call.as_object_mut()
+        .unwrap()
+        .extend(caller.as_object().unwrap().clone());
+    let preview = tool.execute(call.clone()).await.unwrap();
+    assert_eq!(preview["preview"], true);
+    assert_eq!(
+        std::fs::read_to_string(vault.join("Notebooks/plan.md")).unwrap(),
+        before
+    );
+    assert!(
+        db.with_conn(|c| hq_db::note_keep::get(c, "Notebooks/plan.md"))
+            .unwrap()
+            .is_none(),
+        "a preview keeps no earlier text"
+    );
+    call["token"] = preview["token"].clone();
+    tool.execute(call).await.unwrap();
+    let prev = db
+        .with_conn(|c| hq_db::note_keep::get(c, "Notebooks/plan.md"))
+        .unwrap()
+        .expect("the applied delete keeps the earlier text for Undo");
+    assert_eq!(prev.text, before);
+}
