@@ -281,9 +281,43 @@ private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions
             }
         }
         card.quote?.let { QuoteLine(it, card.createdAt) }
-        Text(if (card.kind == CardKind.SignIn) signInBody(card) else card.body, style = HqType.BodySm.copy(fontSize = 15.sp, lineHeight = 22.sp), color = Mts.Ink, maxLines = BODY_LINES, overflow = TextOverflow.Ellipsis)
+        if (card.kind == CardKind.SandboxGrant && card.sandboxGrant != null) {
+            SandboxGrantBody(card.sandboxGrant)
+        } else {
+            Text(if (card.kind == CardKind.SignIn) signInBody(card) else card.body, style = HqType.BodySm.copy(fontSize = 15.sp, lineHeight = 22.sp), color = Mts.Ink, maxLines = BODY_LINES, overflow = TextOverflow.Ellipsis)
+        }
         (answer as? Answer.Failed)?.let { Text(it.reason, style = HqType.BodySm, color = Mts.Amber) }
         AnswerRow(card, answer, offline, actions, onTakeLook)
+    }
+}
+
+@Composable
+private fun SandboxGrantBody(grant: ParsedSandboxGrant) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            Modifier.fillMaxWidth().clip(shape).background(Mts.Surface000).border(1.dp, Mts.Hairline, shape).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(stringResource(SandboxGrantWords.modeRes(grant.capability)), style = SmallText, color = Mts.InkMuted)
+            Text(grant.resource, style = HqType.BodySm.copy(fontFamily = FontFamily.Monospace), color = Mts.Ink)
+        }
+        grant.taskId?.takeIf { it.isNotBlank() }?.let { taskId ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.grants_task_label), style = SmallText, color = Mts.InkMuted)
+                Text(taskId, style = SmallText.copy(fontFamily = FontFamily.Monospace), color = Mts.Ink)
+            }
+        }
+        Text(stringResource(R.string.grants_expires_day), style = SmallText, color = Mts.InkMuted)
+        val clippedReason = SandboxGrantWords.clipReason(grant.helperReason)
+        if (clippedReason.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(R.string.grants_helper_words), style = SmallText, color = Mts.InkMuted)
+                Box(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface000).border(1.dp, Mts.Hairline, shape).padding(12.dp)) {
+                    Text(clippedReason, style = HqType.BodySm, color = Mts.InkMuted)
+                }
+            }
+        }
     }
 }
 
@@ -294,7 +328,19 @@ private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, action
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
     wholeSite?.let { site -> example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.approval_allow_site, site), Modifier.fillMaxWidth(), enabled = !sending && !offline) { actions.onAllowSite(card) } }
     val pair = card.kind != CardKind.SignIn && (card.canAllow || (onDetailsPage && card.kind == CardKind.Approval))
-    if (pair && AnswerLayout.stacked(androidx.compose.ui.platform.LocalDensity.current.fontScale)) {
+    if (card.kind == CardKind.SandboxGrant) {
+        val allowText = stringResource(if (sending) R.string.approval_answering else R.string.grants_allow)
+        val declineText = stringResource(R.string.grants_decline)
+        if (AnswerLayout.stacked(androidx.compose.ui.platform.LocalDensity.current.fontScale)) {
+            example.hq.spike.ui.helpers.OutlineButton(declineText, Modifier.fillMaxWidth(), enabled = !sending && !offline, maxLines = Int.MAX_VALUE) { actions.onNotNow(card) }
+            PrimaryButton(allowText, Modifier.fillMaxWidth(), enabled = !sending && !offline, maxLines = Int.MAX_VALUE) { actions.onAllow(card) }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                example.hq.spike.ui.helpers.OutlineButton(declineText, Modifier.weight(1f), enabled = !sending && !offline) { actions.onNotNow(card) }
+                PrimaryButton(allowText, Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
+            }
+        }
+    } else if (pair && AnswerLayout.stacked(androidx.compose.ui.platform.LocalDensity.current.fontScale)) {
         // Large text: one button per line, the safe answer first, labels wrapping rather than clipping.
         val label = if (card.allowLabel == "Allow") "Allow once" else card.allowLabel
         example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.inbox_decline), Modifier.fillMaxWidth(), enabled = !sending && !offline, maxLines = Int.MAX_VALUE) { actions.onNotNow(card) }
@@ -521,7 +567,11 @@ fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: In
                 }
                 Text(stringResource(R.string.approval_in_words), style = HqType.BodySmBold, color = Mts.Ink)
             }
-            Text(if (card.kind == CardKind.SignIn) signInBody(card) else card.fullBody.ifEmpty { card.body }, style = HqType.Body, color = Mts.InkMuted)
+            if (card.kind == CardKind.SandboxGrant && card.sandboxGrant != null) {
+                SandboxGrantBody(card.sandboxGrant)
+            } else {
+                Text(if (card.kind == CardKind.SignIn) signInBody(card) else card.fullBody.ifEmpty { card.body }, style = HqType.Body, color = Mts.InkMuted)
+            }
             if (card.canAllow || card.kind == CardKind.Approval) {
                 Outcome(HqIcons.Check, Mts.BrandBlue, "If you allow it", "HQ records your yes. What asked then goes ahead.")
                 Outcome(HqIcons.Pause, Mts.InkMuted, "If you say not now", "Nothing is done.")

@@ -245,6 +245,7 @@ object AlertPoster {
 
     internal fun linkFor(card: InboxCard): String = when {
         card.kind == CardKind.Update -> "hq://inbox"
+        card.kind == CardKind.SandboxGrant -> "hq://inbox/${card.id}"
         card.sessionId != null -> "hq://helpers/${card.sessionId}"
         else -> "hq://inbox/${card.id}"
     }
@@ -278,7 +279,8 @@ object AlertPoster {
     private fun actions(c: Context, card: InboxCard, details: Boolean): List<Notification.Action> {
         val icon = Icon.createWithResource(c, HubService.statIcon(c))
         val out = mutableListOf<Notification.Action>()
-        val buttons = details && Build.VERSION.SDK_INT >= SDK_AUTH_ACTION && !NoticeWords.losing(card)
+        // Sandbox-grants notifications do not carry an R0/R1 vs R2 risk class, so conservatively open the app.
+        val buttons = details && Build.VERSION.SDK_INT >= SDK_AUTH_ACTION && !NoticeWords.losing(card) && card.kind != CardKind.SandboxGrant
         if (buttons) {
             val answerable = card.dialog != null || card.canAllow
             // The server answers the dialog it read: Allow once only when it named a yes-once answer, Decline always.

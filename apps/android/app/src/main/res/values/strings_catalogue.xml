@@ -4614,4 +4614,7 @@
     <string name="grants_profile_saved">Saved</string>
     <string name="grants_profile_failed">Could not update access profile.</string>
     <string name="grants_revoke_failed">Could not revoke grant.</string>
+    <string name="grants_session_empty">No access grants for this helper yet.</string>
+    <string name="grants_loading">Loading access...</string>
+    <string name="grants_load_failed">Could not load access grants.</string>
 </resources>

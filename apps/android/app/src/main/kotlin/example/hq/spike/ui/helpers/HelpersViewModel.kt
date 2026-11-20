@@ -33,6 +33,9 @@ import example.hq.spike.data.followHelper
 import example.hq.spike.data.renameHelper
 import example.hq.spike.data.startHelper
 import example.hq.spike.data.helperHosts
+import example.hq.spike.data.SandboxGrant
+import example.hq.spike.data.sandboxGrants
+import example.hq.spike.data.revokeSandboxGrant
 
 enum class HelperFilter { All, Needs, Working, Finished }
 
@@ -91,6 +94,11 @@ data class HelperOpen(
     val technical: Boolean = false,
     /** "Follow in chat" is waiting on HQ. */
     val following: Boolean = false,
+    val grantsOpen: Boolean = false,
+    val grantsLoading: Boolean = false,
+    val grants: List<SandboxGrant> = emptyList(),
+    val grantsError: String? = null,
+    val revokingGrantId: String? = null,
 )
 
 data class HelperLine(val text: String)
@@ -196,6 +204,10 @@ class HelpersActions(
     val onJobNote: (String) -> Unit = {},
     val onJobControl: (String) -> Unit = {},
     val onJobChat: () -> Unit = {},
+    val onGrantsOpen: () -> Unit = {},
+    val onGrantsClose: () -> Unit = {},
+    val onGrantsRefresh: () -> Unit = {},
+    val onGrantRevoke: (String) -> Unit = {},
 )
 
 class HelpersViewModel(app: Application) : AndroidViewModel(app) {
@@ -264,6 +276,10 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         onJobNote = { n -> _state.update { it.copy(jobNote = n) } },
         onJobControl = ::controlJob,
         onJobChat = ::openJobChat,
+        onGrantsOpen = ::openGrants,
+        onGrantsClose = { editOpen { it.copy(grantsOpen = false, grantsError = null) } },
+        onGrantsRefresh = ::refreshGrants,
+        onGrantRevoke = ::revokeGrant,
     )
 
     private fun openRun() = _state.value.let { s -> s.edgeRuns.firstOrNull { it.askId == s.openJob } }
@@ -271,6 +287,44 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
     private fun openJobChat() {
         val thread = openRun()?.threadId ?: return
         _state.update { it.copy(openJob = null, jobNote = "", followed = thread) }
+    }
+
+    private fun openGrants() {
+        val id = _state.value.open?.id ?: return
+        editFor(id) { it.copy(grantsOpen = true, grantsLoading = true, grantsError = null) }
+        loadGrants(id)
+    }
+
+    private fun refreshGrants() {
+        val id = _state.value.open?.takeIf { it.grantsOpen }?.id ?: return
+        loadGrants(id)
+    }
+
+    private fun loadGrants(sessionId: String) {
+        viewModelScope.launch {
+            try {
+                val list = client.sandboxGrants(sessionId)
+                editFor(sessionId) { it.copy(grants = list, grantsLoading = false, grantsError = null) }
+            } catch (e: HqUnavailable) {
+                editFor(sessionId) { it.copy(grantsLoading = false, grantsError = w().s(R.string.grants_load_failed)) }
+            }
+        }
+    }
+
+    private fun revokeGrant(grantId: String) {
+        val open = _state.value.open ?: return
+        if (open.revokingGrantId != null) return
+        val sessionId = open.id
+        editFor(sessionId) { it.copy(revokingGrantId = grantId, grantsError = null) }
+        viewModelScope.launch {
+            try {
+                client.revokeSandboxGrant(grantId)
+                val list = try { client.sandboxGrants(sessionId) } catch (e: HqUnavailable) { null }
+                editFor(sessionId) { it.copy(revokingGrantId = null, grants = list ?: it.grants) }
+            } catch (e: HqUnavailable) {
+                editFor(sessionId) { it.copy(revokingGrantId = null, grantsError = w().s(R.string.grants_revoke_failed)) }
+            }
+        }
     }
 
     /** One of the owner's controls on a job, by the action names of `POST /api/coder/{action}`. */
