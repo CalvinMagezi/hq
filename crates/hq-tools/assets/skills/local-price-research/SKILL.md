@@ -40,7 +40,23 @@ When you hand the figures to a verifier helper, give it each figure with its sou
 - A figure whose source could not be fetched, by you or the helper, is marked `unverified` in the output, in the table and in the sentence that quotes it. Say that no independent check was made.
 - Do not describe a figure as verified because a helper agreed without opening the source.
 
-## 5. Caveats: short, next to the number
+## 5. A dashboard is a page with a chart
+
+When the person asks for a dashboard, or for a comparison they can open, make a page, not an export of your notes.
+
+- Write ONE self-contained `.html` file: no external scripts, fonts or images, so it works offline. Save it under `Exports/` in the vault and attach it to the reply.
+- Draw one bar chart per comparison, in inline SVG or CSS bars: one bar per place, the unit on the axis. A range is a bar with whiskers, or two values, never a midpoint.
+- Add a small table with source, date, retail or wholesale, and confidence for every figure.
+- Set an explicit light page background and dark text colours on both `html` and `body`, so the page reads in any theme.
+- A place with no figure shows the words "no figure found". Never draw a zero bar for it.
+- The spreadsheet is a separate `.xlsx`: numeric price columns (low and high as numbers, the unit in its own column) plus the quality columns from section 3.
+- Never present an export of the research note as the dashboard.
+
+## 6. Check the figures with a helper
+
+After drafting and before the final answer, hand the table with its source URLs to a verifier helper through `spawn_subagents`. Section 4 says what to brief. Report its result in the answer in one plain sentence. If the person asked for a helper, always do this.
+
+## 7. Caveats: short, next to the number
 
 Put a caveat beside the figure it limits, in a few words: "one source", "wholesale", "seen 2026-03", "unverified". Do not collect caveats in a footnote or a closing paragraph. Lead the answer with the figures in their trade unit, then the table.
 

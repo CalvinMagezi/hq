@@ -1153,4 +1153,48 @@ mod tests {
             .unwrap();
         assert!((mean - 0.75).abs() < 1e-9);
     }
+
+    #[test]
+    fn legacy_delegated_work_notices_are_cleaned_once() {
+        let db = Database::open_memory().unwrap();
+        let old = "Sub-agent run ee68156e (verifier) is partial and completed: it ended without a finished deliverable. Details: subagent_run_status.";
+        let day_ago = (chrono::Utc::now() - chrono::Duration::hours(30)).to_rfc3339();
+        let now = chrono::Utc::now().to_rfc3339();
+        let rows: Vec<(String, String, String)> = db
+            .with_conn(|c| {
+                for (id, reviewed, created) in [
+                    ("a", Some(5), &now),
+                    ("b", None, &day_ago),
+                    ("c", None, &now),
+                ] {
+                    c.execute(
+                        "INSERT INTO subagent_runs (run_id, child_id, goal, exec_status, accept_status, started_at, last_activity_at, settled_at, reviewed_at)
+                         VALUES (?1, 'x', 'g', 'completed', 'partial', 1, 1, 1, ?2)",
+                        rusqlite::params![id, reviewed],
+                    )?;
+                    c.execute(
+                        "INSERT INTO value_items (id, source_task, kind, title, body, dedup_key, state, created_at)
+                         VALUES (?1, 'subagent_runs', 'action_needed', 'Delegated work needs attention', ?2, ?3, 'delivered', ?4)",
+                        rusqlite::params![id, old, format!("subagent-run-{id}"), created],
+                    )?;
+                }
+                for _ in 0..2 {
+                    c.execute_batch(include_str!("../sql/147_legacy_delegated_work_notices.sql"))?;
+                }
+                let mut stmt = c.prepare("SELECT id, state, title || ' ' || body FROM value_items ORDER BY id")?;
+                let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+                Ok(rows.collect::<Result<_, _>>()?)
+            })
+            .unwrap();
+        let state = |id: &str| rows.iter().find(|r| r.0 == id).unwrap().1.clone();
+        assert_eq!(state("a"), "dismissed");
+        assert_eq!(state("b"), "dismissed");
+        assert_eq!(state("c"), "delivered");
+        for (_, _, text) in &rows {
+            assert!(text.contains("A background task did not finish"));
+            for leaked in ["ee68156e", "verifier", "subagent_run_status", "Sub-agent"] {
+                assert!(!text.contains(leaked), "{text}");
+            }
+        }
+    }
 }

@@ -662,6 +662,10 @@ fn local_price_research_covers_the_five_rules_without_naming_a_market() {
         "fetch every URL",
         "`unverified`",
         "next to the number",
+        "## 5. A dashboard is a page with a chart",
+        "no figure found",
+        "## 6. Check the figures with a helper",
+        "spawn_subagents",
     ] {
         assert!(text.contains(rule), "the skill must say: {rule}");
     }
