@@ -157,6 +157,74 @@ pub fn revoke_session(db: &Database, session_id: &str, now: i64) -> Result<usize
     })
 }
 
+/// The `capability` of a row that binds a session to a named access profile.
+pub const PROFILE: &str = "profile";
+
+/// The access profile this session opted into, if any: the newest active binding.
+pub fn profile_for_session(db: &Database, session_id: &str) -> Result<Option<String>> {
+    db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT resource FROM sandbox_grants
+             WHERE session_id = ?1 AND capability = ?2 AND state = ?3
+             ORDER BY requested_at DESC, rowid DESC LIMIT 1",
+            params![session_id, PROFILE, ACTIVE],
+            |r| r.get(0),
+        )
+        .optional()?)
+    })
+}
+
+/// A request of this session for exactly this resource that is still waiting or in force, so
+/// asking twice never files twice.
+pub fn open_for(
+    db: &Database,
+    session_id: &str,
+    capability: &str,
+    resource: &str,
+) -> Result<Option<Grant>> {
+    db.with_conn(|c| {
+        Ok(c.query_row(
+            &format!(
+                "SELECT {COLUMNS} FROM sandbox_grants
+                 WHERE session_id = ?1 AND capability = ?2 AND resource = ?3 AND state IN (?4, ?5)
+                 ORDER BY requested_at DESC, rowid DESC LIMIT 1"
+            ),
+            params![session_id, capability, resource, PENDING, ACTIVE],
+            row,
+        )
+        .optional()?)
+    })
+}
+
+/// Whether the owner already declined this exact request from this session.
+pub fn declined_for(
+    db: &Database,
+    session_id: &str,
+    capability: &str,
+    resource: &str,
+) -> Result<bool> {
+    db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sandbox_grants
+             WHERE session_id = ?1 AND capability = ?2 AND resource = ?3 AND state = ?4)",
+            params![session_id, capability, resource, DECLINED],
+            |r| r.get(0),
+        )?)
+    })
+}
+
+/// Requests of this session still waiting for the owner.
+pub fn pending_for_session(db: &Database, session_id: &str) -> Result<Vec<Grant>> {
+    db.with_conn(|c| {
+        let mut stmt = c.prepare(&format!(
+            "SELECT {COLUMNS} FROM sandbox_grants WHERE session_id = ?1 AND state = ?2
+             ORDER BY requested_at, rowid"
+        ))?;
+        let rows = stmt.query_map(params![session_id, PENDING], row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    })
+}
+
 /// Requests this session made, newest first.
 pub fn for_session(db: &Database, session_id: &str, limit: usize) -> Result<Vec<Grant>> {
     db.with_conn(|c| {
@@ -284,6 +352,25 @@ mod tests {
         assert!(delta_for_session(&db, "s1", 50).unwrap().is_empty());
         assert!(!decide(&db, &id, ACTIVE, 60).unwrap());
         assert_eq!(get(&db, &id).unwrap().unwrap().state, REVOKED);
+    }
+
+    #[test]
+    fn a_session_opts_into_one_profile_and_the_newest_binding_wins() {
+        let db = Database::open_memory().unwrap();
+        let d = SandboxDelta::default();
+        let bind = |name: &'static str| NewGrant {
+            capability: PROFILE,
+            resource: name,
+            ..new("s1", &d, ACTIVE)
+        };
+        assert_eq!(profile_for_session(&db, "s1").unwrap(), None);
+        file(&db, &bind("mobile"), 1).unwrap();
+        file(&db, &bind("web"), 2).unwrap();
+        assert_eq!(
+            profile_for_session(&db, "s1").unwrap().as_deref(),
+            Some("web")
+        );
+        assert_eq!(profile_for_session(&db, "s2").unwrap(), None);
     }
 
     #[test]

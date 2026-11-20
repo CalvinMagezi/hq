@@ -35,6 +35,7 @@ mod origin;
 pub mod policy;
 mod preflight;
 pub mod publish;
+pub mod sandbox_request;
 pub(crate) mod spawn_limits;
 mod turn_origin;
 pub use preflight::plain_binary;

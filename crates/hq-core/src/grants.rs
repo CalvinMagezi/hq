@@ -65,6 +65,51 @@ pub struct GrantProfile {
     pub egress: Vec<String>,
 }
 
+/// `~` and `~/x` made absolute under `home`; anything else is returned as written.
+pub fn expand_home(raw: &str, home: &Path) -> PathBuf {
+    match raw.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None if raw == "~" => home.to_path_buf(),
+        None => PathBuf::from(raw),
+    }
+}
+
+impl GrantProfile {
+    /// The profile with `~` expanded and every path that may never be opened dropped, so a
+    /// profile that lists a credential directory by mistake cannot open it.
+    pub fn resolved(&self, home: &Path) -> GrantProfile {
+        let keep = |list: &[String]| -> Vec<String> {
+            list.iter()
+                .map(|p| expand_home(p, home))
+                .filter(|p| denied_path(p, home).is_none())
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect()
+        };
+        GrantProfile {
+            writable: keep(&self.writable),
+            readable: keep(&self.readable),
+            loopback_ports: self
+                .loopback_ports
+                .iter()
+                .copied()
+                .filter(|p| *p != 0)
+                .collect(),
+            egress: self.egress.clone(),
+        }
+    }
+
+    /// What a session that opted into this profile starts with, before it asks for anything.
+    pub fn delta(&self, home: &Path) -> SandboxDelta {
+        let r = self.resolved(home);
+        SandboxDelta {
+            writable: r.writable.iter().map(PathBuf::from).collect(),
+            readable: r.readable.iter().map(PathBuf::from).collect(),
+            loopback_ports: r.loopback_ports,
+            allow: r.egress.iter().filter_map(|e| split_host(e)).collect(),
+        }
+    }
+}
+
 /// `agent_host.grants`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GrantsConfig {
@@ -461,6 +506,21 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn a_profile_expands_home_and_drops_credential_paths() {
+        let p = GrantProfile {
+            writable: vec!["~/.gradle".into(), "~/.ssh".into()],
+            readable: vec!["/home/o".into()],
+            loopback_ports: vec![0, 5037],
+            egress: vec!["pub.dev".into(), "*.bad".into()],
+        };
+        let d = p.delta(Path::new("/home/o"));
+        assert_eq!(d.writable, vec![PathBuf::from("/home/o/.gradle")]);
+        assert!(d.readable.is_empty(), "home itself is dropped");
+        assert_eq!(d.loopback_ports, vec![5037]);
+        assert_eq!(d.allow, vec![("pub.dev".to_string(), 443)]);
     }
 
     #[test]

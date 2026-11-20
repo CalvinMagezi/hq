@@ -78,6 +78,7 @@ pub fn create_harness_session_tools(
         }),
         Box::new(HarnessSessionStopTool { db: db.clone() }),
         Box::new(crate::harness_session::publish::HarnessSessionPublishTool { db: db.clone() }),
+        Box::new(crate::harness_session::sandbox_request::SandboxRequestTool { db: db.clone() }),
         Box::new(crate::harness_session::merge::HarnessSessionRequestMergeTool { db: db.clone() }),
         Box::new(HarnessSessionLinkTool {
             db: db.clone(),
