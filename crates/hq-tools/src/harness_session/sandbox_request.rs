@@ -52,6 +52,30 @@ pub(super) struct Asker<'a> {
     pub host: &'a str,
 }
 
+/// The tag that opts a task into an access profile: `grants:mobile` names the profile `mobile`.
+const PROFILE_TAG_PREFIX: &str = "grants:";
+
+/// The profile this session works under: one bound to it directly, else the one its task's
+/// `grants:<name>` tag names. `None` means it opted into nothing, so every request asks.
+pub(super) fn profile_name(db: &Database, session: &str) -> Option<String> {
+    if let Ok(Some(bound)) = store::profile_for_session(db, session) {
+        return Some(bound);
+    }
+    let task = db
+        .with_conn(|c| hq_db::harness_sessions_registry::get(c, session))
+        .ok()
+        .flatten()?
+        .mission_id?;
+    let task = db
+        .with_conn(|c| hq_db::tasks::get_task(c, &task))
+        .ok()
+        .flatten()?;
+    task.tags
+        .iter()
+        .find_map(|t| t.strip_prefix(PROFILE_TAG_PREFIX))
+        .map(str::to_string)
+}
+
 fn key_for(id: &str) -> String {
     format!("{KEY_PREFIX}{id}")
 }
@@ -194,7 +218,7 @@ pub(super) fn decide(
     // match the canonical resource.
     let home = PathBuf::from(canonical_lenient(&home.to_string_lossy()));
     let home = home.as_path();
-    let profile = store::profile_for_session(db, asker.session)?
+    let profile = profile_name(db, asker.session)
         .and_then(|name| cfg.profiles.get(&name))
         .map(|p| {
             let mut r = p.resolved(home);
@@ -292,7 +316,7 @@ pub(super) fn launch_delta(
 ) -> SandboxDelta {
     let mut delta = store::delta_for_session(db, session, now).unwrap_or_default();
     let home = dirs::home_dir();
-    let profile = store::profile_for_session(db, session).ok().flatten();
+    let profile = profile_name(db, session);
     if let (Some(name), Some(home)) = (profile, home)
         && let Some(p) = cfg.grants.profiles.get(&name)
     {
@@ -629,5 +653,57 @@ mod tests {
             "/a/../b",
             "left for classify to refuse"
         );
+    }
+
+    #[test]
+    fn a_task_tag_opts_its_session_into_a_profile_and_no_tag_means_none() {
+        use hq_db::harness_sessions_registry as registry;
+        let f = fixture(false);
+        f.db.with_conn(|c| {
+            c.execute(
+                "INSERT OR IGNORE INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('in-1', 'personal', 'Work', 'work', 'FR')",
+                [],
+            )?;
+            let tags = ["grants:mobile".to_string()];
+            let tagged = hq_db::tasks::NewTask {
+                title: "Build",
+                description: "d",
+                created_by: "test",
+                tags: &tags,
+                ..Default::default()
+            };
+            hq_db::tasks::create_task(c, "tk-tagged", "in-1", &tagged)?;
+            let plain = hq_db::tasks::NewTask {
+                title: "Plain",
+                description: "d",
+                created_by: "test",
+                ..Default::default()
+            };
+            hq_db::tasks::create_task(c, "tk-plain", "in-1", &plain)?;
+            for (id, task) in [("hs-tag", "tk-tagged"), ("hs-plain", "tk-plain")] {
+                registry::insert(
+                    c,
+                    &registry::NewSession {
+                        id,
+                        harness: "codex",
+                        label: "",
+                        cwd: "/t",
+                        mission_id: Some(task),
+                        placement: registry::Placement {
+                            host: "local",
+                            agent_name: id,
+                            workspace_id: "w",
+                            pane_id: "p",
+                        },
+                        purpose: None,
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(profile_name(&f.db, "hs-tag").as_deref(), Some("mobile"));
+        assert_eq!(profile_name(&f.db, "hs-plain"), None);
+        assert_eq!(profile_name(&f.db, "hs-missing"), None);
     }
 }
