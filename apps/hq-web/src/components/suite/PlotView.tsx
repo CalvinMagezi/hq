@@ -23,6 +23,8 @@ export interface PlotProps {
   format: string
 }
 
+/** The id of the hatch laid over every series after the first, so bars differ by more than colour. */
+const hatchId = (id: string) => `${id.replace(/[^a-z0-9]/gi, '')}hatch`
 const clip = (s: string) => (s.length > TICK_CHARS ? `${s.slice(0, TICK_CHARS - 1)}…` : s)
 const round = (n: number) => Math.round(n * 100) / 100
 
@@ -51,7 +53,12 @@ export function PlotChart({ kind, title, labels, series, format }: PlotProps) {
         {(pie ? labels : series.map((s) => s.name)).map((name, i) => (
           <li key={i}>
             <svg className="su-key" viewBox="0 0 16 10" aria-hidden="true">
-              {kind === 'line' ? <line x1="0" x2="16" y1="5" y2="5" stroke={seriesColor(i)} strokeWidth="2" strokeDasharray={seriesDashed(i) ? SERIES_DASH : undefined} /> : <rect width="16" height="10" rx="2" fill={seriesColor(i)} />}
+              {kind === 'line' ? <line x1="0" x2="16" y1="5" y2="5" stroke={seriesColor(i)} strokeWidth="2" strokeDasharray={seriesDashed(i) ? SERIES_DASH : undefined} /> : (
+                <>
+                  <rect width="16" height="10" rx="2" fill={seriesColor(i)} />
+                  {kind === 'bar' && 0 < i && <rect width="16" height="10" rx="2" fill={`url(#${hatchId(id)})`} />}
+                </>
+              )}
             </svg>
             <span className="su-legend-name">{name}</span>
             {pie && <span className="a-cap a-muted">{fmt(series[0].values[i])}</span>}
@@ -94,6 +101,11 @@ function Cartesian({ id, kind, labels, series, active, setActive, fmt, aria }: {
       }}
     >
       <desc id={`${id}-help`}>{t('suite_plot_keys')}</desc>
+      <defs>
+        <pattern id={hatchId(id)} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="6" className="su-hatch" />
+        </pattern>
+      </defs>
       {scale.ticks.map((tick) => (
         <g key={tick}>
           <line x1={M.left} x2={W - M.right} y1={round(y(tick))} y2={round(y(tick))} className="su-grid-line" />
@@ -120,6 +132,7 @@ function Cartesian({ id, kind, labels, series, active, setActive, fmt, aria }: {
             return (
               <g key={`${si}-${i}`}>
                 <rect x={round(x)} y={round(top)} width={round(barW)} height={round(Math.max(Math.abs(y(v) - y(0)), 1))} fill={seriesColor(si)} />
+                {si > 0 && <rect x={round(x)} y={round(top)} width={round(barW)} height={round(Math.max(Math.abs(y(v) - y(0)), 1))} fill={`url(#${hatchId(id)})`} />}
                 {labelled && (
                   <text x={round(x + barW / 2)} y={round(top - 3)} textAnchor="middle" className="su-vlabel">
                     {compactNumber(v)}

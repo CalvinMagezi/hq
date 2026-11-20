@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { t } from '~/strings'
+import { t, tn } from '~/strings'
 import { colName, computeSheet, formatValue, type Sheet } from '~/lib/sheetCalc'
 import { acceptCell, addRow, setCell } from '~/lib/hqmdEdit'
 import {
@@ -211,8 +211,8 @@ export function SheetView({ sheets, editor }: { sheets: Sheet[]; editor: Editor 
   const paste = (text: string) => {
     if (!picked) return
     const { edits, skipped } = pasteEdits(projected, { row: box?.r1 ?? picked.row, col: box?.c1 ?? picked.col }, parseTsv(text))
-    if (!applyEdits(edits, t('suite_pasted', { n: String(edits.length) }))) return
-    if (skipped > 0) setRefused(t('suite_paste_skipped', { n: String(skipped) }))
+    if (!applyEdits(edits, tn('suite_pasted', edits.length))) return
+    if (skipped > 0) setRefused(tn('suite_paste_skipped', skipped))
     else setRefused(null)
   }
 
@@ -439,7 +439,7 @@ export function SheetView({ sheets, editor }: { sheets: Sheet[]; editor: Editor 
             if (!box) return
             const edits = fillDownEdits(projected, box)
             if (edits.length === 0) toastNotice(t('suite_fill_nothing'))
-            else applyEdits(edits, t('suite_filled', { n: String(edits.length) }))
+            else applyEdits(edits, tn('suite_filled', edits.length))
             setActions(false)
           }}
           onSelect={(kind) => {
@@ -642,7 +642,7 @@ function CellActions({ sheet, cell, pos, srcRow, box, editor, onClose, onEdit, o
           {t('suite_act_edit')}
         </button>
         <button type="button" className="su-act" onClick={onCopy}>
-          {t('suite_act_copy', { n: String(cells) })}
+          {tn('suite_act_copy', cells)}
         </button>
         <button type="button" className="su-act" onClick={() => void doPaste()}>
           {t('suite_act_paste')}

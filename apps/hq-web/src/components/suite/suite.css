@@ -157,6 +157,7 @@
 .su-axis{fill:var(--ink-muted);font:400 10px var(--font-sans)}
 .su-vlabel{fill:var(--ink);font:700 10px var(--font-sans)}
 .su-active{fill:var(--surface-200);opacity:.6}
+.su-hatch{stroke:var(--surface-000);stroke-width:2}
 .su-slice{stroke:var(--surface-100);stroke-width:1.5}
 .su-slice.is-on{stroke:var(--ink);stroke-width:3}
 .su-reading{min-height:24px;margin:0}

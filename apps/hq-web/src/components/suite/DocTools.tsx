@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { t } from '~/strings'
+import { t, tn } from '~/strings'
 import { HqHttpError } from '~/lib/hqAuth'
 import { appendBlock, countMatches, imageMarkdown, isImagePath, isOneBlock, outline, relativePath, replaceAll, tableMarkdown } from '~/lib/docEdit'
 import { deleteBlock, editBlock, fetchBlocks, insertBlock, type SuiteBlock } from '~/lib/suiteApi'
@@ -134,7 +134,7 @@ function FindPanel({ text, apply, onClose }: { text: string; apply: (c: (s: stri
             })
             if (!ok) return
             onClose()
-            toastUndo(t('suite_doc_replaced', { n: String(n) }), async () => void apply((c) => (c === after ? before : null)), t('suite_undone'))
+            toastUndo(tn('suite_doc_replaced', n), async () => void apply((c) => (c === after ? before : null)), t('suite_undone'))
           }}
         >
           {t('suite_doc_replace_all')}
@@ -155,7 +155,7 @@ function FindPanel({ text, apply, onClose }: { text: string; apply: (c: (s: stri
           <span>{t('suite_doc_match_case')}</span>
         </label>
         <p className="a-body-sm" role="status" aria-live="polite">
-          {q === '' ? '' : n === 0 ? t('suite_doc_no_match') : t('suite_doc_matches', { n: String(n) })}
+          {q === '' ? '' : n === 0 ? t('suite_doc_no_match') : tn('suite_doc_matches', n)}
         </p>
       </div>
     </Sheet>

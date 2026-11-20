@@ -301,7 +301,7 @@ export function MarkdownViewer({ content, activePath, zoom, bare, onOpenFile }: 
                 <div className="mb-6 rounded" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
                     <button
                         onClick={() => setMetaOpen(!metaOpen)}
-                        className="w-full text-left px-3 py-2 text-xs font-mono font-bold flex justify-between items-center"
+                        className="w-full min-h-[44px] text-left px-3 py-2 text-xs font-mono font-bold flex justify-between items-center"
                         style={{ color: 'var(--text-dim)', cursor: 'pointer' }}
                     >
                         <span>📄 METADATA</span>
