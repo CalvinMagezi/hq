@@ -1,7 +1,7 @@
 // Renders ```chart fenced blocks to inline SVG. Format: docs/CHART_BLOCKS.md.
 import { t } from '~/strings'
 
-type ChartType = 'line' | 'bar' | 'pie' | 'donut'
+export type ChartType = 'line' | 'bar' | 'pie' | 'donut' | 'area' | 'stacked' | 'scatter'
 
 interface ChartSeries {
   name: string
@@ -19,7 +19,7 @@ export interface ChartSpec {
 
 export type ChartParse = { ok: true; spec: ChartSpec } | { ok: false; reason: string }
 
-const CHART_TYPES: ChartType[] = ['line', 'bar', 'pie', 'donut']
+export const CHART_TYPES: ChartType[] = ['line', 'bar', 'pie', 'donut', 'area', 'stacked', 'scatter']
 export const MAX_POINTS = 50
 export const MAX_SLICES = 12
 export const MAX_SERIES = 6
@@ -57,6 +57,9 @@ const text = (v: unknown, fallback = ''): string =>
 
 const fail = (reason: string): ChartParse => ({ ok: false, reason })
 
+/** A label that reads as a finite number (`3`, `-1.5`, `1e3`): the x of a scatter point. */
+export const isNumberText = (s: string): boolean => s.trim() !== '' && Number.isFinite(Number(s))
+
 function parseSeries(raw: unknown, pointCount: number): ChartSeries[] | string {
   if (!Array.isArray(raw) || raw.length === 0) return t('chart_reason_series')
   if (raw.length > MAX_SERIES) return t('chart_reason_too_many_series', { limit: MAX_SERIES })
@@ -86,6 +89,8 @@ export function parseChart(source: string): ChartParse {
   const limit = isPie ? MAX_SLICES : MAX_POINTS
   if (raw.labels.length > limit) return fail(t('chart_reason_too_many_labels', { limit }))
   const labels = raw.labels.map((l) => text(l))
+  // A scatter chart puts each point at a number on the x axis, so every label must be one.
+  if (type === 'scatter' && !labels.every(isNumberText)) return fail(t('chart_reason_scatter_x'))
   const series = parseSeries(raw.series, labels.length)
   if (typeof series === 'string') return fail(series)
   if (isPie) {
@@ -124,6 +129,64 @@ export function yScale(values: number[]): { min: number; max: number; ticks: num
   return { min, max: max === min ? min + step : max, ticks }
 }
 
+/** Where each series sits in a stacked column: from `lo` to `hi`, positives stacking up from zero and negatives down. */
+export function stackBands(series: { values: number[] }[]): { lo: number; hi: number }[][] {
+  const up: number[] = []
+  const down: number[] = []
+  return series.map((s) =>
+    s.values.map((v, i) => {
+      if (v >= 0) {
+        const lo = up[i] ?? 0
+        up[i] = lo + v
+        return { lo, hi: up[i] }
+      }
+      const hi = down[i] ?? 0
+      down[i] = hi + v
+      return { lo: down[i], hi }
+    }),
+  )
+}
+
+/** Every number the y axis has to hold: the values, or for a stacked chart the tops and bottoms of the stacks. */
+export function yValuesOf(type: string, series: { values: number[] }[]): number[] {
+  const all = type === 'stacked' ? stackBands(series).flatMap((row) => row.flatMap((b) => [b.lo, b.hi])) : series.flatMap((s) => s.values)
+  return all.filter(Number.isFinite)
+}
+
+/** The x axis of a scatter chart: round ends and ticks around the numbers, never forced to include zero. */
+export function xScale(xs: number[]): { min: number; max: number; ticks: number[] } {
+  const lo = Math.min(...xs)
+  const hi = Math.max(...xs)
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return { min: 0, max: 1, ticks: [0, 1] }
+  const span = hi === lo ? 2 : hi - lo
+  const step = niceStep(span, Y_TICKS)
+  const min = hi === lo ? lo - 1 : Math.floor(lo / step) * step
+  const max = hi === lo ? hi + 1 : Math.ceil(hi / step) * step
+  const ticks: number[] = []
+  for (let v = min; v <= max + step / 2; v += step) ticks.push(round(v))
+  return { min, max, ticks }
+}
+
+/** The corners of an area: along the line, then back along the baseline. */
+export function areaPoints(points: { x: number; y: number }[], baseline: number): string {
+  if (points.length === 0) return ''
+  const edge = points.map((p) => `${round(p.x)},${round(p.y)}`)
+  const first = points[0]
+  const last = points[points.length - 1]
+  return [...edge, `${round(last.x)},${round(baseline)}`, `${round(first.x)},${round(baseline)}`].join(' ')
+}
+
+/** Scatter markers differ by shape as well as colour: circle, square, diamond, triangle, then they start over. */
+export const MARKER_SHAPES = ['circle', 'square', 'diamond', 'triangle'] as const
+export function markerPath(shape: number, x: number, y: number, r: number): string {
+  const kind = MARKER_SHAPES[shape % MARKER_SHAPES.length]
+  const [cx, cy] = [round(x), round(y)]
+  if (kind === 'square') return `M ${round(cx - r)} ${round(cy - r)} h ${round(r * 2)} v ${round(r * 2)} h ${round(-r * 2)} Z`
+  if (kind === 'diamond') return `M ${cx} ${round(cy - r * 1.2)} L ${round(cx + r * 1.2)} ${cy} L ${cx} ${round(cy + r * 1.2)} L ${round(cx - r * 1.2)} ${cy} Z`
+  if (kind === 'triangle') return `M ${cx} ${round(cy - r * 1.2)} L ${round(cx + r * 1.1)} ${round(cy + r)} L ${round(cx - r * 1.1)} ${round(cy + r)} Z`
+  return `M ${round(cx - r)} ${cy} a ${r} ${r} 0 1 0 ${round(r * 2)} 0 a ${r} ${r} 0 1 0 ${round(-r * 2)} 0 Z`
+}
+
 const axisText = (x: number, y: number, s: string, anchor: string, extra = '') =>
   `<text x="${round(x)}" y="${round(y)}" text-anchor="${anchor}" style="fill:var(--ink-muted);font-size:10px" ${extra}>${escapeHtml(s)}</text>`
 
@@ -131,25 +194,76 @@ function cartesianSvg(spec: ChartSpec): string {
   const { left, right, top, bottom } = MARGIN
   const plotW = VIEW_W - left - right
   const plotH = VIEW_H - top - bottom
-  const scale = yScale(spec.series.flatMap((s) => s.values))
+  const scale = yScale(yValuesOf(spec.type, spec.series))
   const y = (v: number) => top + (1 - (v - scale.min) / (scale.max - scale.min)) * plotH
   const band = plotW / spec.labels.length
-  const cx = (i: number) => left + (i + 0.5) * band
+  const scatter = spec.type === 'scatter'
+  const xs = scatter ? spec.labels.map(Number) : []
+  const xAxis = scatter ? xScale(xs) : null
+  const atX = (v: number) => (xAxis ? left + ((v - xAxis.min) / (xAxis.max - xAxis.min)) * plotW : 0)
+  const cx = (i: number) => (scatter ? atX(xs[i]) : left + (i + 0.5) * band)
   const parts: string[] = []
 
   for (const tick of scale.ticks) {
     parts.push(`<line x1="${left}" x2="${VIEW_W - right}" y1="${round(y(tick))}" y2="${round(y(tick))}" style="stroke:var(--ink-muted);opacity:0.25"/>`)
     parts.push(axisText(left - 6, y(tick) + 3, compact(tick), 'end'))
   }
-  const every = Math.ceil(spec.labels.length / 8)
-  spec.labels.forEach((l, i) => {
-    if (i % every === 0) parts.push(axisText(cx(i), VIEW_H - bottom + 14, clip(l), 'middle'))
-  })
+  if (xAxis) {
+    for (const tick of xAxis.ticks) parts.push(axisText(atX(tick), VIEW_H - bottom + 14, compact(tick), 'middle'))
+  } else {
+    const every = Math.ceil(spec.labels.length / 8)
+    spec.labels.forEach((l, i) => {
+      if (i % every === 0) parts.push(axisText(cx(i), VIEW_H - bottom + 14, clip(l), 'middle'))
+    })
+  }
   if (spec.xLabel) parts.push(axisText(left + plotW / 2, VIEW_H - 6, spec.xLabel, 'middle'))
   if (spec.yLabel) parts.push(axisText(10, top + plotH / 2, spec.yLabel, 'middle', `transform="rotate(-90 10 ${round(top + plotH / 2)})"`))
 
-  const body = spec.type === 'bar' ? barMarks(spec, band, cx, y) : lineMarks(spec, cx, y)
+  const body =
+    spec.type === 'bar' ? barMarks(spec, band, cx, y)
+    : spec.type === 'stacked' ? stackedMarks(spec, band, cx, y)
+    : spec.type === 'scatter' ? scatterMarks(spec, cx, y)
+    : spec.type === 'area' ? areaMarks(spec, cx, y)
+    : lineMarks(spec, cx, y)
   return svgWrap(spec, parts.join('') + body)
+}
+
+/** One column per label, the series stacked on each other; positives go up from zero and negatives down. */
+function stackedMarks(spec: ChartSpec, band: number, cx: (i: number) => number, y: (v: number) => number): string {
+  const w = band * 0.7
+  return stackBands(spec.series)
+    .map((row, si) =>
+      row
+        .map((b, i) => {
+          const top = y(b.hi)
+          return `<rect x="${round(cx(i) - w / 2)}" y="${round(top)}" width="${round(w)}" height="${round(Math.max(y(b.lo) - top, 1))}" style="fill:${color(si)};stroke:var(--surface-100);stroke-width:1"/>`
+        })
+        .join(''),
+    )
+    .join('')
+}
+
+/** A line with the space under it filled, down to zero. Later series are dashed, as in a line chart. */
+function areaMarks(spec: ChartSpec, cx: (i: number) => number, y: (v: number) => number): string {
+  const base = y(0)
+  return spec.series
+    .map((s, si) => {
+      const pts = s.values.map((v, i) => ({ x: cx(i), y: y(v) }))
+      const fill = `<polygon points="${areaPoints(pts, base)}" style="fill:${color(si)};opacity:0.25"/>`
+      return fill + lineMarks({ ...spec, series: [s] }, cx, y, si)
+    })
+    .join('')
+}
+
+/** Points only: the x of each is its label, the y its value. Each series has its own shape. */
+function scatterMarks(spec: ChartSpec, cx: (i: number) => number, y: (v: number) => number): string {
+  return spec.series
+    .map((s, si) =>
+      s.values
+        .map((v, i) => (Number.isFinite(v) ? `<path d="${markerPath(si, cx(i), y(v), 3.5)}" style="fill:${color(si)};opacity:0.85"/>` : ''))
+        .join(''),
+    )
+    .join('')
 }
 
 function barMarks(spec: ChartSpec, band: number, cx: (i: number) => number, y: (v: number) => number): string {
@@ -168,9 +282,10 @@ function barMarks(spec: ChartSpec, band: number, cx: (i: number) => number, y: (
     .join('')
 }
 
-function lineMarks(spec: ChartSpec, cx: (i: number) => number, y: (v: number) => number): string {
+function lineMarks(spec: ChartSpec, cx: (i: number) => number, y: (v: number) => number, firstIndex = 0): string {
   return spec.series
-    .map((s, si) => {
+    .map((s, n) => {
+      const si = n + firstIndex
       const pts = s.values.map((v, i) => `${round(cx(i))},${round(y(v))}`)
       const line = `<polyline points="${pts.join(' ')}" fill="none" style="stroke:${color(si)};stroke-width:2${isDashed(si) ? `;stroke-dasharray:${DASH}` : ''}"/>`
       if (s.values.length > POINT_MARKER_LIMIT) return line
@@ -224,7 +339,7 @@ function legendHtml(spec: ChartSpec): string {
   if (spec.series.length < 2) return ''
   return spec.series
     .map((s, i) => {
-      const name = spec.type === 'line' ? t(isDashed(i) ? 'chart_line_dashed' : 'chart_line_solid', { name: s.name }) : s.name
+      const name = spec.type === 'line' || spec.type === 'area' ? t(isDashed(i) ? 'chart_line_dashed' : 'chart_line_solid', { name: s.name }) : s.name
       return legendItem(color(i), name)
     })
     .join('')

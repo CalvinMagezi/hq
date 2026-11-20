@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { MAX_POINTS, MAX_SERIES, MAX_SLICES, niceStep, parseChart, parseMermaidPie, renderChartHtml, yScale, type ChartSpec } from './chart'
+import { MARKER_SHAPES, MAX_POINTS, MAX_SERIES, MAX_SLICES, areaPoints, markerPath, niceStep, parseChart, parseMermaidPie, renderChartHtml, stackBands, xScale, yScale, yValuesOf, type ChartSpec } from './chart'
 
 const payload = (over: Record<string, unknown> = {}) =>
   JSON.stringify({
@@ -150,4 +150,72 @@ test('failure reasons are plain sentences with no field names', () => {
   const r = parseChart(payload({ series: [{ name: 'x', values: [1, 2] }] }))
   expect(r.ok).toBe(false)
   if (!r.ok) expect(r.reason).toBe('Series 1 needs 3 values, one for each label.')
+})
+
+test('an area chart fills under each line and keeps the line, dashed after the first', () => {
+  const html = render({ type: 'area' })
+  expect(html.match(/<polygon/g)).toHaveLength(2)
+  expect(html.match(/<polyline/g)).toHaveLength(2)
+  expect(html.match(/stroke-dasharray/g)).toHaveLength(1)
+  expect(html).toContain('North · solid line')
+  expect(html).toContain('South · dashed line')
+})
+
+test('an area polygon closes along the baseline', () => {
+  expect(areaPoints([{ x: 10, y: 5 }, { x: 20, y: 8 }], 30)).toBe('10,5 20,8 20,30 10,30')
+  expect(areaPoints([], 30)).toBe('')
+})
+
+test('a stacked chart has one column per label and series, each on top of the one before', () => {
+  const html = render({ type: 'stacked' })
+  expect(html.match(/<rect/g)).toHaveLength(6)
+  expect(html).toContain('var(--brand-blue)')
+  expect(html).toContain('var(--brand-sky)')
+})
+
+test('stacks add positives upwards and negatives downwards, apart from each other', () => {
+  const bands = stackBands([{ values: [2, -1, 3] }, { values: [3, -2, -1] }])
+  expect(bands[0].map((b) => [b.lo, b.hi])).toEqual([[0, 2], [-1, 0], [0, 3]])
+  expect(bands[1].map((b) => [b.lo, b.hi])).toEqual([[2, 5], [-3, -1], [-1, 0]])
+  // The y axis has to hold the whole stack, not the biggest single value.
+  expect(Math.max(...yValuesOf('stacked', [{ values: [2, -1, 3] }, { values: [3, -2, -1] }]))).toBe(5)
+  expect(Math.max(...yValuesOf('bar', [{ values: [2, -1, 3] }, { values: [3, -2, -1] }]))).toBe(3)
+  expect(yScale(yValuesOf('stacked', [{ values: [4] }, { values: [4] }])).max).toBeGreaterThanOrEqual(8)
+})
+
+test('a scatter chart draws one marker per point, the x taken from the label, with its own shape per series', () => {
+  const html = render({ type: 'scatter', labels: ['1', '2.5', '4'], series: [{ name: 'a', values: [1, 3, 2] }, { name: 'b', values: [2, 1, 3] }] })
+  expect(html.match(/<path/g)).toHaveLength(6)
+  expect(html).not.toContain('<polyline')
+  // The x axis is numbers, not the labels as words.
+  expect(html).toContain('>1<')
+  expect(html).toContain('>4<')
+  expect(markerPath(0, 10, 10, 3)).not.toBe(markerPath(1, 10, 10, 3))
+  expect(MARKER_SHAPES.length).toBeGreaterThanOrEqual(4)
+})
+
+test('a scatter chart whose labels are not numbers says so', () => {
+  const r = parseChart(payload({ type: 'scatter' }))
+  expect(r.ok).toBe(false)
+  if (!r.ok) expect(r.reason).toContain('number')
+  expect(parseChart(payload({ type: 'scatter', labels: [1, 2, 3] })).ok).toBe(true)
+  expect(parseChart(payload({ type: 'scatter', labels: ['1', '', '3'] })).ok).toBe(false)
+})
+
+test('the x axis of a scatter chart rounds outwards and does not have to reach zero', () => {
+  const x = xScale([103, 118, 141])
+  expect(x.min).toBeLessThanOrEqual(103)
+  expect(x.max).toBeGreaterThanOrEqual(141)
+  expect(x.min).toBeGreaterThan(0)
+  expect(xScale([5, 5]).min).toBe(4)
+  expect(xScale([]).ticks).toEqual([0, 1])
+})
+
+test('the new kinds keep the point limit, and a kind that is still unknown is refused', () => {
+  const many = Array.from({ length: MAX_POINTS + 1 }, (_, i) => String(i))
+  const values = many.map(() => 1)
+  for (const type of ['area', 'stacked', 'scatter']) expect(parseChart(payload({ type, labels: many, series: [{ name: 's', values }] })).ok).toBe(false)
+  const radar = parseChart(payload({ type: 'radar' }))
+  expect(radar.ok).toBe(false)
+  if (!radar.ok) expect(radar.reason).toContain('area')
 })

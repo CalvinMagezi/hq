@@ -142,12 +142,29 @@
 .su-dash{display:flex;flex-direction:column;gap:16px;min-width:0}
 .su-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;align-items:end}
 .su-filter-note{grid-column:1 / -1;margin:0}
-.su-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+/* The tiles and plots in the order the note has them. Two columns on a phone, four from a medium pane, six from a wide one;
+   a block takes one (small), two (wide) or all (full). Container queries on the app, as the slides do, not the window. */
+.su-board{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;min-width:0}
+@container app (min-width:700px){.su-board{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@container app (min-width:1100px){.su-board{grid-template-columns:repeat(6,minmax(0,1fr))}}
+.su-slot{display:flex;flex-direction:column;gap:4px;min-width:0}
+.su-slot>.su-tile,.su-slot>.su-plot{flex:1 1 auto}
+.su-size-small{grid-column:span 1}
+.su-size-wide{grid-column:span 2}
+.su-size-full{grid-column:1 / -1}
+.su-board.is-arranging .su-slot{padding:4px;border:1px dashed var(--line);border-radius:var(--radius-md)}
+.su-slot.is-dragging{opacity:.5}
+.su-slot.is-over{outline:2px dashed var(--focus-ring);outline-offset:2px}
+.su-slot-bar{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.su-slot-bar .a-ib{border:1px solid var(--line)}
+.su-grip{touch-action:none;cursor:grab}
+.su-size-pick{flex:1 1 100%;min-height:44px;padding:0 8px;font-size:14px;line-height:20px}
+.su-arrange-hint{margin:0}
+.su-topbar{align-items:center}
 .su-tile{display:flex;flex-direction:column;gap:4px;min-width:0;padding:12px;border-radius:var(--radius-md);background:var(--surface-100);border:1px solid var(--hairline)}
 .su-big{font:700 22px/28px var(--font-sans);font-variant-numeric:tabular-nums}
 .su-delta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-variant-numeric:tabular-nums}
 .su-spark{width:96px;height:28px;flex:none}
-.su-plots{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px}
 .su-plot{margin:0;display:flex;flex-direction:column;gap:8px;min-width:0}
 .su-chart{display:flex;flex-direction:column;gap:8px}
 .su-svg{width:100%;max-width:480px;height:auto;touch-action:manipulation}
@@ -157,6 +174,9 @@
 .su-axis{fill:var(--ink-muted);font:400 10px var(--font-sans)}
 .su-vlabel{fill:var(--ink);font:700 10px var(--font-sans)}
 .su-active{fill:var(--surface-200);opacity:.6}
+.su-active-line{stroke:var(--ink-muted);stroke-width:1;stroke-dasharray:3 3}
+.su-seg{stroke:var(--surface-100);stroke-width:1}
+.su-dot{stroke:var(--surface-100);stroke-width:1}
 .su-hatch{stroke:var(--surface-000);stroke-width:2}
 .su-slice{stroke:var(--surface-100);stroke-width:1.5}
 .su-slice.is-on{stroke:var(--ink);stroke-width:3}
@@ -164,6 +184,23 @@
 .su-legend{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:4px 16px;font:400 14px/20px var(--font-sans)}
 .su-legend li{display:flex;align-items:center;gap:6px;min-height:24px}
 .su-key{width:16px;height:10px;flex:none}
+
+/* ---- review comments ---- */
+.su-cmt-btn{gap:8px}
+.su-badge{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:var(--radius-pill);background:var(--brand-green);color:var(--on-green);font:700 12px/16px var(--font-sans)}
+.su-cmts{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:12px}
+.su-cmt{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px;border:1px solid var(--hairline);border-radius:var(--radius-md);background:var(--surface-100)}
+.su-cmt.is-resolved{opacity:.8}
+.su-cmt-meta,.su-cmt-text{margin:0}
+.su-cmt-text{overflow-wrap:anywhere;white-space:pre-wrap}
+.su-cmt-anchor{margin:0;padding:0 0 0 8px;border-left:3px solid var(--line);color:var(--ink-muted);overflow-wrap:anywhere}
+.su-cmt-orphan{color:var(--warn)}
+.su-cmts-done{padding:8px 0}
+.su-cmts-done summary{min-height:44px;display:flex;align-items:center}
+.su-cmts-done .su-cmts{margin-top:8px}
+.su-cmt-add{margin-top:16px;padding-top:16px;border-top:1px solid var(--hairline)}
+.su-cmt-add h3{margin:0}
+.su-stage .md-cmt-mark,.su-present .md-cmt-mark{display:none}
 
 /* ---- docs ---- */
 .su-doc{gap:8px}
@@ -189,7 +226,8 @@
   .su-grid td.is-picked,.su-grid td.is-range{outline:2px solid Highlight;outline-offset:-2px;background:Canvas}
   .su-mini,.su-stage,.su-tile,.su-act,.su-select,.su-textarea,.su-seg-b,.su-fx{border-color:CanvasText}
   .su-thumb[aria-current="true"] .su-mini,.su-seg-b[aria-checked="true"]{outline:3px solid Highlight}
-  .su-svg rect,.su-svg circle,.su-svg path{forced-color-adjust:none}
+  .su-svg rect,.su-svg circle,.su-svg path,.su-svg polygon{forced-color-adjust:none}
+  .su-active-line{stroke:Highlight}
   .su-active{fill:Highlight;opacity:.25}
   .su-slice.is-on{stroke:Highlight}
   .su-formula,.su-bad{color:LinkText}

@@ -8,6 +8,7 @@ import { toastAlert, toastNotice, toastUndo } from '~/lib/toast'
 import { MarkdownViewer } from '../MarkdownViewer'
 import { Sheet } from '../ui/Sheet'
 import { SaveLine } from './SaveLine'
+import { CommentsButton } from './CommentsPanel'
 import { useSuiteEdit } from './useSuiteEdit'
 
 type Go = { (): Promise<{ blocks: SuiteBlock[] }> }
@@ -26,7 +27,18 @@ export function DocBody({ content, path, hash, zoom, onSaved }: Props) {
   const saving = useSuiteEdit({ path, content, hash, onSaved })
   const [panel, setPanel] = useState<Panel>(null)
   const body = useRef<HTMLDivElement>(null)
+  const picked = useRef('')
   const text = saving.text
+  // The words the person last selected in the note: a comment starts on the block that holds them.
+  useEffect(() => {
+    const onSelect = () => {
+      const sel = window.getSelection()
+      const words = sel && !sel.isCollapsed ? sel.toString().trim() : ''
+      if (words && sel?.anchorNode && body.current?.contains(sel.anchorNode)) picked.current = words
+    }
+    document.addEventListener('selectionchange', onSelect)
+    return () => document.removeEventListener('selectionchange', onSelect)
+  }, [])
   const close = () => setPanel(null)
   const tools: { key: Exclude<Panel, null>; label: string; edit: boolean }[] = [
     { key: 'outline', label: t('suite_doc_outline'), edit: false },
@@ -45,6 +57,7 @@ export function DocBody({ content, path, hash, zoom, onSaved }: Props) {
               {x.label}
             </button>
           ))}
+        <CommentsButton path={path} text={text} canEdit={saving.canEdit} waiting={saving.state === 'queued'} onChanged={() => onSaved?.()} hint={() => (picked.current ? { text: picked.current } : undefined)} />
       </div>
       <div ref={body}>
         <MarkdownViewer content={text} activePath={path} zoom={zoom} />

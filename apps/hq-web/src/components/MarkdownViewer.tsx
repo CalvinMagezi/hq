@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { t } from '~/strings'
+import { t, tn } from '~/strings'
 import { SelectionToolbar } from './SelectionToolbar'
 import { Sheet } from './ui/Sheet'
 import { toastNotice } from '~/lib/toast'
@@ -9,6 +9,7 @@ import { useHQStore } from '~/store/hqStore'
 import { useVaultNoteStore } from '~/store/vaultNoteStore'
 import { blockRemoteImages } from '~/lib/remoteImages'
 import { chartSlot, fillChartSlots } from '~/lib/chartSlots'
+import { commentMarker, foldComments, isCommentLang } from '~/lib/commentView'
 import { parseChart, parseMermaidPie, renderChartHtml } from '~/lib/chart'
 import { codespanHtml, vaultFileLinkTarget, vaultLinkTarget } from '~/lib/noteRefs'
 import { isHtmlPath } from '~/lib/htmlDashboard'
@@ -71,8 +72,17 @@ async function configureMarked() {
         return null
     })
     marked.use({
+        // Review comments (hqmd `comment` blocks) are not drawn as code: a run of them folds into one small marker.
+        hooks: {
+            processAllTokens(tokens: any) {
+                const folded = foldComments(tokens as any[])
+                tokens.splice(0, tokens.length, ...folded)
+                return tokens
+            },
+        },
         renderer: {
             code(token: any) {
+                if (isCommentLang(token.lang)) return commentMarker(token.hqOpen ?? 0, tn('suite_comment_marker', token.hqComments ?? 1))
                 let langLabel = escapeHtml(token.lang || '')
                 if (token.lang === 'chart') {
                     const chart = parseChart(token.text)

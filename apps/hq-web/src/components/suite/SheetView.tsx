@@ -24,6 +24,7 @@ import { Sheet as BottomSheet } from '../ui/Sheet'
 import { useSuiteOps, type OpResult } from '~/lib/suiteOps'
 import { useDensity } from './useDensity'
 import type { Editor } from './Editor'
+import type { AnchorHint } from '~/lib/commentView'
 
 // A sheet draws the rows on screen a page at a time, so a long one does not slow the pane.
 const PAGE_ROWS = 200
@@ -77,7 +78,7 @@ function useServerValues(path: string | undefined, index: number, sheet: Sheet |
   return values
 }
 
-export function SheetView({ sheets, editor }: { sheets: Sheet[]; editor: Editor }) {
+export function SheetView({ sheets, editor, onAnchor }: { sheets: Sheet[]; editor: Editor; /** Where the person is, for a comment's default block. */ onAnchor?: (hint: AnchorHint) => void }) {
   const [at, setAt] = useState(0)
   const [shown, setShown] = useState(PAGE_ROWS)
   const [anchor, setAnchor] = useState<Pos | null>(null)
@@ -95,6 +96,7 @@ export function SheetView({ sheets, editor }: { sheets: Sheet[]; editor: Editor 
   const pointer = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> | null; fired: boolean; kind: string }>({ x: 0, y: 0, timer: null, fired: false, kind: 'mouse' })
   const sheet = sheets[Math.min(at, sheets.length - 1)]
   const where = Math.min(at, sheets.length - 1)
+  useEffect(() => onAnchor?.({ kind: 'sheet', nth: Math.max(where, 0) }), [onAnchor, where])
   const cells = useMemo(() => (sheet ? computeSheet(sheet) : []), [sheet])
   const server = useServerValues(editor.path, where, sheet, cells)
   const order = useMemo(() => (sheet ? viewOrder(sheet, cells, view) : []), [sheet, cells, view])

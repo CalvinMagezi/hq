@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { t } from '~/strings'
 import { readHqmd, type HqmdNote } from '~/lib/hqmd'
 import { readSheet, type Sheet } from '~/lib/sheetCalc'
@@ -7,6 +7,8 @@ import { SaveLine } from './SaveLine'
 import { SheetView } from './SheetView'
 import { SlidesView } from './SlidesView'
 import { DashboardView } from './DashboardView'
+import { CommentsButton } from './CommentsPanel'
+import type { AnchorHint } from '~/lib/commentView'
 import type { Editor } from './Editor'
 import './suite.css'
 
@@ -30,13 +32,17 @@ export function SuiteViewer({ text: source, path, hash, onSaved }: ViewerProps) 
   const editor: Editor = { on: saving.canEdit, apply: saving.apply, path, hash: saving.baseHash, waiting: saving.state === 'queued', reload: () => onSaved?.() }
   const note = useMemo(() => readHqmd(text), [text])
   const sheets = useMemo(() => sheetsOf(note), [note])
+  // Where the person is in the note, so a comment starts on the card or sheet they are looking at.
+  const [hint, setHint] = useState<AnchorHint>()
+  const comments = path ? <CommentsButton path={path} text={text} canEdit={saving.canEdit} waiting={saving.state === 'queued'} onChanged={() => onSaved?.()} hint={hint} /> : null
   return (
     <div className="su-view">
       {note.fidelity === 'lossy' && <p className="a-body-sm a-muted su-note">{t('suite_fidelity_lossy')}</p>}
       {note.fidelity === 'view' && <p className="a-body-sm a-muted su-note">{t('suite_fidelity_view')}</p>}
-      {note.kind === 'sheet' && <SheetView sheets={sheets} editor={editor} />}
-      {note.kind === 'slides' && <SlidesView note={note} editor={editor} />}
-      {note.kind === 'dashboard' && <DashboardView note={note} sheets={sheets} />}
+      {comments && note.kind !== 'dashboard' && <div className="su-toolbar su-topbar">{comments}</div>}
+      {note.kind === 'sheet' && <SheetView sheets={sheets} editor={editor} onAnchor={setHint} />}
+      {note.kind === 'slides' && <SlidesView note={note} editor={editor} onAnchor={setHint} />}
+      {note.kind === 'dashboard' && <DashboardView note={note} sheets={sheets} editor={editor} tools={comments} />}
       <SaveLine state={saving.state} conflict={saving.conflict} onDismiss={saving.dismissConflict} />
     </div>
   )

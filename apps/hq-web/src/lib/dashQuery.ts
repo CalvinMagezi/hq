@@ -1,5 +1,6 @@
 // A dashboard's `where` and `group` (docs/suite/SHEETS.md) read in the browser, plus the view-only filters a
 // person picks from a dropdown. The filters never reach the note: they narrow what this page draws.
+import { isNumberText } from './chart'
 import { computeSheet, parseRange, type Cell, type Sheet } from './sheetCalc'
 
 const OPS = ['>=', '<=', '<>', '!=', '=', '>', '<'] as const
@@ -121,8 +122,12 @@ export interface Series {
 }
 export type PlotData = { ok: true; labels: string[]; series: Series[] } | { ok: false; why: 'other-note' | 'no-sheet' | 'columns' | 'text' | 'groups' }
 
-/** A plot's labels and one or more series. `group` splits by a column (up to six, labels in first-seen order, a missing one counts 0). */
-export function plotData(sheets: Sheet[], a: { from: string; x: string; y: string; where?: string; group?: string }, filters: ViewFilter[]): PlotData {
+/**
+ * A plot's labels and one or more series. `group` splits by a column (up to six, labels in first-seen order, a missing one counts 0).
+ * A scatter plot (`kind`) keeps every row as a point of its own: the label is the row's x, which must be a number, and a group
+ * that has no point at a row has NaN there, which is not drawn.
+ */
+export function plotData(sheets: Sheet[], a: { from: string; x: string; y: string; where?: string; group?: string; kind?: string }, filters: ViewFilter[]): PlotData {
   const range = parseRange(a.from)
   if (!range) return { ok: false, why: 'other-note' }
   const sheet = range.sheet ? sheets.find((s) => s.name === range.sheet || s.id === range.sheet) : sheets[0]
@@ -142,6 +147,8 @@ export function plotData(sheets: Sheet[], a: { from: string; x: string; y: strin
   const labels: string[] = []
   const groups: string[] = []
   const grid = new Map<string, number>()
+  const points: { g: string; y: number }[] = []
+  const scatter = a.kind === 'scatter'
   for (const r of keep) {
     if (r + 2 < first || r + 2 > last) continue
     const y = cells[r]?.[yi]
@@ -150,11 +157,18 @@ export function plotData(sheets: Sheet[], a: { from: string; x: string; y: strin
     const label = lx?.ok ? String(lx.value) : String(r + 2)
     const gc = gi >= 0 ? cells[r][gi] : undefined
     const g = gi >= 0 ? (gc?.ok ? String(gc.value) : '') : a.y
-    if (!labels.includes(label)) labels.push(label)
     if (!groups.includes(g)) groups.push(g)
+    if (scatter) {
+      if (!isNumberText(label)) return { ok: false, why: 'text' }
+      labels.push(label)
+      points.push({ g, y: y.value })
+      continue
+    }
+    if (!labels.includes(label)) labels.push(label)
     grid.set(`${g}\u0000${label}`, (grid.get(`${g}\u0000${label}`) ?? 0) + y.value)
   }
   if (labels.length === 0) return { ok: false, why: 'text' }
   if (groups.length > MAX_GROUPS) return { ok: false, why: 'groups' }
+  if (scatter) return { ok: true, labels, series: groups.map((g) => ({ name: g, values: points.map((p) => (p.g === g ? p.y : Number.NaN)) })) }
   return { ok: true, labels, series: groups.map((g) => ({ name: g, values: labels.map((l) => grid.get(`${g}\u0000${l}`) ?? 0) })) }
 }

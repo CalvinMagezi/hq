@@ -7,6 +7,7 @@ import { toastUndo } from '~/lib/toast'
 import { MarkdownViewer } from '../MarkdownViewer'
 import { usePointerDrag } from '../tasks/usePointerDrag'
 import type { Editor } from './Editor'
+import type { AnchorHint } from '~/lib/commentView'
 
 const SWIPE_PX = 48
 const TAP_ZONE = 0.33
@@ -31,7 +32,7 @@ export function glance(body: string, lines = 3): string {
     .join(' · ')
 }
 
-export function SlidesView({ note, editor }: { note: HqmdNote; editor: Editor }) {
+export function SlidesView({ note, editor, onAnchor }: { note: HqmdNote; editor: Editor; /** Where the person is, for a comment's default block. */ onAnchor?: (hint: AnchorHint) => void }) {
   const [at, setAt] = useState(0)
   const [editingText, setEditingText] = useState(false)
   const [draft, setDraft] = useState('')
@@ -39,6 +40,8 @@ export function SlidesView({ note, editor }: { note: HqmdNote; editor: Editor })
   const [dragging, setDragging] = useState<{ from: number; over: number } | null>(null)
   const items = useRef<(HTMLLIElement | null)[]>([])
   const count = note.slides.length
+  const here = note.slides[Math.min(at, count - 1)]?.title
+  useEffect(() => onAnchor?.(here === undefined ? {} : { text: `## ${here}` }), [onAnchor, here])
 
   const over = (x: number, y: number): number | null => {
     const hit = items.current.findIndex((el) => {

@@ -150,3 +150,42 @@ export const cardSetStyle = edit<{
 /** Dashboard: a tile or a chart from a range; hq draws it first and refuses one that would not draw. */
 export const dashAddTile = edit<{ from: string; fn?: string; where?: string; label?: string; format?: string; afterIndex?: number; hash?: string }>('add_tile')
 export const dashAddPlot = edit<{ type: string; from: string; x: string; y: string; where?: string; group?: string; title?: string; afterIndex?: number; hash?: string }>('add_plot')
+
+// ---------------------------------------------------------------- review comments
+
+/** One review comment as the `comments` action lists it. A comment is a `comment` block anchored to another block by its hash. */
+export interface SuiteComment {
+  /** Position of the comment block; quote it back with `hash` to resolve it. */
+  index: number
+  hash: string
+  /** The hash of the block it is about. */
+  on: string
+  /** A label the writer typed, never an identity. */
+  by: string | null
+  /** An ISO date. */
+  at: string | null
+  state: 'open' | 'resolved' | string
+  text: string
+  /** The block it was about has been edited or removed since. */
+  orphaned: boolean
+  /** The first line of the block it is about. */
+  anchor_preview: string | null
+}
+export interface SuiteComments {
+  revision: string
+  comments: SuiteComment[]
+}
+
+/** The note's comments, in the order they are written. A read: nothing is written and no hash is needed. */
+export const fetchComments = (path: string) => suiteEdit(path, 'comments') as unknown as Promise<SuiteComments>
+
+/** Adds a comment on the block whose hash is `on`. `by` is a label and `at` a date (YYYY-MM-DD); hq fills `at` when left out. */
+export const commentAdd = edit<{ on: string; text: string; by?: string; at?: string }>('add_comment')
+/** Marks one comment resolved; refused when the comment changed since it was listed. */
+export const commentResolve = edit<{ index: number; hash: string }>('resolve_comment')
+
+/** The comment list an add or a resolve answers with, or null when the answer carries none. */
+export function commentsIn(result: { comments?: unknown; revision?: unknown }): SuiteComments | null {
+  if (!Array.isArray(result.comments) || typeof result.revision !== 'string') return null
+  return { revision: result.revision, comments: result.comments as SuiteComment[] }
+}

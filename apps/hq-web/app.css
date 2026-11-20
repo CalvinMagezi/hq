@@ -175,6 +175,17 @@ body {
   padding: 0.5em 1em;
 }
 
+.md-cmt-mark {
+  display: inline-block;
+  margin: 0 0 0.85em;
+  padding: 0 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  color: var(--ink-muted);
+  font: 400 12px/20px var(--font-sans);
+}
+.md-cmt-mark.is-open { border-color: var(--brand-green); color: var(--ink); }
+
 .md-link {
   color: var(--accent-blue);
   text-decoration: none;

@@ -5,13 +5,15 @@
 export type SuiteKind = 'doc' | 'sheet' | 'slides' | 'dashboard' | 'drive-item'
 
 export interface TypedBlock {
-  type: 'sheet' | 'tile' | 'plot'
+  type: 'sheet' | 'tile' | 'plot' | 'comment'
   attrs: Record<string, string>
   /** The text between the fences. */
   body: string
   /** Line numbers (from 0) of the opening and closing fence in the text this was read from. */
   open?: number
   close?: number
+  /** The opening fence line as written, for an edit to check it is still the block the caller saw. */
+  head?: string
 }
 
 export interface CardMeta {
@@ -43,7 +45,7 @@ export interface HqmdNote {
 }
 
 const KINDS: readonly string[] = ['doc', 'sheet', 'slides', 'dashboard', 'drive-item']
-const TYPED = ['sheet', 'tile', 'plot'] as const
+const TYPED = ['sheet', 'tile', 'plot', 'comment'] as const
 
 /** The frontmatter as flat key and value pairs, and the text after it. */
 export function splitFrontmatter(text: string): { meta: Record<string, string>; body: string } {
@@ -78,7 +80,7 @@ export function typedBlocks(body: string): TypedBlock[] {
     let end = i + 1
     while (end < lines.length && !(lines[end].startsWith(fence) && lines[end].trim() === fence[0].repeat(lines[end].trim().length) && lines[end].trim().length >= fence.length)) end += 1
     const header = parseHeader(open[2])
-    if (header) out.push({ ...header, body: lines.slice(i + 1, end).join('\n'), open: i, close: end })
+    if (header) out.push({ ...header, body: lines.slice(i + 1, end).join('\n'), open: i, close: end, head: lines[i] })
     i = end
   }
   return out

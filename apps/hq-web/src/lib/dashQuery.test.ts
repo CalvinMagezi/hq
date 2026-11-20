@@ -65,3 +65,34 @@ describe('plots', () => {
     expect(plotData(sheets(), { from: 'A1:C5', x: 'month', y: 'amount' }, [{ column: 'region', value: 'North' }])).toEqual({ ok: true, labels: ['Jan', 'Feb'], series: [{ name: 'amount', values: [10, 30] }] })
   })
 })
+
+describe('scatter', () => {
+  const XY = '```sheet name=Pairs types="num,num,text"\n| x | y | team |\n|---|---|---|\n| 1 | 10 | a |\n| 1 | 12 | b |\n| 2.5 | 7 | a |\n| 4 | 9 | b |\n```\n'
+  const pairs = () => [readSheet(typedBlocks(XY)[0])!]
+  test('keeps every row as a point, even two with the same x', () => {
+    const r = plotData(pairs(), { from: 'A1:C5', x: 'x', y: 'y', kind: 'scatter' }, [])
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.labels).toEqual(['1', '1', '2.5', '4'])
+      expect(r.series[0].values).toEqual([10, 12, 7, 9])
+    }
+  })
+  test('a group gets NaN where it has no point, so the point is not drawn', () => {
+    const r = plotData(pairs(), { from: 'A1:C5', x: 'x', y: 'y', group: 'team', kind: 'scatter' }, [])
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.series.map((s) => s.name)).toEqual(['a', 'b'])
+      expect(r.series[0].values.map(Number.isNaN)).toEqual([false, true, false, true])
+      expect(r.series[1].values.map(Number.isNaN)).toEqual([true, false, true, false])
+    }
+  })
+  test('an x that is not a number cannot be drawn, and says the range holds no numbers', () => {
+    const r = plotData(sheets(), { from: 'A1:C5', x: 'month', y: 'amount', kind: 'scatter' }, [])
+    expect(r).toEqual({ ok: false, why: 'text' })
+  })
+  test('the same range as a bar still adds the rows of one label together', () => {
+    const r = plotData(pairs(), { from: 'A1:C5', x: 'x', y: 'y' }, [])
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.labels).toEqual(['1', '2.5', '4'])
+  })
+})
