@@ -1,0 +1,1 @@
+The Android app lets you answer a helper's access request with Allow once, for the task, for the repository, or a starter set, and lists the standing access you have given, with Revoke, on its Helpers page.
