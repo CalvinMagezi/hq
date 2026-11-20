@@ -59,6 +59,7 @@ fn block(b: &Block) -> String {
             format!("{fence}{}\n{text}\n{fence}", lang.as_deref().unwrap_or(""))
         }
         Block::Table(t) => table(t),
+        Block::Svg(svg) => svg.clone(),
         Block::Rule => "---".to_owned(),
     }
 }

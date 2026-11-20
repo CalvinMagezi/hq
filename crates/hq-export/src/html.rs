@@ -44,6 +44,8 @@ pre code {{ background: none; padding: 0; }}
 table {{ border-collapse: collapse; margin: 1em 0; }}
 th, td {{ border: 1px solid #cfd3d7; padding: .35em .7em; vertical-align: top; }}
 th {{ background: #eef0f2; }}
+.chart {{ margin: 1em 0; overflow-x: auto; }}
+.chart svg {{ max-width: 100%; height: auto; }}
 hr {{ border: 0; border-top: 1px solid #cfd3d7; margin: 1.5em 0; }}
 .callout {{ margin: 1em 0; padding: .6em 1em; border-left: 4px solid var(--c); background: color-mix(in srgb, var(--c) 10%, white); border-radius: 4px; }}
 .callout > .callout-title {{ font-weight: 700; color: var(--c); margin: 0; }}
@@ -106,6 +108,7 @@ impl Writer {
                 format!("<pre><code{class}>{}</code></pre>\n", escape(text))
             }
             Block::Table(t) => self.table(t),
+            Block::Svg(svg) => format!("<div class=\"chart\">{svg}</div>\n"),
             Block::Rule => "<hr>\n".to_owned(),
         }
     }

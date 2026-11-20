@@ -142,6 +142,48 @@ mod tests {
         );
     }
 
+    const CHART_NOTE: &str = "# Prices\n\n<div style=\"x\"><svg viewBox=\"0 0 100 50\" role=\"img\" aria-label=\"Bar chart\" onload=\"alert(1)\"><script>alert(1)</script><foreignObject><p>x</p></foreignObject><rect x=\"1\" y=\"2\" width=\"30\" height=\"40\" fill=\"#336\" style=\"fill:url(http://e.example/a)\"/><text x=\"2\" y=\"9\">bar chart</text><image href=\"https://e.example/i.png\"/></svg></div>\n\nAfter.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
+
+    #[test]
+    fn html_export_keeps_an_inline_svg_chart_and_nothing_unsafe() {
+        let (v, note) = vault_with_note(CHART_NOTE);
+        let out = export_note_blocking(v.path(), &note, Format::Html, None, &[]).unwrap();
+        let html = String::from_utf8(out.output.bytes).unwrap();
+        assert!(
+            html.contains("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 50\""),
+            "{html}"
+        );
+        assert!(html.contains("<rect x=\"1\""), "{html}");
+        assert!(html.contains("bar chart</text>"), "{html}");
+        for bad in [
+            "<script",
+            "foreignObject",
+            "onload",
+            "url(",
+            "e.example",
+            "<image",
+            "alert",
+        ] {
+            assert!(!html.contains(bad), "{bad} survived: {html}");
+        }
+        assert!(html.contains("<table>"), "other content is kept");
+    }
+
+    #[test]
+    fn a_chart_note_still_exports_to_every_other_format() {
+        let (v, note) = vault_with_note(CHART_NOTE);
+        for format in [
+            Format::Pdf,
+            Format::Docx,
+            Format::Md,
+            Format::Csv,
+            Format::Jira,
+        ] {
+            let out = export_note_blocking(v.path(), &note, format, None, &[]).unwrap();
+            assert!(!out.output.bytes.is_empty(), "{format:?}");
+        }
+    }
+
     #[test]
     fn frontmatter_never_leaks_into_any_text_format() {
         let raw = "\n---\nnoteType: research\ntitle: X\nfileName: Y\ncreated: 2026-11-20\ncurrency: UGX\n---\n\n# Heading\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
