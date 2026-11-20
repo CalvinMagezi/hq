@@ -26,6 +26,13 @@ pub struct QuotaAsk {
 }
 
 /// A program to run once on a host, in a pane of its own that is read and then removed: how
+/// Paths as a host sees them: its home directory, and each path asked about with links resolved.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct RealPaths {
+    pub home: String,
+    pub resolved: Vec<String>,
+}
+
 /// One decision of a session's egress proxy.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct EgressDecision {
@@ -248,6 +255,13 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
             code: "unsupported".into(),
             message: format!("host '{}' cannot run a setup command", self.name()),
         })
+    }
+
+    /// `paths` with their links resolved as this host sees them, and the home directory there,
+    /// so a grant is decided against the machine the session runs on. None when the host cannot
+    /// say (an older host).
+    fn realpaths(&self, _paths: &[String]) -> Option<RealPaths> {
+        None
     }
 
     /// What the egress proxy decided for `name`'s recent requests, as `(host, port, allowed,
@@ -501,6 +515,9 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
         mcp: Option<crate::agent_host::McpAccess>,
     ) -> Result<(), AgentHostError> {
         (**self).resume_awaiting(name, env, mcp)
+    }
+    fn realpaths(&self, paths: &[String]) -> Option<RealPaths> {
+        (**self).realpaths(paths)
     }
     fn egress_decisions(&self, name: &str) -> Option<Vec<EgressDecision>> {
         (**self).egress_decisions(name)

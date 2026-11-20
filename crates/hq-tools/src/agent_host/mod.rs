@@ -40,7 +40,7 @@ use std::time::Duration;
 
 pub use backend::{
     AwaitingAgent, CommandRun, EgressDecision, Host, HostBackend, HostEvent, HostEvents, QuotaAsk,
-    QuotaProfile,
+    QuotaProfile, RealPaths,
 };
 
 #[cfg(unix)]

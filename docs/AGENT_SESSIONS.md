@@ -970,6 +970,11 @@ resolved and credential paths dropped), and `POST /api/sandbox-grants/profile` w
 `{scope: session|task, id, name}` (`name` a configured profile or `none`). A request waiting for you is the
 inbox item (`source: sandbox-grants`) answered through `/api/notifications/{id}/action`.
 
+Paths, symlinks and the home directory are resolved on the computer the session runs on, not where HQ
+runs: the broker asks that computer's host (`host.realpath`). A host that predates this answers nothing,
+and the helper is told to update the host instead of being decided blind. `~` in a profile means the
+session computer's home.
+
 `hq grants list` shows every request and how it was decided; `hq grants revoke <id|session>` revokes.
 A running session keeps the access until it is stopped. Plan and what is still to come (owner prompts in
 the web and Android apps, denial diagnostics, brokered commands and devices):
