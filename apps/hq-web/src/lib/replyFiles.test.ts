@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { sizeLabel, toReplyFiles } from './replyFiles'
+import { deliverablesFirst, fileTypeLabel, sizeLabel, toReplyFiles } from './replyFiles'
 
 describe('toReplyFiles', () => {
   test('keeps well-formed entries and drops the rest', () => {
@@ -20,4 +20,11 @@ describe('toReplyFiles', () => {
   test('sizes read in plain units', () => {
     expect([sizeLabel(10), sizeLabel(2048), sizeLabel(3 * 1024 * 1024)]).toEqual(['10 B', '2 KB', '3.0 MB'])
   })
+})
+
+test('deliverable files come before notes, each group in order', () => {
+  const f = (name: string) => ({ name, path: `Files/${name}` })
+  expect(deliverablesFirst([f('Research.md'), f('Plan.html'), f('Notes.txt'), f('Prices.xlsx')]).map((x) => x.name)).toEqual(['Plan.html', 'Prices.xlsx', 'Research.md', 'Notes.txt'])
+  expect(fileTypeLabel(f('Prices.xlsx'))).toBe('XLSX')
+  expect(fileTypeLabel(f('README'))).toBe('')
 })

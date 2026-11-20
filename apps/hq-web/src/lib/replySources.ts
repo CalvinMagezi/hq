@@ -48,6 +48,36 @@ function baseName(path: string): string {
   return last.replace(/\.md$/, '')
 }
 
+const TRACKING_PARAM = /^(utm_|fbclid$|gclid$|mc_|ref$|ref_src$|igshid$|_hs)/i
+
+/** One page, whatever the way it was linked: no fragment, tracking parameters, `www.`, scheme or trailing slash. */
+export function canonicalUrl(url: string): string | null {
+  try {
+    const u = new URL(url)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+    const host = u.hostname.toLowerCase().replace(/^www\./, '')
+    if (!host) return null
+    const kept = [...u.searchParams.entries()].filter(([k]) => !TRACKING_PARAM.test(k)).sort(([a], [b]) => a.localeCompare(b))
+    const query = kept.length ? `?${kept.map(([k, v]) => `${k}=${v}`).join('&')}` : ''
+    const path = u.pathname.replace(/\/+$/, '')
+    return `${host}${path}${query}`
+  } catch {
+    return null
+  }
+}
+
+/** The last readable piece of a page's path: `/prices/matooke-2024.html` -> `matooke 2024`. */
+function pathTail(url: string): string | null {
+  try {
+    const last = new URL(url).pathname.split('/').filter(Boolean).pop()
+    if (!last) return null
+    const tail = decodeURIComponent(last).replace(/\.[a-z0-9]{1,5}$/i, '').replace(/[-_+]+/g, ' ').trim()
+    return tail || null
+  } catch {
+    return null
+  }
+}
+
 function siteName(url: string): string | null {
   try {
     return new URL(url).hostname.replace(/^www\./, '') || null
@@ -80,15 +110,27 @@ export function sourcesOf(steps: StepLike[]): ReplySource[] {
     }
     if (!kind || !ref || !title) continue
     const reading = step.status === 'running'
-    const at = seen.get(ref)
+    const key = kind === 'web' ? (canonicalUrl(ref) ?? ref) : ref
+    const at = seen.get(key)
     if (at !== undefined) {
       out[at] = { ...out[at], reading: out[at].reading || reading }
       continue
     }
-    seen.set(ref, out.length)
+    seen.set(key, out.length)
     out.push({ kind, title, ref, reading })
   }
-  return out
+  return labelSamePages(out)
+}
+
+/** Two different pages of one site are told apart by the end of their path, not both called by the domain. */
+function labelSamePages(list: ReplySource[]): ReplySource[] {
+  const perSite = new Map<string, number>()
+  for (const s of list) if (s.kind === 'web') perSite.set(s.title, (perSite.get(s.title) ?? 0) + 1)
+  return list.map((s) => {
+    if (s.kind !== 'web' || (perSite.get(s.title) ?? 0) < 2) return s
+    const tail = pathTail(s.ref)
+    return tail ? { ...s, title: `${s.title}: ${tail}` } : s
+  })
 }
 
 function escapeRegExp(s: string): string {
@@ -122,14 +164,52 @@ function isNoteCited(source: ReplySource, content: string): boolean {
   return false
 }
 
+/** How many source chips show before "+N more". */
+export const SOURCE_CAP = 5
+
+/** The chips to show now and how many wait behind "+N more". */
+export function splitSources(sources: ReplySource[], expanded: boolean, cap = SOURCE_CAP): { shown: ReplySource[]; hidden: number } {
+  if (expanded || sources.length <= cap) return { shown: sources, hidden: 0 }
+  return { shown: sources.slice(0, cap), hidden: sources.length - cap }
+}
+
+function linksIn(content: string): { keys: Set<string>; hosts: Set<string> } {
+  const keys = new Set<string>()
+  const hosts = new Set<string>()
+  for (const m of content.matchAll(/https?:\/\/[^\s)>\]"'<]+/gi)) {
+    const key = canonicalUrl(m[0].replace(/[.,;:!?]+$/, ''))
+    if (!key) continue
+    keys.add(key)
+    hosts.add(key.split(/[/?]/)[0])
+  }
+  return { keys, hosts }
+}
+
+function isCited(source: ReplySource, content: string, links: ReturnType<typeof linksIn>): boolean {
+  if (!content) return false
+  if (source.kind === 'note') return isNoteCited(source, content)
+  if (source.kind === 'file') return content.toLowerCase().includes(source.title.toLowerCase())
+  const key = canonicalUrl(source.ref)
+  if (!key) return false
+  if (links.keys.has(key)) return true
+  const host = key.split(/[/?]/)[0]
+  // When the reply links some pages of a site, only those pages are cited; a bare mention of the site names all of it.
+  return !links.hosts.has(host) && content.toLowerCase().includes(host)
+}
+
 /**
- * Sources relevant to an answer: keeps non-note sources, and keeps a note only when
- * it is cited in the answer text or its path was written in this turn.
+ * Sources relevant to an answer: a note only when it is cited or was written this turn.
+ * When the reply cites or links any page or file, only those show of the pages and files; otherwise all of them do.
  */
 export function relevantSources(steps: StepLike[], content: string): ReplySource[] {
   const all = sourcesOf(steps)
   const written = writtenPathsOf(steps)
-  return all.filter((s) => s.kind !== 'note' || written.has(s.ref) || isNoteCited(s, content))
+  const kept = all.filter((s) => s.kind !== 'note' || written.has(s.ref) || isNoteCited(s, content))
+  const links = linksIn(content)
+  // Notes already passed their own test above; the preference is for pages and files.
+  const outside = kept.filter((s) => s.kind !== 'note')
+  const cited = new Set(outside.filter((s) => isCited(s, content, links)))
+  return cited.size > 0 ? kept.filter((s) => s.kind === 'note' || cited.has(s)) : kept
 }
 
 /** The notes this reply wrote, newest last. A path under the Vault's notes is the only kind the pane can open. */

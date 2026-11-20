@@ -24,10 +24,10 @@ export function parseDesktopDownload(detail: unknown): DesktopDownload | null {
   }
 }
 
-/** The toast text for one finished download: the real path on success, a plain failure otherwise. */
+/** The toast text for one finished download: the file name on success, a plain failure otherwise. The shell offers no way to reveal the file, so none is promised. */
 export function desktopDownloadText(result: DesktopDownload): { text: string; ok: boolean } {
   if (result.success && result.name) {
-    return { text: t('note_export_saved', { name: result.name, path: result.path }).trim(), ok: true }
+    return { text: t('note_export_saved', { name: result.name }), ok: true }
   }
   const text = result.name ? t('note_export_save_failed', { name: result.name }) : t('note_export_save_failed_unnamed')
   return { text, ok: false }

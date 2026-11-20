@@ -364,7 +364,7 @@ textarea.a-input{min-height:96px;resize:vertical}
 .a-dlg p{margin:0 0 20px;font:400 14px/20px var(--font-sans);color:var(--ink-muted)}
 .a-dlg-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
 /* n-snack: what just happened, with Undo where it can be undone. Stays until dismissed if it carries an action */
-.a-snack{position:absolute;left:8px;right:8px;bottom:8px;z-index:30;min-height:48px;display:flex;align-items:center;gap:8px;padding:0 4px 0 16px;border-radius:var(--radius-sm);background:var(--ink);color:var(--surface-100);font:400 14px/20px var(--font-sans)}
+.a-snack{position:absolute;left:8px;right:8px;bottom:8px;z-index:200;min-height:48px;display:flex;align-items:center;gap:8px;padding:0 4px 0 16px;border-radius:var(--radius-sm);background:var(--ink);color:var(--surface-100);font:400 14px/20px var(--font-sans)}
 .a-snack span{flex:1 1 0;min-width:0;padding:12px 0}
 .a-snack-act{min-height:48px;padding:0 12px;font:700 14px/20px var(--font-sans);color:var(--snack-action)}
 .a-snack .a-ib{color:var(--surface-100)}

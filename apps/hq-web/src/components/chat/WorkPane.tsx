@@ -6,7 +6,7 @@ import { t, tn } from '~/strings'
 import type { ToolStep } from '~/store/threadStore'
 import { formatCredits, totalCredits, type StepCredit } from '~/lib/stepCredits'
 import { sourcesOf, type MadeNote, type ReplySource } from '~/lib/replySources'
-import type { ReplyFile } from '~/lib/replyFiles'
+import { deliverablesFirst, type ReplyFile } from '~/lib/replyFiles'
 import { helperStatusLabel, type ChatHelperRun, type ChatHelperStatus } from '~/lib/subagentHelpers'
 import { secondsRunning } from '~/lib/liveLine'
 import { stripFrontmatter } from '~/lib/noteConflict'
@@ -152,22 +152,22 @@ function ResultTab({
   }
   return (
     <div className="hq-ctx">
+      {files.length > 0 && (
+        <section>
+          <h3 className="a-grp">{t('chat_pane_made_files')}</h3>
+          <div className="hq-ctx-list">
+            {deliverablesFirst(files).map((f) => (
+              <FileCard key={f.path} file={f} onOpenNote={(note) => onSelectNote?.(note.path)} />
+            ))}
+          </div>
+        </section>
+      )}
       {notes.length > 0 && (
         <section>
           <h3 className="a-grp">{t('chat_pane_made_notes')}</h3>
           <div className="hq-ctx-list">
             {notes.map((n) => (
               <MadeCard key={n.path} note={n} onOpen={(note) => onSelectNote?.(note.path)} />
-            ))}
-          </div>
-        </section>
-      )}
-      {files.length > 0 && (
-        <section>
-          <h3 className="a-grp">{t('chat_pane_made_files')}</h3>
-          <div className="hq-ctx-list">
-            {files.map((f) => (
-              <FileCard key={f.path} file={f} onOpenNote={(note) => onSelectNote?.(note.path)} />
             ))}
           </div>
         </section>

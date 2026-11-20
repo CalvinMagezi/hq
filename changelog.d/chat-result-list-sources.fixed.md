@@ -1,0 +1,1 @@
+In chat, files in the Result pane show their type (XLSX, HTML) and a name that wraps instead of cutting off; reply source chips are listed once per page, labelled by page, limited to what the reply cites, and capped at 5 with "+N more"; deliverable files come before notes.
