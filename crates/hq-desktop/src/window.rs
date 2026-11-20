@@ -34,6 +34,16 @@ pub fn main_page_allowed(url: &str, origin: &str) -> bool {
         && url.password().is_none()
 }
 
+/// The address a srcdoc frame loads as, such as the HTML dashboard preview.
+const SRCDOC_FRAME: &str = "about:srcdoc";
+
+/// What the shell lets a window navigate to: a page of the proxy's origin, or a srcdoc frame, which
+/// only a page that is already ours can make. The system browser still gets `browser_target`, which
+/// takes the proxy's origin alone.
+pub fn navigation_allowed(url: &str, origin: &str) -> bool {
+    url == SRCDOC_FRAME || main_page_allowed(url, origin)
+}
+
 /// The address to hand to the system browser, or `None`. It must be on the proxy's origin, hold
 /// nothing a second parser could read differently (a backslash is a slash to one and part of the
 /// user name to another), and goes out in the parser's own spelling.
@@ -122,6 +132,17 @@ mod tests {
         assert!(!ok("claude-code", "https://auth.openai.com/"));
         assert!(!ok("pi", "https://claude.ai/"));
         assert!(!ok("nobody", "https://claude.ai/"));
+    }
+
+    #[test]
+    fn a_srcdoc_frame_may_load_but_is_never_handed_to_the_browser() {
+        assert!(navigation_allowed("about:srcdoc", ORIGIN));
+        assert!(navigation_allowed("http://127.0.0.1:47474/chat", ORIGIN));
+        assert!(!navigation_allowed("about:blank", ORIGIN));
+        assert!(!navigation_allowed("about:srcdoc?x=1", ORIGIN));
+        assert!(!navigation_allowed("https://example.com/", ORIGIN));
+        assert!(!main_page_allowed("about:srcdoc", ORIGIN));
+        assert!(browser_target("about:srcdoc", ORIGIN).is_none());
     }
 
     #[test]

@@ -234,7 +234,7 @@ pub async fn show_main(
     WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(parsed))
         .title(hq_desktop::window::main_title(desktop.hub_web_active()))
         .inner_size(1200.0, 800.0)
-        .on_navigation(move |url| hq_desktop::window::main_page_allowed(url.as_str(), &origin))
+        .on_navigation(move |url| hq_desktop::window::navigation_allowed(url.as_str(), &origin))
         .on_new_window(|_, _| NewWindowResponse::Deny)
         // The page's own files (a blob it made, or something the proxy served) go to Downloads and
         // the page is told how it ended. The page learns it through a DOM event the shell
