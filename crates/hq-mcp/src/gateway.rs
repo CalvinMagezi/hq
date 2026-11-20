@@ -147,6 +147,7 @@ pub const SESSION_ALLOWLIST: &[&str] = &[
     "harness_session_publish",
     "harness_session_request_merge",
     "sandbox_request",
+    "sandbox_denials",
     // Scoped reads: each resolves the proven session to its task's folders and nothing wider.
     "context_orient",
     "context_search",

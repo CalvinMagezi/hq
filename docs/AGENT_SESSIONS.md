@@ -959,6 +959,11 @@ agent_host:
         egress: ["pub.dev", "dl.google.com"]
 ```
 
+A helper that needs a host but does not know its exact name calls `sandbox_denials`, which lists what its
+session's egress proxy refused recently (host, port, reason). File and local-port denials are not
+collected: the helper's own tool errors name the path or port. A refusal by the command policy (for
+example `env`) is not a sandbox grant: the helper reports it, and brokered commands are a later stage.
+
 Owner routes (web credential only, never an MCP key or a helper token): `GET /api/sandbox-grants[?session=<id>]`,
 `POST /api/sandbox-grants/{id}/revoke`, `GET /api/sandbox-grants/profiles` (each configured profile with `~`
 resolved and credential paths dropped), and `POST /api/sandbox-grants/profile` with

@@ -606,6 +606,12 @@ impl HostBackend for NativeBackend {
         .map(|_| ())
     }
 
+    fn egress_decisions(&self, name: &str) -> Option<Vec<super::backend::EgressDecision>> {
+        // A host too old to know this method fails the call, which reads as "cannot say".
+        let reply = self.call("agent.egress", json!({ "name": name })).ok()?;
+        serde_json::from_value(reply.get("decisions")?.clone()).ok()
+    }
+
     fn installed_programs(&self, names: &[String]) -> Option<Vec<String>> {
         // A host too old to know this method fails the call, which reads as "cannot say".
         let reply = self.call("host.programs", json!({ "names": names })).ok()?;
