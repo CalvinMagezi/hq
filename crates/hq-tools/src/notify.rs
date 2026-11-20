@@ -33,6 +33,7 @@ pub const RESERVED_DEDUP_PREFIXES: &[&str] = &[
     "session-blocked-",
     "session-finished-",
     "fleet-digest-",
+    "sandbox-grant:",
 ];
 
 pub fn create_notify_tools(

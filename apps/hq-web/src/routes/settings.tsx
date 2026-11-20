@@ -46,8 +46,12 @@ import { AccessView } from '~/components/settings/AccessView'
 import {
   SANDBOX_GRANTS_QUERY_KEY,
   SANDBOX_PROFILES_QUERY_KEY,
+  SANDBOX_RULES_QUERY_KEY,
+  SANDBOX_SUMMARY_QUERY_KEY,
+  getSandboxSummary,
   listSandboxGrants,
   listSandboxProfiles,
+  listSandboxRules,
   revokeSandboxGrant,
 } from '~/lib/sandboxGrantsApi'
 
@@ -235,12 +239,26 @@ export function AccessSection() {
     queryFn: listSandboxProfiles,
     retry: retryUnlessMissing,
   })
+  const rules = useQuery({
+    queryKey: SANDBOX_RULES_QUERY_KEY,
+    queryFn: listSandboxRules,
+    retry: retryUnlessMissing,
+  })
+  const summary = useQuery({
+    queryKey: SANDBOX_SUMMARY_QUERY_KEY,
+    queryFn: () => getSandboxSummary(7),
+    retry: retryUnlessMissing,
+  })
   const [revokeError, setRevokeError] = useState<string | null>(null)
   const act = useMutation({
     mutationFn: (id: string) => revokeSandboxGrant(id),
     onMutate: () => setRevokeError(null),
     onError: (e) => setRevokeError(e instanceof Error ? e.message : t('grants_revoke_failed')),
-    onSettled: () => client.invalidateQueries({ queryKey: SANDBOX_GRANTS_QUERY_KEY }),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: SANDBOX_GRANTS_QUERY_KEY })
+      void client.invalidateQueries({ queryKey: SANDBOX_RULES_QUERY_KEY })
+      void client.invalidateQueries({ queryKey: SANDBOX_SUMMARY_QUERY_KEY })
+    },
   })
 
   if (isMissingRoute(grants.error) && isMissingRoute(profiles.error)) return null
@@ -250,6 +268,8 @@ export function AccessSection() {
         onRetry={() => {
           void client.invalidateQueries({ queryKey: SANDBOX_GRANTS_QUERY_KEY })
           void client.invalidateQueries({ queryKey: SANDBOX_PROFILES_QUERY_KEY })
+          void client.invalidateQueries({ queryKey: SANDBOX_RULES_QUERY_KEY })
+          void client.invalidateQueries({ queryKey: SANDBOX_SUMMARY_QUERY_KEY })
         }}
       />
     ) : (
@@ -261,6 +281,8 @@ export function AccessSection() {
     <AccessView
       grants={grants.data.grants}
       profiles={profiles.data.profiles}
+      rules={rules.data?.rules ?? []}
+      summary={summary.data ?? null}
       canChange={reachable}
       revokingId={act.isPending ? (act.variables ?? null) : null}
       error={revokeError}

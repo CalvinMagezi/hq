@@ -17,7 +17,7 @@ export interface AccessProfilePickerViewProps {
   onChange: (name: string) => void
 }
 
-/** Pure selector for 'Allow development access': lists profiles plus 'None', and shows exactly what the chosen profile allows beside it. */
+/** Pure selector for 'Allow development access': lists profiles plus 'None', and shows exactly what the chosen profile allows below it at full width. */
 export function AccessProfilePickerView({
   id = 'task-access-profile',
   profiles,
@@ -35,13 +35,13 @@ export function AccessProfilePickerView({
       <label htmlFor={id} className="a-field-label">
         {t('grants_allow_dev_access')}
       </label>
-      <div className="flex flex-col sm:flex-row sm:items-start gap-2">
+      <div className="flex flex-col gap-2">
         <select
           id={id}
           value={value}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
-          className="a-input sm:w-48 shrink-0"
+          className="a-input sm:w-48"
         >
           <option value={NO_PROFILE}>{t('grants_profile_none')}</option>
           {profiles.map((p) => (
@@ -51,12 +51,12 @@ export function AccessProfilePickerView({
           ))}
         </select>
         {chosen && (
-          <div className="flex flex-col gap-0.5 a-body-sm a-muted min-w-0" data-testid="profile-preview">
+          <div className="flex flex-col gap-0.5 w-full min-w-0 a-body-sm a-muted" data-testid="profile-preview">
             {lines.length === 0 ? (
               <span>{t('grants_profile_empty')}</span>
             ) : (
               lines.map((line) => (
-                <span key={line} className="a-mono break-all">
+                <span key={line} className="a-mono break-words">
                   {line}
                 </span>
               ))

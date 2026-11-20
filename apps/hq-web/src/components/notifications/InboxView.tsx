@@ -67,7 +67,7 @@ export interface InboxViewProps {
   onRestore?: (ids: string[]) => void
   /** Silences the topic of the open item. */
   onSilence?: (topic: SilenceTopic) => void
-  onAction(id: string, action: string): Promise<void>
+  onAction(id: string, action: string, opts?: { starter?: string }): Promise<void>
   /** Clears one update; it reports its own failure. */
   onClear: (id: string) => void
   onAnswered: (id: string, choice: 'approve' | 'decline') => void

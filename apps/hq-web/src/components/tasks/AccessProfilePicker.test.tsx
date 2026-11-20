@@ -39,7 +39,7 @@ describe('AccessProfilePickerView', () => {
     expect(out).not.toContain('data-testid="profile-preview"')
   })
 
-  test('shows exact capabilities allowed beside selector when a profile is selected', () => {
+  test('renders profile preview below the select at full width instead of beside it (HQ-018)', () => {
     const out = html(
       createElement(AccessProfilePickerView, {
         profiles,
@@ -49,6 +49,9 @@ describe('AccessProfilePickerView', () => {
       }),
     )
     expect(out).toContain('data-testid="profile-preview"')
+    expect(out).not.toContain('sm:flex-row')
+    expect(out).toContain('w-full')
+    expect(out.indexOf('</select>')).toBeLessThan(out.indexOf('data-testid="profile-preview"'))
     expect(out).toContain('/home/user/.npm')
     expect(out).toContain('/home/user/tools')
     expect(out).toContain('5173')

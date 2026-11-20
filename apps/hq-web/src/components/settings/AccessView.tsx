@@ -1,10 +1,13 @@
 import {
   activeResourceGrants,
   capabilityModeKey,
+  formatSandboxSummary,
+  formatStandingRule,
   grantStateKey,
   historyResourceGrants,
   type SandboxGrant,
   type SandboxGrantProfile,
+  type SandboxSummaryResponse,
 } from '~/lib/sandboxGrantsApi'
 import { unixToMs } from '~/lib/connectorApi'
 import { dateByAge } from '~/lib/time'
@@ -13,6 +16,8 @@ import { t } from '~/strings'
 export interface AccessViewProps {
   grants: SandboxGrant[]
   profiles: SandboxGrantProfile[]
+  rules?: SandboxGrant[]
+  summary?: SandboxSummaryResponse | null
   canChange: boolean
   revokingId: string | null
   error?: string | null
@@ -29,8 +34,18 @@ export function profileAllowLines(profile: SandboxGrantProfile): string[] {
   return lines
 }
 
-/** Settings > Access: active grants with Revoke, read-only configured profiles, and grant history. */
-export function AccessView({ grants, profiles, canChange, revokingId, error, onRevoke, nowMs = Date.now() }: AccessViewProps) {
+/** Settings > Access: summary line, standing rules with Revoke, active session grants with Revoke, configured profiles, and history. */
+export function AccessView({
+  grants,
+  profiles,
+  rules = [],
+  summary = null,
+  canChange,
+  revokingId,
+  error,
+  onRevoke,
+  nowMs = Date.now(),
+}: AccessViewProps) {
   const active = activeResourceGrants(grants)
   const history = historyResourceGrants(grants)
 
@@ -41,6 +56,48 @@ export function AccessView({ grants, profiles, canChange, revokingId, error, onR
           {error}
         </p>
       )}
+
+      {summary && (
+        <p className="a-body-sm a-muted" data-testid="access-summary">
+          {formatSandboxSummary(summary.days, summary.summary)}
+        </p>
+      )}
+
+      <section aria-labelledby="access-rules-head" className="flex flex-col gap-2">
+        <h3 id="access-rules-head" className="a-grp">
+          {t('grants_settings_rules')}
+        </h3>
+        {rules.length === 0 ? (
+          <p className="a-body-sm a-muted">{t('grants_settings_rules_empty')}</p>
+        ) : (
+          <div className="a-set">
+            {rules.map((r) => {
+              const busy = revokingId === r.id
+              const meta = [r.decision_note, dateByAge(unixToMs(r.requested_at), nowMs)]
+                .filter(Boolean)
+                .join(' · ')
+              return (
+                <div key={r.id} className="a-li" data-testid="access-standing-rule">
+                  <div className="a-li-main">
+                    <b>{formatStandingRule(r)}</b>
+                    {meta && <span>{meta}</span>}
+                    {!canChange && <span>{t('settings_folders_revoke_needs')}</span>}
+                  </div>
+                  <button
+                    type="button"
+                    className="a-btn quiet danger"
+                    disabled={revokingId !== null || !canChange}
+                    aria-busy={busy || undefined}
+                    onClick={() => onRevoke(r.id)}
+                  >
+                    {busy ? t('grants_revoking') : t('grants_revoke')}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </section>
 
       <section aria-labelledby="access-active-head" className="flex flex-col gap-2">
         <h3 id="access-active-head" className="a-grp">

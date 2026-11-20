@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use hq_core::config::AgentHostConfig;
 use hq_core::grants::{
     Capability, Decision, GrantRequest, GrantsConfig, PathView, SandboxDelta, TaskContext,
-    classify, denied_path, normalize,
+    classify, denied_path, expand_resource, normalize, rule_covers,
 };
 use hq_core::types::{ValueItem, ValueKind};
 use hq_db::sandbox_grants::{self as store, NewGrant};
@@ -58,6 +58,61 @@ pub(super) struct Asker<'a> {
 
 fn key_for(id: &str) -> String {
     format!("{KEY_PREFIX}{id}")
+}
+
+/// The repository a session works in: the folder a worktree was made from, else where it runs.
+/// A standing rule for a repository applies to every session in it.
+pub(super) fn repo_root(db: &Database, session: &str, cwd: &str) -> String {
+    db.with_conn(|c| hq_db::session_checkouts::get(c, session))
+        .ok()
+        .flatten()
+        .and_then(|k| k.repo.or(Some(k.folder)))
+        .unwrap_or_else(|| cwd.to_string())
+}
+
+/// The scopes the owner's standing rules can reach this session through: its task and its
+/// repository. (Its own scope holds its own grants, which are not rules.)
+pub(super) fn rule_scopes(
+    db: &Database,
+    session: &str,
+    task: Option<&str>,
+    cwd: &str,
+) -> Vec<String> {
+    let mut out: Vec<String> = task
+        .map(|t| format!("{}{t}", store::TASK_SCOPE))
+        .into_iter()
+        .collect();
+    out.push(format!(
+        "{}{}",
+        store::REPO_SCOPE,
+        repo_root(db, session, cwd)
+    ));
+    out
+}
+
+/// What a standing rule would let `req` do, when one covers it: exactly the resource asked for.
+fn covered_by_rule(
+    db: &Database,
+    paths: &dyn PathView,
+    asker: &Asker,
+    req: &GrantRequest,
+    now: i64,
+) -> Result<Option<(SandboxDelta, String)>> {
+    let scopes = rule_scopes(db, asker.session, asker.task, &asker.cwd.to_string_lossy());
+    let home = paths.home();
+    for rule in store::rules_for(db, &scopes, now)? {
+        let Ok(cap) = serde_json::from_value::<Capability>(json!(rule.capability)) else {
+            continue;
+        };
+        let mut resource = expand_resource(cap, &rule.resource, &home);
+        if matches!(cap, Capability::FsRead | Capability::FsWrite) {
+            resource = paths.canonical(&resource);
+        }
+        if rule_covers(cap, &resource, req) {
+            return Ok(Some((delta_for_owner_approval(req), rule.id)));
+        }
+    }
+    Ok(None)
 }
 
 /// The profile this session works under: the owner's binding for the session or its task.
@@ -276,11 +331,22 @@ pub(super) fn decide(
     };
     let reason: String = reason.chars().take(MAX_TEXT_CHARS).collect();
     let until = Some(now + REQUEST_TTL_SECS);
-    let (state, by, note, delta, expires) = match classify(&req, &ctx) {
+    let mut decision = classify(&req, &ctx);
+    let mut approved_note = String::new();
+    // A request outside the profile that the owner's standing access covers is approved without
+    // asking; a refusal is never overridden.
+    if matches!(decision, Decision::Ask(_))
+        && let Some((d, rule_id)) = covered_by_rule(db, paths, asker, &req, now)?
+    {
+        decision = Decision::Approve(d);
+        // The rule that approved it, so revoking the rule revokes this grant too.
+        approved_note = store::rule_note(&rule_id);
+    }
+    let (state, by, note, delta, expires) = match decision {
         Decision::Approve(d) => (
             store::ACTIVE,
             store::BY_POLICY,
-            String::new(),
+            approved_note,
             d,
             Some(now + GRANT_TTL_SECS),
         ),
@@ -305,7 +371,7 @@ pub(super) fn decide(
             session_id: asker.session,
             task_id: asker.task,
             host: asker.host,
-            repo: &asker.cwd.to_string_lossy(),
+            repo: &repo_root(db, asker.session, &asker.cwd.to_string_lossy()),
             capability: &capability,
             resource: &req.resource,
             delta: &delta,
@@ -350,6 +416,28 @@ pub(super) fn launch_delta(
     };
     let home = PathBuf::from(paths.canonical(&paths.home().to_string_lossy()));
     let mut delta = store::delta_for_session(db, session, now).unwrap_or_default();
+    // The owner's standing access for this task and repository, read against this computer's home.
+    let row = db
+        .with_conn(|c| hq_db::harness_sessions_registry::get(c, session))
+        .ok()
+        .flatten();
+    if let Some(row) = row {
+        let scopes = rule_scopes(db, session, row.mission_id.as_deref(), &row.cwd);
+        for rule in store::rules_for(db, &scopes, now).unwrap_or_default() {
+            let Ok(cap) = serde_json::from_value::<Capability>(json!(rule.capability)) else {
+                continue;
+            };
+            let resource = expand_resource(cap, &rule.resource, &paths.home());
+            let extra = delta_for_owner_approval(&normalize(&GrantRequest {
+                capability: cap,
+                resource,
+            }));
+            delta.writable.extend(extra.writable);
+            delta.readable.extend(extra.readable);
+            delta.loopback_ports.extend(extra.loopback_ports);
+            delta.allow.extend(extra.allow);
+        }
+    }
     if let Some(name) = profile_name(db, session)
         && let Some(p) = cfg.grants.profiles.get(&name)
     {
@@ -864,5 +952,75 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn a_standing_repo_rule_approves_what_it_covers_without_asking_and_never_a_refusal() {
+        let f = fixture(false);
+        let repo = format!("{}{}", store::REPO_SCOPE, f.cwd.display());
+        store::add_rule(
+            &f.db,
+            &repo,
+            "fs_write",
+            "~/.gradle",
+            "starter mobile-dev",
+            1,
+            None,
+        )
+        .unwrap();
+        store::add_rule(
+            &f.db,
+            &repo,
+            "egress",
+            "pub.dev:443",
+            "starter mobile-dev",
+            1,
+            None,
+        )
+        .unwrap();
+        // The rule's `~` means the session computer's home, so a cache under it is covered.
+        let out = ask(&f, Capability::FsWrite, &f.at(".gradle/caches/x"));
+        assert!(matches!(out, Outcome::Approved { .. }), "{out:?}");
+        let out = ask(&f, Capability::Egress, "Pub.dev");
+        assert!(matches!(out, Outcome::Approved { .. }), "{out:?}");
+        let grants = store::for_session(&f.db, SESSION, 10).unwrap();
+        assert!(
+            grants
+                .iter()
+                .all(|g| g.decided_by == store::BY_POLICY && g.decision_note.starts_with("rule:"))
+        );
+        // Not covered: another host, and a sibling directory.
+        assert!(matches!(
+            ask(&f, Capability::Egress, "example.org"),
+            Outcome::Pending { .. }
+        ));
+        assert!(matches!(
+            ask(&f, Capability::FsWrite, &f.at(".gradlex")),
+            Outcome::Pending { .. }
+        ));
+        // A rule naming a credential directory cannot open it.
+        store::add_rule(&f.db, &repo, "fs_read", "~/.ssh", "oops", 2, None).unwrap();
+        let out = ask(&f, Capability::FsRead, &f.at(".ssh/id_ed25519"));
+        assert!(matches!(out, Outcome::Refused(_)), "{out:?}");
+    }
+
+    #[test]
+    fn a_rule_for_another_repository_or_task_does_not_apply() {
+        let f = fixture(false);
+        store::add_rule(
+            &f.db,
+            "repo:/somewhere/else",
+            "fs_write",
+            "~/.gradle",
+            "x",
+            1,
+            None,
+        )
+        .unwrap();
+        store::add_rule(&f.db, "task:t-other", "fs_write", "~/.gradle", "x", 1, None).unwrap();
+        assert!(matches!(
+            ask(&f, Capability::FsWrite, &f.at(".gradle")),
+            Outcome::Pending { .. }
+        ));
     }
 }

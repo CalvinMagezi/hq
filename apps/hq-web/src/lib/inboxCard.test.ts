@@ -19,6 +19,9 @@ const item = (o: Partial<NotificationItem> & { extra?: Record<string, string> } 
 
 test('a 409 on an answer says the question changed and nothing was done', () => {
   expect(answerErrorLine({ status: 409 })).toBe(t('fail_send_answer_changed'))
+  expect(answerErrorLine({ status: 400, message: 'this request is not on a task, so it cannot be allowed for one' })).toBe(
+    'this request is not on a task, so it cannot be allowed for one',
+  )
   expect(answerErrorLine({ status: 500 })).toBe(t('fail_send_answer_no_reply'))
   expect(answerErrorLine(new TypeError('x'))).toBe(t('fail_send_answer_unreachable'))
 })

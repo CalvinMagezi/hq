@@ -163,6 +163,9 @@ pub(crate) struct ListNotificationsParams {
 #[derive(Debug, Deserialize)]
 pub(crate) struct NotificationActionRequest {
     pub(crate) action: String,
+    /// For `allow_starter` on a helper's access request: which starter set to allow.
+    #[serde(default)]
+    pub(crate) starter: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -609,6 +612,7 @@ pub(crate) fn action_outcome(action: &str) -> Option<&'static str> {
         "approve" | "engage" | OPEN_ACTION | ALLOW_SITE_ACTION | ALLOW_FOLDER_ACTION => {
             Some("approved")
         }
+        a if hq_tools::harness_session::sandbox_access::is_access_action(a) => Some("approved"),
         "dismiss" | "reject" => Some("dismissed"),
         _ => None,
     }
@@ -625,7 +629,8 @@ fn refuse_unanswered_dialog(
     if !matches!(
         action,
         "approve" | "engage" | "reject" | ALLOW_SITE_ACTION | ALLOW_FOLDER_ACTION
-    ) {
+    ) && !hq_tools::harness_session::sandbox_access::is_access_action(action)
+    {
         return Ok(());
     }
     let open = hq_db::dialog_alerts::get(db, val_id)
@@ -791,6 +796,18 @@ pub(crate) async fn notification_action_handler(
     {
         return ApiError::bad_request("open is only for an offer you set aside").into_response();
     }
+    // A standing-access answer is checked before anything is recorded: one that cannot be applied
+    // (no task, unknown starter, not an access request) is refused instead of half-answered.
+    if hq_tools::harness_session::sandbox_access::is_access_action(&body.action)
+        && let Err(e) = hq_tools::harness_session::sandbox_access::check_answer(
+            &state.db,
+            val_id,
+            &body.action,
+            body.starter.as_deref(),
+        )
+    {
+        return ApiError::bad_request(e.to_string()).into_response();
+    }
     // The folder is read from the call itself, never from the request, and checked before the
     // answer is recorded, so a request that names no folder is refused instead of half-answered.
     let folder_grant = if body.action == ALLOW_FOLDER_ACTION {
@@ -805,6 +822,9 @@ pub(crate) async fn notification_action_handler(
     let answer = record_action(&state.db, val_id, engagement);
     // A repeat of an answer already given must not count as another approval.
     let first_answer = matches!(answer, Ok(Answered::Recorded));
+    // The owner can upgrade an answer already given (Allow, then Allow for the repository), and a
+    // failed rule write must be retryable, so standing access applies on a repeat too.
+    let answered = matches!(answer, Ok(Answered::Recorded | Answered::AlreadySo));
     match answer {
         Err(e) => {
             warn!(id = %id, action = %body.action, error = %e, "notification action failed");
@@ -815,6 +835,27 @@ pub(crate) async fn notification_action_handler(
             return ApiError::Conflict(settled_message(s)).into_response();
         }
         Ok(Answered::Recorded | Answered::AlreadySo) => {}
+    }
+    // Standing access for the task or repository, and what it added, so the owner is told when the
+    // rule did not land instead of believing it did.
+    let mut rules_added: Option<usize> = None;
+    if answered && hq_tools::harness_session::sandbox_access::is_access_action(&body.action) {
+        match hq_tools::harness_session::sandbox_access::apply_answer(
+            &state.db,
+            val_id,
+            &body.action,
+            body.starter.as_deref(),
+            chrono::Utc::now().timestamp(),
+        ) {
+            Ok(n) => rules_added = Some(n),
+            Err(e) => {
+                warn!(id = %id, error = %e, "recording standing sandbox access failed");
+                return ApiError::internal(format!(
+                    "Your answer was recorded, but the standing access was not saved: {e}. Try again."
+                ))
+                .into_response();
+            }
+        }
     }
     if first_answer {
         let whole_site = body.action == ALLOW_SITE_ACTION;
@@ -858,7 +899,10 @@ pub(crate) async fn notification_action_handler(
     Json(NotificationActionResponse {
         success: true,
         new_state: engagement.to_string(),
-        message: format!("Value item {engagement}"),
+        message: match rules_added {
+            Some(n) => format!("Value item {engagement}; {n} standing access rule(s) added"),
+            None => format!("Value item {engagement}"),
+        },
     })
     .into_response()
 }

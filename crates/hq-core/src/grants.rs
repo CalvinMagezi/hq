@@ -181,6 +181,108 @@ impl GrantProfile {
     }
 }
 
+/// Names of the starter profiles HQ ships: common toolchains' caches and registries, offered inside
+/// the first access request so nobody writes a profile by hand. Paths use `~` for the home of the
+/// computer the session runs on. Nothing here is on until the owner allows it for a repository.
+pub const STARTER_PROFILES: &[&str] = &["mobile-dev", "node-build", "rust-build"];
+
+/// The contents of a starter profile, or `None` for an unknown name.
+///
+/// Kept narrow on purpose. A directory the owner's own tools run code from later (cargo's
+/// `registry/src`, npm's `_npx`, a pnpm store hard-linked into every project, gradle's `init.d`, the
+/// pub `bin`) is never listed, since writing there would plant code that runs outside the sandbox;
+/// a helper builds with a cache inside its worktree (`CARGO_HOME`, `npm_config_cache`) instead.
+/// Broad hosts that serve anyone's files (`storage.googleapis.com`, `github.com`) and the adb
+/// server's port are left out: a helper asks for those one at a time.
+pub fn starter_profile(name: &str) -> Option<GrantProfile> {
+    let list = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    match name {
+        "mobile-dev" => Some(GrantProfile {
+            writable: list(&[
+                "~/.gradle/caches",
+                "~/.gradle/wrapper",
+                "~/.pub-cache/hosted",
+            ]),
+            readable: list(&["~/Library/Android/sdk", "~/Android/Sdk"]),
+            loopback_ports: Vec::new(),
+            egress: list(&[
+                "pub.dev",
+                "dl.google.com",
+                "maven.google.com",
+                "repo.maven.apache.org",
+                "services.gradle.org",
+                "downloads.gradle.org",
+                "plugins.gradle.org",
+            ]),
+        }),
+        "node-build" => Some(GrantProfile {
+            writable: Vec::new(),
+            readable: Vec::new(),
+            loopback_ports: Vec::new(),
+            egress: list(&["registry.npmjs.org", "registry.yarnpkg.com"]),
+        }),
+        "rust-build" => Some(GrantProfile {
+            writable: Vec::new(),
+            readable: Vec::new(),
+            loopback_ports: Vec::new(),
+            egress: list(&["crates.io", "index.crates.io", "static.crates.io"]),
+        }),
+        _ => None,
+    }
+}
+
+/// A standing rule's resource as a request would name it: `~` made absolute under `home`.
+pub fn expand_resource(capability: Capability, resource: &str, home: &Path) -> String {
+    match capability {
+        Capability::FsWrite | Capability::FsRead => {
+            expand_home(resource, home).to_string_lossy().into_owned()
+        }
+        _ => resource.to_string(),
+    }
+}
+
+/// Whether a standing rule (`rule`, already expanded) covers `req`: a directory covers what is
+/// under it, a port or host only itself. The caller has already checked that `req` is not refused.
+pub fn rule_covers(rule_capability: Capability, rule_resource: &str, req: &GrantRequest) -> bool {
+    match (rule_capability, req.capability) {
+        (Capability::FsWrite, Capability::FsWrite | Capability::FsRead)
+        | (Capability::FsRead, Capability::FsRead) => {
+            Path::new(&req.resource).starts_with(rule_resource)
+        }
+        (a, b) if a == b => rule_resource == req.resource,
+        _ => false,
+    }
+}
+
+/// Which starter profile `req` falls inside, if any, so the first card can offer "allow
+/// <starter> for this repository". `home` is the session computer's.
+pub fn starter_for(req: &GrantRequest, home: &Path) -> Option<&'static str> {
+    STARTER_PROFILES.iter().copied().find(|name| {
+        let Some(p) = starter_profile(name) else {
+            return false;
+        };
+        let covers = |cap: Capability, items: &[String]| {
+            items.iter().any(|raw| {
+                let r = normalize(&GrantRequest {
+                    capability: cap,
+                    resource: expand_resource(cap, raw, home),
+                });
+                rule_covers(cap, &r.resource, req)
+            })
+        };
+        covers(Capability::FsWrite, &p.writable)
+            || covers(Capability::FsRead, &p.readable)
+            || covers(
+                Capability::Loopback,
+                &p.loopback_ports
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>(),
+            )
+            || covers(Capability::Egress, &p.egress)
+    })
+}
+
 /// `agent_host.grants`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GrantsConfig {
@@ -680,6 +782,100 @@ mod tests {
             "*.bad",
             "left for classify to refuse"
         );
+    }
+
+    #[test]
+    fn starters_cover_their_caches_and_registries_and_nothing_else() {
+        let home = Path::new("/home/user");
+        let r = |c, x: &str| GrantRequest {
+            capability: c,
+            resource: x.into(),
+        };
+        assert_eq!(
+            starter_for(&r(Capability::FsWrite, "/home/user/.gradle/caches"), home),
+            Some("mobile-dev")
+        );
+        assert_eq!(
+            starter_for(&r(Capability::Egress, "registry.npmjs.org:443"), home),
+            Some("node-build")
+        );
+        assert_eq!(
+            starter_for(&r(Capability::Egress, "index.crates.io:443"), home),
+            Some("rust-build")
+        );
+        // Places the owner's own tools run code from, the adb port and broad hosts are in no starter.
+        for risky in [
+            "/home/user/.cargo/registry/src",
+            "/home/user/.npm/_npx",
+            "/home/user/.gradle/init.d",
+            "/home/user/.pub-cache/bin",
+        ] {
+            assert_eq!(
+                starter_for(&r(Capability::FsWrite, risky), home),
+                None,
+                "{risky}"
+            );
+        }
+        assert_eq!(starter_for(&r(Capability::Loopback, "5037"), home), None);
+        assert_eq!(
+            starter_for(&r(Capability::Egress, "github.com:443"), home),
+            None
+        );
+        assert_eq!(
+            starter_for(&r(Capability::FsWrite, "/home/user/projects"), home),
+            None
+        );
+        assert_eq!(
+            starter_for(&r(Capability::Egress, "evil.example.org:443"), home),
+            None
+        );
+        for name in STARTER_PROFILES {
+            let p = starter_profile(name).unwrap();
+            assert_eq!(
+                p.resolved(home).writable.len(),
+                p.writable.len(),
+                "{name} lists no credential path"
+            );
+        }
+        assert!(starter_profile("nope").is_none());
+    }
+
+    #[test]
+    fn a_rule_covers_what_is_under_it_and_a_write_rule_covers_reads() {
+        let r = |c, x: &str| GrantRequest {
+            capability: c,
+            resource: x.into(),
+        };
+        assert!(rule_covers(
+            Capability::FsWrite,
+            "/a/b",
+            &r(Capability::FsWrite, "/a/b/c")
+        ));
+        assert!(rule_covers(
+            Capability::FsWrite,
+            "/a/b",
+            &r(Capability::FsRead, "/a/b")
+        ));
+        assert!(!rule_covers(
+            Capability::FsRead,
+            "/a/b",
+            &r(Capability::FsWrite, "/a/b")
+        ));
+        assert!(!rule_covers(
+            Capability::FsWrite,
+            "/a/b",
+            &r(Capability::FsWrite, "/a/bc")
+        ));
+        assert!(rule_covers(
+            Capability::Egress,
+            "pub.dev:443",
+            &r(Capability::Egress, "pub.dev:443")
+        ));
+        assert!(!rule_covers(
+            Capability::Egress,
+            "pub.dev:443",
+            &r(Capability::Loopback, "443")
+        ));
     }
 
     #[test]
