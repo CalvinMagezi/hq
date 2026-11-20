@@ -22,6 +22,8 @@ class LinksTest {
         assertEquals(LinkTarget(Place.Chat), parse("hq://chat"))
         assertEquals(LinkTarget(Place.Notes), parse("hq://vault"))
         assertEquals(LinkTarget(Place.Notes), parse("hq://notes"))
+        assertEquals(LinkTarget(Place.Notes, path = "_data/finance/ledger.md"), parse("hq://finance/ledger"))
+        assertNull(Links.parse("hq://finance/other"))
     }
 
     @Test fun theAssistantPageAndTheComposerHaveLinks() {

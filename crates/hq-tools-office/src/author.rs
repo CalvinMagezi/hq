@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
@@ -231,6 +231,13 @@ impl HqTool for OfficeExportTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         let path = text(&args, "path")?.to_string();
         let format = text(&args, "format")?.to_string();
+        // The apps' Export sheet calls export_to_exports too and may open any note of the owner's;
+        // only the agent's tool refuses HQ's private folders (the finance ledger lives in _data).
+        let private =
+            hq_vault::rel_path::protected_folder(&path, hq_vault::rel_path::PRIVATE_FOLDERS);
+        if private.map_or(true, |hit| hit.is_some()) {
+            bail!("'{path}' is in a folder HQ keeps private; open it in the app to export it");
+        }
         export_to_exports(&self.vault, &path, &format).await
     }
 }
@@ -272,6 +279,23 @@ mod tests {
                 ]
             }]
         })
+    }
+
+    #[tokio::test]
+    async fn the_private_data_folder_cannot_be_exported_into_the_open() {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(vault.path().join("_data/finance")).unwrap();
+        let sheet = "```sheet name=L types=\"text\"\n| a |\n|---|\n| x |\n```\n";
+        std::fs::write(vault.path().join("_data/finance/ledger.md"), sheet).unwrap();
+        let (_, export) = author_tools(vault.path());
+        let out = export
+            .execute(json!({"path": "_data/finance/ledger.md", "format": "xlsx"}))
+            .await;
+        assert!(out.is_err(), "the ledger was exported");
+        assert!(
+            !vault.path().join("Exports").exists(),
+            "nothing was written"
+        );
     }
 
     #[tokio::test]

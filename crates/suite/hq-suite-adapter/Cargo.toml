@@ -30,6 +30,8 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+# Dev only: the test that proves the Suite reads the finance ledger. Nothing in src/ names it.
+hq-finance = { workspace = true }
 sha2 = { workspace = true }
 tempfile = { workspace = true }
 toml = { workspace = true }

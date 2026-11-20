@@ -34,6 +34,9 @@ pub const CALENDAR_EDITING_SKILL: &str = "calendar-editing";
 /// The skill `contacts_search` refuses to run without.
 pub const CONTACTS_LOOKUP_SKILL: &str = "contacts-lookup";
 
+/// The skill `finance_import_messages` refuses to run without.
+pub const FINANCE_IMPORT_SKILL: &str = "finance-import";
+
 /// The set is decided once at start, and GitHub can be connected any time after, so the worker
 /// is always offered. Whether it acts is `dispatch::allowed_repos`.
 fn every_install(_: &HqConfig) -> bool {
@@ -143,6 +146,14 @@ pub const BUILTIN_SKILLS: &[Shipped] = &[
         files: &[(
             SKILL_FILE,
             include_str!("../../assets/skills/contacts-lookup/SKILL.md"),
+        )],
+        applies: every_install,
+    },
+    Shipped {
+        name: FINANCE_IMPORT_SKILL,
+        files: &[(
+            SKILL_FILE,
+            include_str!("../../assets/skills/finance-import/SKILL.md"),
         )],
         applies: every_install,
     },

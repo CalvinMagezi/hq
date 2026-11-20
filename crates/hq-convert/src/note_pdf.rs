@@ -452,6 +452,9 @@ hr {{ border: 0; border-top: 1px solid #cfd3d7; margin: 1.5em 0; }}
     )
 }
 
+/// HQ's own state and the owner's private records (the finance ledger) live here; no export reads it.
+const PRIVATE_DATA_FOLDER: &str = "_data";
+
 /// Resolve a note reference to an absolute file inside `vault`.
 ///
 /// Accepts an exact vault-relative path, the same without `.md`, or a bare note
@@ -474,6 +477,7 @@ pub fn resolve_note(vault: &Path, reference: &str) -> Option<PathBuf> {
         let ext = canon.extension()?.to_str()?.to_ascii_lowercase();
         (canon.is_file()
             && canon.starts_with(&root)
+            && !canon.starts_with(root.join(PRIVATE_DATA_FOLDER))
             && matches!(ext.as_str(), "md" | "markdown" | "txt"))
         .then_some(canon)
     };
@@ -942,6 +946,16 @@ mod tests {
             Some(canon.clone())
         );
         assert_eq!(resolve_note(v.path(), "plan"), Some(canon));
+    }
+
+    #[test]
+    fn resolve_note_refuses_the_private_data_folder() {
+        let v = vault();
+        std::fs::create_dir_all(v.path().join("_data/finance")).unwrap();
+        std::fs::write(v.path().join("_data/finance/ledger.md"), "x").unwrap();
+        assert_eq!(resolve_note(v.path(), "_data/finance/ledger.md"), None);
+        assert_eq!(resolve_note(v.path(), "_data/finance/ledger"), None);
+        assert_eq!(resolve_note(v.path(), "ledger"), None);
     }
 
     #[test]
