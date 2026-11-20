@@ -30,7 +30,7 @@ diag Error sheet.ragged_row [block 1] row 1 has 1 cells but the header has 2
 diag Error block.missing_from [block 2] tile needs from=
 diag Error tile.bad_fn [block 2] `total` is not one of sum, count, avg, min, max, median
 diag Error block.bad_from [block 3] from=: `D` is not a cell such as D2
-diag Error plot.bad_type [block 3] `radar` is not one of bar, line, pie, donut
+diag Error plot.bad_type [block 3] `radar` is not one of bar, line, pie, donut, area, stacked, scatter
 diag Error plot.missing_x [block 3] plot needs x=
 diag Error plot.missing_y [block 3] plot needs y=
 diag Error chart.not_object [block 4] a chart body must be one JSON object
