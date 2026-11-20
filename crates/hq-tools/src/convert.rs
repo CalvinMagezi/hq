@@ -98,6 +98,7 @@ impl HqTool for ConvertToMarkdownTool {
         if !path.exists() {
             anyhow::bail!("file not found: {}", path.display());
         }
+        refuse_private_data(&path, &self.vault_path)?;
 
         let ocr = if args.get("ocr").and_then(Value::as_bool).unwrap_or(true) {
             OcrMode::Auto
@@ -146,6 +147,21 @@ fn refuse_protected_output(dest: &Path, vault: &Path) -> Result<()> {
         anyhow::bail!(
             "output '{}' is inside HQ's config directory or the vault's private folders; pick another location",
             dest.display()
+        );
+    }
+    Ok(())
+}
+
+/// `_data` holds HQ's database and keys and the owner's private records. A tool that reads a file
+/// by path must not open anything in it, however the path is spelled.
+fn refuse_private_data(path: &Path, vault: &Path) -> Result<()> {
+    let (Ok(path), Ok(vault)) = (path.canonicalize(), vault.canonicalize()) else {
+        return Ok(());
+    };
+    if path.starts_with(vault.join("_data")) {
+        anyhow::bail!(
+            "'{}' is in the vault's _data folder, which no tool reads",
+            path.display()
         );
     }
     Ok(())
@@ -810,6 +826,24 @@ mod import_tests {
         let p = dir.path().join(name);
         std::fs::write(&p, bytes).unwrap();
         p.to_string_lossy().into_owned()
+    }
+
+    #[tokio::test]
+    async fn the_private_data_folder_is_not_readable_by_any_spelling_of_its_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("_data/finance")).unwrap();
+        std::fs::write(dir.path().join("_data/finance/ledger.md"), "# Ledger").unwrap();
+        std::fs::create_dir_all(dir.path().join("Notebooks")).unwrap();
+        let absolute = dir.path().join("_data/finance/ledger.md");
+        let sneaky = dir.path().join("Notebooks/../_data/finance/ledger.md");
+        for path in [
+            "_data/finance/ledger.md".to_string(),
+            absolute.to_string_lossy().into_owned(),
+            sneaky.to_string_lossy().into_owned(),
+        ] {
+            let out = tool(&dir).execute(json!({"path": path})).await;
+            assert!(out.is_err(), "{path} was readable");
+        }
     }
 
     #[tokio::test]

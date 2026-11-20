@@ -10,6 +10,7 @@ hq-tool-api = { workspace = true }
 hq-suite-adapter = { workspace = true }
 hq-convert = { workspace = true }
 hq-export = { workspace = true }
+hq-vault = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 serde_json = { workspace = true }
