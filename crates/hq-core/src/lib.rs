@@ -9,6 +9,7 @@ pub mod daemon_restart;
 pub mod discord_access;
 pub mod frontmatter_utils;
 pub mod fs_private;
+pub mod grants;
 pub mod hardware;
 pub mod heartbeat;
 pub mod identity;

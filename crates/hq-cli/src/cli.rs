@@ -639,6 +639,25 @@ pub(crate) enum Commands {
         host: Option<String>,
     },
 
+    // ─── Sandbox grants ──────────────────────────────────────────────
+    /// List or revoke the sandbox access helpers asked HQ for
+    Grants {
+        /// Subcommand: list, revoke, profile
+        #[arg(default_value = "list")]
+        sub: String,
+        /// For revoke: a grant id, or a session id to revoke all of its grants. For profile: the
+        /// session id (or, with --task, the task id) to bind
+        target: Option<String>,
+        /// For profile: the access profile's name from agent_host.grants.profiles, or `none`
+        name: Option<String>,
+        /// For profile: `target` is a task id, so every session on it gets the profile
+        #[arg(long)]
+        task: bool,
+        /// Print the grants as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     // ─── Usage ───────────────────────────────────────────────────────
     /// Show LLM cost and tokens from recorded calls
     Usage {

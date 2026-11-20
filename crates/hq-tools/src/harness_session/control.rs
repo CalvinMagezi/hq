@@ -118,6 +118,40 @@ pub async fn resume(db: &Arc<Database>, session_id: &str, prompt: Option<&str>) 
     Ok(value)
 }
 
+/// Why `session_id` cannot be stopped and resumed with its conversation, if it cannot. A
+/// restart that would lose the conversation or kill the sub-helpers it started is not done
+/// silently: the caller says so instead.
+pub(super) fn restart_blocker(db: &Arc<Database>, session_id: &str) -> Result<Option<String>> {
+    let row = get_row(db, session_id)?;
+    if row.origin == registry::ORIGIN_STACK {
+        return Ok(Some("a specialist's one-shot run is never resumed".into()));
+    }
+    let harness = resolve(&row.harness)?;
+    if harness.transport() != super::spec::Transport::Pty {
+        return Ok(Some("this agent cannot resume its conversation".into()));
+    }
+    let resumable = match harness.spec.resume {
+        ResumeStrategy::Args(args) => {
+            !args.iter().any(|a| a.contains("{token}")) || row.resume_token.is_some()
+        }
+        ResumeStrategy::TokenOrArgs { .. } | ResumeStrategy::SessionDir => true,
+        ResumeStrategy::None => false,
+    };
+    if !resumable {
+        return Ok(Some(
+            "this agent has no way to resume its conversation".into(),
+        ));
+    }
+    let id = session_id.to_string();
+    let children = db.with_conn(move |c| registry::running_children(c, &id))?;
+    if !children.is_empty() {
+        return Ok(Some(
+            "it has running sub-helpers that a restart would stop".into(),
+        ));
+    }
+    Ok(None)
+}
+
 /// Live status for one session: registry row plus what the host says now.
 pub fn status(db: &Arc<Database>, session_id: &str) -> Result<Value> {
     let row = get_row(db, session_id)?;

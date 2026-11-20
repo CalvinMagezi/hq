@@ -1,0 +1,1 @@
+A helper in a strict sandbox can ask HQ for the access it needs with `sandbox_request`. HQ approves what the access profile you bound to the task (`agent_host.grants.profiles`, `hq grants profile`) covers, asks you about the rest, and never grants credentials. `hq grants list` and `hq grants revoke` show and undo it.

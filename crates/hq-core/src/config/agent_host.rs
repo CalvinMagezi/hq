@@ -172,6 +172,11 @@ pub struct AgentHostConfig {
     #[serde(default)]
     pub sandbox: SandboxConfig,
 
+    /// Access profiles a task or spawn can opt into, so HQ can approve a helper's request for
+    /// something inside one without asking you. Empty by default: nothing is auto approved.
+    #[serde(default)]
+    pub grants: crate::grants::GrantsConfig,
+
     /// Hours a session on the built-in host may sit silent and not working before
     /// the host stops it (it stays resumable, and HQ tells you it ended). 0 keeps
     /// sessions until someone stops them. Applies to sessions started afterwards.
@@ -879,6 +884,7 @@ impl Default for AgentHostConfig {
             spawn_cwd_deny: Vec::new(),
             handoff_cwd_allow: Vec::new(),
             sandbox: SandboxConfig::default(),
+            grants: Default::default(),
             idle_reap_hours: default_idle_reap_hours(),
             teams: TeamsConfig::default(),
             spawn_limits: SpawnLimitsConfig::default(),

@@ -87,6 +87,57 @@ pub(super) fn plan(cfg: &AgentHostConfig) -> Value {
     })
 }
 
+/// `plan` with a session's grants added: more writable and readable paths, loopback ports and
+/// proxy rules. A plan with no sandbox (`mode: none`) is returned as it was, and nothing is ever
+/// removed, so a grant can only widen what the owner's config already allows.
+pub(super) fn extend_plan(mut plan: Value, grants: &hq_core::grants::SandboxDelta) -> Value {
+    if grants.is_empty() || plan.get("mode").and_then(Value::as_str) == Some("none") {
+        return plan;
+    }
+    let Some(obj) = plan.as_object_mut() else {
+        return plan;
+    };
+    let paths = |list: &[std::path::PathBuf]| -> Vec<Value> {
+        list.iter()
+            .map(|p| Value::String(p.to_string_lossy().into_owned()))
+            .collect()
+    };
+    for (key, add) in [
+        ("writable", paths(&grants.writable)),
+        ("readable", paths(&grants.readable)),
+        (
+            "loopback_ports",
+            grants.loopback_ports.iter().map(|p| json!(p)).collect(),
+        ),
+    ] {
+        let list = obj.entry(key).or_insert_with(|| json!([]));
+        if let Some(list) = list.as_array_mut() {
+            for v in add {
+                if !list.contains(&v) {
+                    list.push(v);
+                }
+            }
+        }
+    }
+    let allow = obj.entry("allow").or_insert_with(|| json!([]));
+    if let Some(list) = allow.as_array_mut() {
+        // A client that honours HTTP_PROXY reaches a local port through the proxy, which refuses
+        // local addresses unless a rule names them as private (as `plan` does for config ports).
+        if !grants.loopback_ports.is_empty() {
+            for host in LOOPBACK_NAMES {
+                list.push(json!({ "host": host, "ports": grants.loopback_ports, "private": true }));
+            }
+        }
+        list.extend(
+            grants
+                .allow
+                .iter()
+                .map(|(host, port)| json!({ "host": host, "ports": [port] })),
+        );
+    }
+    plan
+}
+
 /// The plan a launch under `strict_paths` gets: the same allowlist, always the strict profile.
 pub(super) fn strict_plan(cfg: &AgentHostConfig) -> Value {
     let mut strict = cfg.clone();
@@ -138,6 +189,47 @@ mod tests {
 
     fn cfg() -> AgentHostConfig {
         AgentHostConfig::default()
+    }
+
+    #[test]
+    fn grants_only_widen_a_plan_and_leave_an_unsandboxed_one_alone() {
+        use hq_core::grants::SandboxDelta;
+        let delta = SandboxDelta {
+            writable: vec!["/h/.gradle".into()],
+            loopback_ports: vec![5037],
+            allow: vec![("pub.dev".into(), 443)],
+            ..Default::default()
+        };
+        let base = strict_plan(&cfg());
+        let before = base["writable"].as_array().unwrap().len();
+        let plan = extend_plan(base.clone(), &delta);
+        assert_eq!(plan["writable"].as_array().unwrap().len(), before + 1);
+        assert!(
+            plan["writable"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("/h/.gradle"))
+        );
+        assert!(
+            plan["loopback_ports"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(5037))
+        );
+        assert!(
+            plan["allow"]
+                .as_array()
+                .unwrap()
+                .contains(&json!({"host": "pub.dev", "ports": [443]}))
+        );
+        assert_eq!(
+            extend_plan(plan.clone(), &delta)["writable"],
+            plan["writable"],
+            "twice adds nothing"
+        );
+        assert_eq!(extend_plan(base.clone(), &SandboxDelta::default()), base);
+        let none = json!({ "mode": "none" });
+        assert_eq!(extend_plan(none.clone(), &delta), none);
     }
 
     #[test]
