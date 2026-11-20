@@ -62,8 +62,12 @@ impl BlockType {
     fn allowed_attrs(self) -> &'static [&'static str] {
         match self {
             BlockType::Sheet => &["id", "name", "types", "data", "rows"],
-            BlockType::Tile => &["id", "from", "fn", "label", "format", "where", "group"],
-            BlockType::Plot => &["id", "type", "from", "x", "y", "title", "where", "group"],
+            BlockType::Tile => &[
+                "id", "from", "fn", "label", "format", "where", "group", "size",
+            ],
+            BlockType::Plot => &[
+                "id", "type", "from", "x", "y", "title", "where", "group", "size",
+            ],
             BlockType::Chart => &["id"],
             BlockType::Comment => &["id", "on", "by", "at", "state"],
         }
@@ -330,6 +334,7 @@ impl TypedBlock {
 
     fn validate_tile(&self, out: &mut Vec<Problem>) {
         self.check_from(out);
+        self.check_size(out);
         if let Some(f) = self.require("fn", "tile.missing_fn", out)
             && !["sum", "count", "avg", "min", "max", "median"].contains(&f)
         {
@@ -357,8 +362,21 @@ impl TypedBlock {
         }
     }
 
+    /// `size=` is a view hint for a dashboard: how wide the block draws.
+    fn check_size(&self, out: &mut Vec<Problem>) {
+        if let Some(s) = self.info.get("size")
+            && !["small", "wide", "full"].contains(&s)
+        {
+            out.push(Problem::warn(
+                "block.bad_size",
+                format!("size= `{s}` is not small, wide or full"),
+            ));
+        }
+    }
+
     fn validate_plot(&self, out: &mut Vec<Problem>) {
         self.check_from(out);
+        self.check_size(out);
         if let Some(t) = self.require("type", "plot.missing_type", out)
             && !["bar", "line", "pie", "donut", "area", "stacked", "scatter"].contains(&t)
         {
@@ -587,6 +605,16 @@ mod tests {
             codes(&noxy),
             ["plot.bad_type", "plot.missing_x", "plot.missing_y"]
         );
+    }
+
+    #[test]
+    fn the_size_hint_of_a_dashboard_block_is_known_and_checked() {
+        let tile = TypedBlock::parse("```tile from=A1:A2 fn=sum size=wide\n```").unwrap();
+        assert!(codes(&tile).is_empty(), "{:?}", tile.validate());
+        let plot = TypedBlock::parse("```plot type=bar from=A1:B2 x=a y=b size=full\n```").unwrap();
+        assert!(codes(&plot).is_empty(), "{:?}", plot.validate());
+        let bad = TypedBlock::parse("```tile from=A1:A2 fn=sum size=huge\n```").unwrap();
+        assert_eq!(codes(&bad), ["block.bad_size"]);
     }
 
     #[test]

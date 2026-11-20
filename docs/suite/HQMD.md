@@ -159,8 +159,7 @@ from the block's opening fence. A size equal to the block's default is written a
 only a hint for viewers: exports and the evaluator ignore it, and a block that carries an attribute a
 version does not know keeps it as written.
 
-> The checker's list of known attributes for `tile` and `plot` does not name `size` yet, so
-> the checker reports `block.unknown_attr` (a warning) for it. See `docs/techdebt/dash-size-attr-checker-warning.md`.
+The checker knows `size` and warns (`block.bad_size`) for a value other than those three.
 
 #### `chart`
 
