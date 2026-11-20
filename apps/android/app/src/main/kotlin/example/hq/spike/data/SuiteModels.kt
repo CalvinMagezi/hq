@@ -106,3 +106,60 @@ internal object BlocksWire {
         }
     }
 }
+
+/** One card of a slides note as `/api/suite/cards` lists it. [hash] is quoted back with every edit of the card. */
+data class CardRow(
+    val index: Int,
+    val title: String,
+    val hash: String,
+    val blocks: Int,
+    val layout: String,
+    val transition: String?,
+    val background: String?,
+    val color: String?,
+    val notes: List<String>,
+)
+
+internal object CardsWire {
+    fun list(o: JSONObject): List<CardRow> {
+        val a = o.optJSONArray("cards") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { card(it) }
+    }
+
+    private fun card(c: JSONObject): CardRow {
+        val notes = c.optJSONArray("notes")
+        return CardRow(
+            index = c.optInt("index", 0), title = c.optString("title", ""), hash = c.optString("hash", ""), blocks = c.optInt("blocks", 0),
+            layout = c.optString("layout", "content"), transition = NoteWire.text(c, "transition"), background = NoteWire.text(c, "background"),
+            color = NoteWire.text(c, "color"),
+            notes = if (notes == null) emptyList() else (0 until notes.length()).mapNotNull { (notes.opt(it) as? String)?.takeIf(String::isNotBlank) },
+        )
+    }
+}
+
+/** One review comment as the `comments` action lists it. [on] is the hash of the block it is about. */
+data class CommentRow(
+    val index: Int,
+    val hash: String,
+    val on: String,
+    val by: String?,
+    val at: String?,
+    val open: Boolean,
+    val text: String,
+    val orphaned: Boolean,
+    /** The first line of the block it is about, when that block still exists. */
+    val anchor: String?,
+)
+
+internal object CommentsWire {
+    fun list(o: JSONObject): List<CommentRow> {
+        val a = o.optJSONArray("comments") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map {
+            CommentRow(
+                index = it.optInt("index", 0), hash = it.optString("hash", ""), on = it.optString("on", ""), by = NoteWire.text(it, "by"), at = NoteWire.text(it, "at"),
+                open = it.optString("state", "open") != "resolved", text = it.optString("text", ""), orphaned = it.optBoolean("orphaned", false),
+                anchor = NoteWire.text(it, "anchor_preview"),
+            )
+        }
+    }
+}

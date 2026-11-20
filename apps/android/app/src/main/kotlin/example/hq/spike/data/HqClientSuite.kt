@@ -127,3 +127,71 @@ suspend fun HqClient.suiteAddRow(path: String, sheet: Int, at: Int?) =
 /** Adds a column named [name] on the right of the `sheet`th sheet of [path]. */
 suspend fun HqClient.suiteAddColumn(path: String, sheet: Int, name: String) =
     suiteSheetEdit(path, sheet, "add_column") { it.put("name", name) }
+
+// ---------------------------------------------------------------- slides and comments (`POST /api/suite/edit`)
+
+/** One call of the edit route: [action] with the arguments [build] puts in the body. A refusal throws [HqUnavailable] whose `serverMessage` is hq's sentence. */
+private suspend fun HqClient.suiteEditCall(path: String, action: String, build: (JSONObject) -> Unit = {}): JSONObject {
+    val body = JSONObject().put("path", path).put("action", action)
+    build(body)
+    return postJson("/api/suite/edit", body)
+}
+
+/** The cards of the slides note at [path], in order. */
+suspend fun HqClient.suiteCards(path: String): List<CardRow> =
+    send(authed("/api/suite/cards?path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()) { CardsWire.list(JSONObject(it)) }
+
+/** Adds a card titled [title] with [markdown] under it, after card [after] (which must still hash to [hash]), or at the end when [after] is null. */
+suspend fun HqClient.suiteAddCard(path: String, title: String, markdown: String, after: Int?, hash: String?) {
+    suiteEditCall(path, "add_card") { b ->
+        b.put("title", title).put("markdown", markdown)
+        if (after != null) b.put("after_card", after).put("hash", hash ?: "")
+    }
+}
+
+/** Moves [card] so it becomes card number [to] (zero-based). */
+suspend fun HqClient.suiteMoveCard(path: String, card: CardRow, to: Int) {
+    suiteEditCall(path, "move_card") { it.put("card", card.index).put("hash", card.hash).put("to", to) }
+}
+
+suspend fun HqClient.suiteDeleteCard(path: String, card: CardRow) {
+    suiteEditCall(path, "delete_card") { it.put("card", card.index).put("hash", card.hash) }
+}
+
+/** What the person changed in a card's editor: only the parts that differ from what hq listed are sent. */
+data class CardChange(val title: String, val markdown: String, val notes: String, val layout: String, val transition: String?)
+
+/**
+ * Saves a card's editor. hq changes one thing per call and the card's hash moves with each, so the cards are read again between
+ * the calls. The card's own text goes first (it keeps the notes and the look because the caller carried them in [CardChange.markdown]).
+ */
+suspend fun HqClient.suiteSaveCard(path: String, card: CardRow, change: CardChange, textChanged: Boolean): List<CardRow> {
+    var cur = card
+    suspend fun fresh() { cur = suiteCards(path).getOrNull(card.index) ?: throw HqUnavailable("that deck has no such card") }
+    if (textChanged || change.title != card.title) {
+        suiteEditCall(path, "replace_card") { it.put("card", cur.index).put("hash", cur.hash).put("title", change.title).put("markdown", change.markdown) }
+        fresh()
+    }
+    if (change.notes != card.notes.joinToString("\n")) {
+        suiteEditCall(path, "set_notes") { it.put("card", cur.index).put("hash", cur.hash).put("text", change.notes) }
+        fresh()
+    }
+    if (change.layout != card.layout || change.transition != CardStyles.transitionKind(card.transition)) {
+        suiteEditCall(path, "set_card_style") { b ->
+            b.put("card", cur.index).put("hash", cur.hash).put("layout", change.layout).put("transition", change.transition ?: JSONObject.NULL)
+        }
+    }
+    return suiteCards(path)
+}
+
+/** The comments of the note at [path], in the order the note holds them. */
+suspend fun HqClient.suiteComments(path: String): List<CommentRow> = CommentsWire.list(suiteEditCall(path, "comments"))
+
+/** Adds a comment [text] on the block that hashes to [on]. The label is typed text, never an identity. */
+suspend fun HqClient.suiteAddComment(path: String, on: String, text: String, by: String) {
+    suiteEditCall(path, "add_comment") { it.put("on", on).put("text", text).put("by", by) }
+}
+
+suspend fun HqClient.suiteResolveComment(path: String, comment: CommentRow) {
+    suiteEditCall(path, "resolve_comment") { it.put("index", comment.index).put("hash", comment.hash) }
+}

@@ -85,14 +85,16 @@ fun SheetBlockView(block: Block.Sheet, onCopied: () -> Unit) {
     }
     val context = LocalContext.current
     val client = HqServices.get(context).client
-    val loaded by produceState<Result<SheetView>?>(fixed?.let { Result.success(it) }, path, block.index) {
+    val revision = LocalBlocksRevision.current
+    // The revision moves when the note was written by someone else (a `note_changed` event), so the cells are asked for again.
+    val outside = revision?.intValue
+    val loaded by produceState<Result<SheetView>?>(fixed?.let { Result.success(it) }, path, block.index, outside) {
         if (fixed == null && path != null) value = runCatching { client.suiteSheet(path, block.index) }
     }
     // What hq sent back after an edit replaces what was first loaded.
-    var edited by remember(path, block.index) { mutableStateOf<SheetView?>(null) }
+    var edited by remember(path, block.index, outside) { mutableStateOf<SheetView?>(null) }
     var editing by remember { mutableStateOf<EditTarget?>(null) }
     val scope = rememberCoroutineScope()
-    val revision = LocalBlocksRevision.current
     when (val r = loaded) {
         null -> BlockFrame { Text(stringResource(R.string.suite_sheet_drawing), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(12.dp)) }
         else -> r.fold({
