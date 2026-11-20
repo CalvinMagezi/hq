@@ -1,0 +1,1 @@
+`scripts/install-hq.sh` now updates the copies of the binary that the bridge and the host service run, restarts the bridge, and says how to restart the host service. Before, those two kept running old code after an install.

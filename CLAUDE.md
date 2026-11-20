@@ -157,6 +157,10 @@ unprivileged. It is for a developer's own machine only: the root updater and
 `deploy/install.sh` refuse a linked or user-owned `/usr/local/bin/hq`, since root
 would then run a file the user can change.
 
+`install-hq.sh` also refreshes the copies the bridge (`~/bin/hq-bridge`) and the host service
+(`~/.local/bin/hq`) run, restarts the bridge, and leaves the host service to you (`HQ_RESTART_HOST=1`),
+since restarting it stops every running agent.
+
 Do not compare `--version` to check for staleness: it does not bump between
 builds. `--check` compares content hashes, and the installer verifies that the
 running daemon's binary matches what was just built. A green `/health` proves
