@@ -1,0 +1,1 @@
+The web app shows sandbox access requests from helpers as cards you can allow or decline, lists granted access in Settings under Access with Revoke, and lets you pick an access profile when you create a task.
