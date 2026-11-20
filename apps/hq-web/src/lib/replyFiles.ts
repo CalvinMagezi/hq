@@ -46,3 +46,27 @@ export function sizeLabel(bytes: number): string {
   if (bytes >= KB) return `${Math.round(bytes / KB)} KB`
   return `${bytes} B`
 }
+
+const DELIVERABLE_EXT = new Set(['html', 'htm', 'xlsx', 'xls', 'csv', 'pdf', 'docx', 'pptx'])
+
+/** The file's extension in lower case, or '' when the name has none. */
+export function fileExtension(name: string): string {
+  const base = name.split('/').pop() ?? name
+  const dot = base.lastIndexOf('.')
+  return dot > 0 && dot < base.length - 1 ? base.slice(dot + 1).toLowerCase() : ''
+}
+
+/** What the type chip says: the extension in capitals (XLSX, HTML), or '' when the file has none. */
+export function fileTypeLabel(file: Pick<ReplyFile, 'name' | 'path'>): string {
+  return (fileExtension(file.name) || fileExtension(file.path)).toUpperCase()
+}
+
+/** A file a person asked for (a page, a sheet, a PDF), as opposed to a note HQ wrote on the way. */
+export function isDeliverable(file: Pick<ReplyFile, 'name' | 'path'>): boolean {
+  return DELIVERABLE_EXT.has(fileExtension(file.name) || fileExtension(file.path))
+}
+
+/** Deliverable files first, the rest after, each group in its own order. */
+export function deliverablesFirst<T extends Pick<ReplyFile, 'name' | 'path'>>(files: T[]): T[] {
+  return [...files.filter(isDeliverable), ...files.filter((f) => !isDeliverable(f))]
+}

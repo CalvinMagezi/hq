@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { FileText, Globe, File as FileIcon } from 'lucide-react'
+import { FileText, Globe, File as FileIcon, FileImage, FileSpreadsheet, Presentation } from 'lucide-react'
 import { downloadVaultFile, getExportFormats, getNote, makeExport } from '~/lib/vaultApi'
 import { readHqmd } from '~/lib/hqmd'
 import { isHtmlPath } from '~/lib/htmlDashboard'
@@ -8,8 +8,8 @@ import { computeSheet, formatValue, readSheet } from '~/lib/sheetCalc'
 import { Link } from '@tanstack/react-router'
 import { t } from '~/strings'
 import { useAssetUrl } from '~/lib/useAssetUrl'
-import { sizeLabel, type ReplyFile } from '~/lib/replyFiles'
-import type { MadeNote, ReplySource, SourceKind } from '~/lib/replySources'
+import { fileTypeLabel, sizeLabel, type FileKind, type ReplyFile } from '~/lib/replyFiles'
+import { SOURCE_CAP, splitSources, type MadeNote, type ReplySource, type SourceKind } from '~/lib/replySources'
 import { folderLabel } from '~/lib/workPane'
 
 const KIND_ICON: Record<SourceKind, typeof FileText> = { note: FileText, file: FileIcon, web: Globe }
@@ -19,17 +19,29 @@ export function SourceIcon({ kind }: { kind: SourceKind }) {
   return <Icon className="a-ic xs" aria-hidden="true" />
 }
 
-/** What a reply read, one chip each. A click shows it in the pane's Context tab, not in a new browser tab. */
+/** What a reply read, one chip each; past the cap the rest sit behind "+N more". A click shows it in the pane's Context tab, not in a new browser tab. */
 export function SourceChips({ sources, onOpen }: { sources: ReplySource[]; onOpen: (source: ReplySource) => void }) {
+  const [expanded, setExpanded] = useState(false)
   if (sources.length === 0) return null
+  const { shown, hidden } = splitSources(sources, expanded)
   return (
     <div className="a-chips hq-sources" role="group" aria-label={t('chat_sources_label')}>
-      {sources.map((s) => (
+      {shown.map((s) => (
         <button key={s.ref} type="button" className="a-chip" aria-label={t('chat_source_open', { title: s.title })} onClick={() => onOpen(s)}>
           <SourceIcon kind={s.kind} />
           {s.title}
         </button>
       ))}
+      {hidden > 0 && (
+        <button type="button" className="a-chip" aria-expanded={false} onClick={() => setExpanded(true)}>
+          {t('chat_sources_more', { n: String(hidden) })}
+        </button>
+      )}
+      {expanded && SOURCE_CAP < sources.length && (
+        <button type="button" className="a-chip" aria-expanded={true} onClick={() => setExpanded(false)}>
+          {t('chat_sources_fewer')}
+        </button>
+      )}
     </div>
   )
 }
@@ -63,6 +75,15 @@ const KIND_LABEL = {
   file: 'chat_file_kind_file',
 } as const
 
+const KIND_FILE_ICON: Record<FileKind, typeof FileText> = {
+  sheet: FileSpreadsheet,
+  doc: FileText,
+  slides: Presentation,
+  pdf: FileText,
+  image: FileImage,
+  file: FileIcon,
+}
+
 function noteTitle(path: string): string {
   return (path.split('/').filter(Boolean).pop() ?? path).replace(/\.md$/, '')
 }
@@ -71,13 +92,16 @@ function noteTitle(path: string): string {
 export function FileCard({ file, onOpenNote }: { file: ReplyFile; onOpenNote?: (note: MadeNote) => void }) {
   const url = useAssetUrl(file.path)
   const note = file.note
-  const openTarget = note ? { title: noteTitle(note), path: note } : isHtmlPath(file.path) ? { title: file.name, path: file.path } : null
+  const openTarget = isHtmlPath(file.path) ? { title: file.name, path: file.path } : note ? { title: noteTitle(note), path: note } : null
+  const KindIcon = KIND_FILE_ICON[file.kind]
+  const typeLabel = fileTypeLabel(file)
   return (
     <div className="hq-made hq-made-col">
-      <div className="hq-made-row">
-        <FileIcon className="a-ic" aria-hidden="true" />
+      <div className="hq-made-row hq-made-file">
+        <KindIcon className="a-ic" aria-hidden="true" />
         <span className="hq-made-main">
-          <b>{file.name}</b>
+          <span className="hq-made-type a-cap">{typeLabel || t(KIND_LABEL[file.kind])}</span>
+          <b title={file.name}>{file.name}</b>
           <span className="a-cap a-muted">{`${t(KIND_LABEL[file.kind])} · ${sizeLabel(file.size)}`}</span>
         </span>
         {openTarget && onOpenNote ? (

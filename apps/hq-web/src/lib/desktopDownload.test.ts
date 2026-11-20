@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { t } from '~/strings'
+import { NOTICE_MS, useToasts } from './toast'
 import {
   DESKTOP_DOWNLOAD_EVENT,
   desktopDownloadText,
@@ -18,8 +19,7 @@ function recorder() {
 test('a saved file says its name and the real path', () => {
   const { seen, show } = recorder()
   handleDesktopDownload(event({ name: 'Plan.xlsx', path: '/srv/example/Downloads/Plan.xlsx', success: true }), show)
-  expect(seen).toEqual([['notice', t('note_export_saved', { name: 'Plan.xlsx', path: '/srv/example/Downloads/Plan.xlsx' })]])
-  expect(seen[0]![1]).toContain('/srv/example/Downloads/Plan.xlsx')
+  expect(seen).toEqual([['notice', 'Saved to Downloads: Plan.xlsx']])
 })
 
 test('a failure is an alert, with or without a name', () => {
@@ -54,4 +54,22 @@ test('the listener hears the event by name and stops when told', () => {
   expect(DESKTOP_DOWNLOAD_EVENT).toBe('hq-desktop-download')
   stop()
   expect(handlers.size).toBe(0)
+})
+
+test('a download event on the page reaches the real toast store as a plain notice that goes away in 6 s', () => {
+  const handlers = new Map<string, EventListener>()
+  const target = {
+    addEventListener: (type: string, fn: EventListener) => void handlers.set(type, fn),
+    removeEventListener: (type: string) => void handlers.delete(type),
+  }
+  useToasts.setState({ toasts: [] })
+  listenForDesktopDownloads(target)
+  handlers.get(DESKTOP_DOWNLOAD_EVENT)!(event({ name: 'Matooke.html', path: '/srv/example/Downloads/Matooke.html', success: true }))
+  handlers.get(DESKTOP_DOWNLOAD_EVENT)!(event({ name: 'Matooke.xlsx', path: '', success: false }))
+  const [ok, bad] = useToasts.getState().toasts
+  expect(ok).toMatchObject({ text: 'Saved to Downloads: Matooke.html', kind: 'status' })
+  expect(ok!.undo).toBeUndefined()
+  expect(bad).toMatchObject({ kind: 'alert' })
+  expect(NOTICE_MS).toBe(6000)
+  useToasts.setState({ toasts: [] })
 })
