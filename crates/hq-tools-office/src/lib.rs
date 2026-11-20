@@ -7,6 +7,7 @@
 //! The tool's name and the actions that move an original are in `hq_tool_api::office`.
 
 pub mod author;
+pub mod edit;
 
 use std::path::PathBuf;
 
@@ -25,6 +26,9 @@ pub fn create_office_tools(vault: PathBuf) -> Vec<Box<dyn HqTool>> {
     let mut tools: Vec<Box<dyn HqTool>> = vec![Box::new(OfficeFileTool {
         vault: vault.clone(),
     })];
+    tools.push(Box::new(edit::OfficeEditTool {
+        vault: vault.clone(),
+    }));
     tools.extend(author::create_author_tools(vault));
     tools
 }
