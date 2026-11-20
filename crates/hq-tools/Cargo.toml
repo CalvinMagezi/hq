@@ -7,6 +7,7 @@ edition.workspace = true
 hq-host = { workspace = true }
 hq-core = { workspace = true }
 hq-tool-api = { workspace = true }
+hq-finance = { workspace = true }
 hq-vault = { workspace = true }
 hq-db = { workspace = true }
 hq-llm = { workspace = true }

@@ -12,15 +12,25 @@ struct Message {
     body: String,
 }
 
-/// Drafts for every message that is a mobile-money transaction, oldest first. Messages from other
-/// senders and notices that are not transactions are skipped without being kept.
+/// Drafts for every message that is a mobile-money transaction, oldest first. Notices that are not
+/// transactions are skipped without being kept. Each item is `(sender, received_ms, body)`.
+pub fn drafts_from_messages<'a>(
+    messages: impl IntoIterator<Item = (&'a str, i64, &'a str)>,
+) -> Vec<Draft> {
+    let mut msgs: Vec<(&str, i64, &str)> = messages.into_iter().collect();
+    msgs.sort_by_key(|m| m.1);
+    msgs.iter()
+        .filter_map(|(sender, date, body)| parse_at(sender, body, *date))
+        .collect()
+}
+
+/// The same for an export file: a JSON array of `{ sender, date, body }`.
 pub fn drafts_from_export(json: &str) -> Result<Vec<Draft>, serde_json::Error> {
-    let mut msgs: Vec<Message> = serde_json::from_str(json)?;
-    msgs.sort_by_key(|m| m.date);
-    Ok(msgs
-        .iter()
-        .filter_map(|m| parse_at(&m.sender, &m.body, m.date))
-        .collect())
+    let msgs: Vec<Message> = serde_json::from_str(json)?;
+    Ok(drafts_from_messages(
+        msgs.iter()
+            .map(|m| (m.sender.as_str(), m.date, m.body.as_str())),
+    ))
 }
 
 #[cfg(test)]

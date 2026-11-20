@@ -14,6 +14,7 @@ const CALENDAR: &str = CALENDAR_CREATION_SKILL;
 const READING: &str = CALENDAR_READING_SKILL;
 const EDITING: &str = CALENDAR_EDITING_SKILL;
 const CONTACTS: &str = CONTACTS_LOOKUP_SKILL;
+const FINANCE: &str = FINANCE_IMPORT_SKILL;
 const OFFICE: &str = "office-authoring";
 const PRICE_RESEARCH: &str = "local-price-research";
 
@@ -113,7 +114,8 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             EDITING,
             OFFICE,
             PRICE_RESEARCH,
-            CONTACTS
+            CONTACTS,
+            FINANCE
         ],
         "GitHub can be connected after start, with no repos listed"
     );
@@ -132,7 +134,8 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             EDITING,
             OFFICE,
             PRICE_RESEARCH,
-            CONTACTS
+            CONTACTS,
+            FINANCE
         ]
     );
     assert_eq!(
@@ -149,7 +152,8 @@ fn a_built_in_is_active_unless_it_is_turned_off() {
             EDITING,
             OFFICE,
             PRICE_RESEARCH,
-            CONTACTS
+            CONTACTS,
+            FINANCE
         ]
     );
     assert_eq!(
