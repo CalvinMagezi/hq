@@ -121,6 +121,13 @@ pub(super) fn extend_plan(mut plan: Value, grants: &hq_core::grants::SandboxDelt
     }
     let allow = obj.entry("allow").or_insert_with(|| json!([]));
     if let Some(list) = allow.as_array_mut() {
+        // A client that honours HTTP_PROXY reaches a local port through the proxy, which refuses
+        // local addresses unless a rule names them as private (as `plan` does for config ports).
+        if !grants.loopback_ports.is_empty() {
+            for host in LOOPBACK_NAMES {
+                list.push(json!({ "host": host, "ports": grants.loopback_ports, "private": true }));
+            }
+        }
         list.extend(
             grants
                 .allow

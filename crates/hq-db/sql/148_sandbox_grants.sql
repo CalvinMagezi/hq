@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS sandbox_grants (
     resource      TEXT NOT NULL,
     -- The additive sandbox change this grant applies, as JSON (hq_core::grants::SandboxDelta).
     delta_json    TEXT NOT NULL DEFAULT '{}',
-    -- pending (waiting for the owner), active, declined, refused, revoked.
+    -- pending (waiting for the owner), active, declined, refused, revoked, expired.
     state         TEXT NOT NULL,
     -- policy (HQ under the owner's profile), owner, or system for a refusal.
     decided_by    TEXT NOT NULL DEFAULT 'system',
@@ -24,7 +24,14 @@ CREATE TABLE IF NOT EXISTS sandbox_grants (
     decided_at    INTEGER,
     applied_at    INTEGER,
     expires_at    INTEGER,
-    revoked_at    INTEGER
+    revoked_at    INTEGER,
+    -- 1 from the moment a grant takes effect until the session was restarted to carry it.
+    restart_due   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_sandbox_grants_session ON sandbox_grants (session_id, state);
 CREATE INDEX IF NOT EXISTS idx_sandbox_grants_requested ON sandbox_grants (requested_at);
+-- One live row per request: two parallel asks for the same thing cannot both be filed. Profile
+-- bindings are history, the newest one wins, so they are left out.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sandbox_grants_open
+    ON sandbox_grants (session_id, capability, resource)
+    WHERE state IN ('pending', 'active') AND capability <> 'profile';

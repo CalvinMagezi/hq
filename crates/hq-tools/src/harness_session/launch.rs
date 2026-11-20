@@ -476,6 +476,7 @@ async fn launch_with(
             db,
             &super::agent_host_config(),
             l.session_id,
+            matches!(l.host.name(), "native" | "local"),
             chrono::Utc::now().timestamp(),
         ),
     };

@@ -8,8 +8,16 @@ use std::io::Write;
 
 const LIST_LIMIT: usize = 100;
 const NONE: &str = "-";
+const NO_PROFILE: &str = "none";
 
-pub async fn run(config: &HqConfig, sub: &str, target: Option<String>, json: bool) -> Result<()> {
+pub async fn run(
+    config: &HqConfig,
+    sub: &str,
+    target: Option<String>,
+    name: Option<String>,
+    task: bool,
+    json: bool,
+) -> Result<()> {
     let db = Database::open(&config.db_path())?;
     let mut out = std::io::stdout();
     match sub {
@@ -20,7 +28,19 @@ pub async fn run(config: &HqConfig, sub: &str, target: Option<String>, json: boo
             };
             revoke(&db, &target, &mut out)
         }
-        other => bail!("unknown subcommand '{other}': use list or revoke"),
+        "profile" => {
+            let (Some(target), Some(name)) = (target, name) else {
+                bail!(
+                    "usage: hq grants profile [--task] <session or task id> <profile name | none>"
+                );
+            };
+            let known = &config.agent_host.grants.profiles;
+            if name != NO_PROFILE && !known.contains_key(&name) {
+                bail!("no profile '{name}' in agent_host.grants.profiles");
+            }
+            bind(&db, &target, &name, task, &mut out)
+        }
+        other => bail!("unknown subcommand '{other}': use list, revoke or profile"),
     }
 }
 
@@ -61,6 +81,25 @@ fn line(g: &Grant) -> String {
     )
 }
 
+fn bind(db: &Database, target: &str, name: &str, task: bool, out: &mut impl Write) -> Result<()> {
+    let scope = if task {
+        format!("{}{target}", store::TASK_SCOPE)
+    } else {
+        target.to_string()
+    };
+    store::bind_profile(db, &scope, name, chrono::Utc::now().timestamp())?;
+    writeln!(
+        out,
+        "{} now works under the '{name}' access profile. A running session picks it up when it is next started.",
+        if task {
+            format!("Task {target}")
+        } else {
+            format!("Session {target}")
+        }
+    )?;
+    Ok(())
+}
+
 fn revoke(db: &Database, target: &str, out: &mut impl Write) -> Result<()> {
     let now = chrono::Utc::now().timestamp();
     let mut n = usize::from(store::revoke(db, target, now)?);
@@ -82,7 +121,7 @@ mod tests {
     use super::*;
     use hq_core::grants::SandboxDelta;
 
-    fn filed(db: &Database, session: &str, state: &str) -> String {
+    fn filed(db: &Database, session: &str, state: &str, resource: &str) -> String {
         let d = SandboxDelta::default();
         store::file(
             db,
@@ -92,7 +131,7 @@ mod tests {
                 host: "local",
                 repo: "",
                 capability: "fs_write",
-                resource: "/r/x",
+                resource,
                 delta: &d,
                 state,
                 decided_by: store::BY_POLICY,
@@ -108,9 +147,9 @@ mod tests {
     #[test]
     fn revoke_takes_a_grant_id_or_a_whole_session_and_refuses_unknown_targets() {
         let db = Database::open_memory().unwrap();
-        let a = filed(&db, "s1", store::ACTIVE);
-        filed(&db, "s2", store::ACTIVE);
-        filed(&db, "s2", store::ACTIVE);
+        let a = filed(&db, "s1", store::ACTIVE, "/r/a");
+        filed(&db, "s2", store::ACTIVE, "/r/a");
+        filed(&db, "s2", store::ACTIVE, "/r/b");
         let mut out = Vec::new();
         revoke(&db, &a, &mut out).unwrap();
         revoke(&db, "s2", &mut out).unwrap();
@@ -124,6 +163,31 @@ mod tests {
     }
 
     #[test]
+    fn profile_binds_a_task_or_a_session_for_the_owner() {
+        let db = Database::open_memory().unwrap();
+        let mut out = Vec::new();
+        bind(&db, "t1", "mobile", true, &mut out).unwrap();
+        bind(&db, "s9", "web", false, &mut out).unwrap();
+        assert_eq!(
+            store::profile_for(&db, "sx", Some("t1"))
+                .unwrap()
+                .as_deref(),
+            Some("mobile")
+        );
+        assert_eq!(
+            store::profile_for(&db, "s9", None).unwrap().as_deref(),
+            Some("web")
+        );
+        assert_eq!(
+            store::profile_for(&db, "s9", Some("t1"))
+                .unwrap()
+                .as_deref(),
+            Some("web"),
+            "newest wins"
+        );
+    }
+
+    #[test]
     fn list_prints_a_line_per_grant_and_says_so_when_empty() {
         let db = Database::open_memory().unwrap();
         let mut out = Vec::new();
@@ -133,7 +197,7 @@ mod tests {
                 .unwrap()
                 .contains("No sandbox access")
         );
-        filed(&db, "s1", store::REFUSED);
+        filed(&db, "s1", store::REFUSED, "/r/a");
         let mut out = Vec::new();
         list(&db, false, &mut out).unwrap();
         let text = String::from_utf8(out).unwrap();

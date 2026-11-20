@@ -13,6 +13,7 @@ pub const ACTIVE: &str = "active";
 pub const DECLINED: &str = "declined";
 pub const REFUSED: &str = "refused";
 pub const REVOKED: &str = "revoked";
+pub const EXPIRED: &str = "expired";
 
 pub const BY_POLICY: &str = "policy";
 pub const BY_OWNER: &str = "owner";
@@ -83,12 +84,14 @@ pub fn file(db: &Database, g: &NewGrant, now: i64) -> Result<String> {
     let id = uuid::Uuid::new_v4().simple().to_string();
     let decided = (g.state != PENDING).then_some(now);
     let applied = (g.state == ACTIVE).then_some(now);
+    // A grant that takes effect now needs its session restarted; a profile binding applies at launch.
+    let due = g.state == ACTIVE && g.capability != PROFILE;
     db.with_conn(|c| {
         c.execute(
             "INSERT INTO sandbox_grants (id, session_id, task_id, host, repo, capability, resource,
                 delta_json, state, decided_by, helper_reason, decision_note, requested_at,
-                decided_at, applied_at, expires_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                decided_at, applied_at, expires_at, restart_due)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 id,
                 g.session_id,
@@ -105,7 +108,8 @@ pub fn file(db: &Database, g: &NewGrant, now: i64) -> Result<String> {
                 now,
                 decided,
                 applied,
-                g.expires_at
+                g.expires_at,
+                due
             ],
         )?;
         Ok(())
@@ -124,17 +128,69 @@ pub fn get(db: &Database, id: &str) -> Result<Option<Grant>> {
     })
 }
 
-/// Moves a pending request to `state` (active or declined) when the owner answers. Anything
-/// not pending is left alone, so a late or repeated answer cannot revive a revoked grant.
-pub fn decide(db: &Database, id: &str, state: &str, now: i64) -> Result<bool> {
-    let applied = (state == ACTIVE).then_some(now);
+/// Moves a pending request to `state` (active or declined) when the owner answers. An approval
+/// runs until `expires_at`, counted from now, and makes a restart due. Anything not pending is
+/// left alone, so a late or repeated answer cannot revive a revoked or expired grant.
+pub fn decide(
+    db: &Database,
+    id: &str,
+    state: &str,
+    now: i64,
+    expires_at: Option<i64>,
+) -> Result<bool> {
+    let active = state == ACTIVE;
     db.with_conn(|c| {
         let n = c.execute(
-            "UPDATE sandbox_grants SET state = ?2, decided_by = ?3, decided_at = ?4, applied_at = ?5
-             WHERE id = ?1 AND state = ?6",
-            params![id, state, BY_OWNER, now, applied, PENDING],
+            "UPDATE sandbox_grants SET state = ?2, decided_by = ?3, decided_at = ?4,
+                applied_at = ?5, expires_at = CASE WHEN ?7 THEN ?8 ELSE expires_at END,
+                restart_due = ?7
+             WHERE id = ?1 AND state = ?6 AND (expires_at IS NULL OR expires_at > ?4)",
+            params![
+                id,
+                state,
+                BY_OWNER,
+                now,
+                active.then_some(now),
+                PENDING,
+                active,
+                expires_at
+            ],
         )?;
         Ok(n == 1)
+    })
+}
+
+/// Marks every request past its time as expired, so a waiting one stops counting and a lapsed
+/// grant stops answering "in force".
+pub fn expire_stale(db: &Database, now: i64) -> Result<usize> {
+    db.with_conn(|c| {
+        Ok(c.execute(
+            "UPDATE sandbox_grants SET state = ?1
+             WHERE state IN (?2, ?3) AND capability <> ?4 AND expires_at IS NOT NULL AND expires_at <= ?5",
+            params![EXPIRED, PENDING, ACTIVE, PROFILE, now],
+        )?)
+    })
+}
+
+/// Whether a grant took effect that this session has not been restarted to carry.
+pub fn restart_due(db: &Database, session_id: &str) -> Result<bool> {
+    db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sandbox_grants
+             WHERE session_id = ?1 AND state = ?2 AND restart_due = 1)",
+            params![session_id, ACTIVE],
+            |r| r.get(0),
+        )?)
+    })
+}
+
+pub fn clear_restart_due(db: &Database, session_id: &str) -> Result<()> {
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE sandbox_grants SET restart_due = 0 WHERE session_id = ?1",
+            [session_id],
+        )?;
+        Ok(())
     })
 }
 
@@ -160,18 +216,52 @@ pub fn revoke_session(db: &Database, session_id: &str, now: i64) -> Result<usize
 /// The `capability` of a row that binds a session to a named access profile.
 pub const PROFILE: &str = "profile";
 
-/// The access profile this session opted into, if any: the newest active binding.
-pub fn profile_for_session(db: &Database, session_id: &str) -> Result<Option<String>> {
+/// Prefix of the `session_id` column on a binding the owner made for a whole task.
+pub const TASK_SCOPE: &str = "task:";
+
+/// The access profile this session opted into, if any: the newest active binding the owner made
+/// for the session itself or for its task.
+pub fn profile_for(
+    db: &Database,
+    session_id: &str,
+    task_id: Option<&str>,
+) -> Result<Option<String>> {
+    let task_scope = task_id
+        .map(|t| format!("{TASK_SCOPE}{t}"))
+        .unwrap_or_default();
     db.with_conn(|c| {
         Ok(c.query_row(
             "SELECT resource FROM sandbox_grants
-             WHERE session_id = ?1 AND capability = ?2 AND state = ?3
+             WHERE session_id IN (?1, ?2) AND capability = ?3 AND state = ?4
              ORDER BY requested_at DESC, rowid DESC LIMIT 1",
-            params![session_id, PROFILE, ACTIVE],
+            params![session_id, task_scope, PROFILE, ACTIVE],
             |r| r.get(0),
         )
         .optional()?)
     })
+}
+
+/// Binds a session, or with [`TASK_SCOPE`] a task, to a named profile. Only the owner's own
+/// commands and screens call this: no tool a helper can reach does.
+pub fn bind_profile(db: &Database, scope: &str, name: &str, now: i64) -> Result<String> {
+    file(
+        db,
+        &NewGrant {
+            session_id: scope,
+            task_id: None,
+            host: "",
+            repo: "",
+            capability: PROFILE,
+            resource: name,
+            delta: &SandboxDelta::default(),
+            state: ACTIVE,
+            decided_by: BY_OWNER,
+            helper_reason: "",
+            decision_note: "",
+            expires_at: None,
+        },
+        now,
+    )
 }
 
 /// A request of this session for exactly this resource that is still waiting or in force, so
@@ -181,15 +271,17 @@ pub fn open_for(
     session_id: &str,
     capability: &str,
     resource: &str,
+    now: i64,
 ) -> Result<Option<Grant>> {
     db.with_conn(|c| {
         Ok(c.query_row(
             &format!(
                 "SELECT {COLUMNS} FROM sandbox_grants
                  WHERE session_id = ?1 AND capability = ?2 AND resource = ?3 AND state IN (?4, ?5)
+                   AND (expires_at IS NULL OR expires_at > ?6)
                  ORDER BY requested_at DESC, rowid DESC LIMIT 1"
             ),
-            params![session_id, capability, resource, PENDING, ACTIVE],
+            params![session_id, capability, resource, PENDING, ACTIVE, now],
             row,
         )
         .optional()?)
@@ -214,13 +306,14 @@ pub fn declined_for(
 }
 
 /// Requests of this session still waiting for the owner.
-pub fn pending_for_session(db: &Database, session_id: &str) -> Result<Vec<Grant>> {
+pub fn pending_for_session(db: &Database, session_id: &str, now: i64) -> Result<Vec<Grant>> {
     db.with_conn(|c| {
         let mut stmt = c.prepare(&format!(
             "SELECT {COLUMNS} FROM sandbox_grants WHERE session_id = ?1 AND state = ?2
+               AND (expires_at IS NULL OR expires_at > ?3)
              ORDER BY requested_at, rowid"
         ))?;
-        let rows = stmt.query_map(params![session_id, PENDING], row)?;
+        let rows = stmt.query_map(params![session_id, PENDING, now], row)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     })
 }
@@ -305,6 +398,10 @@ mod tests {
         }
     }
 
+    fn at<'a>(resource: &'a str, g: NewGrant<'a>) -> NewGrant<'a> {
+        NewGrant { resource, ..g }
+    }
+
     fn new<'a>(session: &'a str, d: &'a SandboxDelta, state: &'a str) -> NewGrant<'a> {
         NewGrant {
             session_id: session,
@@ -327,9 +424,9 @@ mod tests {
         let db = Database::open_memory().unwrap();
         let (a, b, c) = (delta("/a"), delta("/b"), delta("/c"));
         file(&db, &new("s1", &a, ACTIVE), 10).unwrap();
-        file(&db, &new("s1", &b, PENDING), 10).unwrap();
+        file(&db, &at("/r/b", new("s1", &b, PENDING)), 10).unwrap();
         file(&db, &new("s2", &c, ACTIVE), 10).unwrap();
-        let mut expired = new("s1", &c, ACTIVE);
+        let mut expired = at("/r/c", new("s1", &c, ACTIVE));
         expired.expires_at = Some(50);
         file(&db, &expired, 10).unwrap();
         let d = delta_for_session(&db, "s1", 100).unwrap();
@@ -342,16 +439,33 @@ mod tests {
         let db = Database::open_memory().unwrap();
         let d = delta("/a");
         let id = file(&db, &new("s1", &d, PENDING), 10).unwrap();
-        assert!(decide(&db, &id, ACTIVE, 20).unwrap());
+        assert!(decide(&db, &id, ACTIVE, 20, Some(900)).unwrap());
         assert!(
-            !decide(&db, &id, ACTIVE, 21).unwrap(),
+            !decide(&db, &id, ACTIVE, 21, Some(900)).unwrap(),
             "not pending any more"
         );
         assert_eq!(delta_for_session(&db, "s1", 30).unwrap().writable.len(), 1);
         assert!(revoke(&db, &id, 40).unwrap());
         assert!(delta_for_session(&db, "s1", 50).unwrap().is_empty());
-        assert!(!decide(&db, &id, ACTIVE, 60).unwrap());
+        assert!(!decide(&db, &id, ACTIVE, 60, Some(900)).unwrap());
         assert_eq!(get(&db, &id).unwrap().unwrap().state, REVOKED);
+    }
+
+    #[test]
+    fn a_task_binding_reaches_its_sessions_and_the_newest_binding_wins() {
+        let db = Database::open_memory().unwrap();
+        bind_profile(&db, &format!("{TASK_SCOPE}t1"), "mobile", 1).unwrap();
+        assert_eq!(
+            profile_for(&db, "s1", Some("t1")).unwrap().as_deref(),
+            Some("mobile")
+        );
+        assert_eq!(profile_for(&db, "s1", Some("t2")).unwrap(), None);
+        assert_eq!(profile_for(&db, "s1", None).unwrap(), None);
+        bind_profile(&db, "s1", "web", 2).unwrap();
+        assert_eq!(
+            profile_for(&db, "s1", Some("t1")).unwrap().as_deref(),
+            Some("web")
+        );
     }
 
     #[test]
@@ -363,26 +477,86 @@ mod tests {
             resource: name,
             ..new("s1", &d, ACTIVE)
         };
-        assert_eq!(profile_for_session(&db, "s1").unwrap(), None);
+        assert_eq!(profile_for(&db, "s1", None).unwrap(), None);
         file(&db, &bind("mobile"), 1).unwrap();
         file(&db, &bind("web"), 2).unwrap();
         assert_eq!(
-            profile_for_session(&db, "s1").unwrap().as_deref(),
+            profile_for(&db, "s1", None).unwrap().as_deref(),
             Some("web")
         );
-        assert_eq!(profile_for_session(&db, "s2").unwrap(), None);
+        assert_eq!(profile_for(&db, "s2", None).unwrap(), None);
     }
 
     #[test]
     fn revoking_a_session_clears_every_live_grant_and_counts_setbacks() {
         let db = Database::open_memory().unwrap();
         let d = delta("/a");
-        file(&db, &new("s1", &d, ACTIVE), 1).unwrap();
-        file(&db, &new("s1", &d, PENDING), 2).unwrap();
-        file(&db, &new("s1", &d, REFUSED), 3).unwrap();
-        file(&db, &new("s1", &d, DECLINED), 4).unwrap();
+        file(&db, &at("/r/1", new("s1", &d, ACTIVE)), 1).unwrap();
+        file(&db, &at("/r/2", new("s1", &d, PENDING)), 2).unwrap();
+        file(&db, &at("/r/3", new("s1", &d, REFUSED)), 3).unwrap();
+        file(&db, &at("/r/4", new("s1", &d, DECLINED)), 4).unwrap();
         assert_eq!(revoke_session(&db, "s1", 9).unwrap(), 2);
         assert_eq!(setbacks(&db, "s1").unwrap(), 2);
         assert_eq!(for_session(&db, "s1", 10).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn a_waiting_request_lapses_and_an_approval_runs_from_the_answer_not_the_ask() {
+        let db = Database::open_memory().unwrap();
+        let d = delta("/a");
+        let mut ask = new("s1", &d, PENDING);
+        ask.expires_at = Some(100);
+        let id = file(&db, &ask, 10).unwrap();
+        assert_eq!(pending_for_session(&db, "s1", 50).unwrap().len(), 1);
+        assert!(
+            open_for(&db, "s1", "fs_write", "/r/x", 50)
+                .unwrap()
+                .is_some()
+        );
+        assert!(pending_for_session(&db, "s1", 150).unwrap().is_empty());
+        assert!(
+            open_for(&db, "s1", "fs_write", "/r/x", 150)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(expire_stale(&db, 150).unwrap(), 1);
+        assert_eq!(get(&db, &id).unwrap().unwrap().state, EXPIRED);
+        assert!(
+            !decide(&db, &id, ACTIVE, 160, Some(999)).unwrap(),
+            "too late"
+        );
+
+        let mut ask = new("s1", &d, PENDING);
+        ask.expires_at = Some(100);
+        let id = file(&db, &ask, 10).unwrap();
+        assert!(decide(&db, &id, ACTIVE, 90, Some(5000)).unwrap());
+        assert_eq!(get(&db, &id).unwrap().unwrap().expires_at, Some(5000));
+        assert!(!delta_for_session(&db, "s1", 4000).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_restart_is_due_until_it_is_done_and_a_request_cannot_be_filed_twice() {
+        let db = Database::open_memory().unwrap();
+        let d = delta("/a");
+        assert!(!restart_due(&db, "s1").unwrap());
+        file(&db, &new("s1", &d, ACTIVE), 1).unwrap();
+        assert!(restart_due(&db, "s1").unwrap());
+        assert!(
+            file(&db, &new("s1", &d, PENDING), 2).is_err(),
+            "same request, one live row"
+        );
+        clear_restart_due(&db, "s1").unwrap();
+        assert!(!restart_due(&db, "s1").unwrap());
+        let bind = |n: &'static str| NewGrant {
+            capability: PROFILE,
+            resource: n,
+            ..new("s1", &d, ACTIVE)
+        };
+        file(&db, &bind("a"), 3).unwrap();
+        file(&db, &bind("a"), 4).unwrap();
+        assert!(
+            !restart_due(&db, "s1").unwrap(),
+            "a binding needs no restart"
+        );
     }
 }

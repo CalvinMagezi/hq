@@ -10,17 +10,33 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
-/// Directories under HOME no grant may ever open, whatever the profile says.
+/// Directories and files under HOME no grant may ever open, whatever the profile says.
+/// Compared without regard to case, so `.SSH` on a case-insensitive disk is the same place.
 pub const DENIED_HOME_DIRS: &[&str] = &[
     ".ssh",
     ".gnupg",
     ".aws",
+    ".azure",
     ".kube",
     ".docker",
     ".config/gh",
+    ".config/gcloud",
+    ".config/cursor",
+    ".config/opencode",
+    ".config/github-copilot",
+    ".local/share/opencode",
+    ".local/state/opencode",
+    ".password-store",
+    "Library/Keychains",
     ".netrc",
     ".npmrc",
+    ".pypirc",
     ".git-credentials",
+    ".gitconfig",
+    ".cargo/credentials",
+    ".cargo/credentials.toml",
+    ".zsh_history",
+    ".bash_history",
     ".hq",
     ".claude",
     ".claude.json",
@@ -28,6 +44,12 @@ pub const DENIED_HOME_DIRS: &[&str] = &[
     ".codex",
     ".cursor",
     ".copilot",
+    ".kimi",
+    ".qwen",
+    ".pi",
+    ".hermes",
+    ".openclaw",
+    ".agents",
 ];
 /// Another Claude account's directory (`~/.claude-<name>`).
 const OTHER_CLAUDE_PREFIX: &str = ".claude-";
@@ -201,6 +223,12 @@ pub enum Decision {
     Refuse(RefuseReason),
 }
 
+fn lowered(path: &Path) -> Vec<String> {
+    path.components()
+        .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+        .collect()
+}
+
 /// Why `path` may never be inside a writable or readable root, if so.
 pub fn denied_path(path: &Path, home: &Path) -> Option<RefuseReason> {
     if !path.is_absolute() {
@@ -209,15 +237,43 @@ pub fn denied_path(path: &Path, home: &Path) -> Option<RefuseReason> {
     if path.components().any(|c| matches!(c, Component::ParentDir)) {
         return Some(RefuseReason::Traversal);
     }
-    if home.starts_with(path) {
+    let (p, h) = (lowered(path), lowered(home));
+    if h.starts_with(&p) {
         return Some(RefuseReason::HomeRoot);
     }
-    let in_home = path.strip_prefix(home).ok()?;
-    let first = in_home.components().next()?.as_os_str().to_string_lossy();
-    let named = DENIED_HOME_DIRS
-        .iter()
-        .any(|d| in_home.starts_with(d) || Path::new(d).starts_with(in_home));
-    (named || first.starts_with(OTHER_CLAUDE_PREFIX)).then_some(RefuseReason::Credentials)
+    let rest = p.strip_prefix(h.as_slice())?;
+    let named = DENIED_HOME_DIRS.iter().any(|d| {
+        let d: Vec<String> = Path::new(d)
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+            .collect();
+        rest.starts_with(&d) || d.starts_with(rest)
+    });
+    let other_claude = rest
+        .first()
+        .is_some_and(|f| f.starts_with(OTHER_CLAUDE_PREFIX));
+    (named || other_claude).then_some(RefuseReason::Credentials)
+}
+
+/// The request in its one canonical spelling, so asking twice in different words is asking once.
+/// What cannot be read stays as written for `classify` to refuse.
+pub fn normalize(req: &GrantRequest) -> GrantRequest {
+    let resource = match req.capability {
+        Capability::Loopback => req
+            .resource
+            .trim()
+            .parse::<u16>()
+            .map(|p| p.to_string())
+            .unwrap_or_else(|_| req.resource.clone()),
+        Capability::Egress => split_host(&req.resource)
+            .map(|(h, p)| format!("{h}:{p}"))
+            .unwrap_or_else(|| req.resource.clone()),
+        _ => req.resource.clone(),
+    };
+    GrantRequest {
+        capability: req.capability,
+        resource,
+    }
 }
 
 fn under_any(path: &Path, roots: &[String]) -> bool {
@@ -521,6 +577,44 @@ mod tests {
         assert!(d.readable.is_empty(), "home itself is dropped");
         assert_eq!(d.loopback_ports, vec![5037]);
         assert_eq!(d.allow, vec![("pub.dev".to_string(), 443)]);
+    }
+
+    #[test]
+    fn credential_paths_match_without_regard_to_case_and_more_stores_are_listed() {
+        let p = Some(mobile());
+        for path in [
+            "/home/o/.SSH/id_ed25519",
+            "/HOME/O/.Aws",
+            "/home/o/Library/Keychains/login.keychain-db",
+            "/home/o/.config/gcloud/x",
+            "/home/o/.gitconfig",
+            "/home/o/.hermes/memory",
+        ] {
+            assert!(
+                matches!(
+                    run(Capability::FsRead, path, p.clone()),
+                    Decision::Refuse(_)
+                ),
+                "{path}"
+            );
+        }
+        assert_eq!(
+            run(Capability::FsRead, "/Home/O", p),
+            Decision::Refuse(RefuseReason::HomeRoot)
+        );
+    }
+
+    #[test]
+    fn spellings_of_one_request_normalize_to_one() {
+        let n = |c, r: &str| normalize(&req(c, r)).resource;
+        assert_eq!(n(Capability::Loopback, " 05037 "), "5037");
+        assert_eq!(n(Capability::Egress, "Pub.Dev"), "pub.dev:443");
+        assert_eq!(n(Capability::Egress, "pub.dev:443"), "pub.dev:443");
+        assert_eq!(
+            n(Capability::Egress, "*.bad"),
+            "*.bad",
+            "left for classify to refuse"
+        );
     }
 
     #[test]

@@ -391,9 +391,13 @@ pub(crate) async fn dispatch(command: Commands, config: &HqConfig) -> Result<()>
             lane,
             host,
         } => commands::quota::run(config, json, refresh, lane, host).await,
-        Commands::Grants { sub, target, json } => {
-            commands::grants::run(config, &sub, target, json).await
-        }
+        Commands::Grants {
+            sub,
+            target,
+            name,
+            task,
+            json,
+        } => commands::grants::run(config, &sub, target, name, task, json).await,
         Commands::Usage { sub } => commands::usage::run(config, &sub).await,
         Commands::Cost => commands::usage::run(config, "summary").await,
         Commands::Summary => commands::usage::run(config, "daily").await,

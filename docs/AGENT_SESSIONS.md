@@ -944,7 +944,8 @@ attested; the helper's `reason` is shown to the owner as its own words and never
 - **Refuse**, without asking anyone, for credentials, HQ's own files, other agents' state, the home
   directory and its parents, `..`, relative paths and port 0.
 
-A task opts in with a tag `grants:<profile>`; profiles are `agent_host.grants.profiles` and nothing is
+The owner opts a task or session in with `hq grants profile [--task] <id> <profile>` (nothing a helper can
+write does it: a task tag or a note does not). Profiles are `agent_host.grants.profiles` and nothing is
 enabled until the owner writes one:
 
 ```yaml

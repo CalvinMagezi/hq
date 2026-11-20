@@ -208,3 +208,16 @@ adb install; those are reported as unverified.
 
 Restart loses an in-flight command. Some harnesses cannot resume. Seatbelt denial parsing depends on
 macOS log access. Granting a shared cache lets one session affect the cache other sessions read.
+
+## Review findings fixed in P1
+
+An adversarial review of the first P1 diff found, and this branch fixes: a helper could opt itself
+into a profile by editing its task's tags (the profile is now an owner-written binding only); a restart
+could lose a conversation or kill sub-helpers (it is refused up front and the grant applies at next
+launch); an approved grant could be left without its restart (the restart is now a row flag, not a return
+value); requests never expired and could be dodged by respelling (expiry, normalised keys and a unique
+row per live request); remote hosts used this machine's home (refused); case-insensitive disks and
+more credential stores (case-folded compare, longer list); loopback grants did not reach HTTP clients
+behind the proxy (private rules added); stored paths were not re-checked at launch (now they are).
+Not done: a vault location in the deny list, and checking on a real Mac that `canonicalize` keeps the
+typed case.

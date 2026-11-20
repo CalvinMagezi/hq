@@ -4,7 +4,9 @@
 //! the helper's reason. An approved grant is written to `sandbox_grants`, and the session is
 //! restarted (resumed, same conversation) so its sandbox carries the grant: a sandbox cannot be
 //! widened on a live process. What needs the owner is filed in their inbox; the helper calls
-//! again with the same arguments to find the answer. Plan: `docs/plans/delegated-sandbox-grants.md`.
+//! again with the same arguments to find the answer. The profile a task works under is bound by
+//! the owner (`hq grants profile`), never by anything a helper can write. Plan:
+//! `docs/plans/delegated-sandbox-grants.md`.
 
 use crate::registry::HqTool;
 use crate::util::arg_str;
@@ -13,19 +15,21 @@ use async_trait::async_trait;
 use hq_core::config::AgentHostConfig;
 use hq_core::grants::{
     Capability, Decision, GrantRequest, GrantsConfig, SandboxDelta, TaskContext, classify,
+    denied_path, normalize,
 };
 use hq_core::types::{ValueItem, ValueKind};
 use hq_db::sandbox_grants::{self as store, NewGrant};
 use hq_db::{Database, value_items};
 use serde_json::{Value, json};
+use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 use value_items::RequestState;
 
 const SOURCE: &str = "sandbox-grants";
 const KEY_PREFIX: &str = "sandbox-grant:";
-const REQUEST_TTL_HOURS: i64 = 24;
+const REQUEST_TTL_SECS: i64 = 24 * 3600;
 const GRANT_TTL_SECS: i64 = 24 * 3600;
 /// Declined or refused requests after which HQ stops forwarding more from one session.
 const MAX_SETBACKS: usize = 3;
@@ -33,10 +37,13 @@ const MAX_WAITING: usize = 3;
 const MAX_TEXT_CHARS: usize = 300;
 /// How long a restart waits for the helper to finish its turn before it stops it anyway.
 const SETTLE_WAIT: Duration = Duration::from_secs(60);
+/// The host names the built-in host on this machine goes by. Paths and the home directory are
+/// read from this machine, so a request from any other host is not decided here.
+const LOCAL_HOSTS: &[&str] = &["", "native", "local"];
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Outcome {
-    Approved { id: String, new: bool },
+    Approved { id: String },
     Pending { id: String },
     Declined,
     Refused(String),
@@ -52,32 +59,20 @@ pub(super) struct Asker<'a> {
     pub host: &'a str,
 }
 
-/// The tag that opts a task into an access profile: `grants:mobile` names the profile `mobile`.
-const PROFILE_TAG_PREFIX: &str = "grants:";
+fn key_for(id: &str) -> String {
+    format!("{KEY_PREFIX}{id}")
+}
 
-/// The profile this session works under: one bound to it directly, else the one its task's
-/// `grants:<name>` tag names. `None` means it opted into nothing, so every request asks.
+/// The profile this session works under: the owner's binding for the session or its task.
 pub(super) fn profile_name(db: &Database, session: &str) -> Option<String> {
-    if let Ok(Some(bound)) = store::profile_for_session(db, session) {
-        return Some(bound);
-    }
     let task = db
         .with_conn(|c| hq_db::harness_sessions_registry::get(c, session))
         .ok()
-        .flatten()?
-        .mission_id?;
-    let task = db
-        .with_conn(|c| hq_db::tasks::get_task(c, &task))
+        .flatten()
+        .and_then(|row| row.mission_id);
+    store::profile_for(db, session, task.as_deref())
         .ok()
-        .flatten()?;
-    task.tags
-        .iter()
-        .find_map(|t| t.strip_prefix(PROFILE_TAG_PREFIX))
-        .map(str::to_string)
-}
-
-fn key_for(id: &str) -> String {
-    format!("{KEY_PREFIX}{id}")
+        .flatten()
 }
 
 /// `path` with its longest existing ancestor resolved through symlinks, so a link cannot carry a
@@ -124,30 +119,29 @@ fn describe(req: &GrantRequest) -> String {
     format!("{what} {}", shown(&req.resource))
 }
 
-/// Applies the owner's answers to requests this session had waiting. Returns the ids that
-/// became active, which is what makes a restart due.
-pub(super) fn settle_pending(db: &Database, session: &str) -> Result<Vec<String>> {
-    let mut activated = Vec::new();
-    for grant in store::pending_for_session(db, session)? {
+/// Applies the owner's answers to requests this session had waiting. Approval counts only when
+/// it is signed and unspent, and spends it.
+pub(super) fn settle_pending(db: &Database, session: &str, now: i64) -> Result<()> {
+    for grant in store::pending_for_session(db, session, now)? {
         let key = key_for(&grant.id);
         let latest = value_items::latest_engagement_by_dedup(db, &key)?;
-        let now = chrono::Utc::now();
-        match RequestState::from_latest(latest, now) {
-            RequestState::Declined => {
-                store::decide(db, &grant.id, store::DECLINED, now.timestamp())?;
-            }
-            RequestState::Ask | RequestState::Wait => {
-                let signed = value_items::is_signed_approval(db, &key)?;
-                if signed && super::folder_request::approval_unspent(db, &key)? {
-                    value_items::consume_approval(db, &key)?;
-                    if store::decide(db, &grant.id, store::ACTIVE, now.timestamp())? {
-                        activated.push(grant.id);
-                    }
-                }
-            }
+        if RequestState::from_latest(latest, chrono::Utc::now()) == RequestState::Declined {
+            store::decide(db, &grant.id, store::DECLINED, now, None)?;
+            continue;
+        }
+        let signed = value_items::is_signed_approval(db, &key)?
+            && super::folder_request::approval_unspent(db, &key)?;
+        if signed && value_items::consume_approval(db, &key)? {
+            store::decide(
+                db,
+                &grant.id,
+                store::ACTIVE,
+                now,
+                Some(now + GRANT_TTL_SECS),
+            )?;
         }
     }
-    Ok(activated)
+    Ok(())
 }
 
 fn file_for_owner(
@@ -172,9 +166,45 @@ fn file_for_owner(
         ),
     )
     .with_dedup_key(key_for(id));
-    item.expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(REQUEST_TTL_HOURS));
+    item.expires_at = Some(chrono::Utc::now() + chrono::Duration::seconds(REQUEST_TTL_SECS));
     value_items::insert(db, &item)?;
     Ok(())
+}
+
+/// The change one owner-approved request applies: exactly the resource asked for, nothing wider.
+fn delta_for_owner_approval(req: &GrantRequest) -> SandboxDelta {
+    let mut d = SandboxDelta::default();
+    match req.capability {
+        Capability::FsWrite => d.writable.push(PathBuf::from(&req.resource)),
+        Capability::FsRead => d.readable.push(PathBuf::from(&req.resource)),
+        Capability::Loopback => d.loopback_ports.extend(req.resource.parse::<u16>()),
+        Capability::Egress => {
+            // `normalize` made the resource `host:port`; anything else never reaches here.
+            if let Some((host, port)) = req.resource.rsplit_once(':')
+                && let Ok(port) = port.parse()
+            {
+                d.allow.push((host.to_string(), port));
+            }
+        }
+    }
+    d
+}
+
+fn existing(
+    db: &Database,
+    session: &str,
+    capability: &str,
+    resource: &str,
+    now: i64,
+) -> Result<Option<Outcome>> {
+    Ok(
+        store::open_for(db, session, capability, resource, now)?.map(|open| {
+            match open.state.as_str() {
+                store::ACTIVE => Outcome::Approved { id: open.id },
+                _ => Outcome::Pending { id: open.id },
+            }
+        }),
+    )
 }
 
 /// Decides one request and records it. Everything but the restart happens here.
@@ -187,23 +217,29 @@ pub(super) fn decide(
     reason: &str,
     now: i64,
 ) -> Result<Outcome> {
-    let activated = settle_pending(db, asker.session)?;
+    if !LOCAL_HOSTS.contains(&asker.host) {
+        return Ok(Outcome::Refused(
+            "HQ cannot yet decide access for a session on another computer; tell the user what you need".into(),
+        ));
+    }
+    if hq_db::tasks::has_hidden_chars(&req.resource) || req.resource.contains('\0') {
+        return Ok(Outcome::Refused(
+            "the request has control or invisible characters, so it cannot be shown to the owner"
+                .into(),
+        ));
+    }
+    store::expire_stale(db, now)?;
+    settle_pending(db, asker.session, now)?;
+    let mut req = normalize(req);
+    if matches!(req.capability, Capability::FsRead | Capability::FsWrite) {
+        req.resource = canonical_lenient(&req.resource);
+    }
     let capability = serde_json::to_value(req.capability)?
         .as_str()
         .unwrap_or_default()
         .to_string();
-    let mut req = req.clone();
-    if matches!(req.capability, Capability::FsRead | Capability::FsWrite) {
-        req.resource = canonical_lenient(&req.resource);
-    }
-    if let Some(open) = store::open_for(db, asker.session, &capability, &req.resource)? {
-        return Ok(match open.state.as_str() {
-            store::ACTIVE => Outcome::Approved {
-                new: activated.contains(&open.id),
-                id: open.id,
-            },
-            _ => Outcome::Pending { id: open.id },
-        });
+    if let Some(found) = existing(db, asker.session, &capability, &req.resource, now)? {
+        return Ok(found);
     }
     if store::declined_for(db, asker.session, &capability, &req.resource)? {
         return Ok(Outcome::Declined);
@@ -211,7 +247,7 @@ pub(super) fn decide(
     if store::setbacks(db, asker.session)? >= MAX_SETBACKS {
         return Ok(Outcome::Stopped);
     }
-    if store::pending_for_session(db, asker.session)?.len() >= MAX_WAITING {
+    if store::pending_for_session(db, asker.session, now)?.len() >= MAX_WAITING {
         return Ok(Outcome::TooMany);
     }
     // Compare like with like: a home reached through a link, or a profile path that is one, must
@@ -237,6 +273,7 @@ pub(super) fn decide(
         profile,
     };
     let reason: String = reason.chars().take(MAX_TEXT_CHARS).collect();
+    let until = Some(now + REQUEST_TTL_SECS);
     let (state, by, note, delta, expires) = match classify(&req, &ctx) {
         Decision::Approve(d) => (
             store::ACTIVE,
@@ -250,7 +287,7 @@ pub(super) fn decide(
             store::BY_SYSTEM,
             why.text().into(),
             delta_for_owner_approval(&req),
-            Some(now + GRANT_TTL_SECS),
+            until,
         ),
         Decision::Refuse(why) => (
             store::REFUSED,
@@ -260,7 +297,7 @@ pub(super) fn decide(
             None,
         ),
     };
-    let id = store::file(
+    let filed = store::file(
         db,
         &NewGrant {
             session_id: asker.session,
@@ -277,9 +314,17 @@ pub(super) fn decide(
             expires_at: expires,
         },
         now,
-    )?;
+    );
+    let id = match filed {
+        Ok(id) => id,
+        // A parallel call filed the same request first: answer from that one.
+        Err(e) => match existing(db, asker.session, &capability, &req.resource, now)? {
+            Some(found) => return Ok(found),
+            None => return Err(e),
+        },
+    };
     Ok(match state {
-        store::ACTIVE => Outcome::Approved { id, new: true },
+        store::ACTIVE => Outcome::Approved { id },
         store::PENDING => {
             file_for_owner(db, &id, asker, &req, &reason)?;
             Outcome::Pending { id }
@@ -288,36 +333,21 @@ pub(super) fn decide(
     })
 }
 
-/// The change one owner-approved request applies: exactly the resource asked for, nothing wider.
-fn delta_for_owner_approval(req: &GrantRequest) -> SandboxDelta {
-    let mut d = SandboxDelta::default();
-    match req.capability {
-        Capability::FsWrite => d.writable.push(PathBuf::from(&req.resource)),
-        Capability::FsRead => d.readable.push(PathBuf::from(&req.resource)),
-        Capability::Loopback => d.loopback_ports.extend(req.resource.trim().parse::<u16>()),
-        Capability::Egress => {
-            let (host, port) = req
-                .resource
-                .rsplit_once(':')
-                .and_then(|(h, p)| Some((h.to_string(), p.parse().ok()?)))
-                .unwrap_or_else(|| (req.resource.clone(), 443));
-            d.allow.push((host.to_ascii_lowercase(), port));
-        }
-    }
-    d
-}
-
-/// What a launch of `session` carries: its active grants and the access profile it opted into.
+/// What a launch of `session` carries: its active grants and the access profile the owner bound
+/// to it. Every path is checked again here, resolved, because the stored rows and the profile
+/// are not trusted to still be what `classify` once approved.
 pub(super) fn launch_delta(
     db: &Database,
     cfg: &AgentHostConfig,
     session: &str,
+    local: bool,
     now: i64,
 ) -> SandboxDelta {
+    let Some(home) = dirs::home_dir().filter(|_| local) else {
+        return SandboxDelta::default();
+    };
     let mut delta = store::delta_for_session(db, session, now).unwrap_or_default();
-    let home = dirs::home_dir();
-    let profile = profile_name(db, session);
-    if let (Some(name), Some(home)) = (profile, home)
+    if let Some(name) = profile_name(db, session)
         && let Some(p) = cfg.grants.profiles.get(&name)
     {
         let base = p.delta(&home);
@@ -326,20 +356,30 @@ pub(super) fn launch_delta(
         delta.loopback_ports.extend(base.loopback_ports);
         delta.allow.extend(base.allow);
     }
+    let home = PathBuf::from(canonical_lenient(&home.to_string_lossy()));
+    let safe = |list: Vec<PathBuf>| -> Vec<PathBuf> {
+        list.into_iter()
+            .map(|p| PathBuf::from(canonical_lenient(&p.to_string_lossy())))
+            .filter(|p| denied_path(p, &home).is_none())
+            .collect()
+    };
+    delta.writable = safe(delta.writable);
+    delta.readable = safe(delta.readable);
+    delta.loopback_ports.retain(|p| *p != 0);
     delta
 }
 
-fn reply(outcome: Outcome, req: &GrantRequest) -> Value {
+fn reply(outcome: Outcome, req: &GrantRequest, restart: &Restart) -> Value {
     let what = describe(req);
     match outcome {
-        Outcome::Approved { id, new } => json!({
+        Outcome::Approved { id } => json!({
             "status": "approved",
             "grant": id,
-            "restart": new,
-            "next": if new {
-                "HQ applied this to your session. Your session restarts when this turn ends and continues the same conversation. Do not retry now; you will be told when it is back."
-            } else {
-                "This is already in force. If the command still fails, it is not blocked by this; read the error again."
+            "restart": matches!(restart, Restart::Scheduled),
+            "next": match restart {
+                Restart::Scheduled => "HQ applied this to your session. Your session restarts when this turn ends and continues the same conversation. Do not retry now; you will be told when it is back.".to_string(),
+                Restart::Blocked(why) => format!("HQ approved this, but could not restart you to apply it ({why}). It takes effect the next time your session is started. Tell the user that; do not retry now."),
+                Restart::NotDue => "This is already in force. If the command still fails, it is not blocked by this; read the error again.".to_string(),
             },
         }),
         Outcome::Pending { id } => json!({
@@ -354,7 +394,7 @@ fn reply(outcome: Outcome, req: &GrantRequest) -> Value {
         Outcome::Refused(why) => json!({
             "status": "refused",
             "reason": why,
-            "next": "HQ never grants this, and the owner was not asked. Use another approach, or report to the user that the task needs something HQ cannot give.",
+            "next": "HQ does not grant this, and the owner was not asked. Use another approach, or report to the user that the task needs something HQ cannot give.",
         }),
         Outcome::Stopped => json!({
             "status": "stopped_asking",
@@ -367,28 +407,67 @@ fn reply(outcome: Outcome, req: &GrantRequest) -> Value {
     }
 }
 
-/// Restarts `session` once its turn ends, so its sandbox carries the new grant. Best effort: a
-/// failure is logged and the grant stays recorded for the next launch.
-fn schedule_restart(db: Arc<Database>, session: String) {
+/// Where the restart a grant needs stands.
+pub(super) enum Restart {
+    NotDue,
+    Scheduled,
+    Blocked(String),
+}
+
+static RESTARTING: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
+
+/// Restarts `session` once its turn ends, so its sandbox carries the new grant, unless it cannot
+/// be restarted without losing something. Best effort after that: a failure is logged and the
+/// grant stays recorded for the next launch.
+pub(super) fn plan_restart(db: &Arc<Database>, session: &str) -> Restart {
+    match store::restart_due(db, session) {
+        Ok(true) => {}
+        _ => return Restart::NotDue,
+    }
+    match super::control::restart_blocker(db, session) {
+        Ok(None) => {}
+        Ok(Some(why)) => {
+            let _ = store::clear_restart_due(db, session);
+            return Restart::Blocked(why);
+        }
+        Err(e) => {
+            let _ = store::clear_restart_due(db, session);
+            return Restart::Blocked(e.to_string());
+        }
+    }
+    if !RESTARTING
+        .lock()
+        .is_ok_and(|mut r| r.insert(session.to_string()))
+    {
+        return Restart::Scheduled;
+    }
+    let _ = store::clear_restart_due(db, session);
+    let (db, session) = (db.clone(), session.to_string());
     tokio::spawn(async move {
-        let (d, id) = (db.clone(), session.clone());
-        let settled =
-            tokio::task::spawn_blocking(move || super::control::wait(&d, &id, &[], SETTLE_WAIT))
-                .await;
-        if !matches!(settled, Ok(Ok(_))) {
-            tracing::warn!(session = %session, "sandbox grant restart: session never settled");
-        }
-        let (d, id) = (db.clone(), session.clone());
-        if let Ok(Err(e)) = tokio::task::spawn_blocking(move || super::control::stop(&d, &id)).await
-        {
-            tracing::warn!(session = %session, error = %e, "sandbox grant restart: stop failed");
-            return;
-        }
-        let note = "HQ applied the sandbox access you asked for and restarted you. Retry the command that was blocked.";
-        if let Err(e) = super::control::resume(&db, &session, Some(note)).await {
-            tracing::warn!(session = %session, error = %e, "sandbox grant restart: resume failed");
+        restart(&db, &session).await;
+        if let Ok(mut r) = RESTARTING.lock() {
+            r.remove(&session);
         }
     });
+    Restart::Scheduled
+}
+
+async fn restart(db: &Arc<Database>, session: &str) {
+    let (d, id) = (db.clone(), session.to_string());
+    let settled =
+        tokio::task::spawn_blocking(move || super::control::wait(&d, &id, &[], SETTLE_WAIT)).await;
+    if !matches!(settled, Ok(Ok(_))) {
+        tracing::warn!(session, "sandbox grant restart: session never settled");
+    }
+    let (d, id) = (db.clone(), session.to_string());
+    if let Ok(Err(e)) = tokio::task::spawn_blocking(move || super::control::stop(&d, &id)).await {
+        tracing::warn!(session, error = %e, "sandbox grant restart: stop failed");
+        return;
+    }
+    let note = "HQ applied the sandbox access you asked for and restarted you. Retry the command that was blocked.";
+    if let Err(e) = super::control::resume(db, session, Some(note)).await {
+        tracing::warn!(session, error = %e, "sandbox grant restart: resume failed");
+    }
 }
 
 pub struct SandboxRequestTool {
@@ -440,36 +519,27 @@ impl HqTool for SandboxRequestTool {
             bail!("HQ cannot tell which home directory this host uses");
         };
         let db = self.db.clone();
-        let (outcome, req) = {
+        let (outcome, restart) = {
             let (db, session, req) = (db.clone(), session.clone(), req.clone());
-            tokio::task::spawn_blocking(move || -> Result<(Outcome, GrantRequest)> {
+            tokio::task::spawn_blocking(move || -> Result<(Outcome, Restart)> {
                 let row = super::control::get_row(&db, &session)?;
-                let task = row.mission_id.clone();
                 let cwd = PathBuf::from(&row.cwd);
                 let asker = Asker {
                     session: &session,
                     cwd: &cwd,
-                    task: task.as_deref(),
+                    task: row.mission_id.as_deref(),
                     host: &row.host,
                 };
                 let cfg = super::agent_host_config().grants;
-                let out = decide(
-                    &db,
-                    &cfg,
-                    &home,
-                    &asker,
-                    &req,
-                    &reason,
-                    chrono::Utc::now().timestamp(),
-                )?;
-                Ok((out, req))
+                let now = chrono::Utc::now().timestamp();
+                let out = decide(&db, &cfg, &home, &asker, &req, &reason, now)?;
+                // A grant that took effect, on this call or since the last one, is carried by a
+                // restart whatever this call's answer was.
+                Ok((out, plan_restart(&db, &session)))
             })
             .await??
         };
-        if matches!(outcome, Outcome::Approved { new: true, .. }) {
-            schedule_restart(db, session);
-        }
-        Ok(reply(outcome, &req))
+        Ok(reply(outcome, &req, &restart))
     }
 }
 
@@ -508,26 +578,7 @@ mod tests {
             },
         );
         if with_profile {
-            let d = SandboxDelta::default();
-            store::file(
-                &db,
-                &NewGrant {
-                    session_id: SESSION,
-                    task_id: None,
-                    host: "local",
-                    repo: "",
-                    capability: store::PROFILE,
-                    resource: "mobile",
-                    delta: &d,
-                    state: store::ACTIVE,
-                    decided_by: store::BY_OWNER,
-                    helper_reason: "",
-                    decision_note: "",
-                    expires_at: None,
-                },
-                1,
-            )
-            .unwrap();
+            store::bind_profile(&db, SESSION, "mobile", 1).unwrap();
         }
         Fixture {
             db,
@@ -556,15 +607,12 @@ mod tests {
     fn a_profile_covered_request_is_approved_and_reaches_the_next_launch() {
         let f = fixture(true);
         let out = ask(&f, Capability::FsWrite, &f.at(".gradle/caches"));
-        assert!(
-            matches!(out, Outcome::Approved { new: true, .. }),
-            "{out:?}"
-        );
+        assert!(matches!(out, Outcome::Approved { .. }), "{out:?}");
         let d = store::delta_for_session(&f.db, SESSION, 200).unwrap();
         assert_eq!(d.writable, vec![PathBuf::from(&f.at(".gradle/caches"))]);
         let again = ask(&f, Capability::FsWrite, &f.at(".gradle/caches"));
         assert!(
-            matches!(again, Outcome::Approved { new: false, .. }),
+            matches!(again, Outcome::Approved { .. }),
             "asking twice files once"
         );
         assert_eq!(
@@ -586,7 +634,12 @@ mod tests {
         );
         let again = ask(&f, Capability::Egress, "example.org");
         assert!(matches!(again, Outcome::Pending { .. }));
-        assert_eq!(store::pending_for_session(&f.db, SESSION).unwrap().len(), 1);
+        assert_eq!(
+            store::pending_for_session(&f.db, SESSION, 100)
+                .unwrap()
+                .len(),
+            1
+        );
         let items = value_items::count_waiting_with_prefix(&f.db, KEY_PREFIX).unwrap();
         assert_eq!(items, 1, "one inbox item");
     }
@@ -612,7 +665,7 @@ mod tests {
         let Outcome::Pending { id } = ask(&f, Capability::Egress, "a.example.org") else {
             panic!("pending")
         };
-        assert!(store::decide(&f.db, &id, store::DECLINED, 150).unwrap());
+        assert!(store::decide(&f.db, &id, store::DECLINED, 150, None).unwrap());
         assert_eq!(
             ask(&f, Capability::Egress, "a.example.org"),
             Outcome::Declined
@@ -656,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn a_task_tag_opts_its_session_into_a_profile_and_no_tag_means_none() {
+    fn only_the_owners_binding_opts_a_session_in_and_a_task_tag_does_nothing() {
         use hq_db::harness_sessions_registry as registry;
         let f = fixture(false);
         f.db.with_conn(|c| {
@@ -673,14 +726,7 @@ mod tests {
                 ..Default::default()
             };
             hq_db::tasks::create_task(c, "tk-tagged", "in-1", &tagged)?;
-            let plain = hq_db::tasks::NewTask {
-                title: "Plain",
-                description: "d",
-                created_by: "test",
-                ..Default::default()
-            };
-            hq_db::tasks::create_task(c, "tk-plain", "in-1", &plain)?;
-            for (id, task) in [("hs-tag", "tk-tagged"), ("hs-plain", "tk-plain")] {
+            for id in ["hs-tag", "hs-bound"] {
                 registry::insert(
                     c,
                     &registry::NewSession {
@@ -688,7 +734,7 @@ mod tests {
                         harness: "codex",
                         label: "",
                         cwd: "/t",
-                        mission_id: Some(task),
+                        mission_id: Some("tk-tagged"),
                         placement: registry::Placement {
                             host: "local",
                             agent_name: id,
@@ -702,9 +748,78 @@ mod tests {
             Ok(())
         })
         .unwrap();
+        assert_eq!(
+            profile_name(&f.db, "hs-tag"),
+            None,
+            "a tag a helper can write opts in nothing"
+        );
+        store::bind_profile(&f.db, "task:tk-tagged", "mobile", 5).unwrap();
         assert_eq!(profile_name(&f.db, "hs-tag").as_deref(), Some("mobile"));
-        assert_eq!(profile_name(&f.db, "hs-plain"), None);
         assert_eq!(profile_name(&f.db, "hs-missing"), None);
+    }
+
+    #[test]
+    fn spellings_of_one_request_are_one_request_and_other_hosts_and_hidden_text_are_refused() {
+        let f = fixture(true);
+        let a = ask(&f, Capability::Egress, "Example.org");
+        let b = ask(&f, Capability::Egress, "example.org:443");
+        let (Outcome::Pending { id: x }, Outcome::Pending { id: y }) = (a, b) else {
+            panic!("pending")
+        };
+        assert_eq!(x, y);
+        let out = ask(
+            &f,
+            Capability::FsRead,
+            &format!("{}/a\u{202e}b", f.home.display()),
+        );
+        assert!(matches!(out, Outcome::Refused(_)), "{out:?}");
+        let asker = Asker {
+            session: SESSION,
+            cwd: &f.cwd,
+            task: None,
+            host: "laptop",
+        };
+        let req = GrantRequest {
+            capability: Capability::Egress,
+            resource: "pub.dev".into(),
+        };
+        let out = decide(&f.db, &f.cfg, &f.home, &asker, &req, "", 100).unwrap();
+        assert!(matches!(out, Outcome::Refused(_)), "{out:?}");
+    }
+
+    #[test]
+    fn a_launch_rechecks_stored_paths_and_ignores_a_remote_host() {
+        let f = fixture(true);
+        let d = SandboxDelta {
+            writable: vec![f.home.join(".ssh/x"), f.home.join("ok")],
+            loopback_ports: vec![0, 5037],
+            ..Default::default()
+        };
+        store::file(
+            &f.db,
+            &NewGrant {
+                session_id: SESSION,
+                task_id: None,
+                host: "local",
+                repo: "",
+                capability: "fs_write",
+                resource: "/planted",
+                delta: &d,
+                state: store::ACTIVE,
+                decided_by: store::BY_POLICY,
+                helper_reason: "",
+                decision_note: "",
+                expires_at: None,
+            },
+            2,
+        )
+        .unwrap();
+        let cfg = AgentHostConfig::default();
+        let got = launch_delta(&f.db, &cfg, SESSION, true, 10);
+        // The home of this machine differs from the fixture's, so nothing under the fixture
+        // home is a credential here; what matters is the port and that a remote host gets none.
+        assert!(!got.loopback_ports.contains(&0));
+        assert!(launch_delta(&f.db, &cfg, SESSION, false, 10).is_empty());
     }
 
     fn item_id(f: &Fixture, grant: &str) -> String {
@@ -726,21 +841,15 @@ mod tests {
         };
         assert!(value_items::approve_by_id(&f.db, &item_id(&f, &id)).unwrap());
         let again = ask(&f, Capability::Egress, "example.org");
-        assert_eq!(
-            again,
-            Outcome::Approved {
-                id: id.clone(),
-                new: true
-            }
+        assert_eq!(again, Outcome::Approved { id: id.clone() });
+        assert!(
+            store::restart_due(&f.db, SESSION).unwrap(),
+            "the answer makes a restart due"
         );
         let d = store::delta_for_session(&f.db, SESSION, 200).unwrap();
         assert_eq!(d.allow, vec![("example.org".to_string(), 443)]);
         let third = ask(&f, Capability::Egress, "example.org");
-        assert_eq!(
-            third,
-            Outcome::Approved { id, new: false },
-            "the restart is due once"
-        );
+        assert_eq!(third, Outcome::Approved { id });
 
         let Outcome::Pending { id: no } = ask(&f, Capability::Egress, "other.org") else {
             panic!("pending")
