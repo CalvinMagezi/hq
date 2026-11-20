@@ -3685,6 +3685,7 @@ dependencies = [
 name = "hq-finance"
 version = "0.9.1"
 dependencies = [
+ "chrono",
  "regex",
  "serde",
  "serde_json",
@@ -3855,6 +3856,7 @@ dependencies = [
  "hex",
  "hq-backup",
  "hq-convert",
+ "hq-finance",
  "hq-suite-calc",
  "hq-suite-docs",
  "hq-suite-governor",

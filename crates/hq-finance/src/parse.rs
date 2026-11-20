@@ -7,6 +7,7 @@ use std::sync::LazyLock;
 
 pub const PARSER_VERSION: u32 = 1;
 const CENTS_PER_UNIT: i64 = 100;
+const EAT_OFFSET_SECS: i32 = 3 * 3600;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Provider {
@@ -52,6 +53,8 @@ pub struct Draft {
     pub balance_cents: Option<i64>,
     pub txn_id: Option<String>,
     pub occurred_at: Option<String>,
+    /// The day the phone received the message (East Africa Time), for messages that carry no time.
+    pub received_on: Option<String>,
     pub confidence: Confidence,
     pub review: ReviewState,
     pub parser_version: u32,
@@ -65,6 +68,47 @@ impl Draft {
             .as_ref()
             .map(|id| format!("{:?}|{id}|{:?}", self.provider, self.kind))
     }
+
+    /// Folds in a second message about the same transaction. A payment arrives as a receipt with
+    /// the time and a statement with the fee, each missing what the other has. A balance with cents
+    /// beats one rounded down by the other message.
+    pub fn merge(&mut self, other: &Draft) {
+        self.fee_cents = self.fee_cents.or(other.fee_cents);
+        self.occurred_at = self
+            .occurred_at
+            .take()
+            .or_else(|| other.occurred_at.clone());
+        let has_cents = |b: Option<i64>| b.is_some_and(|c| c % CENTS_PER_UNIT != 0);
+        let take_other = self.balance_cents.is_none()
+            || (!has_cents(self.balance_cents) && has_cents(other.balance_cents));
+        if take_other {
+            self.balance_cents = other.balance_cents;
+        }
+        self.received_on = self
+            .received_on
+            .take()
+            .or_else(|| other.received_on.clone());
+        self.confidence = confidence_of(&self.txn_id, &self.occurred_at);
+    }
+}
+
+/// One draft per transaction: messages sharing a key are merged, in first-seen order. A draft with
+/// no transaction id cannot be matched and is kept as it is.
+pub fn dedupe(drafts: Vec<Draft>) -> Vec<Draft> {
+    let mut out: Vec<Draft> = Vec::new();
+    let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for d in drafts {
+        match d.dedupe_key().and_then(|k| at.get(&k).copied()) {
+            Some(i) => out[i].merge(&d),
+            None => {
+                if let Some(k) = d.dedupe_key() {
+                    at.insert(k, out.len());
+                }
+                out.push(d);
+            }
+        }
+    }
+    out
 }
 
 const NUM: &str = r"(?:UGX\s*)*(\d[\d,]*(?:\.\d+)?)";
@@ -113,6 +157,14 @@ static GENERIC_RECEIVED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!(r"(?i)you have \S+\s+{NUM}\s+from\b")).unwrap());
 static FAILED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)has failed|payment of .* failed").unwrap());
+
+fn confidence_of(txn_id: &Option<String>, occurred_at: &Option<String>) -> Confidence {
+    match (txn_id, occurred_at) {
+        (Some(_), Some(_)) => Confidence::High,
+        (Some(_), None) => Confidence::Medium,
+        _ => Confidence::Low,
+    }
+}
 
 pub fn provider_for(sender: &str) -> Option<Provider> {
     let s = sender.to_ascii_lowercase();
@@ -175,6 +227,19 @@ fn classify(body: &str) -> Option<(Kind, i64)> {
 }
 
 /// None means "not a transaction message" (promotion, notice), which is not an error.
+/// Like `parse`, and records the day the message arrived, which dates a message with no time in it.
+pub fn parse_at(sender: &str, body: &str, received_ms: i64) -> Option<Draft> {
+    let mut d = parse(sender, body)?;
+    d.received_on = day_of(received_ms);
+    Some(d)
+}
+
+fn day_of(ms: i64) -> Option<String> {
+    let eat = chrono::FixedOffset::east_opt(EAT_OFFSET_SECS)?;
+    let t = chrono::DateTime::from_timestamp_millis(ms)?.with_timezone(&eat);
+    Some(t.format("%Y-%m-%d").to_string())
+}
+
 pub fn parse(sender: &str, body: &str) -> Option<Draft> {
     let provider = provider_for(sender)?;
     let (kind, amount_cents) = classify(body)?;
@@ -182,19 +247,17 @@ pub fn parse(sender: &str, body: &str) -> Option<Draft> {
     let occurred_at = DATETIME
         .captures(body)
         .map(|c| format!("{} {}", &c[1], &c[2]));
-    let confidence = match (&txn_id, &occurred_at) {
-        (Some(_), Some(_)) => Confidence::High,
-        (Some(_), None) => Confidence::Medium,
-        _ => Confidence::Low,
-    };
+    let confidence = confidence_of(&txn_id, &occurred_at);
     Some(Draft {
         provider,
         kind,
         amount_cents,
         fee_cents: grab(&FEE, body),
-        balance_cents: grab(&BALANCE, body),
+        // An advance message reports the advance's own balance, not the wallet's.
+        balance_cents: grab(&BALANCE, body).filter(|_| kind != Kind::LoanDisbursed),
         txn_id,
         occurred_at,
+        received_on: None,
         confidence,
         review: ReviewState::Draft,
         parser_version: PARSER_VERSION,
