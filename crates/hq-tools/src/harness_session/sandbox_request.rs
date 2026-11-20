@@ -706,4 +706,53 @@ mod tests {
         assert_eq!(profile_name(&f.db, "hs-plain"), None);
         assert_eq!(profile_name(&f.db, "hs-missing"), None);
     }
+
+    fn item_id(f: &Fixture, grant: &str) -> String {
+        f.db.with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT id FROM value_items WHERE dedup_key = ?1",
+                [key_for(grant)],
+                |r| r.get::<_, String>(0),
+            )?)
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn the_owners_yes_activates_the_request_once_and_the_no_declines_it() {
+        let f = fixture(true);
+        let Outcome::Pending { id } = ask(&f, Capability::Egress, "example.org") else {
+            panic!("pending")
+        };
+        assert!(value_items::approve_by_id(&f.db, &item_id(&f, &id)).unwrap());
+        let again = ask(&f, Capability::Egress, "example.org");
+        assert_eq!(
+            again,
+            Outcome::Approved {
+                id: id.clone(),
+                new: true
+            }
+        );
+        let d = store::delta_for_session(&f.db, SESSION, 200).unwrap();
+        assert_eq!(d.allow, vec![("example.org".to_string(), 443)]);
+        let third = ask(&f, Capability::Egress, "example.org");
+        assert_eq!(
+            third,
+            Outcome::Approved { id, new: false },
+            "the restart is due once"
+        );
+
+        let Outcome::Pending { id: no } = ask(&f, Capability::Egress, "other.org") else {
+            panic!("pending")
+        };
+        assert!(value_items::dismiss_by_id(&f.db, &item_id(&f, &no)).unwrap());
+        assert_eq!(ask(&f, Capability::Egress, "other.org"), Outcome::Declined);
+        assert_eq!(
+            store::delta_for_session(&f.db, SESSION, 200)
+                .unwrap()
+                .allow
+                .len(),
+            1
+        );
+    }
 }
