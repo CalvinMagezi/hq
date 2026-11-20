@@ -925,6 +925,44 @@ the goal and criteria in force at the time (`registry::list_events`).
   is the only tool that ends it, and it is never called as a side effect of a mode change.
   After a resume the row keeps its goal, so Drive can be turned on again.
 
+## Asking for sandbox access (`sandbox_request`)
+
+A helper under the strict sandbox that needs something outside its wall calls `sandbox_request`
+instead of working around the denial. It names one resource: `fs_write` or `fs_read` with an absolute
+path, `loopback` with a port, or `egress` with `host[:port]`. The session is the one the MCP gateway
+attested; the helper's `reason` is shown to the owner as its own words and never decides anything.
+
+`hq_core::grants::classify` decides from the typed request and the access profile the task opted into:
+
+- **Approve** when the path is inside the session's worktree or a profile directory, the port or host is
+  listed in the profile. The grant is stored in `sandbox_grants` and the session restarts (resumed, same
+  conversation) when its turn ends, because a sandbox cannot be widened on a live process. Every launch
+  of the session reads its active grants back (`LaunchRequest.grants`).
+- **Ask** for anything else: an inbox item (`source: sandbox-grants`) the owner approves or dismisses.
+  The helper calls again with the same arguments to find the answer. A declined request is not asked
+  twice; three declined or refused requests stop further ones.
+- **Refuse**, without asking anyone, for credentials, HQ's own files, other agents' state, the home
+  directory and its parents, `..`, relative paths and port 0.
+
+A task opts in with a tag `grants:<profile>`; profiles are `agent_host.grants.profiles` and nothing is
+enabled until the owner writes one:
+
+```yaml
+agent_host:
+  grants:
+    profiles:
+      mobile-dev:
+        writable: ["~/.gradle", "~/.pub-cache"]
+        readable: ["~/Library/Android/sdk"]
+        loopback_ports: [5037]
+        egress: ["pub.dev", "dl.google.com"]
+```
+
+`hq grants list` shows every request and how it was decided; `hq grants revoke <id|session>` revokes.
+A running session keeps the access until it is stopped. Plan and what is still to come (owner prompts in
+the web and Android apps, denial diagnostics, brokered commands and devices):
+`docs/plans/delegated-sandbox-grants.md`.
+
 ## Publishing a helper's work (`harness_session_publish`)
 
 A sandboxed helper that committed work in its own worktree used to stop at "policy denies
