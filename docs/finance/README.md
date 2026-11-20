@@ -32,6 +32,14 @@ The first time, the phone has no permission to read messages. Android grants it 
 Settings, Finance: the chat answers `not_set_up` or `permission_missing` and points there. It is
 never requested in the middle of a chat.
 
+## Reminders
+
+Once a week, a person who has a ledger gets one inbox item with two numbers: how many rows wait for
+review, and how old the newest transaction is (daemon task `finance-nudge`, off with
+`daemon.finance_nudge: false`). It reads counts from the ledger, never a message, and never
+imports: an import needs your approval each time. The item is device-only, so no push service
+carries it. A person who never imported is never reminded.
+
 ## Where a copy can be, and why it goes no further
 
 | Place | Holds | Kept closed by |
