@@ -27,4 +27,5 @@ pub mod sheets;
 pub mod shrink;
 pub mod sinks;
 pub mod slide_ops;
+pub mod snapshot;
 pub mod text;
