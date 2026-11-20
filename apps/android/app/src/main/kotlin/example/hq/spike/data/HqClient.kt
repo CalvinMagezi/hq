@@ -19,7 +19,12 @@ import org.json.JSONObject
 
 /** The local hq is not answering, or answered with an error. */
 /** hq did not answer, or answered with an error; [status] is the HTTP status when there was one. */
-class HqUnavailable(message: String, cause: Throwable? = null, val status: Int = 0) : IOException(message, cause) {
+class HqUnavailable(
+    message: String,
+    cause: Throwable? = null,
+    val status: Int = 0,
+    val serverMessage: String? = null,
+) : IOException(message, cause) {
     companion object {
         /** HQ answered, but with something the phone cannot read: an error to retry, not "HQ is not running". */
         const val UNREADABLE = -1
@@ -470,8 +475,12 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
                 }
             }
             response.use { r ->
-                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for ${request.url.encodedPath}", status = r.code)
-                parse(r.body.string())
+                val body = r.body.string()
+                if (!r.isSuccessful) {
+                    val serverMsg = runCatching { JSONObject(body).optString("error", "").trim().ifBlank { null } }.getOrNull()
+                    throw HqUnavailable("HTTP ${r.code} for ${request.url.encodedPath}", status = r.code, serverMessage = serverMsg)
+                }
+                parse(body)
             }
         } catch (e: IOException) {
             throw if (e is HqUnavailable) e else HqUnavailable("hq is not reachable", e)

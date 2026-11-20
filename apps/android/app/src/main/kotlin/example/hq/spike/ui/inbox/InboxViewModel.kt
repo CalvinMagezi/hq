@@ -26,6 +26,9 @@ import example.hq.spike.data.answerNotification
 import example.hq.spike.data.answerDialog
 import example.hq.spike.data.sendSessionKeys
 import example.hq.spike.data.helperScreen
+import example.hq.spike.data.HqClient
+import example.hq.spike.data.SandboxGrantProfile
+import example.hq.spike.data.sandboxGrantStarters
 import example.hq.spike.data.sandboxGrants
 
 enum class InboxTab { Needs, Updates, Done }
@@ -70,6 +73,8 @@ data class InboxUi(
     val catchUpDismissed: Boolean = false,
     /** Done rows whose Restore is in flight: the button waits so a second tap cannot repeat it. */
     val restoring: Set<String> = emptySet(),
+    /** Shipped starter sets loaded from HQ so sandbox access cards show what a starter includes. */
+    val sandboxStarters: List<SandboxGrantProfile> = emptyList(),
 ) {
     val shownNeeds: List<InboxCard> get() = needs.filter { it.id !in cleared }
     val shownUpdates: List<InboxCard> get() = updates.filter { it.id !in cleared }
@@ -88,6 +93,7 @@ class InboxActions(
     val onAllow: (InboxCard) -> Unit = {},
     val onAllowSite: (InboxCard) -> Unit = {},
     val onNotNow: (InboxCard) -> Unit = {},
+    val onSandboxGrantAnswer: (InboxCard, SandboxGrantAnswer) -> Unit = { _, _ -> },
     val onDetails: (InboxCard?) -> Unit = {},
     val onClear: (InboxCard) -> Unit = {},
     val onClearAll: () -> Unit = {},
@@ -117,6 +123,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
 
     val actions = InboxActions(
         onTab = { t -> _state.update { it.copy(tab = t) } }, onAllow = { answer(it, allow = true) }, onAllowSite = { answer(it, allow = true, wholeSite = true) }, onNotNow = { answer(it, allow = false) },
+        onSandboxGrantAnswer = ::answerSandboxGrant,
         onDetails = { c -> _state.update { it.copy(details = c) } }, onClear = { clear(listOf(it)) },
         onClearAll = { clear(_state.value.shownUpdates) }, onUndo = ::undo, onDismissLine = { queue.latest()?.let { queue.expire(it) }; _state.update { it.copy(line = null) } },
         onBannerNotNow = { NotifAccess.snooze(getApplication()); refreshBanner() },
@@ -174,7 +181,12 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         val history = try { client.notifications("history", HISTORY_LIMIT) } catch (e: HqUnavailable) { null }
         if (frozen) return
         val lists = inboxLists(pending.items, history?.items.orEmpty()).let { l -> InboxLists(withGrantDetails(withDeviceNames(l.needs)), l.updates, l.done) }
-        _state.update { it.copy(loaded = true, offline = false, needs = lists.needs, updates = lists.updates, done = lists.done, details = it.details?.let { d -> lists.needs.firstOrNull { n -> n.id == d.id } }, ownerOnlyCount = pending.needsOwnerOnly, checkedAt = InboxWords.clock(java.time.OffsetDateTime.now().toString())) }
+        val starters = if (lists.needs.any { it.kind == CardKind.SandboxGrant }) {
+            try { client.sandboxGrantStarters() } catch (e: HqUnavailable) { _state.value.sandboxStarters }
+        } else {
+            _state.value.sandboxStarters
+        }
+        _state.update { it.copy(loaded = true, offline = false, needs = lists.needs, updates = lists.updates, done = lists.done, sandboxStarters = starters, details = it.details?.let { d -> lists.needs.firstOrNull { n -> n.id == d.id } }, ownerOnlyCount = pending.needsOwnerOnly, checkedAt = InboxWords.clock(java.time.OffsetDateTime.now().toString())) }
     }
 
     /** Names each new sign-in's device from HQ's device list; one it cannot read keeps the plain "A new device". */
@@ -240,6 +252,38 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
             }
             refresh()
             actions.onBroughtBack(ChatLink.threadOf(card.link))
+        }
+    }
+
+    private fun answerSandboxGrant(card: InboxCard, choice: SandboxGrantAnswer) {
+        if (_state.value.answering[card.id] == Answer.Sending) return
+        _state.update { it.copy(answering = it.answering + (card.id to Answer.Sending)) }
+        viewModelScope.launch {
+            try {
+                client.answerNotification(card.id, choice.action, choice.starter)
+                _state.update {
+                    it.copy(
+                        answering = it.answering - card.id,
+                        details = null,
+                        line = InboxLine(if (choice.isAllow) "Allowed." else "Not now. Nothing was done."),
+                    )
+                }
+                refresh()
+            } catch (e: HqUnavailable) {
+                when {
+                    e.status == HqClient.HTTP_CONFLICT || e.message?.contains("HTTP 409") == true -> {
+                        _state.update { it.copy(answering = it.answering - card.id, details = null, line = InboxLine("Already answered.")) }
+                        refresh()
+                    }
+                    e.status == HqClient.HTTP_BAD_REQUEST && !e.serverMessage.isNullOrBlank() -> {
+                        // Server explains why a standing-access choice (e.g. missing task or repo) cannot be applied.
+                        _state.update { it.copy(answering = it.answering + (card.id to Answer.Failed(e.serverMessage))) }
+                    }
+                    else -> {
+                        _state.update { it.copy(answering = it.answering + (card.id to Answer.Failed("Couldn't send your answer. HQ didn't answer in time. It may be restarting."))) }
+                    }
+                }
+            }
         }
     }
 
