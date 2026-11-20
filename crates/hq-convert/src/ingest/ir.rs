@@ -120,6 +120,20 @@ pub enum Block {
     Rule,
     /// Markdown that is already final, such as footnote definitions.
     Raw(String),
+    /// A review comment on the block before it. Only the Word reader makes one, and only when
+    /// asked (`ConvertOptions::word_comments`); [`render_checked`] writes it as a `comment` block.
+    Comment(DocComment),
+}
+
+/// A comment from the source file, ready to be written as a `comment` block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocComment {
+    /// Author label, already cleaned; empty when the file names none.
+    pub by: String,
+    /// `YYYY-MM-DD`, when the file gives a date.
+    pub at: Option<String>,
+    pub resolved: bool,
+    pub text: String,
 }
 
 /// Collapses every run of whitespace to one space, as HTML and ODF do for text.
@@ -211,13 +225,34 @@ enum Mode {
 ///
 /// A document with a title block gets that title as the only `#` heading and
 /// every other heading moves down one level.
-pub fn render(mut blocks: Vec<Block>) -> String {
+pub fn render(blocks: Vec<Block>) -> String {
+    render_checked(blocks).0
+}
+
+/// [`render`], and how many `comment` blocks ended up anchored to a hash no block of the written
+/// text has (zero when there are no comments).
+pub fn render_checked(mut blocks: Vec<Block>) -> (String, usize) {
     shift_headings(&mut blocks);
     let blocks = merge_adjacent(blocks);
     let mut parts: Vec<String> = Vec::new();
+    let mut has_comments = false;
+    let mut anchor: Option<String> = None;
     for block in &blocks {
+        if let Block::Comment(c) = block {
+            has_comments = true;
+            if let Some(on) = &anchor {
+                parts.push(comment_block(c, on));
+            }
+            continue;
+        }
         let text = render_block(block);
         if !text.trim().is_empty() {
+            // The hash is that of the block as the note will hold it, so ask the note's own
+            // parser. A part that parses to several blocks is anchored on its last.
+            anchor = hq_suite_md::Document::parse(&tidy(&text))
+                .nodes()
+                .last()
+                .map(|n| n.hash());
             parts.push(text);
         }
     }
@@ -226,7 +261,27 @@ pub fn render(mut blocks: Vec<Block>) -> String {
     if !out.is_empty() {
         out.push('\n');
     }
-    out
+    let orphaned = if has_comments {
+        hq_suite_md::comments(&hq_suite_md::Document::parse(&out))
+            .iter()
+            .filter(|c| c.orphaned)
+            .count()
+    } else {
+        0
+    };
+    (out, orphaned)
+}
+
+fn comment_block(c: &DocComment, on: &str) -> String {
+    let mut attrs: Vec<(&str, &str)> = vec![("on", on)];
+    if !c.by.is_empty() {
+        attrs.push(("by", &c.by));
+    }
+    if let Some(at) = &c.at {
+        attrs.push(("at", at));
+    }
+    attrs.push(("state", if c.resolved { "resolved" } else { "open" }));
+    hq_suite_md::TypedBlock::new(hq_suite_md::BlockType::Comment, &attrs, &c.text).render("\n")
 }
 
 fn shift_headings(blocks: &mut [Block]) {
@@ -335,6 +390,7 @@ fn render_block(block: &Block) -> String {
         }
         Block::Rule => "---".to_string(),
         Block::Raw(text) => text.clone(),
+        Block::Comment(_) => String::new(),
     }
 }
 

@@ -188,6 +188,7 @@ impl Default for Options {
                 ocr: hq_convert::ingest::OcrMode::Off,
                 external_office: false,
                 image_markers: true,
+                word_comments: true,
                 ..ConvertOptions::default()
             },
             max_source_bytes: 64 * 1024 * 1024,

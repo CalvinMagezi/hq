@@ -7,6 +7,7 @@
 //! structure; PDFs and images keep their text-layer and OCR paths.
 
 mod docx;
+mod docx_comments;
 mod html;
 pub mod ir;
 mod keep;
@@ -84,6 +85,11 @@ pub struct ConvertOptions {
     /// caller that stores the pictures can link each one where it sat. Off by default: the usual
     /// output is `*[image: alt]*`, with the picture left out.
     pub image_markers: bool,
+    /// Carry the comments of a Word document as hqmd `comment` blocks placed after the block they
+    /// sit on, each anchored by that block's hash. Off by default: a plain import has no use for
+    /// them, and its output stays as it was. The report counts what was carried and what had no
+    /// block to sit on.
+    pub word_comments: bool,
 }
 
 impl Default for ConvertOptions {
@@ -95,6 +101,7 @@ impl Default for ConvertOptions {
             ocr: OcrMode::Auto,
             external_office: true,
             image_markers: false,
+            word_comments: false,
         }
     }
 }
@@ -173,12 +180,11 @@ pub async fn convert_bytes(
     let ext = ext.as_str();
     let (markdown, title, engine) = match sniffed.kind {
         Kind::Docx => {
-            let reader: Reader = if opts.image_markers {
-                docx::read_marked
-            } else {
-                docx::read
-            };
-            let parsed = native(bytes.clone(), opts, reader).await?;
+            let (markers, comments) = (opts.image_markers, opts.word_comments);
+            let parsed = native(bytes.clone(), opts, move |pkg| {
+                docx::read_with(pkg, markers, comments)
+            })
+            .await?;
             finish(parsed, &mut losses, "native:docx".into())
         }
         Kind::Pptx => {
@@ -387,7 +393,7 @@ async fn blocking<T: Send + 'static>(
 async fn native(
     bytes: Arc<Vec<u8>>,
     opts: &ConvertOptions,
-    read: fn(&mut package::Package<'_>) -> Result<ir::Parsed, ConvertError>,
+    read: impl FnOnce(&mut package::Package<'_>) -> Result<ir::Parsed, ConvertError> + Send + 'static,
 ) -> Result<ir::Parsed, ConvertError> {
     let limits = opts.limits.clone();
     tokio::task::spawn_blocking(move || {
@@ -422,5 +428,12 @@ fn finish(
     engine: String,
 ) -> (String, Option<String>, String) {
     losses.merge(parsed.losses);
-    (ir::render(parsed.blocks), parsed.title, engine)
+    let (markdown, orphaned) = ir::render_checked(parsed.blocks);
+    if orphaned > 0 {
+        losses.note(
+            LossKind::CommentsUnanchored,
+            format!("{orphaned} comment block(s) point at a block the written note does not hold"),
+        );
+    }
+    (markdown, parsed.title, engine)
 }

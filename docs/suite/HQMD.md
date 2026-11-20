@@ -167,7 +167,8 @@ A review note on another block. The body is the comment text.
 When the block it is about is edited, its hash changes and the comment becomes **orphaned**. The
 checker reports that as `comment.orphaned` (information, not an error); the comment stays in the
 note until someone resolves or deletes it. Attributes the version does not know are kept as
-written. Comments never leave the note: the Word, PDF, PowerPoint and Excel exports omit them, so
+written. A shrunk Word file brings its comments in as `comment` blocks (`DOCS.md`, "Comments from a Word
+file"). Comments never leave the note: the Word, PDF, PowerPoint and Excel exports omit them, so
 a shared file carries no review notes.
 
 ## References

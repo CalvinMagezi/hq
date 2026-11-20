@@ -3518,6 +3518,7 @@ dependencies = [
  "chrono",
  "dirs",
  "encoding_rs",
+ "hq-suite-md",
  "regex",
  "roxmltree 0.21.1",
  "scraper",

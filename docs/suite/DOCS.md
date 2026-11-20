@@ -11,6 +11,26 @@ A doc is an ordinary note: headings, paragraphs, lists, tables, code and images 
 
 `GET /api/suite/blocks?path=`, `POST /api/suite/blocks/edit`, `/insert` and `/delete` are the routes; they use the hqmd patch (`Op::Replace`, `InsertAfter`, `Delete`) that the format's guarantees are written for.
 
+## Comments from a Word file
+
+When a Word file is shrunk (`hq-suite-shrink`, which turns on `ConvertOptions::word_comments`), the
+comments in `word/comments.xml` come across as `comment` blocks (`HQMD.md`), each placed after the
+block it was on:
+
+- `on` is the hash of that block as written in the note, so the comment is not orphaned.
+- `by` is the Word author, cleaned as the comment tools clean it (no control characters, quotes or
+  backticks, 60 characters). `at` is the comment's day (`YYYY-MM-DD`), left out when Word has none.
+- `state` is `resolved` when `commentsExtended.xml` marks it done, else `open`. A reply is its own
+  comment, on the block of the comment it answers.
+- A comment in a table cell sits on the table; one on a list item sits after the list.
+- The report counts how many were carried. A comment with no body block to sit on (header, footer,
+  note, never referenced) is **not carried** and is counted as a loss, so the fidelity tier is
+  lossy. Nothing is anchored to the title as a stand-in.
+
+A plain import (`hq vault import`, `convert_to_markdown`) leaves the option off and its output is
+unchanged. The report now also counts tracked changes: inserted text is kept as plain text, deleted
+text is dropped.
+
 ## Not done
 
 Showing the formatting live as you type (the field is markdown, with buttons), moving a block, comments, and fill-in fields (`fields` is still reserved). A block edit is markdown, as the web and chat write it.
