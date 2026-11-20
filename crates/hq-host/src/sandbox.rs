@@ -623,6 +623,17 @@ fn real_place(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// The git directories a linked worktree keeps outside itself: its own `<common>/worktrees/<id>`
+/// and the shared `<common>`. Without them a commit in the worktree fails under the strict wall.
+fn linked_git_dirs(project: &Path) -> Option<(PathBuf, PathBuf)> {
+    let pointer = std::fs::read_to_string(project.join(".git")).ok()?;
+    let gitdir = PathBuf::from(pointer.trim().strip_prefix("gitdir:")?.trim());
+    let gitdir = gitdir.canonicalize().ok()?;
+    let common = std::fs::read_to_string(gitdir.join("commondir")).ok()?;
+    let common = gitdir.join(common.trim()).canonicalize().ok()?;
+    (gitdir.starts_with(&common)).then_some((gitdir, common))
+}
+
 fn under(base: &Path, names: &[&str]) -> Vec<PathBuf> {
     names.iter().map(|n| base.join(n)).collect()
 }
@@ -843,13 +854,15 @@ fn strict_policy(
     let own_tmp = canonical([tmp])
         .into_iter()
         .filter(|d| !private_tmp.iter().any(|p| d.starts_with(p)));
+    let linked = linked_git_dirs(&project);
     let writable = canonical(
         under(home, HOME_WRITABLE)
             .into_iter()
             .chain([claude_dir.to_path_buf()])
             .chain(shared_tmp)
             .chain(own_tmp)
-            .chain(spec.writable.iter().cloned()),
+            .chain(spec.writable.iter().cloned())
+            .chain(linked.iter().map(|(_, common)| common.clone())),
     );
     // A writable root that contains HOME, the run directory or a secret directory
     // would let the agent rename or rewrite them, which no read rule survives.
@@ -884,9 +897,24 @@ fn strict_policy(
             inside.display()
         )));
     }
+    // The shared git directory is writable for commits, but hooks and config run code later,
+    // outside the sandbox, so they stay read-only as the project's own do.
+    let linked_protected: Vec<PathBuf> = linked
+        .iter()
+        .flat_map(|(gitdir, common)| {
+            [
+                common.join("hooks"),
+                common.join("config"),
+                gitdir.join("config.worktree"),
+            ]
+        })
+        .collect();
     let (project_files, project_dirs): (Vec<_>, Vec<_>) = under(&project, PROJECT_READONLY)
         .into_iter()
-        .partition(|p| p.extension().is_some() || p.ends_with("config"));
+        .chain(linked_protected)
+        .partition(|p| {
+            p.extension().is_some() || p.ends_with("config") || p.ends_with("config.worktree")
+        });
     // Seatbelt denies writes to a path whether or not it exists; a bubblewrap
     // mount needs something to mount over, so only existing paths are protected.
     let keep = |paths: Vec<PathBuf>| -> Vec<PathBuf> {
@@ -2339,6 +2367,24 @@ mod tests {
             std::fs::read_to_string(f.config_dir.join("gh.env")).is_ok_and(|t| t.is_empty())
                 || !f.config_dir.join("gh.env").exists()
         );
+    }
+
+    #[test]
+    fn a_linked_worktree_gets_its_git_dirs_and_a_plain_checkout_gets_none() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let gitdir = root.join("main/.git/worktrees/wt");
+        std::fs::create_dir_all(&gitdir).unwrap();
+        std::fs::write(gitdir.join("commondir"), "../..\n").unwrap();
+        let wt = root.join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", gitdir.display())).unwrap();
+        let (found_gitdir, common) = linked_git_dirs(&wt).expect("a linked worktree");
+        assert_eq!(found_gitdir, gitdir);
+        assert_eq!(common, root.join("main/.git"));
+        let plain = root.join("plain");
+        std::fs::create_dir_all(plain.join(".git")).unwrap();
+        assert!(linked_git_dirs(&plain).is_none());
     }
 
     /// `/var/run` is a link to `/run` on most Linux systems, and bubblewrap cannot
