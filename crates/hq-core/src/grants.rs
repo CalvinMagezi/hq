@@ -384,16 +384,16 @@ mod tests {
 
     fn ctx(profile: Option<GrantProfile>) -> TaskContext {
         TaskContext {
-            home: "/home/o".into(),
-            worktree: "/home/o/wt/app".into(),
+            home: "/home/user".into(),
+            worktree: "/home/user/wt/app".into(),
             profile,
         }
     }
 
     fn mobile() -> GrantProfile {
         GrantProfile {
-            writable: vec!["/home/o/.gradle".into()],
-            readable: vec!["/home/o/Android/sdk".into()],
+            writable: vec!["/home/user/.gradle".into()],
+            readable: vec!["/home/user/Android/sdk".into()],
             loopback_ports: vec![5037],
             egress: vec!["pub.dev".into(), "repo.example.org:8443".into()],
         }
@@ -414,7 +414,7 @@ mod tests {
     fn a_listed_cache_is_approved_with_exactly_that_path() {
         let d = run(
             Capability::FsWrite,
-            "/home/o/.gradle/caches",
+            "/home/user/.gradle/caches",
             Some(mobile()),
         );
         let Decision::Approve(delta) = d else {
@@ -422,7 +422,7 @@ mod tests {
         };
         assert_eq!(
             delta.writable,
-            vec![PathBuf::from("/home/o/.gradle/caches")]
+            vec![PathBuf::from("/home/user/.gradle/caches")]
         );
         assert!(delta.readable.is_empty() && delta.allow.is_empty());
     }
@@ -431,11 +431,11 @@ mod tests {
     fn reading_is_allowed_under_a_writable_root_but_writing_is_not_allowed_under_a_readable_one() {
         let p = Some(mobile());
         assert!(matches!(
-            run(Capability::FsRead, "/home/o/.gradle", p.clone()),
+            run(Capability::FsRead, "/home/user/.gradle", p.clone()),
             Decision::Approve(_)
         ));
         assert_eq!(
-            run(Capability::FsWrite, "/home/o/Android/sdk/x", p),
+            run(Capability::FsWrite, "/home/user/Android/sdk/x", p),
             Decision::Ask(AskReason::OutsideProfile)
         );
     }
@@ -444,11 +444,11 @@ mod tests {
     fn the_task_worktree_is_approved_and_a_sibling_is_not() {
         let p = Some(mobile());
         assert!(matches!(
-            run(Capability::FsWrite, "/home/o/wt/app/build", p.clone()),
+            run(Capability::FsWrite, "/home/user/wt/app/build", p.clone()),
             Decision::Approve(_)
         ));
         assert_eq!(
-            run(Capability::FsWrite, "/home/o/wt/other", p),
+            run(Capability::FsWrite, "/home/user/wt/other", p),
             Decision::Ask(AskReason::OutsideProfile)
         );
     }
@@ -456,7 +456,7 @@ mod tests {
     #[test]
     fn no_profile_asks_and_never_approves() {
         assert_eq!(
-            run(Capability::FsWrite, "/home/o/wt/app/x", None),
+            run(Capability::FsWrite, "/home/user/wt/app/x", None),
             Decision::Ask(AskReason::NoProfile)
         );
         assert_eq!(
@@ -468,14 +468,14 @@ mod tests {
     #[test]
     fn credentials_and_hq_are_refused_even_when_a_profile_lists_them() {
         let mut p = mobile();
-        p.writable.push("/home/o/.ssh".into());
+        p.writable.push("/home/user/.ssh".into());
         for path in [
-            "/home/o/.ssh",
-            "/home/o/.ssh/id_ed25519",
-            "/home/o/.config/gh/hosts.yml",
-            "/home/o/.hq/config.yaml",
-            "/home/o/.claude-work/x",
-            "/home/o/.aws",
+            "/home/user/.ssh",
+            "/home/user/.ssh/id_ed25519",
+            "/home/user/.config/gh/hosts.yml",
+            "/home/user/.hq/config.yaml",
+            "/home/user/.claude-work/x",
+            "/home/user/.aws",
         ] {
             assert_eq!(
                 run(Capability::FsRead, path, Some(p.clone())),
@@ -485,7 +485,7 @@ mod tests {
         }
         // Without a profile the refusal still wins over the ask.
         assert_eq!(
-            run(Capability::FsWrite, "/home/o/.ssh", None),
+            run(Capability::FsWrite, "/home/user/.ssh", None),
             Decision::Refuse(RefuseReason::Credentials)
         );
     }
@@ -494,11 +494,11 @@ mod tests {
     fn home_its_parents_relative_paths_and_dotdot_are_refused() {
         let p = Some(mobile());
         for (path, why) in [
-            ("/home/o", RefuseReason::HomeRoot),
+            ("/home/user", RefuseReason::HomeRoot),
             ("/home", RefuseReason::HomeRoot),
             ("/", RefuseReason::HomeRoot),
             ("gradle", RefuseReason::NotAbsolute),
-            ("/home/o/wt/app/../../.ssh", RefuseReason::Traversal),
+            ("/home/user/wt/app/../../.ssh", RefuseReason::Traversal),
         ] {
             assert_eq!(
                 run(Capability::FsWrite, path, p.clone()),
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn a_parent_of_a_credential_directory_is_refused_so_a_root_cannot_contain_it() {
         assert_eq!(
-            run(Capability::FsRead, "/home/o/.config", Some(mobile())),
+            run(Capability::FsRead, "/home/user/.config", Some(mobile())),
             Decision::Refuse(RefuseReason::Credentials)
         );
     }
@@ -568,12 +568,12 @@ mod tests {
     fn a_profile_expands_home_and_drops_credential_paths() {
         let p = GrantProfile {
             writable: vec!["~/.gradle".into(), "~/.ssh".into()],
-            readable: vec!["/home/o".into()],
+            readable: vec!["/home/user".into()],
             loopback_ports: vec![0, 5037],
             egress: vec!["pub.dev".into(), "*.bad".into()],
         };
-        let d = p.delta(Path::new("/home/o"));
-        assert_eq!(d.writable, vec![PathBuf::from("/home/o/.gradle")]);
+        let d = p.delta(Path::new("/home/user"));
+        assert_eq!(d.writable, vec![PathBuf::from("/home/user/.gradle")]);
         assert!(d.readable.is_empty(), "home itself is dropped");
         assert_eq!(d.loopback_ports, vec![5037]);
         assert_eq!(d.allow, vec![("pub.dev".to_string(), 443)]);
@@ -583,12 +583,12 @@ mod tests {
     fn credential_paths_match_without_regard_to_case_and_more_stores_are_listed() {
         let p = Some(mobile());
         for path in [
-            "/home/o/.SSH/id_ed25519",
-            "/HOME/O/.Aws",
-            "/home/o/Library/Keychains/login.keychain-db",
-            "/home/o/.config/gcloud/x",
-            "/home/o/.gitconfig",
-            "/home/o/.hermes/memory",
+            "/home/user/.SSH/id_ed25519",
+            "/HOME/USER/.Aws",
+            "/home/user/Library/Keychains/login.keychain-db",
+            "/home/user/.config/gcloud/x",
+            "/home/user/.gitconfig",
+            "/home/user/.hermes/memory",
         ] {
             assert!(
                 matches!(
@@ -599,7 +599,7 @@ mod tests {
             );
         }
         assert_eq!(
-            run(Capability::FsRead, "/Home/O", p),
+            run(Capability::FsRead, "/Home/User", p),
             Decision::Refuse(RefuseReason::HomeRoot)
         );
     }
