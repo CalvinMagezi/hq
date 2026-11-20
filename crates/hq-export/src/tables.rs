@@ -347,6 +347,37 @@ fn sheet_name(raw: &str, index: usize, used: &mut HashSet<String>) -> String {
     name
 }
 
+/// A spreadsheet cell that is one number: [`parse_number`] plus comma
+/// thousands groups and a leading currency code (`UGX 1,250,000`). A range or
+/// anything with extra text stays text.
+fn spreadsheet_number(cell: &str) -> Option<f64> {
+    const CURRENCY_CODE_LEN: std::ops::RangeInclusive<usize> = 3..=4;
+    let s = cell.trim();
+    let s = match s.split_once(' ') {
+        Some((code, rest))
+            if CURRENCY_CODE_LEN.contains(&code.len())
+                && code.bytes().all(|b| b.is_ascii_uppercase()) =>
+        {
+            rest.trim()
+        }
+        _ => s,
+    };
+    if !s.contains(',') {
+        return parse_number(s);
+    }
+    let unsigned = s.strip_prefix('-').unwrap_or(s);
+    let int = unsigned.split('.').next().unwrap_or("");
+    let mut groups = int.split(',');
+    let head_ok = groups
+        .next()
+        .is_some_and(|g| (1..=3).contains(&g.len()) && g.bytes().all(|b| b.is_ascii_digit()));
+    let tail_ok = groups.all(|g| g.len() == 3 && g.bytes().all(|b| b.is_ascii_digit()));
+    if !head_ok || !tail_ok {
+        return None;
+    }
+    parse_number(&s.replace(',', ""))
+}
+
 pub(crate) fn xlsx(doc: &Document) -> Result<Packed, ExportError> {
     let grids = grids(doc)?;
     let fail = |e: rust_xlsxwriter::XlsxError| ExportError::Render(e.to_string());
@@ -369,7 +400,7 @@ pub(crate) fn xlsx(doc: &Document) -> Result<Packed, ExportError> {
                 let (r, c) = (r as u32 + 1, c as u16);
                 // Strings are written as strings, never parsed as formulas, so
                 // `=cmd()` in a note stays text in the sheet.
-                match parse_number(value) {
+                match spreadsheet_number(value) {
                     Some(n) => sheet.write_number(r, c, n).map_err(fail)?,
                     None if value.is_empty() => continue,
                     None => sheet.write_string(r, c, value).map_err(fail)?,
@@ -519,6 +550,79 @@ mod tests {
         assert!(z.by_name("xl/worksheets/sheet1.xml").is_ok());
         assert!(z.by_name("xl/worksheets/sheet2.xml").is_ok());
         assert!(z.by_name("xl/worksheets/sheet3.xml").is_err());
+    }
+
+    const PRICES: &str = "## Hotels\n\n| Name | Price low (UGX) | Range | Rooms |\n|---|---|---|---|\n| A | 10000 | UGX 10,000–30,000 | |\n| B | UGX 1,250,000 | 5.5 | 007 |\n\n## Taxis\n\n| Route | Fare |\n|---|---|\n| X | 2,500 |\n";
+
+    fn sheet_xml(md: &str, n: usize) -> String {
+        use std::io::Read;
+        let p = xlsx(&doc(md)).unwrap();
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(p.bytes)).unwrap();
+        let mut out = String::new();
+        z.by_name(&format!("xl/worksheets/sheet{n}.xml"))
+            .unwrap()
+            .read_to_string(&mut out)
+            .unwrap();
+        out
+    }
+
+    #[test]
+    fn spreadsheet_number_accepts_only_whole_cell_numbers() {
+        for (cell, want) in [
+            ("10000", Some(10000.0)),
+            ("UGX 10,000", Some(10000.0)),
+            ("-1,234.5", Some(-1234.5)),
+            ("USD 5", Some(5.0)),
+        ] {
+            assert_eq!(spreadsheet_number(cell), want, "{cell}");
+        }
+        for cell in [
+            "UGX 10,000–30,000",
+            "1,23",
+            "12,3456",
+            "UGX",
+            "ab 5",
+            "5 UGX",
+            "007",
+            "1,000 and more",
+            ",100",
+        ] {
+            assert_eq!(spreadsheet_number(cell), None, "{cell}");
+        }
+    }
+
+    #[test]
+    fn xlsx_makes_every_table_a_sheet_named_from_its_heading() {
+        use std::io::Read;
+        let p = xlsx(&doc(PRICES)).unwrap();
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(p.bytes)).unwrap();
+        let mut wb = String::new();
+        z.by_name("xl/workbook.xml")
+            .unwrap()
+            .read_to_string(&mut wb)
+            .unwrap();
+        assert!(
+            wb.contains("name=\"Hotels\"") && wb.contains("name=\"Taxis\""),
+            "{wb}"
+        );
+        assert!(z.by_name("xl/worksheets/sheet3.xml").is_err());
+    }
+
+    #[test]
+    fn xlsx_numeric_cells_are_numbers_and_ranges_stay_text() {
+        let s = sheet_xml(PRICES, 1);
+        // 10000, 1250000 and 5.5 are numeric (no t="s"); the range and 007 are strings.
+        assert_eq!(s.matches("<v>10000</v>").count(), 1, "{s}");
+        assert!(s.contains("<v>1250000</v>"), "{s}");
+        assert!(s.contains("<v>5.5</v>"), "{s}");
+        assert!(
+            !s.contains("<c r=\"B3\" t=\"s\""),
+            "UGX 1,250,000 must be numeric: {s}"
+        );
+        assert!(s.contains("<c r=\"C2\" t=\"s\""), "range stays text: {s}");
+        assert!(s.contains("<c r=\"D3\" t=\"s\""), "007 stays text: {s}");
+        assert!(!s.contains("r=\"D2\""), "blank stays empty: {s}");
+        assert!(sheet_xml(PRICES, 2).contains("<v>2500</v>"));
     }
 
     #[test]

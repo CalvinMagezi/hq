@@ -222,12 +222,16 @@ pub fn prepare_note_with(
 /// Returns `(frontmatter, body)`. Text without a closed `---` block comes back whole.
 fn split_frontmatter(raw: &str) -> (Option<String>, &str) {
     let text = raw.strip_prefix('\u{feff}').unwrap_or(raw);
-    let Some(rest) = text
-        .strip_prefix("---\n")
-        .or_else(|| text.strip_prefix("---\r\n"))
-    else {
+    // Editors and generators often leave blank lines or a BOM before the
+    // fence, and a fence may carry trailing spaces; a missed fence turns the
+    // YAML into a setext heading in the output.
+    let lead = text.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    let Some((first, rest)) = lead.split_once('\n') else {
         return (None, text);
     };
+    if first.trim_end() != "---" {
+        return (None, text);
+    }
     let mut offset = 0;
     for line in rest.split_inclusive('\n') {
         if line.trim_end() == "---" || line.trim_end() == "..." {
@@ -744,6 +748,35 @@ mod tests {
 
     fn prep(raw: &str, v: &tempfile::TempDir) -> PreparedNote {
         prepare_note(raw, "Fallback", &v.path().join("Notebooks/Inbox"), v.path())
+    }
+
+    const FM_BODY: &str = "noteType: research\ntitle: X\nfileName: Y\ncreated: 2026-11-20\ncurrency: UGX\n---\n\n# Heading\n\n| a | b |\n|---|---|\n| 1 | 2 |";
+
+    #[test]
+    fn frontmatter_is_dropped_whatever_surrounds_the_opening_fence() {
+        let v = vault();
+        for open in [
+            "---\n",
+            "\n---\n",
+            "  \n---\n",
+            "\u{feff}\n---\n",
+            "--- \n",
+            "---\r\n",
+        ] {
+            let raw = format!("{open}{FM_BODY}");
+            let raw = if open.ends_with("\r\n") {
+                raw.replace('\n', "\r\n")
+            } else {
+                raw
+            };
+            let p = prep(&raw, &v);
+            assert!(
+                !p.markdown.contains("noteType"),
+                "{open:?} leaked: {}",
+                p.markdown
+            );
+            assert_eq!(p.title, "X", "{open:?}");
+        }
     }
 
     #[test]
