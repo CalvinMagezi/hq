@@ -6,9 +6,9 @@
 //! their own spacing.
 //!
 //! Formulas that read rows: adding rows in the middle of a sheet and deleting rows move every row
-//! below them, and this editor does not rewrite references. It refuses instead, and says which
-//! formula (or tile, or plot) would end up pointing at the wrong row. Adding rows at the end and
-//! adding a column on the right move nothing, so they are always allowed.
+//! below them, so the references that read those rows are moved too (`ref_shift`): formulas on
+//! this sheet and on others, and the `from=` of tiles and plots. The only refusal is deleting the
+//! rows a tile or plot reads and nothing else.
 
 use anyhow::{Context, Result, bail};
 use hq_suite_calc::column_name;
@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 use crate::edit_plan::{
     Planned, addr, opt_str, opt_u64, patch, place_after, plural, req_str, req_u64,
 };
+use crate::ref_shift::{FromShift, RowChange, shift_formula, shift_from};
 use crate::sheets::{MAX_CELL_CHARS, NoteBook, sheet_of_range};
 
 /// Most cells one `set_cells` call may carry, and most rows one `add_rows` call may add.
@@ -185,12 +186,12 @@ fn line_of_cells(cells: &[String]) -> String {
 }
 
 /// Writes the block back with `lines` (and a new header when `info` is given).
-fn finish(
-    doc: &Document,
-    t: &Table,
-    mut lines: Vec<String>,
-    info: Option<&Info>,
-) -> Result<Document> {
+fn finish(doc: &Document, t: &Table, lines: Vec<String>, info: Option<&Info>) -> Result<Document> {
+    patch(doc, vec![block_op(doc, t, lines, info)?])
+}
+
+/// The patch operation that writes the block back with `lines`.
+fn block_op(doc: &Document, t: &Table, mut lines: Vec<String>, info: Option<&Info>) -> Result<Op> {
     if let Some(info) = info {
         let fence: String = lines[0]
             .chars()
@@ -207,13 +208,10 @@ fn finish(
     {
         bail!("that change would break the sheet: {}", p.message);
     }
-    patch(
-        doc,
-        vec![Op::Replace {
-            at: addr(doc, t.node, Some(&t.hash))?,
-            markdown,
-        }],
-    )
+    Ok(Op::Replace {
+        at: addr(doc, t.node, Some(&t.hash))?,
+        markdown,
+    })
 }
 
 /// Every formula among `texts` must be one the sheet can read and the file writers may write.
@@ -250,110 +248,247 @@ fn after(t: &Table, new: &Document) -> Value {
 
 // ---------------------------------------------------------------- formulas that read rows
 
-/// The row (one-based) a word such as `D12` or `$B$3` names, if it is a cell.
-fn ref_row(word: &str) -> Option<u32> {
-    let w: String = word.chars().filter(|c| *c != '$').collect();
-    let letters = w.chars().take_while(|c| c.is_ascii_alphabetic()).count();
-    let digits = &w[letters..];
-    ((1..=3).contains(&letters) && !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()))
-        .then(|| digits.parse().ok())
-        .flatten()
+/// What moving rows does to the rest of the note: the formulas, tiles and plots that read them.
+struct Shift {
+    /// Formulas of the edited sheet to rewrite: table row, column, new text.
+    own: Vec<(usize, usize, String)>,
+    /// Replacements for the other blocks that read the moved rows.
+    ops: Vec<Op>,
+    formulas: usize,
+    tiles: usize,
+    plots: usize,
+    /// Rewritten formulas that now hold a `#REF!`.
+    broken: usize,
+    /// (sheet number, label, old text, new text) of every rewritten formula.
+    checks: Vec<(usize, String, String, String)>,
 }
 
-/// Whether `formula` names any cell on row `first_row` (one-based) or below. Text in quotes and
-/// function names are not cells; a whole-column reference has no row.
-pub(crate) fn mentions_row_from(formula: &str, first_row: u32) -> bool {
-    let chars: Vec<char> = formula.chars().collect();
-    let (mut i, mut in_text) = (0, false);
-    while i < chars.len() {
-        let c = chars[i];
-        if c == '"' {
-            in_text = !in_text;
-            i += 1;
-        } else if in_text {
-            i += 1;
-        } else if c.is_ascii_alphanumeric() || matches!(c, '_' | '$' | '.') {
-            let start = i;
-            while i < chars.len()
-                && (chars[i].is_ascii_alphanumeric() || matches!(chars[i], '_' | '$' | '.'))
-            {
-                i += 1;
-            }
-            let word: String = chars[start..i].iter().collect();
-            if chars.get(i) != Some(&'(') && ref_row(&word).is_some_and(|r| r >= first_row) {
-                return true;
-            }
-        } else {
-            i += 1;
-        }
+/// `line` with the text of cell `col` replaced, the cell's own spacing kept.
+fn replace_cell_in_line(line: &str, col: usize, new: &str) -> Result<String> {
+    let mut parts: Vec<String> = line.split('|').map(str::to_string).collect();
+    if col + 1 >= parts.len() {
+        bail!("a line of this sheet's table has fewer cells than its header");
     }
-    false
+    let seg = &parts[col + 1];
+    let lead = &seg[..seg.len() - seg.trim_start().len()];
+    let trail = &seg[seg.trim_end().len()..];
+    parts[col + 1] = format!("{lead}{new}{trail}");
+    Ok(parts.join("|"))
 }
 
-/// Refuses a change that moves rows from `first_row` (one-based) down when anything reads them:
-/// a formula in this sheet (other than in the rows being deleted, `gone`), a formula in another
-/// sheet that names this one, or a tile or plot range over it.
-fn guard_row_shift(
+fn sheet_name(blocks: &[TypedBlock], n: usize) -> String {
+    blocks
+        .iter()
+        .filter(|b| b.ty == BlockType::Sheet)
+        .nth(n)
+        .and_then(|b| b.info.get("name"))
+        .map_or_else(|| format!("Sheet{}", n + 1), str::to_string)
+}
+
+/// Works out how `change` to the rows of table `t` rewrites every formula and block that reads
+/// them. Rows in `gone` are being deleted and are not rewritten. Nothing is written here.
+fn plan_shift(
     doc: &Document,
     note: &str,
     t: &Table,
-    first_row: u32,
+    change: RowChange,
     gone: std::ops::Range<usize>,
-) -> Result<()> {
-    let blocks: Vec<TypedBlock> = doc.typed_blocks().filter_map(|(_, b)| b.ok()).collect();
-    let nb = NoteBook::new(&blocks);
-    let sheets: Vec<&TypedBlock> = blocks.iter().filter(|b| b.ty == BlockType::Sheet).collect();
-    let name_of = |i: usize| {
-        sheets[i]
-            .info
-            .get("name")
-            .map_or_else(|| format!("Sheet{}", i + 1), str::to_string)
+) -> Result<Shift> {
+    let all: Vec<(usize, TypedBlock)> = doc
+        .typed_blocks()
+        .filter_map(|(i, b)| b.ok().map(|b| (i, b)))
+        .collect();
+    let blocks: Vec<TypedBlock> = all.iter().map(|(_, b)| b.clone()).collect();
+    let edited = sheet_name(&blocks, t.sheet);
+    let mut out = Shift {
+        own: Vec::new(),
+        ops: Vec::new(),
+        formulas: 0,
+        tiles: 0,
+        plots: 0,
+        broken: 0,
+        checks: Vec::new(),
     };
-    let mine = name_of(t.sheet).to_lowercase();
-    let advice = "This editor does not rewrite references, so rows are only added at the end or deleted when nothing reads the rows below. Rewrite those formulas with set_cells first, or add the rows at the end.";
-    for (s, table) in nb.tables.iter().enumerate() {
-        for (r, row) in table.iter().enumerate() {
+    for (r, row) in t
+        .cells
+        .iter()
+        .enumerate()
+        .filter(|(r, _)| !gone.contains(r))
+    {
+        for (c, text) in row.iter().enumerate() {
+            if !text.trim_start().starts_with('=') {
+                continue;
+            }
+            let new = shift_formula(text, &edited, &edited, change);
+            if new != *text {
+                out.formulas += 1;
+                out.broken += usize::from(new.contains("#REF!"));
+                out.checks
+                    .push((t.sheet, a1(r, c), text.clone(), new.clone()));
+                out.own.push((r, c, new));
+            }
+        }
+    }
+    let sheet_nodes: Vec<usize> = all
+        .iter()
+        .filter(|(_, b)| b.ty == BlockType::Sheet)
+        .map(|(i, _)| *i)
+        .collect();
+    for (k, &node) in sheet_nodes
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| *k != t.sheet)
+    {
+        let name = sheet_name(&blocks, k);
+        let other = match load(doc, k, None) {
+            Ok(o) => o,
+            Err(e) => {
+                let src = doc
+                    .node(node)
+                    .map(|n| n.src().to_string())
+                    .unwrap_or_default();
+                if src.lines().any(|l| l.contains("| =") || l.contains("|=")) {
+                    bail!("sheet `{name}` reads rows that would move, and {e}");
+                }
+                continue;
+            }
+        };
+        let mut lines = other.lines.clone();
+        let mut changed = false;
+        for (r, row) in other.cells.iter().enumerate() {
             for (c, text) in row.iter().enumerate() {
                 if !text.trim_start().starts_with('=') {
                     continue;
                 }
-                if s == t.sheet {
-                    if !gone.contains(&r) && mentions_row_from(text, first_row) {
-                        bail!(
-                            "{} holds the formula `{text}`, which reads row {first_row} or below, and those rows would move. {advice}",
-                            a1(r, c)
-                        );
-                    }
-                } else if text.to_lowercase().contains(&format!("{mine}!"))
-                    && mentions_row_from(text, first_row)
-                {
-                    bail!(
-                        "{} in sheet `{}` holds the formula `{text}`, which reads this sheet from row {first_row} down, and those rows would move. {advice}",
-                        a1(r, c),
-                        name_of(s)
-                    );
+                let new = shift_formula(text, &name, &edited, change);
+                if new != *text {
+                    let li = other.line_of(r);
+                    lines[li] = replace_cell_in_line(&lines[li], c, &new)?;
+                    changed = true;
+                    out.formulas += 1;
+                    out.broken += usize::from(new.contains("#REF!"));
+                    out.checks
+                        .push((k, format!("{name}!{}", a1(r, c)), text.clone(), new));
                 }
             }
         }
-    }
-    for b in blocks
-        .iter()
-        .filter(|b| matches!(b.ty, BlockType::Tile | BlockType::Plot))
-    {
-        let Ok(from) = RangeRef::parse(b.info.get("from").unwrap_or_default()) else {
-            continue;
-        };
-        if sheet_of_range(&blocks, note, &from, "a block").ok() == Some(t.sheet)
-            && from.end.row >= first_row
-        {
-            bail!(
-                "a {} block reads `{}`, which reaches row {first_row} or below, and those rows would move. {advice}",
-                b.ty.name(),
-                b.info.get("from").unwrap_or_default()
-            );
+        if changed {
+            out.ops.push(Op::Replace {
+                at: addr(doc, other.node, Some(&other.hash))?,
+                markdown: lines.join("\n"),
+            });
         }
     }
-    Ok(())
+    for (node, b) in all
+        .iter()
+        .filter(|(_, b)| matches!(b.ty, BlockType::Tile | BlockType::Plot))
+    {
+        let from = b.info.get("from").unwrap_or_default();
+        let Ok(range) = RangeRef::parse(from) else {
+            continue;
+        };
+        if sheet_of_range(&blocks, note, &range, "a block").ok() != Some(t.sheet) {
+            continue;
+        }
+        let to = match shift_from(from, change) {
+            FromShift::Same => continue,
+            FromShift::Moved(to) => to,
+            FromShift::Gone => bail!(
+                "a {} block reads only the rows you are deleting (`{from}`); change or remove that block first",
+                b.ty.name()
+            ),
+        };
+        let n = doc
+            .node(*node)
+            .context("a block is missing from the note")?;
+        let src = n.src();
+        let first_end = src.find('\n').unwrap_or(src.len());
+        let first = &src[..first_end];
+        let cr = if first.ends_with('\r') { "\r" } else { "" };
+        let fence: String = first
+            .chars()
+            .take_while(|c| *c == '`' || *c == '~')
+            .collect();
+        let mut info = b.info.clone();
+        if let Some(a) = info.attrs.iter_mut().find(|a| a.key == "from") {
+            a.value = to;
+            a.quoted = true;
+        }
+        let markdown = format!("{fence}{}{cr}{}", info.render(), &src[first_end..]);
+        out.ops.push(Op::Replace {
+            at: addr(doc, *node, Some(&n.hash()))?,
+            markdown,
+        });
+        if b.ty == BlockType::Tile {
+            out.tiles += 1;
+        } else {
+            out.plots += 1;
+        }
+    }
+    Ok(out)
+}
+
+impl Shift {
+    /// The edited sheet's lines with its rewritten formulas in them.
+    fn apply_own(&self, t: &Table, lines: &mut [String]) -> Result<()> {
+        for (r, c, new) in &self.own {
+            let li = t.line_of(*r);
+            lines[li] = replace_cell_in_line(&lines[li], *c, new)?;
+        }
+        Ok(())
+    }
+
+    /// Every rewritten formula that read fine before must still read fine (a `#REF!` is the
+    /// one thing allowed to stop reading: the sheet shows it as an error).
+    fn check(&self, before: &Document, after: &Document) -> Result<()> {
+        let book_of = |d: &Document| {
+            let blocks: Vec<TypedBlock> = d.typed_blocks().filter_map(|(_, b)| b.ok()).collect();
+            NoteBook::new(&blocks).book
+        };
+        let (old, new) = (book_of(before), book_of(after));
+        let body = |s: &str| s.trim_start().trim_start_matches('=').trim().to_string();
+        for (sheet, label, was, now) in &self.checks {
+            if now.contains("#REF!") {
+                continue;
+            }
+            let (was_body, now_body) = (body(was), body(now));
+            let read_before =
+                hq_suite_xlsx::formula_is_safe(&was_body) && old.formula_parses(*sheet, &was_body);
+            let reads_now =
+                hq_suite_xlsx::formula_is_safe(&now_body) && new.formula_parses(*sheet, &now_body);
+            if read_before && !reads_now {
+                bail!("{label}: `{now}` is not a formula the sheet can read after the move");
+            }
+        }
+        Ok(())
+    }
+
+    /// ". Adjusted 6 formulas and 1 chart", or nothing when nothing read the moved rows.
+    fn sentence(&self) -> String {
+        let mut parts = Vec::new();
+        if self.formulas > 0 {
+            parts.push(plural(self.formulas, "formula", "formulas"));
+        }
+        if self.tiles > 0 {
+            parts.push(plural(self.tiles, "tile", "tiles"));
+        }
+        if self.plots > 0 {
+            parts.push(plural(self.plots, "chart", "charts"));
+        }
+        let joined = match parts.len() {
+            0 => return String::new(),
+            1 => parts[0].clone(),
+            n => format!("{} and {}", parts[..n - 1].join(", "), parts[n - 1]),
+        };
+        let mut s = format!(". Adjusted {joined}");
+        if self.broken > 0 {
+            s.push_str(&format!(
+                "; {} now show #REF! because they read a deleted row",
+                plural(self.broken, "formula", "formulas")
+            ));
+        }
+        s
+    }
 }
 
 // ---------------------------------------------------------------- set_cells
@@ -438,6 +573,25 @@ pub fn set_cells(doc: &Document, args: &Value) -> Result<Planned> {
 
 // ---------------------------------------------------------------- rows
 
+/// Writes the edited block and every block the shift rewrote as one patch, and checks that the
+/// rewritten formulas still read.
+fn write_rows(
+    doc: &Document,
+    t: &Table,
+    lines: Vec<String>,
+    shift: Option<&Shift>,
+) -> Result<Document> {
+    let mut ops = vec![block_op(doc, t, lines, None)?];
+    if let Some(shift) = shift {
+        ops.extend(shift.ops.iter().cloned());
+    }
+    let new = patch(doc, ops)?;
+    if let Some(shift) = shift {
+        shift.check(doc, &new)?;
+    }
+    Ok(new)
+}
+
 /// Adds rows at the end, or before table row `at` (1 is the first row under the header).
 pub fn add_rows(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
     let sheet = opt_u64(args, "sheet")?.unwrap_or(0) as usize;
@@ -468,10 +622,24 @@ pub fn add_rows(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
             bail!("`at` must be from 1 (first row under the header) to {total} (the end); got {a}")
         }
     };
-    if at < total {
-        guard_row_shift(doc, note, &t, at as u32 + 1, 0..0)?;
-    }
+    let shift = if at < total {
+        Some(plan_shift(
+            doc,
+            note,
+            &t,
+            RowChange::Insert {
+                at_row: at as u32 + 1,
+                n: texts.len() as u32,
+            },
+            0..0,
+        )?)
+    } else {
+        None
+    };
     let mut lines = t.lines.clone();
+    if let Some(shift) = &shift {
+        shift.apply_own(&t, &mut lines)?;
+    }
     let place = if at < total {
         t.line_of(at)
     } else {
@@ -480,7 +648,7 @@ pub fn add_rows(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
     for (k, cells) in texts.iter().enumerate() {
         lines.insert(place + k, line_of_cells(cells));
     }
-    let new = finish(doc, &t, lines, None)?;
+    let new = write_rows(doc, &t, lines, shift.as_ref())?;
     let formulas: Vec<(String, String)> = texts
         .iter()
         .enumerate()
@@ -496,7 +664,7 @@ pub fn add_rows(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
         plural(texts.len(), "row", "rows"),
         at + 1,
         at + texts.len()
-    );
+    ) + &shift.as_ref().map(Shift::sentence).unwrap_or_default();
     let extra = after(&t, &new);
     Ok(Planned::new(new, summary)
         .touching(texts.len() * cols)
@@ -533,12 +701,22 @@ pub fn delete_rows(doc: &Document, note: &str, args: &Value) -> Result<Planned> 
             }
         }
     }
-    guard_row_shift(doc, note, &t, row as u32 + 1, row..row + count)?;
+    let shift = plan_shift(
+        doc,
+        note,
+        &t,
+        RowChange::Delete {
+            first_row: row as u32 + 1,
+            count: count as u32,
+        },
+        row..row + count,
+    )?;
     let mut lines = t.lines.clone();
+    shift.apply_own(&t, &mut lines)?;
     for r in (row..row + count).rev() {
         lines.remove(t.line_of(r));
     }
-    let new = finish(doc, &t, lines, None)?;
+    let new = write_rows(doc, &t, lines, Some(&shift))?;
     let shown: Vec<String> = (row..(row + count).min(row + 3))
         .map(|r| format!("row {}: {}", r + 1, t.cells[r].join(" | ")))
         .collect();
@@ -549,7 +727,7 @@ pub fn delete_rows(doc: &Document, note: &str, args: &Value) -> Result<Planned> 
         row + count,
         shown.join("; "),
         if count > 3 { "; and more" } else { "" }
-    );
+    ) + &shift.sentence();
     let extra = after(&t, &new);
     Ok(Planned::new(new, summary)
         .touching(count * t.columns())
@@ -811,3 +989,7 @@ pub fn add_sheet(doc: &Document, args: &Value) -> Result<Planned> {
 #[cfg(test)]
 #[path = "sheet_ops_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "sheet_shift_tests.rs"]
+mod shift_tests;

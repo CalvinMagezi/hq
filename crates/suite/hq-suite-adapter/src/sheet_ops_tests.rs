@@ -151,51 +151,6 @@ fn rows_are_added_at_the_end_even_when_formulas_read_the_rows_above() {
 }
 
 #[test]
-fn rows_in_the_middle_are_refused_when_a_formula_reads_the_rows_below() {
-    let d = vault(NOTE);
-    let hash = sheet_hash(&d, 0);
-    let e = err(
-        &d,
-        json!({"action": "add_rows", "hash": hash, "at": 2, "rows": [["Rice", 1, 1, 1]]}),
-    );
-    assert!(
-        e.contains("reads row 3 or below") && e.contains("would move"),
-        "{e}"
-    );
-    // The same call in a sheet nothing reads is fine, and lands where asked.
-    let p = vault(PLAIN);
-    let hash = sheet_hash(&p, 0);
-    run(
-        p.path(),
-        &json!({"action": "add_rows", "note": "Notebooks/n.md", "hash": hash, "at": 2, "rows": [["Dee", 9]]}),
-        Gate::Owner,
-    )
-    .unwrap();
-    assert_eq!(
-        text(&p),
-        PLAIN.replace("| Bob | 2 |\n", "| Dee | 9 |\n| Bob | 2 |\n")
-    );
-}
-
-#[test]
-fn a_tile_or_a_plot_over_the_rows_blocks_an_insert_too() {
-    let note = format!("{PLAIN}\n```tile from=\"B2:B4\" fn=sum label=Total\n```\n");
-    let d = vault(&note);
-    let hash = sheet_hash(&d, 0);
-    let e = err(
-        &d,
-        json!({"action": "add_rows", "hash": hash, "at": 1, "rows": [["Zed", 0]]}),
-    );
-    assert!(e.contains("a tile block reads"), "{e}");
-    // A formula in another sheet that names this one counts as well.
-    let two = format!("{PLAIN}\n```sheet name=Other\n| v |\n|---|\n| =SUM(Names!B2:B4) |\n```\n");
-    let d = vault(&two);
-    let hash = sheet_hash(&d, 0);
-    let e = err(&d, json!({"action": "delete_rows", "hash": hash, "row": 3}));
-    assert!(e.contains("sheet `Other`"), "{e}");
-}
-
-#[test]
 fn add_rows_checks_its_arguments() {
     let d = vault(PLAIN);
     let hash = sheet_hash(&d, 0);
@@ -268,11 +223,22 @@ fn the_cell_limit_of_a_sheet_is_kept() {
 }
 
 #[test]
-fn rows_are_deleted_only_when_nothing_reads_below_them() {
+fn rows_are_deleted_and_the_formulas_below_follow() {
     let d = vault(NOTE);
     let hash = sheet_hash(&d, 0);
-    let e = err(&d, json!({"action": "delete_rows", "hash": hash, "row": 1}));
-    assert!(e.contains("reads row 2 or below"), "{e}");
+    let out = go(&d, json!({"action": "delete_rows", "hash": hash, "row": 1})).unwrap();
+    assert!(
+        out["summary"]
+            .as_str()
+            .unwrap()
+            .contains("Adjusted 2 formulas")
+    );
+    assert_eq!(
+        text(&d),
+        NOTE.replace("| Sugar | 40  | 4200  | =B2*C2 |\n", "")
+            .replace("=B3*C3", "=B2*C2")
+            .replace("=SUM(D2:D3)", "=SUM(D2:D2)")
+    );
     let p = vault(PLAIN);
     let hash = sheet_hash(&p, 0);
     let call = |args: Value| {
@@ -577,25 +543,4 @@ fn untouched_blocks_and_other_sheets_come_back_byte_for_byte() {
     assert!(
         after.ends_with("```sheet name=Other\n|  a |   b |\n|----|-----|\n|  1 |   2 |\n```\n")
     );
-}
-
-#[test]
-fn only_references_to_rows_at_or_below_count_as_reading_them() {
-    assert!(mentions_row_from("SUM(D2:D3)", 3));
-    assert!(!mentions_row_from("SUM(D2:D3)", 4));
-    assert!(mentions_row_from("B$5*$C7", 7));
-    assert!(mentions_row_from("Prices!B9+1", 9));
-    assert!(
-        !mentions_row_from("\"D9\"&A1", 5),
-        "text in quotes is not a cell"
-    );
-    assert!(
-        !mentions_row_from("LOG10(A1)", 2),
-        "a function name is not a cell"
-    );
-    assert!(
-        !mentions_row_from("SUM(A:A)", 1),
-        "a whole column has no row"
-    );
-    assert!(!mentions_row_from("1.5*2", 1), "numbers are not cells");
 }

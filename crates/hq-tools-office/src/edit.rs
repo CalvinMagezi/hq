@@ -66,8 +66,8 @@ impl HqTool for OfficeEditTool {
          `col`, with the `expected` text of each cell), `add_rows` (at the end, or before `at`), \
          `delete_rows`, `add_column` (on the right: `name`, `type`, `default`), `set_column_type`, \
          `add_sheet` (`name`, `columns`, optional `types` and `rows`). The sheet actions that \
-         change structure quote the sheet block's `hash`. Rows are not inserted or deleted where \
-         a formula, tile or plot reads the rows below; the answer says which. Decks: `add_card` \
+         change structure quote the sheet block's `hash`. Rows inserted or deleted move the \
+         formulas, tiles and plots that read the rows below, and the answer says how many. Decks: `add_card` \
          (`title`, `markdown`, after `after_card`), `replace_card`, `move_card` (`to`), \
          `delete_card`, `set_notes` (`text`), `set_card_style` (`transition`, `background`, \
          `color`, `layout`; null clears one); a card is quoted by its `card` number and `hash`. \

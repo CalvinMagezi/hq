@@ -22,6 +22,7 @@ pub mod governor;
 pub mod measure;
 pub mod peer;
 pub mod preview;
+pub mod ref_shift;
 pub mod restore;
 pub mod sheet_ops;
 pub mod sheets;
