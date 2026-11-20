@@ -122,7 +122,7 @@ mod tests {
         let vault = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(vault.path().join("Notebooks")).unwrap();
         std::fs::write(vault.path().join("Notebooks/a.docx"), b"x").unwrap();
-        let tool = create_office_tools(vault.path().to_path_buf()).remove(0);
+        let tool = create_office_tools(vault.path().to_path_buf(), None).remove(0);
         assert_eq!(tool.name(), OFFICE_TOOL);
 
         let ok = tool
