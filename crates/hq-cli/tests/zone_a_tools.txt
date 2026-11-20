@@ -1,6 +1,7 @@
 # Tools that change things and are zone A by name: no approval for the tool as such.
 # config_manage, helper_setup, vault_export, hq_coder and the office tool ask for some arguments;
 # harness_session_send and _publish ask once the chat has read outside text.
+# sandbox_request is itself the gate: it approves under the owner's profile, asks the owner, or refuses.
 # Add a line only after deciding the tool needs no approval.
 agent_delegate
 agent_message_send
@@ -39,6 +40,7 @@ notify_owner
 office_create
 office_export
 office_file
+sandbox_request
 space_create
 space_update
 subagent_run_cancel
