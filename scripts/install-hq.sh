@@ -17,7 +17,8 @@
 # Usage (from repo root):
 #   ./scripts/install-hq.sh              # build if needed, install, restart daemon
 #   ./scripts/install-hq.sh --no-build   # install the existing release binary
-#   ./scripts/install-hq.sh --check      # report installed vs built version
+#   ./scripts/install-hq.sh --check      # report installed vs built version (copies included)
+#   HQ_RESTART_HOST=1 ./scripts/install-hq.sh   # also restart the host service (stops running agents)
 #   sudo ./scripts/install-hq.sh --link  # one-time: point /usr/local/bin/hq at ~/bin/hq
 
 set -euo pipefail
@@ -86,6 +87,17 @@ record_stamp() {
     chown -R "$INVOKING_USER" "$STAMP_DIR" 2>/dev/null || true
 }
 
+# Services that run their own copy of the binary instead of $USER_BIN: the bridge (so a daemon
+# restart never drops the phone link) and the host service. A copy nobody updates keeps running
+# old code for weeks: the gate, the sandbox and the pairing all live in them. `path:launchd-label`.
+SIBLING_COPIES=(
+    "$USER_HOME/bin/hq-bridge:com.agent-hq.bridge"
+    "$USER_HOME/.local/bin/hq:com.hq.host"
+)
+# The host service owns every running coding agent: restarting it stops them (they stay
+# resumable), so it restarts only when asked. The bridge only blips the phone link for seconds.
+HOST_LABEL="com.hq.host"
+
 if [[ "${1:-}" == "--check" ]]; then
     built="$(short_hash "$BINARY")"
     printf 'built       %s  %s\n' "$built" "$BINARY"
@@ -99,6 +111,18 @@ if [[ "${1:-}" == "--check" ]]; then
             printf '%-11s -> %s  %s\n' "linked" "$USER_BIN" "$p"
             continue
         fi
+        from="$(cat "$(stamp_file "$p")" 2>/dev/null || echo unknown)"
+        case "$from" in
+            "$built") state="current" ;;
+            unknown)  state="UNKNOWN" ;;
+            *)        state="STALE" ;;
+        esac
+        printf '%-11s built from %s  %s  (%s)\n' "$state" "$from" "$p" \
+            "$("$p" --version 2>/dev/null || echo '-')"
+    done
+    for entry in "${SIBLING_COPIES[@]}"; do
+        p="${entry%%:*}"
+        [[ -f "$p" && ! -L "$p" ]] || continue
         from="$(cat "$(stamp_file "$p")" 2>/dev/null || echo unknown)"
         case "$from" in
             "$built") state="current" ;;
@@ -269,6 +293,45 @@ if ! $STABLE_SIGN; then
     echo ""
     echo "⚠️  Using ad-hoc signature — FDA may need re-granting."
     echo "   Run 'hq host install' once to make a stable signing identity."
+fi
+
+# ─── Sibling copies ───────────────────────────────────────────
+# Written next to the target and moved into place, so a running service never sees a half-written
+# file. A copy that is a symlink (or absent) is left alone: it already follows $USER_BIN or is not
+# in use on this machine.
+sync_sibling() {
+    local path="$1" label="$2" tmp="$1.new"
+    install -m 755 "$BINARY" "$tmp"
+    sign_binary "$tmp" || true
+    mv -f "$tmp" "$path"
+    record_stamp "$path"
+    echo "Installed $path ($(du -sh "$path" | cut -f1)) for $label"
+}
+
+HOST_STALE=false
+for entry in "${SIBLING_COPIES[@]}"; do
+    path="${entry%%:*}"
+    label="${entry##*:}"
+    [[ -f "$path" && ! -L "$path" ]] || continue
+    sync_sibling "$path" "$label"
+    if [[ "$label" == "$HOST_LABEL" ]]; then
+        if [[ "${HQ_RESTART_HOST:-}" == "1" ]]; then
+            run_as_user launchctl kickstart -k "$LAUNCH_DOMAIN/$label" >/dev/null 2>&1 \
+                && echo "Restarted $label (its agents stopped and can be resumed)."
+        else
+            HOST_STALE=true
+        fi
+    else
+        run_as_user launchctl kickstart -k "$LAUNCH_DOMAIN/$label" >/dev/null 2>&1 \
+            && echo "Restarted $label."
+    fi
+done
+if $HOST_STALE; then
+    echo ""
+    echo "⚠️  The host service ($HOST_LABEL) may still be running the OLD binary in memory."
+    echo "   Restarting it stops every running coding agent (they stay resumable), so it is"
+    echo "   left to you:  launchctl kickstart -k $LAUNCH_DOMAIN/$HOST_LABEL"
+    echo "   or rerun this install with HQ_RESTART_HOST=1."
 fi
 
 # ─── Restart daemon ───────────────────────────────────────────
