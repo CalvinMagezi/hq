@@ -19,9 +19,10 @@ pub const GATE_DENIED_EXIT: i32 = 64;
 /// not end the host), and so is `agent.report`, which belongs to the agent's own
 /// hooks on the machine where it runs. `host.lockdown` is in so HQ can stop a
 /// machine's agents from anywhere; unlocking has no method at all.
-const ALLOWED: [&str; 34] = [
+const ALLOWED: [&str; 36] = [
     "host.status",
     "host.programs",
+    "host.realpath",
     "host.lockdown",
     "host.quota",
     "host.workspace",
@@ -36,6 +37,7 @@ const ALLOWED: [&str; 34] = [
     "agent.spawn",
     "agent.list",
     "agent.get",
+    "agent.egress",
     "agent.read",
     "agent.read_since",
     "agent.pending",
@@ -115,6 +117,14 @@ mod tests {
     #[test]
     fn a_remote_caller_can_read_lane_quota() {
         assert!(parse_request(&request("host.quota", "{}")).is_ok());
+    }
+
+    #[test]
+    fn a_remote_caller_can_resolve_paths_and_read_a_sessions_egress_log() {
+        // The sandbox grants broker decides against the session computer's paths and its
+        // sandbox_denials tool reads the egress log, both from an HQ that runs elsewhere.
+        assert!(parse_request(&request("host.realpath", r#"{"paths":["/a"]}"#)).is_ok());
+        assert!(parse_request(&request("agent.egress", r#"{"name":"a"}"#)).is_ok());
     }
 
     #[test]
