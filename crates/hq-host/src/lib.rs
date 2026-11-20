@@ -59,6 +59,7 @@ mod quota;
 mod relay;
 #[cfg(unix)]
 mod report;
+#[cfg(unix)]
 mod sandbox;
 #[cfg(unix)]
 mod server;
