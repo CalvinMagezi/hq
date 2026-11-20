@@ -14,6 +14,8 @@ Never write a deliverable anywhere else. A file in a scratch folder, `/tmp` or y
 
 ## The two steps
 
+These tools may not be in your tool list yet: they load on demand. Call `tool_search` with the word `office` first, then use them. Do not tell the owner they are unavailable until a search and a real call have both failed, and then quote the error you got.
+
 1. `office_create` with `kind`:
    - `sheet`: give `sheets`, each with `columns` (a name and a `type`: text, int, num, bool, date, pct, or a currency code such as ugx or usd) and `rows`. A cell that starts with `=` is a formula, written the way a spreadsheet writes it (`=B2*C2`, `=SUM(D2:D9)`). Use formulas for totals and products so the owner can change a number and see the rest follow. Leave a cell blank when you do not know the value.
    - `doc`: give `content` as Markdown. Use headings, short paragraphs and tables.

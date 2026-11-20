@@ -257,15 +257,7 @@ impl AgentSession {
         let mut tools = self.tools.lock().await;
         let catalog = tools.deferred_catalog();
 
-        let query_lower = query.to_lowercase();
-        let matches: Vec<_> = catalog
-            .iter()
-            .filter(|(name, hint)| {
-                name.to_lowercase().contains(&query_lower)
-                    || hint.to_lowercase().contains(&query_lower)
-            })
-            .take(max_results)
-            .collect();
+        let matches = rank_tool_matches(&catalog, query, max_results);
 
         if matches.is_empty() {
             return Ok(hq_core::types::ToolResult {
@@ -541,5 +533,101 @@ mod arg_preview_tests {
         .unwrap();
         assert!(!p.contains("0123456789abcdef"), "{p}");
         assert!(p.contains("[REDACTED]"), "{p}");
+    }
+}
+
+/// Splits a tool-search query into lowercase words (three or more characters and not a
+/// stop word, so "the" and "of" match nothing by accident).
+const STOP_WORDS: &[&str] = &[
+    "the", "and", "for", "with", "that", "this", "from", "into", "you", "are", "need", "want",
+];
+
+fn query_terms(query: &str) -> Vec<String> {
+    let mut terms: Vec<String> = query
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() >= 3 && !STOP_WORDS.contains(w))
+        .map(str::to_string)
+        .collect();
+    terms.sort();
+    terms.dedup();
+    terms
+}
+
+/// Catalogue entries that match any query word in the name or hint, the most words first and
+/// catalogue order among equals, at most `max_results`. A name match counts double so
+/// `office_create` outranks a tool that only mentions "office" in its hint.
+fn rank_tool_matches<'a>(
+    catalog: &'a [(String, String)],
+    query: &str,
+    max_results: usize,
+) -> Vec<&'a (String, String)> {
+    let terms = query_terms(query);
+    let mut scored: Vec<(usize, &(String, String))> = catalog
+        .iter()
+        .filter_map(|entry| {
+            let name = entry.0.to_lowercase();
+            let hint = entry.1.to_lowercase();
+            let score: usize = terms
+                .iter()
+                .map(|t| {
+                    usize::from(name.contains(t.as_str())) * 2
+                        + usize::from(hint.contains(t.as_str()))
+                })
+                .sum();
+            (score > 0).then_some((score, entry))
+        })
+        .collect();
+    scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+    scored
+        .into_iter()
+        .take(max_results)
+        .map(|(_, e)| e)
+        .collect()
+}
+
+#[cfg(test)]
+mod tool_search_tests {
+    use super::rank_tool_matches;
+
+    fn cat() -> Vec<(String, String)> {
+        [
+            ("vault_inventory", "List notes in the vault"),
+            ("office_create", "Make a spreadsheet, document or dashboard"),
+            ("office_export", "Export an office file"),
+            ("web_fetch", "Fetch a page"),
+        ]
+        .iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect()
+    }
+
+    fn names(q: &str, n: usize) -> Vec<String> {
+        rank_tool_matches(&cat(), q, n)
+            .into_iter()
+            .map(|e| e.0.clone())
+            .collect()
+    }
+
+    #[test]
+    fn long_sentence_finds_office_create() {
+        let got = names(
+            "I need to make a spreadsheet and a dashboard for the team",
+            5,
+        );
+        assert_eq!(got.first().map(String::as_str), Some("office_create"));
+    }
+
+    #[test]
+    fn single_word_still_matches_and_ranks_by_terms() {
+        assert_eq!(names("office", 5), vec!["office_export", "office_create"]);
+        assert_eq!(names("export office file", 5)[0], "office_export");
+    }
+
+    #[test]
+    fn max_results_caps_and_nonsense_matches_nothing() {
+        assert_eq!(names("office", 1).len(), 1);
+        assert!(names("zzzz qqqq", 5).is_empty());
+        assert!(names("", 5).is_empty());
     }
 }

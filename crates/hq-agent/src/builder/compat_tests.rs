@@ -353,3 +353,84 @@ async fn an_orchestrator_cannot_point_a_note_export_outside_notebooks() {
     }
     assert!(!outside.exists());
 }
+
+/// Names that look like a tool (`word_word`) in a built-in skill's `hints:` line.
+fn skill_hint_tool_names() -> Vec<String> {
+    let mut out = Vec::new();
+    for skill in hq_tools::skill_model::shipped::BUILTIN_SKILLS {
+        for (_, text) in skill.files {
+            let Some(line) = text.lines().find(|l| l.starts_with("hints:")) else {
+                continue;
+            };
+            let list = line.trim_start_matches("hints:").trim();
+            let list = list.trim_start_matches('[').trim_end_matches(']');
+            for h in list.split(',').map(str::trim) {
+                if h.contains('_')
+                    && h.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+                    && !h.starts_with('_')
+                {
+                    out.push(h.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Tools the capabilities list or a skill names that a native chat session does not carry, each
+/// with the reason. A new entry here needs a reason a reviewer accepts; the usual fix is to
+/// register the tool in `hq_tool_catalog`.
+const NOT_IN_NATIVE_CATALOGUE: &[(&str, &str)] = &[
+    (
+        "calendar_create_event",
+        "device action: the phone app answers it, the host has no calendar",
+    ),
+    (
+        "calendar_delete_event",
+        "device action: the phone app answers it",
+    ),
+    (
+        "calendar_list_events",
+        "device action: the phone app answers it",
+    ),
+    (
+        "calendar_update_event",
+        "device action: the phone app answers it",
+    ),
+    ("contacts_search", "device action: the phone app answers it"),
+    (
+        "depends_on",
+        "a task field a skill names in its hints, not a tool",
+    ),
+    (
+        "google_workspace",
+        "gws CLI tool the MCP registry carries; not yet in the native catalogue",
+    ),
+];
+
+/// The capabilities list and the built-in skills promise tools to the owner. A promise the native
+/// chat session cannot keep is how "make a spreadsheet" once failed with "the tools are
+/// unavailable": the tools existed over MCP only.
+#[tokio::test]
+async fn every_advertised_tool_is_in_the_native_catalogue() {
+    let names = web_chat_tool_names().await;
+    let mut wanted: Vec<String> = hq_tools::capabilities::catalog()
+        .iter()
+        .flat_map(|c| c.tools.iter().cloned())
+        .collect();
+    wanted.extend(skill_hint_tool_names());
+    wanted.sort();
+    wanted.dedup();
+    let missing: Vec<&String> = wanted
+        .iter()
+        // The office tools come with the `suite` feature, which `hq-cli` turns on by default.
+        .filter(|w| cfg!(feature = "suite") || !w.starts_with("office_"))
+        .filter(|w| !names.contains(w))
+        .filter(|w| !NOT_IN_NATIVE_CATALOGUE.iter().any(|(n, _)| n == w))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "advertised but not in the native session catalogue: {missing:?}. Register them in \
+         hq_tool_catalog, or add them to NOT_IN_NATIVE_CATALOGUE with a reason. Have: {names:?}"
+    );
+}
