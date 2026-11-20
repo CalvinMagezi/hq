@@ -121,7 +121,8 @@ pub enum Block {
     /// Markdown that is already final, such as footnote definitions.
     Raw(String),
     /// A review comment on the block before it. Only the Word reader makes one, and only when
-    /// asked (`ConvertOptions::word_comments`); [`render_checked`] writes it as a `comment` block.
+    /// asked (`ConvertOptions::word_comments`); [`render_checked`] writes it as a `comment` block
+    /// through the caller's [`CommentCodec`].
     Comment(DocComment),
 }
 
@@ -226,12 +227,33 @@ enum Mode {
 /// A document with a title block gets that title as the only `#` heading and
 /// every other heading moves down one level.
 pub fn render(blocks: Vec<Block>) -> String {
-    render_checked(blocks).0
+    render_checked(blocks, None).0
+}
+
+/// How a caller that owns the note format writes a Word comment into the note. The importer
+/// knows nothing of that format: it hands each comment and the block it sits on to this codec,
+/// so the `comment` block syntax and the block hash stay with the crate that defines them.
+pub trait CommentCodec: Send + Sync {
+    /// The anchor of the last block in `markdown_part` (the text of one rendered block, tidied
+    /// the way the note will hold it), or `None` when it holds no block.
+    fn last_block_hash(&self, markdown_part: &str) -> Option<String>;
+    /// One comment as the note's text, anchored on the block whose anchor is `on`. `at` is
+    /// `YYYY-MM-DD` when the file gives a date; `by` is empty when it names no author.
+    fn render_comment(
+        &self,
+        on: &str,
+        by: &str,
+        at: Option<&str>,
+        resolved: bool,
+        text: &str,
+    ) -> String;
+    /// How many comments in the finished `markdown` point at a block it does not hold.
+    fn orphans(&self, markdown: &str) -> usize;
 }
 
 /// [`render`], and how many `comment` blocks ended up anchored to a hash no block of the written
-/// text has (zero when there are no comments).
-pub fn render_checked(mut blocks: Vec<Block>) -> (String, usize) {
+/// text has (zero when there are no comments). Without a `codec`, comments are not written.
+pub fn render_checked(mut blocks: Vec<Block>, codec: Option<&dyn CommentCodec>) -> (String, usize) {
     shift_headings(&mut blocks);
     let blocks = merge_adjacent(blocks);
     let mut parts: Vec<String> = Vec::new();
@@ -240,8 +262,8 @@ pub fn render_checked(mut blocks: Vec<Block>) -> (String, usize) {
     for block in &blocks {
         if let Block::Comment(c) = block {
             has_comments = true;
-            if let Some(on) = &anchor {
-                parts.push(comment_block(c, on));
+            if let (Some(codec), Some(on)) = (codec, &anchor) {
+                parts.push(codec.render_comment(on, &c.by, c.at.as_deref(), c.resolved, &c.text));
             }
             continue;
         }
@@ -249,10 +271,9 @@ pub fn render_checked(mut blocks: Vec<Block>) -> (String, usize) {
         if !text.trim().is_empty() {
             // The hash is that of the block as the note will hold it, so ask the note's own
             // parser. A part that parses to several blocks is anchored on its last.
-            anchor = hq_suite_md::Document::parse(&tidy(&text))
-                .nodes()
-                .last()
-                .map(|n| n.hash());
+            if codec.is_some() {
+                anchor = codec.and_then(|c| c.last_block_hash(&tidy(&text)));
+            }
             parts.push(text);
         }
     }
@@ -261,27 +282,11 @@ pub fn render_checked(mut blocks: Vec<Block>) -> (String, usize) {
     if !out.is_empty() {
         out.push('\n');
     }
-    let orphaned = if has_comments {
-        hq_suite_md::comments(&hq_suite_md::Document::parse(&out))
-            .iter()
-            .filter(|c| c.orphaned)
-            .count()
-    } else {
-        0
+    let orphaned = match codec {
+        Some(codec) if has_comments => codec.orphans(&out),
+        _ => 0,
     };
     (out, orphaned)
-}
-
-fn comment_block(c: &DocComment, on: &str) -> String {
-    let mut attrs: Vec<(&str, &str)> = vec![("on", on)];
-    if !c.by.is_empty() {
-        attrs.push(("by", &c.by));
-    }
-    if let Some(at) = &c.at {
-        attrs.push(("at", at));
-    }
-    attrs.push(("state", if c.resolved { "resolved" } else { "open" }));
-    hq_suite_md::TypedBlock::new(hq_suite_md::BlockType::Comment, &attrs, &c.text).render("\n")
 }
 
 fn shift_headings(blocks: &mut [Block]) {

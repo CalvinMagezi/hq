@@ -2,7 +2,9 @@
 
 use std::io::{Cursor, Write};
 
-use hq_convert::ingest::{ConvertOptions, LossKind, OcrMode, convert_bytes};
+use hq_convert::ingest::{
+    CommentCodec, ConvertOptions, LossKind, OcrMode, WordComments, convert_bytes,
+};
 
 const NS: &str = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main""#;
 
@@ -36,21 +38,33 @@ fn docx() -> Vec<u8> {
     buf.into_inner()
 }
 
-fn opts(word_comments: bool) -> ConvertOptions {
+fn opts() -> ConvertOptions {
     ConvertOptions {
         ocr: OcrMode::Off,
         external_office: false,
-        word_comments,
         ..ConvertOptions::default()
     }
 }
 
+/// A stand-in for a note format: anchors on the part's length, writes one line per comment.
+struct Fake;
+
+impl CommentCodec for Fake {
+    fn last_block_hash(&self, part: &str) -> Option<String> {
+        Some(part.len().to_string())
+    }
+    fn render_comment(&self, on: &str, by: &str, _: Option<&str>, _: bool, text: &str) -> String {
+        format!("[{on}|{by}|{text}]")
+    }
+    fn orphans(&self, _: &str) -> usize {
+        0
+    }
+}
+
 #[tokio::test]
-async fn off_by_default_the_import_is_what_it_always_was() {
-    assert!(!ConvertOptions::default().word_comments);
-    let done = convert_bytes(docx(), "docx", None, &opts(false))
-        .await
-        .unwrap();
+async fn without_a_codec_the_import_is_what_it_always_was() {
+    assert!(ConvertOptions::default().word_comments.is_none());
+    let done = convert_bytes(docx(), "docx", None, &opts()).await.unwrap();
     assert_eq!(
         done.markdown,
         "Order for March\n\nSix bags at 6,000 each.\n\nThanks. Added later.\n"
@@ -62,25 +76,21 @@ async fn off_by_default_the_import_is_what_it_always_was() {
 }
 
 #[tokio::test]
-async fn asked_for_they_follow_their_block_and_the_report_counts_them() {
-    let plain = convert_bytes(docx(), "docx", None, &opts(false))
-        .await
-        .unwrap();
-    let done = convert_bytes(docx(), "docx", None, &opts(true))
-        .await
-        .unwrap();
-    assert_eq!(hq_suite_md::strip_comments(&done.markdown), plain.markdown);
-    let doc = hq_suite_md::Document::parse(&done.markdown);
-    let found = hq_suite_md::comments(&doc);
-    assert_eq!(found.len(), 1, "{}", done.markdown);
-    assert!(!found[0].orphaned);
-    assert_eq!(found[0].by.as_deref(), Some("Sam"));
-    assert_eq!(found[0].at.as_deref(), Some("2026-11-20"));
-    assert_eq!(found[0].text, "Is 6,000 right?");
+async fn with_a_codec_comments_follow_their_block_and_the_report_counts_them() {
+    let on = ConvertOptions {
+        word_comments: Some(WordComments::new(Fake)),
+        ..opts()
+    };
+    let done = convert_bytes(docx(), "docx", None, &on).await.unwrap();
+    assert!(
+        done.markdown
+            .contains("Six bags at 6,000 each.\n\n[23|Sam|Is 6,000 right?]\n\nThanks."),
+        "{}",
+        done.markdown
+    );
     let kinds: Vec<_> = done.report.warnings.iter().map(|w| w.kind).collect();
     assert!(kinds.contains(&LossKind::CommentsCarried), "{kinds:?}");
     assert!(kinds.contains(&LossKind::CommentsUnanchored), "{kinds:?}");
     assert!(kinds.contains(&LossKind::TrackedChanges), "{kinds:?}");
-    // The one that could not be placed is a loss, so the outcome says so.
     assert!(done.report.has_loss());
 }

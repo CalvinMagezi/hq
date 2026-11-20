@@ -13,7 +13,7 @@ A doc is an ordinary note: headings, paragraphs, lists, tables, code and images 
 
 ## Comments from a Word file
 
-When a Word file is shrunk (`hq-suite-shrink`, which turns on `ConvertOptions::word_comments`), the
+When a Word file is shrunk (`hq-suite-shrink`, which sets `ConvertOptions::word_comments` to the codec from `hq_suite_ingest::word_comment_codec()`; the importer itself does not know hqmd), the
 comments in `word/comments.xml` come across as `comment` blocks (`HQMD.md`), each placed after the
 block it was on:
 

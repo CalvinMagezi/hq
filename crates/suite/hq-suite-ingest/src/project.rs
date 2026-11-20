@@ -270,7 +270,7 @@ mod tests {
         let off = read_document(bytes.clone(), "docx", &opts()).await.unwrap();
         assert_eq!(off.markdown, "Order for March\n");
         let on = ConvertOptions {
-            word_comments: true,
+            word_comments: Some(crate::word_comment_codec()),
             ..opts()
         };
         let got = read_document(bytes, "docx", &on).await.unwrap();

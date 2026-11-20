@@ -35,6 +35,7 @@ use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
+pub use ir::CommentCodec;
 pub use package::Limits;
 pub use report::{ConversionReport, LossKind, Losses, Outcome, Stats, Warning};
 pub use sniff::{By, Kind, Sniffed, sniff};
@@ -86,10 +87,26 @@ pub struct ConvertOptions {
     /// output is `*[image: alt]*`, with the picture left out.
     pub image_markers: bool,
     /// Carry the comments of a Word document as hqmd `comment` blocks placed after the block they
-    /// sit on, each anchored by that block's hash. Off by default: a plain import has no use for
-    /// them, and its output stays as it was. The report counts what was carried and what had no
-    /// block to sit on.
-    pub word_comments: bool,
+    /// sit on, each anchored by that block's hash. The codec writes them, since the importer does
+    /// not know the note format. `None` by default: a plain import has no use for them, and its
+    /// output stays as it was. The report counts what was carried and what had no block to sit on.
+    pub word_comments: Option<WordComments>,
+}
+
+/// A shared [`CommentCodec`], as `ConvertOptions::word_comments` holds it.
+#[derive(Clone)]
+pub struct WordComments(pub Arc<dyn CommentCodec>);
+
+impl WordComments {
+    pub fn new(codec: impl CommentCodec + 'static) -> Self {
+        Self(Arc::new(codec))
+    }
+}
+
+impl std::fmt::Debug for WordComments {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WordComments(..)")
+    }
 }
 
 impl Default for ConvertOptions {
@@ -101,7 +118,7 @@ impl Default for ConvertOptions {
             ocr: OcrMode::Auto,
             external_office: true,
             image_markers: false,
-            word_comments: false,
+            word_comments: None,
         }
     }
 }
@@ -180,12 +197,13 @@ pub async fn convert_bytes(
     let ext = ext.as_str();
     let (markdown, title, engine) = match sniffed.kind {
         Kind::Docx => {
-            let (markers, comments) = (opts.image_markers, opts.word_comments);
+            let (markers, comments) = (opts.image_markers, opts.word_comments.is_some());
             let parsed = native(bytes.clone(), opts, move |pkg| {
                 docx::read_with(pkg, markers, comments)
             })
             .await?;
-            finish(parsed, &mut losses, "native:docx".into())
+            let codec = opts.word_comments.as_ref().map(|c| &*c.0);
+            finish_with(parsed, &mut losses, "native:docx".into(), codec)
         }
         Kind::Pptx => {
             let parsed = native(bytes.clone(), opts, pptx::read).await?;
@@ -427,8 +445,18 @@ fn finish(
     losses: &mut Losses,
     engine: String,
 ) -> (String, Option<String>, String) {
+    finish_with(parsed, losses, engine, None)
+}
+
+/// [`finish`], writing Word comments through `codec` (only the Word reader makes any).
+fn finish_with(
+    parsed: ir::Parsed,
+    losses: &mut Losses,
+    engine: String,
+    codec: Option<&dyn CommentCodec>,
+) -> (String, Option<String>, String) {
     losses.merge(parsed.losses);
-    let (markdown, orphaned) = ir::render_checked(parsed.blocks);
+    let (markdown, orphaned) = ir::render_checked(parsed.blocks, codec);
     if orphaned > 0 {
         losses.note(
             LossKind::CommentsUnanchored,

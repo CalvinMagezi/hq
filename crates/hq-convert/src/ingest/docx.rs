@@ -1076,16 +1076,6 @@ mod tests {
     const W14: &str = "http://schemas.microsoft.com/office/word/2010/wordml";
     const W15: &str = "http://schemas.microsoft.com/office/word/2012/wordml";
 
-    /// Reads with comments on, rendering the way the importer does.
-    fn md_comments(bytes: &[u8]) -> (String, Vec<String>) {
-        let mut pkg = Package::open(bytes, &Limits::default()).unwrap();
-        let parsed = read_with(&mut pkg, false, true).unwrap();
-        let warnings = parsed.losses.into_warnings();
-        let (md, orphaned) = super::super::ir::render_checked(parsed.blocks);
-        assert_eq!(orphaned, 0, "{md}");
-        (md, warnings.into_iter().map(|w| w.detail).collect())
-    }
-
     fn commented_doc() -> Vec<u8> {
         let comments = format!(
             r#"<w:comments {NS} xmlns:w14="{W14}"><w:comment w:id="0" w:author="Sam &quot;the&quot; `Reviewer`" w:date="2026-11-20T10:15:00Z"><w:p w14:paraId="AAA1"><w:r><w:t>Is this the final figure?</w:t></w:r></w:p><w:p w14:paraId="AAA2"><w:r><w:t>Please check.</w:t></w:r></w:p></w:comment>
@@ -1111,54 +1101,6 @@ mod tests {
     }
 
     #[test]
-    fn comments_follow_their_block_with_its_hash_and_the_rest_of_the_note_is_unchanged() {
-        let bytes = commented_doc();
-        let (written, notes) = md_comments(&bytes);
-        let plain = md(&bytes);
-        assert_eq!(
-            hq_suite_md::strip_comments(&written),
-            plain,
-            "comments are the only difference"
-        );
-        let doc = hq_suite_md::Document::parse(&written);
-        let found = hq_suite_md::comments(&doc);
-        assert_eq!(found.len(), 3, "{written}");
-        assert!(found.iter().all(|c| !c.orphaned), "{written}");
-        // Each sits right after its block.
-        let node_of = |on: &str| {
-            doc.nodes()
-                .iter()
-                .find(|n| n.hash() == on)
-                .map(|n| n.src().to_string())
-                .unwrap()
-        };
-        assert_eq!(node_of(&found[0].on), "Budget is 6,000.");
-        assert_eq!(found[0].by.as_deref(), Some("Sam the Reviewer"));
-        assert_eq!(found[0].at.as_deref(), Some("2026-11-20"));
-        assert_eq!(found[0].state, hq_suite_md::CommentState::Resolved);
-        assert_eq!(found[0].text, "Is this the final figure?\nPlease check.");
-        // A reply keeps its own author and date, on the block of the comment it answers.
-        assert_eq!(found[1].on, found[0].on);
-        assert_eq!(found[1].by.as_deref(), Some("Ana"));
-        assert_eq!(found[1].at.as_deref(), Some("2026-11-21"));
-        assert_eq!(found[1].state, hq_suite_md::CommentState::Resolved);
-        // A comment inside a table cell sits on the table; no date is written when Word has none.
-        assert!(node_of(&found[2].on).starts_with("| Item | Cost |"));
-        assert_eq!(found[2].at, None);
-        assert_eq!(found[2].state, hq_suite_md::CommentState::Open);
-        assert!(
-            notes.contains(&"3 Word comments carried as comment blocks".to_string()),
-            "{notes:?}"
-        );
-        assert!(
-            notes
-                .iter()
-                .any(|n| n.starts_with("1 Word comment not carried")),
-            "{notes:?}"
-        );
-    }
-
-    #[test]
     fn without_the_option_comments_change_nothing() {
         let with_parts = commented_doc();
         let bare = docx(
@@ -1173,43 +1115,6 @@ mod tests {
         let mut pkg = Package::open(&with_parts, &Limits::default()).unwrap();
         let warnings = read(&mut pkg).unwrap().losses.into_warnings();
         assert!(warnings.iter().all(|w| !w.detail.contains("comment")));
-    }
-
-    #[test]
-    fn a_comment_on_a_list_item_sits_after_the_list() {
-        let numbering = format!(
-            r#"<w:numbering {NS}><w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/></w:lvl></w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num></w:numbering>"#
-        );
-        let comments = format!(
-            r#"<w:comments {NS}><w:comment w:id="7" w:author="Sam"><w:p><w:r><w:t>second?</w:t></w:r></w:p></w:comment></w:comments>"#
-        );
-        let item = |t: &str, c: &str| {
-            format!(
-                r#"<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>{c}<w:r><w:t>{t}</w:t></w:r></w:p>"#
-            )
-        };
-        let body = [
-            item("first", ""),
-            item("second", r#"<w:commentRangeStart w:id="7"/>"#),
-            item("third", ""),
-        ]
-        .concat();
-        let bytes = docx(
-            &body,
-            &[
-                ("word/numbering.xml", &numbering),
-                ("word/comments.xml", &comments),
-            ],
-        );
-        let (md, _) = md_comments(&bytes);
-        assert_eq!(
-            hq_suite_md::strip_comments(&md),
-            "1. first\n2. second\n3. third\n"
-        );
-        assert_eq!(
-            hq_suite_md::comments(&hq_suite_md::Document::parse(&md)).len(),
-            1
-        );
     }
 
     #[test]

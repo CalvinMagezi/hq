@@ -1,8 +1,9 @@
 //! Word comments (`word/comments.xml`, with `word/commentsExtended.xml` for resolved and replies).
 //!
-//! Only read when `ConvertOptions::word_comments` is on. Each comment becomes a
-//! [`Block::Comment`] right after the body block it sits on; [`ir::render_checked`] turns it into
-//! a `comment` block anchored by that block's hash. A comment with no block to sit on (its range
+//! Only read when `ConvertOptions::word_comments` is set. Each comment becomes a
+//! [`Block::Comment`] right after the body block it sits on; [`ir::render_checked`] hands it to
+//! the caller's [`ir::CommentCodec`], which writes a `comment` block anchored by that block's
+//! hash. A comment with no block to sit on (its range
 //! is in a header, a footer or a note, or it is never referenced) is not carried, and the report
 //! counts it as a loss.
 
