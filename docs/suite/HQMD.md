@@ -130,6 +130,7 @@ One number computed from a range. The body is empty.
 | `format` | A column type used to display the result. |
 | `where` | Optional. Row filter such as `qty>30 and item=Sugar`; with it the range's first row names the columns and the number comes from the last column. |
 | `group` | Not allowed on a tile. |
+| `size` | Optional view hint: `small`, `wide` or `full`, see "Dashboard layout". |
 
 #### `plot`
 
@@ -143,6 +144,23 @@ A chart drawn from a range. The body is empty.
 | `title` | Optional. |
 | `where` | Optional. Row filter, as on a tile. |
 | `group` | Optional. Column to split into one series per value (bar and line only, up to six). |
+| `size` | Optional view hint: `small`, `wide` or `full`, see "Dashboard layout". |
+
+#### Dashboard layout
+
+The tiles and plots of a dashboard note are shown in the order the note writes them. A block can also
+carry `size=small`, `size=wide` or `size=full`, a hint for how much room a viewer gives it: one column,
+two columns, or the full width of the grid. With no `size` a tile is `small` and a plot is `wide`; a value
+a viewer does not know counts as no `size`.
+
+The web app writes both when a person arranges a dashboard: moving a block rewrites the note so the two
+blocks swap places (every other line stays as written), and a size is added to, changed on or removed
+from the block's opening fence. A size equal to the block's default is written as no attribute. `size` is
+only a hint for viewers: exports and the evaluator ignore it, and a block that carries an attribute a
+version does not know keeps it as written.
+
+> The checker's list of known attributes for `tile` and `plot` does not name `size` yet, so
+> the checker reports `block.unknown_attr` (a warning) for it. See `docs/techdebt/dash-size-attr-checker-warning.md`.
 
 #### `chart`
 

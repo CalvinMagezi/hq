@@ -66,8 +66,8 @@ export function SelectionToolbar({ containerRef, onSendAction }: { containerRef:
             id="hq-selection-toolbar"
             className="fixed z-50 flex items-center gap-1 rounded-lg shadow-xl px-1.5 py-1.5 transform -translate-x-1/2 -mt-12 transition-all"
             style={{
-                background: 'var(--bg-elevated)',
-                border: '1px solid var(--border)',
+                background: 'var(--surface-200)',
+                border: '1px solid var(--hairline)',
                 left: selection.rect.left + selection.rect.width / 2,
                 top: selection.rect.top,
             }}
@@ -79,7 +79,7 @@ export function SelectionToolbar({ containerRef, onSendAction }: { containerRef:
                     setSelection(null)
                 }}
                 className="text-xs font-mono font-bold px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 hover:bg-white/10"
-                style={{ color: 'var(--text-primary)' }}
+                style={{ color: 'var(--ink)' }}
             >
                 <span className="opacity-70">💬</span> Send to Chat
             </button>

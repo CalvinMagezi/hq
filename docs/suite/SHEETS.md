@@ -105,6 +105,12 @@ On a **plot**, `group=region` draws one series per value of that column (up to s
 
 A tile takes no `group` (it shows one number); a pie or donut takes none either. Anything that cannot be read or drawn says why instead of guessing: an unknown column, a condition without a value, more than four conditions, more than six groups.
 
+### Layout
+
+The web app draws a dashboard's tiles and plots in the order the note has them, as one grid, and lets a
+person move a block earlier or later and give it a size (`size=small|wide|full`, see "Dashboard layout" in
+`HQMD.md`). The filters above stay view-only; the layout is written into the note.
+
 ## Second batch of functions
 
 Added to `hq-suite-calc` from the list of what the owner's workbooks still miss. **Not re-measured**: no real workbook was available when this was written, so the match rates above are the ones measured before it, and the effect of this batch on them is unknown until `hq suite calc-check` is run again. Every new function has unit tests that assert Excel's documented answers, error cases included (`crates/suite/hq-suite-calc/src/tests_more.rs`).

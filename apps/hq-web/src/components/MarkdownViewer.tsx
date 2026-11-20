@@ -308,23 +308,23 @@ export function MarkdownViewer({ content, activePath, zoom, bare, onOpenFile }: 
         <div className="markdown-viewer relative" key={activePath} ref={containerRef} style={zoom && zoom !== 1 ? { zoom: `${zoom}` } as React.CSSProperties : undefined}>
             {!bare && <SelectionToolbar containerRef={containerRef} onSendAction={handleSendSelection} />}
             {!bare && Object.keys(frontmatter).length > 0 && (
-                <div className="mb-6 rounded" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+                <div className="mb-6 rounded" style={{ background: 'var(--surface-200)', border: '1px solid var(--hairline)' }}>
                     <button
                         onClick={() => setMetaOpen(!metaOpen)}
                         className="w-full min-h-[44px] text-left px-3 py-2 text-xs font-mono font-bold flex justify-between items-center"
-                        style={{ color: 'var(--text-dim)', cursor: 'pointer' }}
+                        style={{ color: 'var(--ink-muted)', cursor: 'pointer' }}
                     >
                         <span>📄 METADATA</span>
                         <span>{metaOpen ? '▾' : '▸'}</span>
                     </button>
 
                     {metaOpen && (
-                        <div className="px-3 pb-3 text-xs font-mono border-t" style={{ borderColor: 'var(--border)' }}>
+                        <div className="px-3 pb-3 text-xs font-mono border-t" style={{ borderColor: 'var(--hairline)' }}>
                             <div className="grid grid-cols-1 gap-1 pt-2">
                                 {Object.entries(frontmatter).map(([k, v]) => (
                                     <div key={k} className="flex">
-                                        <span className="w-24 opacity-60" style={{ color: 'var(--accent-blue)' }}>{k}</span>
-                                        <span className="truncate" style={{ color: 'var(--text-primary)' }}>{v as React.ReactNode}</span>
+                                        <span className="w-24 opacity-60" style={{ color: 'var(--text-blue)' }}>{k}</span>
+                                        <span className="truncate" style={{ color: 'var(--ink)' }}>{v as React.ReactNode}</span>
                                     </div>
                                 ))}
                             </div>

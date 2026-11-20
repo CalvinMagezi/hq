@@ -40,11 +40,11 @@ export function ToolCallBlock({ steps, credits }: Props) {
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
         className="w-full flex items-center gap-2 px-3 min-h-10 py-2 text-left transition-colors hover:bg-white/5"
-        style={{ color: 'var(--text-dim)' }}
+        style={{ color: 'var(--ink-muted)' }}
       >
-        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--accent-green)' }} />
+        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--text-green)' }} />
         <span className="min-w-0 flex-1 truncate">
-          <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
+          <span className="font-semibold" style={{ color: 'var(--ink)' }}>
             {tn('chat_did', lines.length)}
           </span>
         </span>
@@ -53,10 +53,10 @@ export function ToolCallBlock({ steps, credits }: Props) {
 
       {expanded && (
         <div className="px-2 sm:px-3 pb-2.5 pt-1 space-y-1.5 border-t border-white/5 max-h-80 overflow-y-auto">
-          <ul className="text-[13px] space-y-1 py-1" style={{ color: 'var(--text-dim)' }}>
+          <ul className="text-[13px] space-y-1 py-1" style={{ color: 'var(--ink-muted)' }}>
             {lines.map((line, i) => (
               <li key={i} className="flex items-start gap-2 min-h-6">
-                <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: 'var(--accent-green)' }} aria-hidden="true" />
+                <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: 'var(--text-green)' }} aria-hidden="true" />
                 <span className="min-w-0 break-words">{stepText(line)}</span>
               </li>
             ))}
@@ -66,7 +66,7 @@ export function ToolCallBlock({ steps, credits }: Props) {
             onClick={() => setTechnical(!technical)}
             aria-expanded={technical}
             className="flex items-center gap-1 min-h-9 px-1 text-[11px] opacity-70 hover:opacity-100"
-            style={{ color: 'var(--text-dim)' }}
+            style={{ color: 'var(--ink-muted)' }}
           >
             {technical ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
             {t('chat_technical_details')}
@@ -103,29 +103,29 @@ function ToolStepRow({ step, credit, open, onToggle }: { step: ToolStep; credit?
           className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase shrink-0"
           style={{
             background: isDone ? 'rgba(0, 255, 163, 0.1)' : 'rgba(255, 179, 0, 0.1)',
-            color: isDone ? 'var(--accent-green)' : 'var(--accent-amber)',
+            color: isDone ? 'var(--text-green)' : 'var(--warn)',
           }}
         >
           {step.status}
         </span>
-        <span className="font-bold truncate flex-1 min-w-0" style={{ color: 'var(--text-primary)' }}>{step.toolName}</span>
+        <span className="font-bold truncate flex-1 min-w-0" style={{ color: 'var(--ink)' }}>{step.toolName}</span>
         {credit && (
-          <span className="text-[11px] opacity-60 shrink-0" style={{ color: 'var(--text-dim)' }} title={CREDITS_TOOLTIP}>
+          <span className="text-[11px] opacity-60 shrink-0" style={{ color: 'var(--ink-muted)' }} title={CREDITS_TOOLTIP}>
             {formatCredits(credit.delta)}
           </span>
         )}
         {step.durationMs !== undefined && (
-          <span className="text-[11px] opacity-60 shrink-0" style={{ color: 'var(--text-dim)' }}>{formatDuration(step.durationMs)}</span>
+          <span className="text-[11px] opacity-60 shrink-0" style={{ color: 'var(--ink-muted)' }}>{formatDuration(step.durationMs)}</span>
         )}
         {hasDetail && (
-          <span className="text-[11px] shrink-0" style={{ color: 'var(--text-dim)' }}>{open ? '▲' : '▼'}</span>
+          <span className="text-[11px] shrink-0" style={{ color: 'var(--ink-muted)' }}>{open ? '▲' : '▼'}</span>
         )}
       </button>
 
       {step.progressMessages.length > 0 && !isDone && (
         <div className="mx-2 mb-1.5 space-y-0.5 pl-2 border-l border-amber-500/20">
           {step.progressMessages.slice(-3).map((msg, idx) => (
-            <div key={idx} className="text-[11px] flex items-center gap-1.5" style={{ color: 'var(--text-dim)' }}>
+            <div key={idx} className="text-[11px] flex items-center gap-1.5" style={{ color: 'var(--ink-muted)' }}>
               <Terminal className="w-2.5 h-2.5 opacity-40 shrink-0" />
               <span className="truncate">{msg}</span>
             </div>
@@ -136,12 +136,12 @@ function ToolStepRow({ step, credit, open, onToggle }: { step: ToolStep; credit?
       {open && (
         <div className="mx-2 mb-2 pt-2 border-t border-white/5 space-y-2 text-[11px]">
           {step.inputArgs && (
-            <StepPayload icon={<Code2 className="w-3 h-3" />} label="Input" color="var(--accent-green)">
+            <StepPayload icon={<Code2 className="w-3 h-3" />} label="Input" color="var(--text-green)">
               {JSON.stringify(step.inputArgs, null, 2)}
             </StepPayload>
           )}
           {step.resultOutput && (
-            <StepPayload icon={<AlignLeft className="w-3 h-3" />} label="Output" color="var(--accent-blue)">
+            <StepPayload icon={<AlignLeft className="w-3 h-3" />} label="Output" color="var(--text-blue)">
               {step.resultOutput}
             </StepPayload>
           )}
@@ -157,7 +157,7 @@ function StepPayload({ icon, label, color, children }: { icon: React.ReactNode; 
       <div className="flex items-center gap-1 font-semibold mb-1 opacity-75" style={{ color }}>
         {icon} {label}
       </div>
-      <pre className="p-2 rounded bg-black/40 border border-white/5 overflow-x-auto text-[11px] leading-tight max-h-48 whitespace-pre-wrap break-words" style={{ color: 'var(--text-primary)' }}>
+      <pre className="p-2 rounded bg-black/40 border border-white/5 overflow-x-auto text-[11px] leading-tight max-h-48 whitespace-pre-wrap break-words" style={{ color: 'var(--ink)' }}>
         {children}
       </pre>
     </div>

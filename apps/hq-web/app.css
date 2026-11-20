@@ -1,35 +1,10 @@
 @import "tailwindcss";
 
 :root {
-  /* Older names, kept for screens not yet rebuilt: each points at the phone's MTS token (aligned-ui.css). */
-  --bg-base: var(--surface-000);
+  /* The mono face the chat, code and terminal views use; the design file's own is not as wide-reaching. */
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --bg-surface: var(--surface-100);
-  --bg-elevated: var(--surface-200);
-  --bg-solid-surface: var(--surface-100);
-  --bg-solid-elevated: var(--surface-200);
-  --border: var(--hairline);
-  --border-glow: rgba(0, 173, 238, 0.15);
-  --accent-green: #22ff37;
-  --accent-amber: #ffb300;
-  --accent-red: var(--warn);
-  --accent-blue: #00adee;
-  --accent-violet: #00adee;   /* brand blue — replaces violet everywhere */
-  --text-primary: var(--ink);
-  --text-dim: var(--ink-muted);
-  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-  --font-body: var(--font-sans);
-  --font-heading: var(--font-sans);
-
-  --glass-bg: var(--surface-100);
-  --glass-bg-heavy: var(--surface-100);
-  --glass-bg-light: var(--surface-100);
-  --glass-blur: 0px;
-  --glass-blur-heavy: 0px;
-  --glass-border: var(--hairline);
-  --glass-shine: transparent;
-  --glass-shadow: none;
 }
 
 * {
@@ -59,9 +34,9 @@ body {
 }
 
 body {
-  background: var(--bg-base);
-  color: var(--text-primary);
-  font-family: var(--font-body);
+  background: var(--surface-000);
+  color: var(--ink);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
@@ -70,27 +45,14 @@ body {
 
 /* ─── Glass utilities ──────────────────────────────────────────────────────── */
 
-.glass {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-}
-
-.glass-heavy {
-  background: var(--glass-bg-heavy);
-  border: 1px solid var(--glass-border);
-}
-
 .glass-card {
-  background: rgba(8, 8, 8, 0.50);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 var(--glass-shine);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  background: var(--surface-100);
+  border: 1px solid var(--hairline);
+  transition: border-color 0.2s ease;
 }
 
 .glass-card:hover {
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 var(--glass-shine);
-  transform: translateY(-1px);
+  border-color: var(--line);
 }
 
 /* Glass inner shine — top edge highlight */
@@ -136,12 +98,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--hairline);
   border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--line);
 }
 
 /* ─── Usage ring animation ─────────────────────────────────────────────────── */
@@ -149,7 +111,7 @@ body {
 /* ─── Markdown Viewer Styles ───────────────────────────────────────────────── */
 
 .markdown-viewer {
-  font-family: var(--font-body);
+  font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.7;
   overflow-wrap: break-word;
@@ -158,19 +120,19 @@ body {
 }
 
 .md-heading {
-  color: var(--accent-blue);
-  font-family: var(--font-heading);
+  color: var(--text-blue);
+  font-family: var(--font-sans);
   font-weight: 700;
   margin-top: 1.5em;
   margin-bottom: 0.5em;
 }
 
 .md-blockquote {
-  border-left: 3px solid var(--accent-amber);
+  border-left: 3px solid var(--warn);
   padding-left: 1em;
   margin-left: 0;
-  color: var(--text-dim);
-  background: rgba(255, 179, 0, 0.04);
+  color: var(--ink-muted);
+  background: var(--surface-100);
   border-radius: 0 8px 8px 0;
   padding: 0.5em 1em;
 }
@@ -187,7 +149,7 @@ body {
 .md-cmt-mark.is-open { border-color: var(--brand-green); color: var(--ink); }
 
 .md-link {
-  color: var(--accent-blue);
+  color: var(--text-blue);
   text-decoration: none;
 }
 
@@ -196,16 +158,16 @@ body {
 }
 
 .md-wikilink {
-  color: var(--accent-blue);
-  background: rgba(0, 173, 238, 0.08);
+  color: var(--text-blue);
+  background: var(--surface-200);
   padding: 0 4px;
   border-radius: 4px;
   cursor: pointer;
 }
 
 .markdown-viewer pre {
-  background: rgba(8, 8, 8, 0.8) !important;
-  border: 1px solid rgba(0, 173, 238, 0.15);
+  background: var(--surface-100) !important;
+  border: 1px solid var(--hairline);
   padding: 1em;
   border-radius: 10px;
   overflow-x: auto;
@@ -228,13 +190,13 @@ body {
 .markdown-viewer li > ul,
 .markdown-viewer li > ol { margin: 0.3em 0 0; }
 
-.markdown-viewer strong { color: #fff; font-weight: 700; }
+.markdown-viewer strong { color: var(--ink); font-weight: 700; }
 
-.markdown-viewer hr { border: 0; border-top: 1px solid var(--border); }
+.markdown-viewer hr { border: 0; border-top: 1px solid var(--hairline); }
 
 .markdown-viewer :not(pre) > code {
-  background: rgba(8, 8, 8, 0.8);
-  color: var(--accent-green);
+  background: var(--surface-200);
+  color: var(--text-green);
   padding: 0.2em 0.4em;
   border-radius: 4px;
   font-size: 0.9em;
@@ -244,17 +206,17 @@ body {
 /* A backticked vault path that opens the note. cursor:pointer is what makes iOS Safari deliver the
    tap to the delegated click handler on a non-button element. */
 .markdown-viewer :not(pre) > code.md-note-ref {
-  color: var(--accent-blue);
-  border: 1px solid rgba(0, 173, 238, 0.25);
+  color: var(--text-blue);
+  border: 1px solid var(--line);
   cursor: pointer;
   overflow-wrap: anywhere;
   touch-action: manipulation;
-  -webkit-tap-highlight-color: rgba(0, 173, 238, 0.2);
+  -webkit-tap-highlight-color: color-mix(in srgb, var(--brand-blue) 20%, transparent);
 }
 
 .markdown-viewer :not(pre) > code.md-note-ref:hover,
 .markdown-viewer :not(pre) > code.md-note-ref:focus-visible {
-  background: rgba(0, 173, 238, 0.14);
+  background: var(--surface-200);
   outline: none;
 }
 
@@ -268,69 +230,6 @@ body {
   list-style-type: decimal;
   padding-left: 2em;
   margin-bottom: 1em;
-}
-
-/* Table styles */
-.md-table-wrap {
-  width: 100%;
-  overflow-x: auto;
-  margin: 1em 0;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-}
-
-.md-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9em;
-}
-
-.md-table thead tr {
-  background: rgba(8, 8, 8, 0.6);
-  border-bottom: 2px solid rgba(0, 173, 238, 0.2);
-}
-
-.md-th {
-  padding: 8px 16px;
-  text-align: left;
-  color: var(--accent-blue);
-  font-weight: 700;
-  white-space: nowrap;
-  min-width: 80px;
-}
-
-.md-tr-even { background: transparent; }
-.md-tr-odd { background: rgba(255, 255, 255, 0.02); }
-
-.md-tr-even:hover,
-.md-tr-odd:hover {
-  background: rgba(0, 173, 238, 0.04);
-}
-
-.md-td {
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-primary);
-  vertical-align: top;
-  line-height: 1.6;
-  min-width: 8rem;
-  max-width: 28rem;
-  word-break: normal;
-  overflow-wrap: anywhere;
-}
-
-.md-table [align="right"] { text-align: right; }
-.md-table [align="center"] { text-align: center; }
-
-@media (max-width: 640px) {
-  .md-th,
-  .md-td {
-    padding: 6px 10px;
-  }
-
-  .md-td {
-    max-width: 16rem;
-  }
 }
 
 /* Code block copy button */
@@ -351,7 +250,7 @@ body {
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: var(--ink-muted);
   font-family: var(--font-mono);
   z-index: 1;
   pointer-events: none;
@@ -364,9 +263,9 @@ body {
   padding: 2px 8px;
   font-size: 12px;
   font-family: var(--font-mono);
-  background: rgba(8, 8, 8, 0.8);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
+  background: var(--surface-100);
+  border: 1px solid var(--hairline);
+  color: var(--ink-muted);
   border-radius: 6px;
   cursor: pointer;
   opacity: 0;
@@ -375,27 +274,11 @@ body {
 }
 
 .code-copy-btn:hover {
-  color: var(--accent-blue);
-  border-color: rgba(0, 173, 238, 0.3);
+  color: var(--text-blue);
+  border-color: var(--line);
 }
 
 /* ─── Animations ───────────────────────────────────────────────────────────── */
-
-@keyframes thinking-bounce {
-  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
-  40% { transform: translateY(-5px); opacity: 1; }
-}
-
-.thinking-dot {
-  display: inline-block;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  animation: thinking-bounce 1.2s ease-in-out infinite;
-}
-
-.thinking-dot:nth-child(2) { animation-delay: 0.15s; }
-.thinking-dot:nth-child(3) { animation-delay: 0.3s; }
 
 /* Staggered fade-in for list items */
 
@@ -405,75 +288,18 @@ body {
 
 /* Glass tag pill */
 .glass-tag {
-  background: rgba(0, 173, 238, 0.06);
-  border: 1px solid rgba(0, 173, 238, 0.14);
+  background: var(--surface-200);
+  border: 1px solid var(--hairline);
   border-radius: 6px;
 }
 
 /* Glass skeleton shimmer */
 
-/* ─── DOCX viewer ──────────────────────────────────────────────────────────── */
-
-.docx-viewer .markdown-viewer p {
-  margin-bottom: 0.8em;
-}
-
-.docx-viewer .markdown-viewer table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 1em 0;
-  font-size: 12px;
-}
-
-.docx-viewer .markdown-viewer th,
-.docx-viewer .markdown-viewer td {
-  border: 1px solid var(--border);
-  padding: 8px 12px;
-  text-align: left;
-}
-
-.docx-viewer .markdown-viewer th {
-  background: rgba(8, 8, 8, 0.6);
-  color: var(--accent-blue);
-  font-weight: 700;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.docx-viewer .markdown-viewer tr:nth-child(even) {
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.docx-viewer .markdown-viewer img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 8px;
-  margin: 0.5em 0;
-}
-
-.docx-viewer .markdown-viewer strong {
-  color: var(--text-primary);
-}
-
-.docx-viewer .markdown-viewer em {
-  color: var(--text-dim);
-}
-
 /* ─── Note editor textarea glass focus ──────────────────────────────────────── */
 
 textarea:focus {
   outline: none;
-  border-color: rgba(0, 173, 238, 0.25) !important;
-  box-shadow: 0 0 0 3px rgba(0, 173, 238, 0.06), 0 0 20px rgba(0, 173, 238, 0.04);
-}
-
-/* ─── Mobile-specific glass overrides ──────────────────────────────────────── */
-
-@media (max-width: 768px) {
-  .glass-heavy {
-    background: rgba(14, 16, 20, 0.7);
-  }
+  border-color: var(--focus-ring) !important;
 }
 
 /* ─── Room Desktop ─────────────────────────────────────────────────────────── */
@@ -496,90 +322,26 @@ html[data-embed="1"] .a-rail {
 
 /* Terminal palette for ANSI output in the Workbench, derived from the brand accents and neutral grays. */
 :root {
-  --ansi-0: color-mix(in srgb, white 14%, var(--bg-base));
-  --ansi-1: var(--accent-red);
-  --ansi-2: var(--accent-green);
-  --ansi-3: var(--accent-amber);
-  --ansi-4: var(--accent-blue);
-  --ansi-5: var(--accent-blue);
-  --ansi-6: var(--accent-blue);
-  --ansi-7: color-mix(in srgb, white 80%, var(--bg-base));
-  --ansi-8: color-mix(in srgb, white 45%, var(--bg-base));
-  --ansi-9: color-mix(in srgb, var(--accent-red) 75%, white);
-  --ansi-10: color-mix(in srgb, var(--accent-green) 75%, white);
-  --ansi-11: color-mix(in srgb, var(--accent-amber) 75%, white);
-  --ansi-12: color-mix(in srgb, var(--accent-blue) 75%, white);
-  --ansi-13: color-mix(in srgb, var(--accent-blue) 75%, white);
-  --ansi-14: color-mix(in srgb, var(--accent-blue) 75%, white);
-  --ansi-15: color-mix(in srgb, white 95%, var(--bg-base));
+  --ansi-0: color-mix(in srgb, white 14%, var(--surface-000));
+  --ansi-1: var(--danger);
+  --ansi-2: var(--text-green);
+  --ansi-3: var(--warn);
+  --ansi-4: var(--text-blue);
+  --ansi-5: var(--text-blue);
+  --ansi-6: var(--text-blue);
+  --ansi-7: color-mix(in srgb, white 80%, var(--surface-000));
+  --ansi-8: color-mix(in srgb, white 45%, var(--surface-000));
+  --ansi-9: color-mix(in srgb, var(--danger) 75%, white);
+  --ansi-10: color-mix(in srgb, var(--text-green) 75%, white);
+  --ansi-11: color-mix(in srgb, var(--warn) 75%, white);
+  --ansi-12: color-mix(in srgb, var(--text-blue) 75%, white);
+  --ansi-13: color-mix(in srgb, var(--text-blue) 75%, white);
+  --ansi-14: color-mix(in srgb, var(--text-blue) 75%, white);
+  --ansi-15: color-mix(in srgb, white 95%, var(--surface-000));
 }
-
-/* ─── Shared controls not yet on the design system ───────────────────────── */
-
-:root {
-  --glass-fill: var(--surface-100);
-  --glass-line: var(--hairline);
-  --glass-hi: none;
-}
-
-.hq-row {
-  border: 1px solid transparent;
-  border-radius: 14px;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-.hq-row:hover { background: rgba(255, 255, 255, 0.05); }
-
-/* The emergency stop: brand green outline, so it reads apart from the solid New agent button. */
-
-/* Drag handle between the Workbench sidebar and its detail pane. */
 
 @media (prefers-reduced-motion: reduce) {
-  .hq-row, aside { transition: none !important; }
-}
-
-/* ─── Inner controls shared by Tasks, Chat and Inbox ──────────────────────── */
-
-.hq-field {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--glass-line);
-}
-.hq-field:focus,
-.hq-field:focus-within { border-color: rgba(0, 173, 238, 0.55); }
-.hq-field::placeholder { color: #8a8687; }
-
-.hq-card {
-  background: var(--glass-fill);
-  border: 1px solid var(--glass-line);
-  box-shadow: var(--glass-hi), 0 8px 24px rgba(0, 0, 0, 0.22);
-}
-
-.hq-btn-ghost {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 14px;
-  border-radius: 9999px;
-  border: 1px solid var(--glass-line);
-  background: rgba(255, 255, 255, 0.04);
-  font-size: 13px;
-  font-weight: 600;
-  color: #e8e8f0;
-  transition: background 0.15s ease;
-}
-.hq-btn-ghost:hover { background: rgba(255, 255, 255, 0.09); }
-
-.hq-composer {
-  border-top: 1px solid var(--glass-line);
-  background: rgba(14, 16, 20, 0.5);
-}
-
-/* Dialogs, drawers and overlays */
-
-.hq-modal {
-  background: rgba(20, 22, 27, 0.78);
-  border: 1px solid var(--glass-line);
-  box-shadow: var(--glass-hi), 0 30px 80px rgba(0, 0, 0, 0.55);
+  aside { transition: none !important; }
 }
 
 /* The shell (web-matches-phone wave A): the design's .a-app fills the window; places fill .a-main. */
