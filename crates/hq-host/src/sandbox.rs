@@ -627,11 +627,34 @@ fn real_place(path: &Path) -> Option<PathBuf> {
 /// and the shared `<common>`. Without them a commit in the worktree fails under the strict wall.
 fn linked_git_dirs(project: &Path) -> Option<(PathBuf, PathBuf)> {
     let pointer = std::fs::read_to_string(project.join(".git")).ok()?;
-    let gitdir = PathBuf::from(pointer.trim().strip_prefix("gitdir:")?.trim());
-    let gitdir = gitdir.canonicalize().ok()?;
+    let gitdir = Path::new(pointer.trim().strip_prefix("gitdir:")?.trim());
+    let gitdir = project.join(gitdir).canonicalize().ok()?;
     let common = std::fs::read_to_string(gitdir.join("commondir")).ok()?;
     let common = gitdir.join(common.trim()).canonicalize().ok()?;
     (gitdir.starts_with(&common)).then_some((gitdir, common))
+}
+
+/// What a commit in a linked worktree writes: the worktree's own git directory and the shared
+/// object store, refs and reflogs. The rest of the shared directory (the main checkout's
+/// `HEAD`, `index`, `config`, `hooks` and every sibling worktree) stays out of reach.
+fn linked_writable(gitdir: &Path, common: &Path) -> Vec<PathBuf> {
+    vec![
+        gitdir.to_path_buf(),
+        common.join("objects"),
+        common.join("refs"),
+        common.join("logs"),
+    ]
+}
+
+/// Files inside the writable worktree git directory that decide where git reads its
+/// configuration from, or what it runs. A planted `commondir` would point git, including the
+/// owner's, at a configuration the agent wrote.
+fn linked_protected(project: &Path, gitdir: &Path) -> Vec<PathBuf> {
+    ["commondir", "gitdir", "config.worktree"]
+        .iter()
+        .map(|n| gitdir.join(n))
+        .chain([project.join(".git")])
+        .collect()
 }
 
 fn under(base: &Path, names: &[&str]) -> Vec<PathBuf> {
@@ -862,7 +885,7 @@ fn strict_policy(
             .chain(shared_tmp)
             .chain(own_tmp)
             .chain(spec.writable.iter().cloned())
-            .chain(linked.iter().map(|(_, common)| common.clone())),
+            .chain(linked.iter().flat_map(|(g, c)| linked_writable(g, c))),
     );
     // A writable root that contains HOME, the run directory or a secret directory
     // would let the agent rename or rewrite them, which no read rule survives.
@@ -897,21 +920,13 @@ fn strict_policy(
             inside.display()
         )));
     }
-    // The shared git directory is writable for commits, but hooks and config run code later,
-    // outside the sandbox, so they stay read-only as the project's own do.
-    let linked_protected: Vec<PathBuf> = linked
+    let linked_guard: Vec<PathBuf> = linked
         .iter()
-        .flat_map(|(gitdir, common)| {
-            [
-                common.join("hooks"),
-                common.join("config"),
-                gitdir.join("config.worktree"),
-            ]
-        })
+        .flat_map(|(gitdir, _)| linked_protected(&project, gitdir))
         .collect();
     let (project_files, project_dirs): (Vec<_>, Vec<_>) = under(&project, PROJECT_READONLY)
         .into_iter()
-        .chain(linked_protected)
+        .chain(linked_guard)
         .partition(|p| {
             p.extension().is_some() || p.ends_with("config") || p.ends_with("config.worktree")
         });
@@ -2382,6 +2397,23 @@ mod tests {
         let (found_gitdir, common) = linked_git_dirs(&wt).expect("a linked worktree");
         assert_eq!(found_gitdir, gitdir);
         assert_eq!(common, root.join("main/.git"));
+        let writable = linked_writable(&gitdir, &common);
+        assert!(writable.contains(&common.join("objects")));
+        assert!(
+            !writable.contains(&common),
+            "the shared directory itself stays closed"
+        );
+        let guarded = linked_protected(&wt, &gitdir);
+        for name in ["commondir", "gitdir"] {
+            assert!(guarded.contains(&gitdir.join(name)), "{name} read-only");
+        }
+        assert!(guarded.contains(&wt.join(".git")));
+        std::fs::write(wt.join(".git"), "gitdir: ../main/.git/worktrees/wt\n").unwrap();
+        assert_eq!(
+            linked_git_dirs(&wt).map(|l| l.0),
+            Some(gitdir.clone()),
+            "relative pointer"
+        );
         let plain = root.join("plain");
         std::fs::create_dir_all(plain.join(".git")).unwrap();
         assert!(linked_git_dirs(&plain).is_none());
