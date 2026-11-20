@@ -120,6 +120,8 @@ const signInListeners = new Set<() => void>()
 function setSignInNeeded(next: boolean) {
   if (signInNeeded === next) return
   signInNeeded = next
+  // The "you were signed out" reason belongs to one signed-out spell; a working sign-in ends it.
+  if (!next) signedOut = false
   for (const listener of signInListeners) listener()
 }
 
