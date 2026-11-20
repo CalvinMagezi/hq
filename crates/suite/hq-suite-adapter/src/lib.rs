@@ -10,6 +10,7 @@ pub mod api;
 pub mod author;
 pub mod blocks;
 pub mod calc;
+pub mod charts;
 pub mod docs;
 pub mod filter;
 pub mod governor;

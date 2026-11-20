@@ -132,3 +132,7 @@ Smaller refusals inside functions that exist:
 ### Left for the web mirror
 
 `apps/hq-web/src/lib/sheetCalc.ts` is a separate TypeScript calculator for the grid and has only five functions. It does not follow this engine, so a cell it shows can differ from the one hq calculates until it either learns these functions or asks hq for the values.
+
+## Charts in the `.xlsx`
+
+A `plot` block that reads a plain range (no `where`, no `group`) is written as a native chart: bar, line, pie or donut, with the chart reading the sheet's own cells (so changing a cell in Excel moves the chart) and carrying a cached copy so a viewer that does not recalculate still draws it. Series colours are written explicitly so every program draws the same chart. A plot that filters or groups has no single range, so it is left out and the export's one-line statement says how many. `hq-suite-xlsx::write_xlsx_with_charts` is the writer; `hq-suite-adapter::charts` maps a note's plots onto it. Checked in LibreOffice (`cargo test -p hq-suite-xlsx --test libreoffice -- --ignored`, set `XLSX_KEEP=<dir>` to keep the PDF); not yet opened in Excel.

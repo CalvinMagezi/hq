@@ -100,14 +100,14 @@ fn show(value: &Value, kind: &str) -> String {
 
 /// Every `sheet` block of a note as one workbook, so a formula can read another block by its name
 /// (`=Prices!B2`). A block without a `name` is `Sheet1`, `Sheet2` and so on, in order.
-struct NoteBook {
-    book: Workbook,
+pub(crate) struct NoteBook {
+    pub(crate) book: Workbook,
     /// The table of each sheet block, in note order; its number here is its sheet number.
     tables: Vec<Vec<Vec<String>>>,
 }
 
 impl NoteBook {
-    fn new(blocks: &[TypedBlock]) -> NoteBook {
+    pub(crate) fn new(blocks: &[TypedBlock]) -> NoteBook {
         let sheets: Vec<&TypedBlock> = blocks.iter().filter(|b| b.ty == BlockType::Sheet).collect();
         let names: Vec<String> = sheets
             .iter()
@@ -338,7 +338,12 @@ pub fn plot(vault: &Path, note: &str, index: usize) -> Result<String> {
     let paths = SuitePaths::new(vault);
     let text = std::fs::read_to_string(paths.resolve(note)?)
         .with_context(|| format!("{note} cannot be read"))?;
-    let doc = Document::parse(&text);
+    plot_in(&text, note, index)
+}
+
+/// As [`plot`], over the note's text, which the caller has already read.
+pub(crate) fn plot_in(text: &str, note: &str, index: usize) -> Result<String> {
+    let doc = Document::parse(text);
     let blocks: Vec<_> = doc.typed_blocks().filter_map(|(_, b)| b.ok()).collect();
     let Some(plot) = blocks.iter().filter(|b| b.ty == BlockType::Plot).nth(index) else {
         bail!("that note has no plot number {}", index + 1);
@@ -493,7 +498,12 @@ pub struct TileView {
 /// The `index`th `tile` block of the note, computed over a range of a sheet in the same note.
 /// The number (among the note's `sheet` blocks) of the sheet a range reads: the block it names, or
 /// the first. A range in another note is refused for now.
-fn sheet_of_range(blocks: &[TypedBlock], note: &str, from: &RangeRef, what: &str) -> Result<usize> {
+pub(crate) fn sheet_of_range(
+    blocks: &[TypedBlock],
+    note: &str,
+    from: &RangeRef,
+    what: &str,
+) -> Result<usize> {
     let stem = note
         .rsplit('/')
         .next()
