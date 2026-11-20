@@ -448,6 +448,9 @@ pub struct LaunchRequest {
     /// Run under the strict sandbox whatever the host's default profile is. Set for a session
     /// started after the chat read outside text.
     pub strict: bool,
+    /// What this session's active sandbox grants add to the plan (`hq_db::sandbox_grants`),
+    /// read again at every launch so a resumed session keeps them.
+    pub grants: hq_core::grants::SandboxDelta,
 }
 
 /// The HQ endpoint and the session's own token.

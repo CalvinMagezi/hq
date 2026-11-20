@@ -140,6 +140,7 @@ fn a_reported_conversation_id_becomes_the_hosts_restart_command() {
             acp_argv: None,
             acp_model: None,
             strict: false,
+            grants: Default::default(),
         })
         .unwrap();
     let mut client = Client::connect(&dir).unwrap();

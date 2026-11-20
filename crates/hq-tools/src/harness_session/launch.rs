@@ -472,6 +472,12 @@ async fn launch_with(
         acp_argv,
         acp_model: harness.model.clone(),
         strict: launch_is_narrowed(db, &l),
+        grants: hq_db::sandbox_grants::delta_for_session(
+            db,
+            l.session_id,
+            chrono::Utc::now().timestamp(),
+        )
+        .unwrap_or_default(),
     };
     let began = std::time::Instant::now();
     let host = l.host.clone();

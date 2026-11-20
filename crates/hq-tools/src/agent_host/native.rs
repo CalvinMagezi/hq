@@ -181,13 +181,19 @@ impl NativeBackend {
     }
 
     /// The sandbox request for a launch in `cwd`.
-    fn sandbox_for(&self, cwd: &str, force_strict: bool) -> Option<Value> {
-        match &self.strict {
+    fn sandbox_for(
+        &self,
+        cwd: &str,
+        force_strict: bool,
+        grants: &hq_core::grants::SandboxDelta,
+    ) -> Option<Value> {
+        let plan = match &self.strict {
             Some((paths, plan)) if force_strict || super::sandbox::is_strict_path(paths, cwd) => {
                 Some(plan.clone())
             }
             _ => self.sandbox.clone(),
-        }
+        };
+        plan.map(|p| super::sandbox::extend_plan(p, grants))
     }
 
     pub fn with_launch_bound(mut self, bound: Duration) -> Self {
@@ -323,7 +329,7 @@ impl NativeBackend {
         let params = acp_spawn_params(
             req,
             argv,
-            &self.sandbox_for(&req.cwd, req.strict),
+            &self.sandbox_for(&req.cwd, req.strict, &req.grants),
             self.idle_ttl_secs,
         );
         let within = req.start_timeout + self.command_timeout;
@@ -668,7 +674,7 @@ impl HostBackend for NativeBackend {
         let params = json!({
             "name": req.name, "argv": argv_for(req), "cwd": req.cwd,
             "agent": req.kind, "resume_argv": resume, "env": env,
-            "sandbox": self.sandbox_for(&req.cwd, req.strict),
+            "sandbox": self.sandbox_for(&req.cwd, req.strict, &req.grants),
             "idle_ttl_secs": self.idle_ttl_secs,
         });
         let spawned = self.call("agent.spawn", params)?;
@@ -1081,6 +1087,7 @@ mod tests {
             acp_argv: None,
             acp_model: None,
             strict: false,
+            grants: Default::default(),
         }
     }
 
