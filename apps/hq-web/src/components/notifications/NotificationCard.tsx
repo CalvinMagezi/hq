@@ -8,8 +8,10 @@ import { ClipboardCheck, LifeBuoy, ShieldAlert, Sparkles, TriangleAlert } from '
 import type { NotificationItem } from '~/lib/notificationsApi'
 import {
   SANDBOX_GRANTS_QUERY_KEY,
+  SANDBOX_STARTERS_QUERY_KEY,
   isSandboxGrantNotification,
   listSandboxGrants,
+  listSandboxStarters,
   parseSandboxGrantNotification,
 } from '~/lib/sandboxGrantsApi'
 import { relTime } from '~/lib/time'
@@ -23,7 +25,7 @@ import { clockTime } from './UpdateRow'
 interface Props {
   notification: NotificationItem
   selected?: boolean
-  onAction(id: string, action: string): Promise<void>
+  onAction(id: string, action: string, opts?: { starter?: string }): Promise<void>
   onAnswered: (id: string, choice: 'approve' | 'decline') => void
   loadingAction: string | null
 }
@@ -47,13 +49,14 @@ export function NotificationCard({ notification, selected, onAction, onAnswered,
   const ranOut = lapsed(notification)
   const stuckOpen = kind === 'stuck' && isPending && !ranOut
   const sandboxGrant = isSandboxGrantNotification(notification)
-  const act = async (id: string, action: string) => {
+  const act = async (id: string, action: string, opts?: { starter?: string }) => {
     setFailure(null)
     setRefused(false)
     try {
-      await onAction(id, action)
-      if (action === 'approve' || action === 'reject' || (sandboxGrant && action === 'dismiss')) {
-        setSent({ answer: t(action === 'approve' ? 'inbox_answer_allowed' : 'inbox_answer_declined'), at: new Date() })
+      await onAction(id, action, opts)
+      const isAllow = action === 'approve' || action === 'allow_task' || action === 'allow_repo' || action === 'allow_starter'
+      if (isAllow || action === 'reject' || (sandboxGrant && action === 'dismiss')) {
+        setSent({ answer: t(isAllow ? 'inbox_answer_allowed' : 'inbox_answer_declined'), at: new Date() })
       }
     } catch (e) {
       setFailure(answerErrorLine(e))
@@ -66,6 +69,12 @@ export function NotificationCard({ notification, selected, onAction, onAnswered,
   const sandboxGrants = useQuery({
     queryKey: SANDBOX_GRANTS_QUERY_KEY,
     queryFn: () => listSandboxGrants(),
+    enabled: sandboxGrant && isPending,
+    retry: false,
+  })
+  const sandboxStarters = useQuery({
+    queryKey: SANDBOX_STARTERS_QUERY_KEY,
+    queryFn: listSandboxStarters,
     enabled: sandboxGrant && isPending,
     retry: false,
   })
@@ -104,11 +113,17 @@ export function NotificationCard({ notification, selected, onAction, onAnswered,
       answer = (
         <SandboxGrantCard
           grant={parsedGrant}
+          starters={sandboxStarters.data?.starters}
           showTitle={false}
           busy={loadingAction !== null}
           error={failure}
-          onAllow={() => void act(notification.id, 'approve')}
-          onDecline={() => void act(notification.id, 'dismiss')}
+          onAnswer={(ans) =>
+            void act(
+              notification.id,
+              ans.action,
+              ans.action === 'allow_starter' ? { starter: ans.starter } : undefined,
+            )
+          }
         />
       )
     } else if (taskCheck && isPending) {

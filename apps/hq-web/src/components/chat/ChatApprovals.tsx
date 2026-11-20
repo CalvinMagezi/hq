@@ -7,15 +7,28 @@ import { approvalsForThread, splitSaid } from '~/lib/chatApprovals'
 import { executeNotificationAction, fetchNotificationsClient, type NotificationItem } from '~/lib/notificationsApi'
 import {
   SANDBOX_GRANTS_QUERY_KEY,
+  SANDBOX_RULES_QUERY_KEY,
+  SANDBOX_STARTERS_QUERY_KEY,
+  SANDBOX_SUMMARY_QUERY_KEY,
   isSandboxGrantNotification,
   listSandboxGrants,
+  listSandboxStarters,
   parseSandboxGrantNotification,
   type SandboxGrant,
+  type SandboxGrantProfile,
 } from '~/lib/sandboxGrantsApi'
 import { toastAlert } from '~/lib/toast'
 import { t, tn } from '~/strings'
 
-type ApprovalAction = 'approve' | 'approve_site' | 'approve_folder' | 'reject' | 'dismiss'
+type ApprovalAction =
+  | 'approve'
+  | 'allow_task'
+  | 'allow_repo'
+  | 'allow_starter'
+  | 'approve_site'
+  | 'approve_folder'
+  | 'reject'
+  | 'dismiss'
 
 const POLL_MS = 4000
 const HTTP_CONFLICT = 409
@@ -44,6 +57,7 @@ export function ChatApprovals({ threadId, sessionIds = [], waiting, onKeepGoing,
     refetchInterval: POLL_MS,
   })
   const [busy, setBusy] = useState<string | null>(null)
+  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const seenPending = useRef<Set<string>>(new Set())
 
   const items = approvalsForThread(list.data ?? [], threadId, sessionIds)
@@ -56,23 +70,34 @@ export function ChatApprovals({ threadId, sessionIds = [], waiting, onKeepGoing,
     enabled: hasSandboxGrant,
     retry: false,
   })
+  const starters = useQuery({
+    queryKey: SANDBOX_STARTERS_QUERY_KEY,
+    queryFn: listSandboxStarters,
+    enabled: hasSandboxGrant,
+    retry: false,
+  })
   const answered = items.filter((i) => i.state !== 'pending' && seenPending.current.has(i.id)).length
   const canKeepGoing = pending.length === 0 && waiting && answered !== 0
   const showSummary = answered !== 0 && !waiting
 
-  const answer = async (item: NotificationItem, action: ApprovalAction) => {
+  const answer = async (item: NotificationItem, action: ApprovalAction, opts?: { starter?: string }) => {
     setBusy(item.id)
+    setErrors((prev) => ({ ...prev, [item.id]: null }))
     try {
-      await executeNotificationAction(item.id, action)
+      await executeNotificationAction(item.id, action, opts)
     } catch (err) {
       if (!(err instanceof HqHttpError && err.status === HTTP_CONFLICT)) {
-        toastAlert(err instanceof Error ? err.message : t('notice_action_try_again'))
+        const msg = err instanceof Error ? err.message : t('notice_action_try_again')
+        setErrors((prev) => ({ ...prev, [item.id]: msg }))
+        toastAlert(msg)
       }
     } finally {
       setBusy(null)
       await client.invalidateQueries({ queryKey: key })
       if (isSandboxGrantNotification(item)) {
         await client.invalidateQueries({ queryKey: SANDBOX_GRANTS_QUERY_KEY })
+        await client.invalidateQueries({ queryKey: SANDBOX_RULES_QUERY_KEY })
+        await client.invalidateQueries({ queryKey: SANDBOX_SUMMARY_QUERY_KEY })
       }
     }
   }
@@ -88,8 +113,10 @@ export function ChatApprovals({ threadId, sessionIds = [], waiting, onKeepGoing,
             key={item.id}
             item={item}
             grants={grants.data?.grants}
+            starters={starters.data?.starters}
             busy={busy === item.id}
-            onAnswer={(a) => void answer(item, a)}
+            error={errors[item.id] ?? null}
+            onAnswer={(a, opts) => void answer(item, a, opts)}
           />
         ))}
         {pending.length === 0 && waiting && answered === 0 && (
@@ -117,11 +144,13 @@ export function ChatApprovals({ threadId, sessionIds = [], waiting, onKeepGoing,
 interface EntryProps {
   item: NotificationItem
   grants?: SandboxGrant[]
+  starters?: SandboxGrantProfile[]
   busy: boolean
-  onAnswer: (action: ApprovalAction) => void
+  error?: string | null
+  onAnswer: (action: ApprovalAction, opts?: { starter?: string }) => void
 }
 
-function ApprovalEntry({ item, grants, busy, onAnswer }: EntryProps) {
+function ApprovalEntry({ item, grants, starters, busy, error, onAnswer }: EntryProps) {
   if (isSandboxGrantNotification(item)) {
     const parsed = parseSandboxGrantNotification(item, grants)
     return (
@@ -131,9 +160,12 @@ function ApprovalEntry({ item, grants, busy, onAnswer }: EntryProps) {
         </p>
         <SandboxGrantCard
           grant={parsed}
+          starters={starters}
           busy={busy}
-          onAllow={() => onAnswer('approve')}
-          onDecline={() => onAnswer('dismiss')}
+          error={error}
+          onAnswer={(ans) =>
+            onAnswer(ans.action, ans.action === 'allow_starter' ? { starter: ans.starter } : undefined)
+          }
         />
       </div>
     )

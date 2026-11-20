@@ -3,13 +3,16 @@ import { ArrowLeft, ArrowUpRight, BellOff, Inbox } from 'lucide-react'
 import { useState } from 'react'
 import { PaneHead } from '~/components/ui/Panes'
 import { allowLabel, allowTone, quoteArgs } from '~/components/ui/ApprovalCard'
+import { SandboxGrantActions } from '~/components/ui/SandboxGrantCard'
 import { answerErrorLine, lapsed, REQUEST_LIFETIME_MS, serverHqLine } from '~/lib/inboxCard'
 import { silenceTopicOf, type NotificationItem, type SilenceTopic } from '~/lib/notificationsApi'
 import {
   SANDBOX_GRANTS_QUERY_KEY,
+  SANDBOX_STARTERS_QUERY_KEY,
   capabilityModeKey,
   isSandboxGrantNotification,
   listSandboxGrants,
+  listSandboxStarters,
   parseSandboxGrantNotification,
 } from '~/lib/sandboxGrantsApi'
 import { t, type StringKey } from '~/strings'
@@ -23,7 +26,7 @@ const WHEN_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle
 
 interface Props {
   notification: NotificationItem | null
-  onAction(id: string, action: string): Promise<void>
+  onAction(id: string, action: string, opts?: { starter?: string }): Promise<void>
   onAnswered: (id: string, choice: 'approve' | 'decline') => void
   loadingAction: string | null
   /** Where the link in the item's own words goes. */
@@ -53,6 +56,12 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
   const sandboxGrants = useQuery({
     queryKey: SANDBOX_GRANTS_QUERY_KEY,
     queryFn: () => listSandboxGrants(),
+    enabled: isSandboxGrant && notification?.state === 'pending',
+    retry: false,
+  })
+  const sandboxStarters = useQuery({
+    queryKey: SANDBOX_STARTERS_QUERY_KEY,
+    queryFn: listSandboxStarters,
     enabled: isSandboxGrant && notification?.state === 'pending',
     retry: false,
   })
@@ -92,10 +101,10 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
   const plainBody = signInId ? <SignInBody device={device} createdAt={n.created_at} /> : <p className="hq-inbox-text">{n.description}</p>
   const askable = !dialog && !signInId && !isSandboxGrant && approvable
   const clearable = !dialog && !signInId && !isSandboxGrant && !approvable
-  const act = async (action: string) => {
+  const act = async (action: string, opts?: { starter?: string }) => {
     setFailure(null)
     try {
-      await onAction(n.id, action)
+      await onAction(n.id, action, opts)
     } catch (e) {
       setFailure(answerErrorLine(e))
     }
@@ -111,6 +120,12 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
         <div className="a-drow">
           <span>{t('grants_task_label')}</span>
           <span className="a-mono">{parsedGrant.taskId}</span>
+        </div>
+      )}
+      {parsedGrant.repo && (
+        <div className="a-drow">
+          <span>{t('grants_repo_label')}</span>
+          <span className="a-mono">{parsedGrant.repo}</span>
         </div>
       )}
       <p className="a-cap a-muted">{t('grants_expires_day')}</p>
@@ -204,21 +219,17 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
               }}
             />
           )}
-          {isSandboxGrant && (
-            <>
-              <button type="button" className="a-btn secondary" disabled={busy} onClick={() => void act('dismiss')}>
-                {t('grants_decline')}
-              </button>
-              <button
-                type="button"
-                className="a-btn secondary"
-                disabled={busy}
-                aria-busy={answering('approve') || undefined}
-                onClick={() => void act('approve')}
-              >
-                {answering('approve') ? t('approval_answering') : t('grants_allow')}
-              </button>
-            </>
+          {isSandboxGrant && parsedGrant && (
+            <div className="w-full">
+              <SandboxGrantActions
+                grant={parsedGrant}
+                starters={sandboxStarters.data?.starters}
+                busy={busy}
+                onAnswer={(ans) =>
+                  void act(ans.action, ans.action === 'allow_starter' ? { starter: ans.starter } : undefined)
+                }
+              />
+            </div>
           )}
           {askable && (
             <>

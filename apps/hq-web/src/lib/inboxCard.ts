@@ -19,6 +19,7 @@ export const REQUEST_LIFETIME_MS = 24 * 60 * 60 * 1000
 export const NOTIFY_HIDE_MS = 7 * 24 * 60 * 60 * 1000
 export const NOTIFY_HIDDEN_KEY = 'hq-notify-card-until'
 
+const HTTP_BAD_REQUEST = 400
 const HTTP_CONFLICT = 409
 /** The source of HQ's items about a helper's session (`session_supervisor/alerts.rs`). */
 const HELPER_SUPERVISOR_SOURCE = 'session-supervisor'
@@ -49,6 +50,10 @@ export function lapsed(n: NotificationItem, now: number = Date.now()): boolean {
 export function answerErrorLine(err: unknown): string {
   const status = (err as { status?: number } | null)?.status
   if (status === HTTP_CONFLICT) return t('fail_send_answer_changed')
+  if (status === HTTP_BAD_REQUEST) {
+    const msg = (err as { message?: string } | null)?.message?.trim()
+    if (msg) return msg
+  }
   if (err instanceof TypeError) return t('fail_send_answer_unreachable')
   if (typeof status === 'number') return t('fail_send_answer_no_reply')
   return t('fail_answer_refused')

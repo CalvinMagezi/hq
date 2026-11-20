@@ -32,6 +32,12 @@ import type { UpdateFilter } from '~/components/notifications/updateKind'
 import { globalSessionsApi } from '~/lib/sessionsApi'
 import { clearedDialogs, inBatches, pileOf, staleRequests } from '~/lib/catchUp'
 import { LATER_MS, neighbour, preferredItem, readLater, splitLater, writeLater, type LaterMap } from '~/lib/inboxView'
+import {
+  SANDBOX_GRANTS_QUERY_KEY,
+  SANDBOX_RULES_QUERY_KEY,
+  SANDBOX_SUMMARY_QUERY_KEY,
+  isSandboxGrantNotification,
+} from '~/lib/sandboxGrantsApi'
 
 export const Route = createFileRoute('/inbox')({
   validateSearch: (search: Record<string, unknown>): { tab?: 'updates' | 'done' } => {
@@ -128,14 +134,22 @@ function NotificationsPage() {
     markNotificationRead(openUnread).catch(() => undefined)
   }, [openUnread, markRead])
 
-  const handleAction = async (id: string, action: string) => {
+  const queryClient = useQueryClient()
+
+  const handleAction = async (id: string, action: string, opts?: { starter?: string }) => {
     setLoadingAction(`${action}-${id}`)
     try {
-      const res = await executeNotificationAction(id, action)
+      const res = await executeNotificationAction(id, action, opts)
       if (res.success) {
         updateNotificationState(id, res.new_state as NotificationState)
         if (linkedId === id) closeDetail()
-        if (action === 'dismiss' && notifications.find((n) => n.id === id)?.kind === 'value_item') {
+        const target = notifications.find((n) => n.id === id)
+        if (target && isSandboxGrantNotification(target)) {
+          void queryClient.invalidateQueries({ queryKey: SANDBOX_GRANTS_QUERY_KEY })
+          void queryClient.invalidateQueries({ queryKey: SANDBOX_RULES_QUERY_KEY })
+          void queryClient.invalidateQueries({ queryKey: SANDBOX_SUMMARY_QUERY_KEY })
+        }
+        if (action === 'dismiss' && target?.kind === 'value_item') {
           toastUndo(
             t('undo_update_cleared'),
             async () => {
@@ -185,7 +199,6 @@ function NotificationsPage() {
       .then(() => toastNotice(t('inbox_done_cleared')))
       .catch(failed)
   // Settings keeps its own copy of the silences; a change made here makes it read again.
-  const queryClient = useQueryClient()
   const forgetSilences = () => queryClient.invalidateQueries({ queryKey: ['inbox-silences'] })
   // Silencing is about what interrupts: the items stay listed. Undo turns the topic back on.
   const handleSilence = (topic: SilenceTopic) =>

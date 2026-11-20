@@ -127,9 +127,11 @@ export async function fetchNotificationsClient(filter?: ListNotificationsFilter)
 
 export function executeNotificationAction(
   id: string,
-  action: 'approve' | 'reject' | 'dismiss' | string
+  action: 'approve' | 'allow_task' | 'allow_repo' | 'allow_starter' | 'reject' | 'dismiss' | string,
+  opts?: { starter?: string }
 ): Promise<{ success: boolean; new_state: string; message: string }> {
-  return hqJson(`/api/notifications/${encodeURIComponent(id)}/action`, 'POST', { action })
+  const body = opts?.starter ? { action, starter: opts.starter } : { action }
+  return hqJson(`/api/notifications/${encodeURIComponent(id)}/action`, 'POST', body)
 }
 
 /** Sites that stopped asking because the owner allowed them in several chats. */
