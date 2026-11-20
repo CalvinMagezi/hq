@@ -80,6 +80,7 @@ fun HelperOverlays(shownUi: HelpersUi, actions: HelpersActions) {
         if (open.confirmStop) StopDialog(card, open, actions)
         if (open.rename != null) RenameDialog(open.rename, actions)
         if (open.menu) MenuSheet(card, actions)
+        if (open.grantsOpen) GrantsSheet(open, actions)
     }
     ui.start?.let { StartSheet(it, ui, actions) }
     if (ui.githubOpen) GithubSheet(ui, actions)
@@ -133,6 +134,7 @@ private fun HelperPageView(card: HelperCard, open: HelperOpen, ui: HelpersUi, ac
                 MessageRow(open, actions)
             }
             open.error?.let { Text(it, style = HqType.BodySm, color = Mts.Amber) }
+            AccessRow(actions.onGrantsOpen)
             TechnicalRow(actions.onTechnical)
         }
     }

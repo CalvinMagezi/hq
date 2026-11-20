@@ -26,6 +26,7 @@ import example.hq.spike.data.answerNotification
 import example.hq.spike.data.answerDialog
 import example.hq.spike.data.sendSessionKeys
 import example.hq.spike.data.helperScreen
+import example.hq.spike.data.sandboxGrants
 
 enum class InboxTab { Needs, Updates, Done }
 
@@ -172,7 +173,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         }
         val history = try { client.notifications("history", HISTORY_LIMIT) } catch (e: HqUnavailable) { null }
         if (frozen) return
-        val lists = inboxLists(pending.items, history?.items.orEmpty()).let { l -> InboxLists(withDeviceNames(l.needs), l.updates, l.done) }
+        val lists = inboxLists(pending.items, history?.items.orEmpty()).let { l -> InboxLists(withGrantDetails(withDeviceNames(l.needs)), l.updates, l.done) }
         _state.update { it.copy(loaded = true, offline = false, needs = lists.needs, updates = lists.updates, done = lists.done, details = it.details?.let { d -> lists.needs.firstOrNull { n -> n.id == d.id } }, ownerOnlyCount = pending.needsOwnerOnly, checkedAt = InboxWords.clock(java.time.OffsetDateTime.now().toString())) }
     }
 
@@ -184,6 +185,19 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
             (0 until (list?.length() ?: 0)).associate { i -> list!!.getJSONObject(i).let { d -> d.optString("id") to d.optString("label") } }
         } catch (e: HqUnavailable) { emptyMap() }
         return needs.map { c -> if (c.kind == CardKind.SignIn) c.copy(deviceLabel = labels[c.signInDevice]?.ifBlank { null }) else c }
+    }
+
+    /** Enriches pending sandbox-grants items with task id and exact resource from GET /api/sandbox-grants. */
+    private suspend fun withGrantDetails(needs: List<InboxCard>): List<InboxCard> {
+        if (needs.none { it.kind == CardKind.SandboxGrant }) return needs
+        val grants = try { client.sandboxGrants() } catch (e: HqUnavailable) { emptyList() }
+        if (grants.isEmpty()) return needs
+        return needs.map { c ->
+            if (c.kind == CardKind.SandboxGrant && c.sandboxGrant != null) {
+                val enriched = SandboxGrantWords.enrich(c.sandboxGrant, grants)
+                c.copy(sandboxGrant = enriched, sessionId = enriched.sessionId, body = enriched.resource)
+            } else c
+        }
     }
 
     /** Signs the new sign-in's device out after the red question; HQ settles its inbox item when the device goes. */
@@ -237,6 +251,8 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
                 if (card.dialog != null) {
                     // The server answers the dialog it read, and refuses one that moved on (409, handled below).
                     client.answerDialog(card.id, if (allow) "approve" else "decline")
+                } else if (card.kind == CardKind.SandboxGrant) {
+                    client.answerNotification(card.id, if (allow) "approve" else "dismiss")
                 } else {
                     // A helper is answered in its own terminal first, and only if its screen still shows the dialog this card quoted.
                     if (card.kind == CardKind.HelperAsks && card.sessionId != null && !answerHelper(card, if (allow) "enter" else "esc")) return@launch
@@ -331,7 +347,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
 
 class InboxLists(val needs: List<InboxCard>, val updates: List<InboxCard>, val done: List<DoneEntry>)
 
-internal val NEEDS_ORDER = listOf(CardKind.SignIn, CardKind.HelperAsks, CardKind.TaskReview, CardKind.Approval, CardKind.HelperStuck)
+internal val NEEDS_ORDER = listOf(CardKind.SignIn, CardKind.HelperAsks, CardKind.SandboxGrant, CardKind.TaskReview, CardKind.Approval, CardKind.HelperStuck)
 
 /** What the three tabs show for what the server holds: things that need the owner, updates, and what the owner already decided. */
 fun inboxLists(pending: List<example.hq.spike.data.HqClient.InboxItem>, history: List<example.hq.spike.data.HqClient.InboxItem>): InboxLists {

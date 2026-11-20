@@ -12,7 +12,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
-enum class CardKind { HelperAsks, TaskReview, Approval, HelperStuck, Update, SignIn }
+enum class CardKind { HelperAsks, TaskReview, Approval, SandboxGrant, HelperStuck, Update, SignIn }
 
 enum class CardIcon { Sparkle, Info, Pause, Check, Task, Warning }
 
@@ -70,6 +70,8 @@ data class InboxCard(
     val openLabel: String? = null,
     /** Ids of updates folded into this one as the same event: clearing the row clears them too. */
     val alsoIds: List<String> = emptyList(),
+    /** Parsed details of a sandbox-grants access request, shown on its Inbox card and details page. */
+    val sandboxGrant: ParsedSandboxGrant? = null,
 ) {
     val ids: List<String> get() = listOf(id) + alsoIds
 
@@ -130,6 +132,15 @@ object InboxWords {
         return when {
             // A new sign-in is answered It was me or Sign it out, never Allow: its words come from the catalogue on screen.
             item.signInDevice != null -> InboxCard(item.id, CardKind.SignIn, Plain.strip(item.title.trim()), "", "", item.createdAt, CardIcon.Info, null, false, "", item.link, askedBy(item, null), item.state, signInDevice = item.signInDevice)
+            item.kind == "action_needed" && item.sourceTask == example.hq.spike.data.SANDBOX_GRANTS_SOURCE -> {
+                val parsed = SandboxGrantWords.parse(item)
+                val title = Plain.strip(item.title.trim())
+                InboxCard(
+                    item.id, CardKind.SandboxGrant, title, parsed.resource, whereOf(item, null), item.createdAt, CardIcon.Info,
+                    parsed.sessionId, canAllow = true, allowLabel = "Allow", link = item.link, asked = askedBy(item, null),
+                    state = item.state, sandboxGrant = parsed,
+                )
+            }
             helper != null -> helperCard(item, helper.groupValues[1], helper.groupValues[2], session?.groupValues?.get(1), session?.groupValues?.get(2))
             item.kind == "action_needed" && item.sourceTask == TASK_REVIEW_SOURCE -> {
                 // Saying yes here only clears the notice, so it is not offered as "Allow": the owner is asked to look at the task.
@@ -214,7 +225,7 @@ object InboxWords {
 
     private fun whereOf(item: InboxItem, host: String?): String = host ?: when (val s = item.sourceTask) {
         null, "" -> "HQ"
-        "session-supervisor", "session_chat" -> "A helper"
+        "session-supervisor", "session_chat", example.hq.spike.data.SANDBOX_GRANTS_SOURCE -> "A helper"
         else -> s.replace('-', ' ').replace('_', ' ').replaceFirstChar { it.uppercase() }
     }
 
