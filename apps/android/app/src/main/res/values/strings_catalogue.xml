@@ -4454,6 +4454,10 @@
     <string name="suite_bar_working">Working on it…</string>
     <string name="suite_sheet_edit_title">Edit %1$s</string>
     <string name="suite_sheet_edit_label">Edit this cell</string>
+    <string name="suite_sheet_add_row">Add a row below</string>
+    <string name="suite_sheet_add_column">Add a column on the right</string>
+    <string name="suite_sheet_new_column">Column %1$s</string>
+    <string name="suite_sheet_structure_failed">That did not work. Reload the sheet and try again.</string>
     <string name="suite_sheet_edit_hint">Press and hold a cell to edit it.</string>
     <string name="suite_sheet_edit_failed">Couldn\'t save. The cell may have changed, or the text has a | in it. Close this and try again.</string>
     <string name="suite_sheet_save">Save</string>

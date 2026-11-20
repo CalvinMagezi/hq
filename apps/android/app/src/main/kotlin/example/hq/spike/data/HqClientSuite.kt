@@ -105,3 +105,25 @@ private suspend fun HqClient.suiteAction(route: String, body: JSONObject): Suite
         throw HqUnavailable("hq sent something unreadable", e, status = HqUnavailable.UNREADABLE)
     }
 }
+
+/**
+ * One edit through hq's edit route (`POST /api/suite/edit`), quoting the hash of the `sheet` block read just before so hq refuses
+ * a change made from a screen that is out of date. [sheet] counts `sheet` blocks from zero. A refusal throws with hq's sentence.
+ */
+private suspend fun HqClient.suiteSheetEdit(path: String, sheet: Int, action: String, build: (JSONObject) -> Unit) {
+    val hash = suiteBlocks(path).filter { it.kind == "sheet" }.getOrNull(sheet)?.hash ?: throw HqUnavailable("that note has no such sheet")
+    val body = JSONObject().put("path", path).put("action", action).put("sheet", sheet).put("hash", hash)
+    build(body)
+    postJson("/api/suite/edit", body)
+}
+
+/** Adds a blank row to the `sheet`th sheet of [path], before table row [at] (1 is the first row under the header), or at the end when [at] is null. */
+suspend fun HqClient.suiteAddRow(path: String, sheet: Int, at: Int?) =
+    suiteSheetEdit(path, sheet, "add_rows") { b ->
+        b.put("rows", org.json.JSONArray().put(org.json.JSONArray().put("")))
+        if (at != null) b.put("at", at)
+    }
+
+/** Adds a column named [name] on the right of the `sheet`th sheet of [path]. */
+suspend fun HqClient.suiteAddColumn(path: String, sheet: Int, name: String) =
+    suiteSheetEdit(path, sheet, "add_column") { it.put("name", name) }
