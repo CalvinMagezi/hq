@@ -150,7 +150,7 @@ class QuietInboxTest {
 
     @Test fun everyToolHqAsksAboutGetsASentenceAndNoSnakeCaseName() {
         val tools = listOf(
-            "calendar_delete_event", "calendar_create_event", "calendar_update_event", "calendar_list_events", "contacts_search",
+            "calendar_delete_event", "calendar_create_event", "calendar_update_event", "calendar_list_events", "contacts_search", "finance_import_messages",
             "bash", "web_fetch", "task_delete", "vault_import", "harness_session_send", "some_new_tool", "",
         )
         for (t in tools) {

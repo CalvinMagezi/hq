@@ -50,6 +50,7 @@ object Links {
             "tasks" -> if (rest == "away") LinkTarget(Place.Tasks, away = true) else LinkTarget(Place.Tasks, id = id(rest))
             "helpers" -> if (rest == "github") LinkTarget(Place.Helpers, github = true) else LinkTarget(Place.Helpers, id = id(rest))
             "notes", "vault" -> if (rest.startsWith("n/")) LinkTarget(Place.Notes, noteId = id(rest.removePrefix("n/"))) else LinkTarget(Place.Notes, path = notePath(rest))
+            "finance" -> if (rest.equals("ledger", ignoreCase = true)) LinkTarget(Place.Notes, path = example.hq.spike.finance.FinanceLimits.LEDGER_PATH) else null
             "settings" -> rest.lowercase().ifEmpty { "home" }.takeIf { it in SETTINGS_SCREENS }?.let { LinkTarget(Place.Chat, screen = it) }
             "search" -> LinkTarget(Place.Notes, search = SearchScope.entries.firstOrNull { it.name.equals(rest, true) } ?: SearchScope.All)
             "web" -> if (rest.lowercase() in RETIRED_HOME) LinkTarget(Place.Notes) else webPage(rest, u.query)?.let { LinkTarget(Place.Chat, web = it.slug) }

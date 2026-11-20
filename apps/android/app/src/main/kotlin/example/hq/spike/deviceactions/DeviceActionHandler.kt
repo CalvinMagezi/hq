@@ -70,7 +70,7 @@ class DeviceActionHandler(
         if (!ackSent(action.actionId)) return
         val outcome = withContext(Dispatchers.IO) { module.run(action) }
         log("device_action ${action.actionId} phase=done outcome=${outcome.code}")
-        post(action.actionId, outcome.toJson())
+        if (!outcome.alreadySettled) post(action.actionId, outcome.toJson())
     }
 
     private fun expired(action: ChatEvent.DeviceAction): Boolean {

@@ -432,6 +432,10 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         send(authed("/api/device-actions/${java.net.URLEncoder.encode(actionId, "UTF-8")}/result").post(result.toString().toRequestBody("application/json".toMediaType())).build()) { }
     }
 
+    /** Uploads allowlisted mobile-money messages to settle a finance.import action; body is never logged. */
+    suspend fun postFinanceImport(actionId: String, payload: JSONObject): JSONObject =
+        send(authed("/api/finance/import/${java.net.URLEncoder.encode(actionId, "UTF-8")}").post(payload.toString().toRequestBody("application/json".toMediaType())).build()) { JSONObject(it) }
+
     /** The device actions still open for this session, so one whose socket dropped after the insert can still be settled. */
     suspend fun pendingDeviceActions(): List<ChatEvent.DeviceAction> = send(authed("/api/device-actions/pending").build()) { body ->
         val root = body.trim()

@@ -21,6 +21,7 @@ object NoteRefs {
     /** The vault path a markdown link points at, or null for an ordinary link. */
     fun fromLink(href: String): String? {
         val h = href.trim()
+        if (h.equals(example.hq.spike.finance.FinanceLimits.LEDGER_LINK, ignoreCase = true)) return example.hq.spike.finance.FinanceLimits.LEDGER_PATH
         if (h.startsWith("/api/note")) return sanitize(h)
         val noFragment = h.substringBefore('#')
         val isScheme = Regex("^(vault|note):", RegexOption.IGNORE_CASE).containsMatchIn(noFragment)
