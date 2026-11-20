@@ -41,6 +41,8 @@ pub use host_git::{for_push as hardened_git_for_push, hardened as hardened_git};
 #[cfg(unix)]
 mod keys;
 #[cfg(unix)]
+mod linked_git;
+#[cfg(unix)]
 mod lockdown;
 #[cfg(unix)]
 mod merge;
@@ -57,7 +59,6 @@ mod quota;
 mod relay;
 #[cfg(unix)]
 mod report;
-#[cfg(unix)]
 mod sandbox;
 #[cfg(unix)]
 mod server;
