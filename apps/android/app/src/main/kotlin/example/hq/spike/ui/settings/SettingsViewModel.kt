@@ -525,6 +525,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             assistantRow(c),
             calendarRow(c),
             contactsRow(c),
+            financeRow(c),
             phoneRow(c, SettingsPage.CaptureWidgets, PhoneWords.captureSummary(Words.of(c), captureFacts())),
         ))
     }
@@ -542,6 +543,13 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private fun contactsRow(c: Context): HomeRow {
         val allowed = example.hq.spike.contacts.AndroidContactsReader.hasPermission(c)
         return phoneRow(c, SettingsPage.Contacts, c.getString(if (allowed) R.string.contacts_status_allowed else R.string.cal_status_no_access), warn = !allowed)
+    }
+
+    private fun financeRow(c: Context): HomeRow {
+        val enabled = example.hq.spike.finance.FinancePrefs(c).isEnabled()
+        val allowed = example.hq.spike.finance.AndroidSmsReader.hasPermission(c)
+        val status = c.getString(if (!enabled) R.string.finance_status_off else if (!allowed) R.string.cal_status_no_access else R.string.finance_status_on)
+        return phoneRow(c, SettingsPage.Finance, status, warn = enabled && !allowed)
     }
 
     private fun assistantRow(c: Context): HomeRow {
