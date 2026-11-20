@@ -74,7 +74,9 @@ impl HqTool for OfficeEditTool {
          Dashboards: `add_tile` (`from`, `fn`, `where`, `label`, `format`) and `add_plot` (`type`, \
          `from`, `x`, `y`, `where`, `group`, `title`), checked by drawing them before anything is \
          written. If the note changed since you read it the edit is refused and nothing is \
-         written: read again and retry. A call that deletes anything, or touches more than 50 \
+         written: read again and retry. Review notes: `comments` lists a note's comments, `add_comment` \
+         (`on` the block's `hash`, `text`, optional `by`) leaves one on a block and `resolve_comment` \
+         (`index`, `hash`) closes it; comments are never put in an exported file. A call that deletes anything, or touches more than 50 \
          cells, writes nothing and returns a preview with a `token`; call again with the same \
          arguments and that `token` to apply it. `focus` (`note`, optional `block`, `row`, `col`) \
          is what the owner has selected, if they passed it; it is only a pointer and is echoed \
@@ -97,6 +99,16 @@ impl HqTool for OfficeEditTool {
                 "The block's (or, for deck actions, the card's) hash, from `blocks` or `cards`.",
             ),
             ("markdown", "string", "The new block's or card's Markdown."),
+            (
+                "on",
+                "string",
+                "add_comment: the hash of the block the comment is about.",
+            ),
+            (
+                "by",
+                "string",
+                "add_comment: who the comment is from, as a label (default HQ).",
+            ),
             ("sheet", "integer", "Which sheet block, from 0."),
             (
                 "row",
@@ -117,7 +129,7 @@ impl HqTool for OfficeEditTool {
             (
                 "text",
                 "string",
-                "set_cell: the new cell text. set_notes: the speaker notes (empty clears them).",
+                "set_cell: the new cell text. set_notes: the speaker notes (empty clears them). add_comment: the comment.",
             ),
             (
                 "name",

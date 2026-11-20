@@ -1,55 +1,57 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
-import { OP_ROUTES, createSuiteOps, opAvailable, probeSuiteOps, resetSuiteOpsProbe } from './suiteOps'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { suiteOps } from './suiteOps'
 
-const target = { path: 'N/a.md', base: 'h1', index: 0 }
-const reply = (status: number, body: unknown = {}) => new Response(JSON.stringify(body), { status })
+const calls: { url: string; body?: unknown }[] = []
+const blocks = [
+  { index: 0, hash: 'aaaaaaaaaaaa', kind: 'heading 1', src: '# T' },
+  { index: 1, hash: 'bbbbbbbbbbbb', kind: 'sheet', src: '```sheet\n| a | b |\n```' },
+  { index: 2, hash: 'cccccccccccc', kind: 'sheet', src: '```sheet\n| c |\n```' },
+]
+let fail: { status: number; error: string } | null = null
+const realFetch = globalThis.fetch
 
-beforeEach(() => resetSuiteOpsProbe())
+beforeEach(() => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined })
+    if (url.startsWith('/api/suite/blocks')) return new Response(JSON.stringify({ revision: 'r', blocks }))
+    if (fail) return new Response(JSON.stringify({ error: fail.error }), { status: fail.status })
+    return new Response(JSON.stringify({ applied: true, summary: 'ok', revision: 'r2' }))
+  }) as typeof fetch
+})
 
-describe('the planned structure routes', () => {
-  test('a call posts its body to the planned route with the note hash', async () => {
-    const seen: { url: string; init?: RequestInit }[] = []
-    const ops = createSuiteOps(async (url, init) => (seen.push({ url, init }), reply(200)))
-    expect(await ops.rows(target, 'insert', 3)).toEqual({ ok: true })
-    expect(seen[0].url).toBe('/api/suite/sheet/rows')
-    expect(seen[0].init?.method).toBe('POST')
-    expect(JSON.parse(String(seen[0].init?.body))).toEqual({ path: 'N/a.md', base: 'h1', index: 0, action: 'insert', at: 3, count: 1 })
-    await ops.columnType(target, 2, 'ugx')
-    expect(seen[1].url).toBe('/api/suite/sheet/column-type')
-    await ops.style(target, { layout: 'two-column' })
-    expect(seen[2].url).toBe('/api/suite/slides/style')
+afterEach(() => {
+  globalThis.fetch = realFetch
+  calls.length = 0
+  fail = null
+})
+
+describe('sheet structure edits go to the one edit route', () => {
+  test('a row is inserted before its table row, quoting the sheet block hash read just before', async () => {
+    expect(await suiteOps.rows({ path: 'N/a.md', index: 1 }, 'insert', 3)).toEqual({ ok: true })
+    expect(calls[0].url).toStartWith('/api/suite/blocks')
+    expect(calls[1].url).toBe('/api/suite/edit')
+    // The second sheet block is number 1, whatever other blocks come before it.
+    expect(calls[1].body).toMatchObject({ path: 'N/a.md', action: 'add_rows', sheet: 1, hash: 'cccccccccccc', at: 4, rows: [['']] })
   })
 
-  test('a 404 means the route is not there yet: it is reported unavailable and remembered', async () => {
-    const ops = createSuiteOps(async () => reply(404))
-    expect(opAvailable('rows')).toBe(true)
-    expect(await ops.rows(target, 'delete', 1)).toEqual({ ok: false, reason: 'unavailable', message: '' })
-    expect(opAvailable('rows')).toBe(false)
-    expect(opAvailable('columns')).toBe(true)
+  test('a delete names the table row (1 is the first under the header) and a column goes on the right', async () => {
+    await suiteOps.rows({ path: 'N/a.md', index: 0 }, 'delete', 0)
+    expect(calls[1].body).toMatchObject({ action: 'delete_rows', sheet: 0, hash: 'bbbbbbbbbbbb', row: 1, count: 1 })
+    await suiteOps.addColumn({ path: 'N/a.md', index: 0 }, 'Notes')
+    expect(calls[3].body).toMatchObject({ action: 'add_column', name: 'Notes' })
+    await suiteOps.columnType({ path: 'N/a.md', index: 0 }, 2, 'ugx')
+    expect(calls[5].body).toMatchObject({ action: 'set_column_type', col: 2, type: 'ugx' })
   })
 
-  test('a refusal that names a stale note carries the server sentence; an outage is a plain failure', async () => {
-    const stale = createSuiteOps(async () => reply(409, { error: 'the note changed' }))
-    expect(await stale.card(target, 'add')).toEqual({ ok: false, reason: 'stale', message: 'the note changed' })
-    const down = createSuiteOps(async () => Promise.reject(new TypeError('offline')))
-    expect(await down.move(target, 2)).toEqual({ ok: false, reason: 'failed', message: '' })
-    expect(opAvailable('move')).toBe(true)
-  })
-
-  test('the probe asks with OPTIONS and hides only what answered 404', async () => {
-    const asked: string[] = []
-    await probeSuiteOps(async (url, init) => {
-      asked.push(`${init?.method} ${url}`)
-      return reply(url === OP_ROUTES.notes ? 404 : 405)
-    })
-    expect(asked.every((a) => a.startsWith('OPTIONS '))).toBe(true)
-    expect(asked).toHaveLength(Object.keys(OP_ROUTES).length)
-    expect(opAvailable('notes')).toBe(false)
-    expect(opAvailable('rows')).toBe(true)
-  })
-
-  test('a probe that cannot reach HQ leaves every route shown', async () => {
-    await probeSuiteOps(async () => Promise.reject(new TypeError('offline')))
-    expect(Object.keys(OP_ROUTES).every((n) => opAvailable(n as keyof typeof OP_ROUTES))).toBe(true)
+  test("HQ's sentence for a refused change comes back; a missing sheet is refused before any edit is sent", async () => {
+    fail = { status: 422, error: 'that block changed since it was read' }
+    const r = await suiteOps.rows({ path: 'N/a.md', index: 0 }, 'delete', 0)
+    expect(r).toEqual({ ok: false, reason: 'stale', message: expect.stringContaining('changed') })
+    calls.length = 0
+    fail = null
+    const none = await suiteOps.rows({ path: 'N/a.md', index: 5 }, 'insert', 0)
+    expect(none.ok).toBe(false)
+    expect(calls.some((c) => c.url === '/api/suite/edit')).toBe(false)
   })
 })

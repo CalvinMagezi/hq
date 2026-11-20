@@ -619,8 +619,8 @@ interface ActionsProps {
 
 /** What can be done to the picked cell, in a bottom sheet. Structure changes go through HQ and are hidden where it has no route. */
 function CellActions({ sheet, cell, pos, srcRow, box, editor, onClose, onEdit, onCopy, onPaste, onFill, onSelect, onCard, callOp }: ActionsProps) {
-  const { ops, available } = useSuiteOps()
-  const [confirm, setConfirm] = useState<'row' | 'col' | null>(null)
+  const { ops } = useSuiteOps()
+  const [confirm, setConfirm] = useState<'row' | null>(null)
   const [manual, setManual] = useState<string | null>(null)
   const held = editor.waiting
   const cells = box ? (box.r2 - box.r1 + 1) * (box.c2 - box.c1 + 1) : 1
@@ -633,8 +633,8 @@ function CellActions({ sheet, cell, pos, srcRow, box, editor, onClose, onEdit, o
       setManual('')
     }
   }
-  const rowsOk = available('rows') && !held
-  const colsOk = available('columns') && !held
+  const rowsOk = !held
+  const colsOk = !held
   return (
     <BottomSheet title={t('suite_actions_title', { cell })} onClose={onClose} placement="bottom">
       <div className="su-actions">
@@ -678,7 +678,7 @@ function CellActions({ sheet, cell, pos, srcRow, box, editor, onClose, onEdit, o
           </button>
         </div>
       )}
-      <ColumnType sheet={sheet} col={pos.col} disabled={!available('columnType') || held} callOp={callOp} ops={ops} />
+      <ColumnType sheet={sheet} col={pos.col} disabled={held} callOp={callOp} ops={ops} />
       {(rowsOk || colsOk) && (
         <div className="su-actions" role="group" aria-label={t('suite_structure')}>
           {rowsOk && (
@@ -699,21 +699,13 @@ function CellActions({ sheet, cell, pos, srcRow, box, editor, onClose, onEdit, o
             </>
           )}
           {colsOk && (
-            <>
-              <button type="button" className="su-act" onClick={() => void callOp((tg) => ops.columns(tg, 'insert', pos.col), t('suite_say_col_added'))}>
-                {t('suite_act_col_left')}
-              </button>
-              <button type="button" className="su-act" onClick={() => void callOp((tg) => ops.columns(tg, 'insert', pos.col + 1), t('suite_say_col_added'))}>
-                {t('suite_act_col_right')}
-              </button>
-              <button
-                type="button"
-                className={`su-act${confirm === 'col' ? ' su-danger' : ''}`}
-                onClick={() => (confirm === 'col' ? void callOp((tg) => ops.columns(tg, 'delete', pos.col), t('suite_say_col_deleted')) : setConfirm('col'))}
-              >
-                {confirm === 'col' ? t('suite_act_confirm') : t('suite_act_col_delete', { col: colName(pos.col) })}
-              </button>
-            </>
+            <button
+              type="button"
+              className="su-act"
+              onClick={() => void callOp((tg) => ops.addColumn(tg, t('suite_new_column', { n: String(sheet.header.length + 1) })), t('suite_say_col_added'))}
+            >
+              {t('suite_act_col_right')}
+            </button>
           )}
         </div>
       )}

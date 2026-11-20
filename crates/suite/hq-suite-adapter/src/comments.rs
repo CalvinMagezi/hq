@@ -94,14 +94,23 @@ fn is_comment(doc: &Document, i: usize) -> bool {
     doc.nodes()[i].kind() == &NodeKind::Typed(BlockType::Comment)
 }
 
-fn write(file: &Path, doc: &Document, op: Op) -> Result<CommentsView> {
+fn patch_doc(doc: &Document, op: Op) -> Result<Document> {
     let patch = Patch {
         base_revision: Some(doc.revision()),
         ops: vec![op],
     };
-    let patched = apply(doc, &patch).map_err(|e| anyhow::anyhow!("that edit was refused: {e}"))?;
+    apply(doc, &patch).map_err(|e| anyhow::anyhow!("that edit was refused: {e}"))
+}
+
+fn write(file: &Path, doc: &Document, op: Op) -> Result<CommentsView> {
+    let patched = patch_doc(doc, op)?;
     fsx::atomic_write(file, patched.render().as_bytes())?;
     Ok(view_of(&patched))
+}
+
+/// The comments of a note already read, as [`list`] returns them.
+pub fn view(doc: &Document) -> CommentsView {
+    view_of(doc)
 }
 
 /// The note's comments, in the order they are written.
@@ -121,6 +130,14 @@ pub fn add(
     at: &str,
     text: &str,
 ) -> Result<CommentsView> {
+    let (file, doc) = read(vault, note)?;
+    let patched = add_in(&doc, on, by, at, text)?;
+    fsx::atomic_write(&file, patched.render().as_bytes())?;
+    Ok(view_of(&patched))
+}
+
+/// [`add`] over a note already read: the note as it would be, nothing written.
+pub fn add_in(doc: &Document, on: &str, by: &str, at: &str, text: &str) -> Result<Document> {
     let text = text.trim();
     if text.is_empty() {
         bail!("a comment cannot be empty");
@@ -139,14 +156,13 @@ pub fn add(
         .filter(|c| !c.is_control() && !matches!(c, '"' | '`'))
         .take(MAX_BY_CHARS)
         .collect();
-    let (file, doc) = read(vault, note)?;
     let Some(anchor) =
-        (0..doc.nodes().len()).find(|&i| !is_comment(&doc, i) && doc.nodes()[i].hash() == on)
+        (0..doc.nodes().len()).find(|&i| !is_comment(doc, i) && doc.nodes()[i].hash() == on)
     else {
         bail!("that block changed since it was read, so the comment was not added");
     };
     let mut last = anchor;
-    while last + 1 < doc.nodes().len() && is_comment(&doc, last + 1) {
+    while last + 1 < doc.nodes().len() && is_comment(doc, last + 1) {
         last += 1;
     }
     let mut attrs = vec![("on", on)];
@@ -156,9 +172,8 @@ pub fn add(
     attrs.push(("at", at));
     attrs.push(("state", "open"));
     let block = TypedBlock::new(BlockType::Comment, &attrs, text);
-    write(
-        &file,
-        &doc,
+    patch_doc(
+        doc,
         Op::InsertAfter {
             at: doc.addr(last),
             markdown: block.render("\n"),
@@ -170,6 +185,13 @@ pub fn add(
 /// and its text are kept as written, including any this version does not know.
 pub fn resolve(vault: &Path, note: &str, index: usize, hash: &str) -> Result<CommentsView> {
     let (file, doc) = read(vault, note)?;
+    let patched = resolve_in(&doc, index, hash)?;
+    fsx::atomic_write(&file, patched.render().as_bytes())?;
+    Ok(view_of(&patched))
+}
+
+/// [`resolve`] over a note already read: the note as it would be, nothing written.
+pub fn resolve_in(doc: &Document, index: usize, hash: &str) -> Result<Document> {
     let node = doc
         .node(index)
         .with_context(|| format!("there is no block {index}"))?;
@@ -183,7 +205,7 @@ pub fn resolve(vault: &Path, note: &str, index: usize, hash: &str) -> Result<Com
         bail!("block {index} is not a comment");
     }
     if block.info.get("state") == Some("resolved") {
-        return Ok(view_of(&doc));
+        return Ok(doc.clone());
     }
     match block.info.attrs.iter_mut().find(|a| a.key == "state") {
         Some(a) => *a = hq_suite_md::Attr::new("state", "resolved"),
@@ -192,9 +214,8 @@ pub fn resolve(vault: &Path, note: &str, index: usize, hash: &str) -> Result<Com
             .attrs
             .push(hq_suite_md::Attr::new("state", "resolved")),
     }
-    write(
-        &file,
-        &doc,
+    patch_doc(
+        doc,
         Op::Replace {
             at: Addr {
                 index,

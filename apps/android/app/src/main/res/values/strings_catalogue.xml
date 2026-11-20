@@ -4658,9 +4658,8 @@
     <string name="suite_act_row_above">Insert a row above</string>
     <string name="suite_act_row_below">Insert a row below</string>
     <string name="suite_act_row_delete">Delete row %1$s</string>
-    <string name="suite_act_col_left">Insert a column to the left</string>
-    <string name="suite_act_col_right">Insert a column to the right</string>
-    <string name="suite_act_col_delete">Delete column %1$s</string>
+    <string name="suite_act_col_right">Add a column on the right</string>
+    <string name="suite_new_column">Column %1$s</string>
     <string name="suite_act_confirm">Tap again to delete</string>
     <string name="suite_structure">Rows and columns</string>
     <string name="suite_structure_waiting">A change is waiting to be sent. This works once HQ has it.</string>
@@ -4703,7 +4702,6 @@
     <string name="suite_say_row_added">Row added</string>
     <string name="suite_say_row_deleted">Row deleted</string>
     <string name="suite_say_col_added">Column added</string>
-    <string name="suite_say_col_deleted">Column deleted</string>
     <string name="suite_say_type_set">Column type is now %1$s</string>
     <string name="suite_worked_out_by_hq">Worked out by HQ</string>
     <string name="suite_card_open">Open row as a card</string>

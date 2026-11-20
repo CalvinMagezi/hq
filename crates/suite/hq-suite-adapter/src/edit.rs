@@ -15,9 +15,9 @@ use serde_json::{Value, json};
 
 use crate::blocks::{self, BlocksView, check_markdown, view_of};
 use crate::edit_plan::{
-    PREVIEW_CELLS, Planned, check_focus, load, opt_u64, patch, req_str, req_u64, token_for,
+    PREVIEW_CELLS, Planned, check_focus, load, opt_str, opt_u64, patch, req_str, req_u64, token_for,
 };
-use crate::{dash_ops, sheet_ops, sheets, slide_ops};
+use crate::{comments, dash_ops, sheet_ops, sheets, slide_ops};
 
 /// Longest source excerpt a listing returns per block, so a read stays small.
 const EXCERPT_CHARS: usize = 400;
@@ -44,6 +44,9 @@ pub const ACTIONS: &[&str] = &[
     "set_card_style",
     "add_tile",
     "add_plot",
+    "comments",
+    "add_comment",
+    "resolve_comment",
 ];
 
 /// Who is asking. An agent's change that deletes or is large is previewed first; the owner,
@@ -79,7 +82,7 @@ pub fn listing(view: &BlocksView) -> Value {
 pub fn is_write(args: &Value) -> bool {
     !matches!(
         args.get("action").and_then(Value::as_str),
-        Some("blocks" | "cards")
+        Some("blocks" | "cards" | "comments")
     )
 }
 
@@ -88,6 +91,10 @@ pub fn is_write(args: &Value) -> bool {
 pub fn note_revision(vault: &Path, note: &str) -> Option<String> {
     let (_, doc) = load(vault, note).ok()?;
     Some(doc.revision())
+}
+
+fn comment_listing(doc: &Document) -> Value {
+    serde_json::to_value(comments::view(doc)).unwrap_or(Value::Null)
 }
 
 fn block_listing(doc: &Document) -> Value {
@@ -182,6 +189,22 @@ fn plan(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
         "set_card_style" => slide_ops::set_card_style(doc, args)?,
         "add_tile" => dash_ops::add_tile(doc, note, args)?,
         "add_plot" => dash_ops::add_plot(doc, note, args)?,
+        "add_comment" => {
+            // The label is typed text, never an identity; an agent's defaults to "HQ".
+            let by = opt_str(args, "by").unwrap_or("HQ");
+            let at = opt_str(args, "at")
+                .map(str::to_string)
+                .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
+            let new = comments::add_in(doc, req_str(args, "on")?, by, &at, req_str(args, "text")?)?;
+            let extra = comment_listing(&new);
+            Planned::new(new, "Added a comment".to_string()).with(extra)
+        }
+        "resolve_comment" => {
+            let n = index("index")?;
+            let new = comments::resolve_in(doc, n, req_str(args, "hash")?)?;
+            let extra = comment_listing(&new);
+            Planned::new(new, format!("Resolved comment {n}")).with(extra)
+        }
         other => bail!(
             "unknown action `{other}`; use one of: {}",
             ACTIONS.join(", ")
@@ -228,6 +251,10 @@ pub fn first_step(vault: &Path, args: &Value, gate: Gate) -> Result<Step> {
         "cards" => {
             let (_, doc) = load(vault, note)?;
             Ok(Step::Done(with_focus(vault, args, slide_ops::list(&doc)?)?))
+        }
+        "comments" => {
+            let (_, doc) = load(vault, note)?;
+            Ok(Step::Done(with_focus(vault, args, comment_listing(&doc))?))
         }
         _ => {
             if let Some(f) = args.get("focus").filter(|f| !f.is_null()) {

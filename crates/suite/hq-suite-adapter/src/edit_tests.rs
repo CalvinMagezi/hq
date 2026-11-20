@@ -280,3 +280,46 @@ fn an_unknown_action_lists_the_known_ones_and_blocks_and_cards_never_write() {
         .to_string();
     assert!(e.contains("index"));
 }
+
+#[test]
+fn an_agent_comments_on_a_block_and_resolves_it_and_a_stale_anchor_writes_nothing() {
+    let d = vault("# Plan\n\nThe revenue figure is final.\n");
+    let doc = Document::parse(&text(&d));
+    let para = doc
+        .nodes()
+        .iter()
+        .find(|n| n.src().starts_with("The revenue"))
+        .unwrap()
+        .hash();
+    let added = agent(
+        &d,
+        json!({"action": "add_comment", "on": para, "text": "Is this audited?", "at": "2026-11-20"}),
+    )
+    .unwrap();
+    assert_eq!(added["applied"], true);
+    assert!(text(&d).contains("Is this audited?") && text(&d).contains("by=HQ"));
+    let listed = agent(&d, json!({"action": "comments"})).unwrap();
+    let row = &listed["comments"][0];
+    assert_eq!(
+        (row["state"].as_str(), row["by"].as_str()),
+        (Some("open"), Some("HQ"))
+    );
+    let before = text(&d);
+    agent(
+        &d,
+        json!({"action": "resolve_comment", "index": row["index"], "hash": row["hash"]}),
+    )
+    .unwrap();
+    assert!(text(&d).contains("state=resolved"));
+    // An anchor hash that no block has any more is refused and nothing is written.
+    let before_stale = text(&d);
+    assert!(
+        agent(
+            &d,
+            json!({"action": "add_comment", "on": "0123456789ab", "text": "x", "at": "2026-11-20"})
+        )
+        .is_err()
+    );
+    assert_eq!(text(&d), before_stale);
+    assert_ne!(before, before_stale);
+}
