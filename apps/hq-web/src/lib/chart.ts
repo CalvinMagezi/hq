@@ -41,6 +41,8 @@ const VIEW_W = 360
 const VIEW_H = 240
 const MARGIN = { left: 52, right: 12, top: 10, bottom: 44 }
 const Y_TICKS = 4
+/** A scatter chart keeps its first and last points off the edges of the frame. */
+const SCATTER_INSET = 8
 const POINT_MARKER_LIMIT = 30
 const PIE_RADIUS = 90
 const DONUT_HOLE = 0.55
@@ -200,7 +202,7 @@ function cartesianSvg(spec: ChartSpec): string {
   const scatter = spec.type === 'scatter'
   const xs = scatter ? spec.labels.map(Number) : []
   const xAxis = scatter ? xScale(xs) : null
-  const atX = (v: number) => (xAxis ? left + ((v - xAxis.min) / (xAxis.max - xAxis.min)) * plotW : 0)
+  const atX = (v: number) => (xAxis ? left + SCATTER_INSET + ((v - xAxis.min) / (xAxis.max - xAxis.min)) * (plotW - 2 * SCATTER_INSET) : 0)
   const cx = (i: number) => (scatter ? atX(xs[i]) : left + (i + 0.5) * band)
   const parts: string[] = []
 

@@ -6,6 +6,7 @@ import { commentAdd, commentResolve, commentsIn, fetchBlocks, fetchComments, typ
 import { blockChoice, commentable, countComments, pickAnchor, splitComments, type AnchorHint } from '~/lib/commentView'
 import { toastAlert, toastNotice } from '~/lib/toast'
 import { Sheet } from '../ui/Sheet'
+import './suite.css'
 
 /** What the Comments button needs from a viewer: where the note lives, its text, and whether it may be changed. */
 export interface CommentsProps {

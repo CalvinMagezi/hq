@@ -9,6 +9,7 @@ import { MarkdownViewer } from '../MarkdownViewer'
 import { Sheet } from '../ui/Sheet'
 import { SaveLine } from './SaveLine'
 import { CommentsButton } from './CommentsPanel'
+import './suite.css'
 import { useSuiteEdit } from './useSuiteEdit'
 
 type Go = { (): Promise<{ blocks: SuiteBlock[] }> }

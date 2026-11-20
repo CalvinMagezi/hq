@@ -11,6 +11,8 @@ const M = { left: 52, right: 12, top: 14, bottom: 44 }
 const PW = W - M.left - M.right
 const PH = H - M.top - M.bottom
 const LABEL_LIMIT = 12
+/** A scatter chart keeps its first and last points off the edges of the frame. */
+const INSET = 8
 const TICK_CHARS = 10
 const PIE_R = 90
 const HOLE = 0.55
@@ -121,7 +123,7 @@ function Cartesian({ id, kind, labels, series, active, setActive, fmt, aria }: {
   const band = PW / labels.length
   const xs = scatter ? labels.map(Number) : []
   const xAxis = scatter ? xScale(xs) : null
-  const atX = (v: number) => (xAxis ? M.left + ((v - xAxis.min) / (xAxis.max - xAxis.min)) * PW : 0)
+  const atX = (v: number) => (xAxis ? M.left + INSET + ((v - xAxis.min) / (xAxis.max - xAxis.min)) * (PW - 2 * INSET) : 0)
   const cx = (i: number) => (scatter ? atX(xs[i]) : M.left + (i + 0.5) * band)
   const every = Math.ceil(labels.length / 6)
   const labelled = labels.length * series.length <= LABEL_LIMIT

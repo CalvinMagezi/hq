@@ -99,7 +99,7 @@
 .su-seg-b[aria-checked="true"]{border-color:var(--brand-green);background:var(--surface-200)}
 .su-colors{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
 .su-color-row{display:flex;align-items:center;gap:8px;min-height:48px}
-.su-color{width:48px;height:48px;padding:2px;border:1px solid var(--line);border-radius:var(--radius-md);background:transparent}
+.su-color{flex:none;width:48px;height:48px;padding:2px;border:1px solid var(--line);border-radius:var(--radius-md);background:transparent}
 .su-notes{padding:8px 0}
 .su-notes summary{min-height:44px;display:flex;align-items:center}
 @container app (min-width:900px){
