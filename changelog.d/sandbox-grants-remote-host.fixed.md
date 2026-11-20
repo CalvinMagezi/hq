@@ -1,0 +1,1 @@
+Sandbox access requests from a helper on another computer than HQ (such as a laptop host driven by the phone) are decided against that computer's own home directory and paths instead of being refused.

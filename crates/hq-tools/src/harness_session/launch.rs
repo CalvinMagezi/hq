@@ -439,6 +439,20 @@ async fn launch_with(
         (Some(prompt), None, false) => harness.prompt_args(prompt),
         _ => Vec::new(),
     };
+    let grants = {
+        let (db, host, session) = (db.clone(), l.host.clone(), l.session_id.to_string());
+        blocking(move || {
+            let paths = super::sandbox_request::HostPaths::probe(host);
+            super::sandbox_request::launch_delta(
+                &db,
+                &super::agent_host_config(),
+                &session,
+                paths.as_ref().map(|p| p as &dyn hq_core::grants::PathView),
+                chrono::Utc::now().timestamp(),
+            )
+        })
+        .await?
+    };
     let request = LaunchRequest {
         name: l.session_id.to_string(),
         kind: harness.spec.kind.to_string(),
@@ -472,13 +486,7 @@ async fn launch_with(
         acp_argv,
         acp_model: harness.model.clone(),
         strict: launch_is_narrowed(db, &l),
-        grants: super::sandbox_request::launch_delta(
-            db,
-            &super::agent_host_config(),
-            l.session_id,
-            matches!(l.host.name(), "native" | "local"),
-            chrono::Utc::now().timestamp(),
-        ),
+        grants,
     };
     let began = std::time::Instant::now();
     let host = l.host.clone();

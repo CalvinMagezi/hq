@@ -14,15 +14,15 @@ use anyhow::{Result, bail};
 use async_trait::async_trait;
 use hq_core::config::AgentHostConfig;
 use hq_core::grants::{
-    Capability, Decision, GrantRequest, GrantsConfig, SandboxDelta, TaskContext, classify,
-    denied_path, normalize,
+    Capability, Decision, GrantRequest, GrantsConfig, PathView, SandboxDelta, TaskContext,
+    classify, denied_path, normalize,
 };
 use hq_core::types::{ValueItem, ValueKind};
 use hq_db::sandbox_grants::{self as store, NewGrant};
 use hq_db::{Database, value_items};
 use serde_json::{Value, json};
 use std::collections::HashSet;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 use value_items::RequestState;
@@ -37,9 +37,6 @@ const MAX_WAITING: usize = 3;
 const MAX_TEXT_CHARS: usize = 300;
 /// How long a restart waits for the helper to finish its turn before it stops it anyway.
 const SETTLE_WAIT: Duration = Duration::from_secs(60);
-/// The host names the built-in host on this machine goes by. Paths and the home directory are
-/// read from this machine, so a request from any other host is not decided here.
-const LOCAL_HOSTS: &[&str] = &["", "native", "local"];
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Outcome {
@@ -75,27 +72,37 @@ pub(super) fn profile_name(db: &Database, session: &str) -> Option<String> {
         .flatten()
 }
 
-/// `path` with its longest existing ancestor resolved through symlinks, so a link cannot carry a
-/// grant outside the directory it names. A path with `..` is returned as written, for `classify`
-/// to refuse.
-fn canonical_lenient(path: &str) -> String {
-    let p = PathBuf::from(path);
-    if !p.is_absolute() || p.components().any(|c| matches!(c, Component::ParentDir)) {
-        return path.to_string();
+/// The paths of the computer a session runs on, asked of its host: that is where the home
+/// directory and the symlinks are, and it is not always the machine HQ runs on.
+pub(super) struct HostPaths {
+    host: crate::agent_host::Host,
+    home: PathBuf,
+}
+
+impl HostPaths {
+    /// None when the host cannot resolve paths (an older host), so nothing is decided blind.
+    pub(super) fn probe(host: crate::agent_host::Host) -> Option<Self> {
+        let home = host.realpaths(&[])?.home;
+        Some(Self {
+            host,
+            home: PathBuf::from(home),
+        })
     }
-    let mut tail = Vec::new();
-    let mut at = p.as_path();
-    loop {
-        if let Ok(real) = at.canonicalize() {
-            let mut out = real;
-            out.extend(tail.iter().rev());
-            return out.to_string_lossy().into_owned();
+}
+
+impl PathView for HostPaths {
+    fn home(&self) -> PathBuf {
+        self.home.clone()
+    }
+    fn canonical(&self, path: &str) -> String {
+        match self.host.realpaths(&[path.to_string()]) {
+            Some(found) if found.resolved.len() == 1 => {
+                found.resolved.into_iter().next().unwrap_or_default()
+            }
+            // An answer that cannot be read leaves the path as written; `classify` then judges
+            // an unresolved path, and a symlink on this host cannot be seen through.
+            _ => path.to_string(),
         }
-        let (Some(name), Some(parent)) = (at.file_name(), at.parent()) else {
-            return path.to_string();
-        };
-        tail.push(name.to_os_string());
-        at = parent;
     }
 }
 
@@ -211,17 +218,12 @@ fn existing(
 pub(super) fn decide(
     db: &Database,
     cfg: &GrantsConfig,
-    home: &Path,
+    paths: &dyn PathView,
     asker: &Asker,
     req: &GrantRequest,
     reason: &str,
     now: i64,
 ) -> Result<Outcome> {
-    if !LOCAL_HOSTS.contains(&asker.host) {
-        return Ok(Outcome::Refused(
-            "HQ cannot yet decide access for a session on another computer; tell the user what you need".into(),
-        ));
-    }
     if hq_db::tasks::has_hidden_chars(&req.resource) || req.resource.contains('\0') {
         return Ok(Outcome::Refused(
             "the request has control or invisible characters, so it cannot be shown to the owner"
@@ -232,7 +234,7 @@ pub(super) fn decide(
     settle_pending(db, asker.session, now)?;
     let mut req = normalize(req);
     if matches!(req.capability, Capability::FsRead | Capability::FsWrite) {
-        req.resource = canonical_lenient(&req.resource);
+        req.resource = paths.canonical(&req.resource);
     }
     let capability = serde_json::to_value(req.capability)?
         .as_str()
@@ -252,14 +254,14 @@ pub(super) fn decide(
     }
     // Compare like with like: a home reached through a link, or a profile path that is one, must
     // match the canonical resource.
-    let home = PathBuf::from(canonical_lenient(&home.to_string_lossy()));
+    let home = PathBuf::from(paths.canonical(&paths.home().to_string_lossy()));
     let home = home.as_path();
     let profile = profile_name(db, asker.session)
         .and_then(|name| cfg.profiles.get(&name))
         .map(|p| {
             let mut r = p.resolved(home);
             for list in [&mut r.writable, &mut r.readable] {
-                *list = list.iter().map(|x| canonical_lenient(x)).collect();
+                *list = list.iter().map(|x| paths.canonical(x)).collect();
             }
             r
         });
@@ -340,26 +342,26 @@ pub(super) fn launch_delta(
     db: &Database,
     cfg: &AgentHostConfig,
     session: &str,
-    local: bool,
+    paths: Option<&dyn PathView>,
     now: i64,
 ) -> SandboxDelta {
-    let Some(home) = dirs::home_dir().filter(|_| local) else {
+    let Some(paths) = paths else {
         return SandboxDelta::default();
     };
+    let home = PathBuf::from(paths.canonical(&paths.home().to_string_lossy()));
     let mut delta = store::delta_for_session(db, session, now).unwrap_or_default();
     if let Some(name) = profile_name(db, session)
         && let Some(p) = cfg.grants.profiles.get(&name)
     {
-        let base = p.delta(&home);
+        let base = p.delta(&paths.home());
         delta.writable.extend(base.writable);
         delta.readable.extend(base.readable);
         delta.loopback_ports.extend(base.loopback_ports);
         delta.allow.extend(base.allow);
     }
-    let home = PathBuf::from(canonical_lenient(&home.to_string_lossy()));
     let safe = |list: Vec<PathBuf>| -> Vec<PathBuf> {
         list.into_iter()
-            .map(|p| PathBuf::from(canonical_lenient(&p.to_string_lossy())))
+            .map(|p| PathBuf::from(paths.canonical(&p.to_string_lossy())))
             .filter(|p| denied_path(p, &home).is_none())
             .collect()
     };
@@ -515,9 +517,6 @@ impl HqTool for SandboxRequestTool {
             resource: arg_str(&args, "resource"),
         };
         let reason = arg_str(&args, "reason");
-        let Some(home) = dirs::home_dir() else {
-            bail!("HQ cannot tell which home directory this host uses");
-        };
         let db = self.db.clone();
         let (outcome, restart) = {
             let (db, session, req) = (db.clone(), session.clone(), req.clone());
@@ -532,7 +531,16 @@ impl HqTool for SandboxRequestTool {
                 };
                 let cfg = super::agent_host_config().grants;
                 let now = chrono::Utc::now().timestamp();
-                let out = decide(&db, &cfg, &home, &asker, &req, &reason, now)?;
+                let host = crate::agent_host::host(Some(&row.host))?;
+                let Some(paths) = HostPaths::probe(host) else {
+                    return Ok((
+                        Outcome::Refused(
+                            "the computer this session runs on cannot resolve paths for HQ yet (its host is older than this HQ); tell the user to update the host".into(),
+                        ),
+                        Restart::NotDue,
+                    ));
+                };
+                let out = decide(&db, &cfg, &paths, &asker, &req, &reason, now)?;
                 // A grant that took effect, on this call or since the last one, is carried by a
                 // restart whatever this call's answer was.
                 Ok((out, plan_restart(&db, &session)))
@@ -546,7 +554,18 @@ impl HqTool for SandboxRequestTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hq_core::grants::GrantProfile;
+    use hq_core::grants::{GrantProfile, canonical_lenient};
+
+    struct TestPaths(PathBuf);
+
+    impl PathView for TestPaths {
+        fn home(&self) -> PathBuf {
+            self.0.clone()
+        }
+        fn canonical(&self, path: &str) -> String {
+            canonical_lenient(path)
+        }
+    }
 
     const SESSION: &str = "hs-1";
 
@@ -600,7 +619,16 @@ mod tests {
             capability,
             resource: resource.into(),
         };
-        decide(&f.db, &f.cfg, &f.home, &asker, &req, "build failed", 100).unwrap()
+        decide(
+            &f.db,
+            &f.cfg,
+            &TestPaths(f.home.clone()),
+            &asker,
+            &req,
+            "build failed",
+            100,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -694,21 +722,6 @@ mod tests {
     }
 
     #[test]
-    fn a_symlink_cannot_carry_a_grant_outside_the_listed_directory() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
-        std::fs::create_dir(root.join("real")).unwrap();
-        std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
-        let got = canonical_lenient(&format!("{}/link/new/dir", root.display()));
-        assert_eq!(got, format!("{}/real/new/dir", root.display()));
-        assert_eq!(
-            canonical_lenient("/a/../b"),
-            "/a/../b",
-            "left for classify to refuse"
-        );
-    }
-
-    #[test]
     fn only_the_owners_binding_opts_a_session_in_and_a_task_tag_does_nothing() {
         use hq_db::harness_sessions_registry as registry;
         let f = fixture(false);
@@ -759,7 +772,7 @@ mod tests {
     }
 
     #[test]
-    fn spellings_of_one_request_are_one_request_and_other_hosts_and_hidden_text_are_refused() {
+    fn spellings_of_one_request_are_one_request_and_hidden_text_is_refused() {
         let f = fixture(true);
         let a = ask(&f, Capability::Egress, "Example.org");
         let b = ask(&f, Capability::Egress, "example.org:443");
@@ -773,22 +786,10 @@ mod tests {
             &format!("{}/a\u{202e}b", f.home.display()),
         );
         assert!(matches!(out, Outcome::Refused(_)), "{out:?}");
-        let asker = Asker {
-            session: SESSION,
-            cwd: &f.cwd,
-            task: None,
-            host: "laptop",
-        };
-        let req = GrantRequest {
-            capability: Capability::Egress,
-            resource: "pub.dev".into(),
-        };
-        let out = decide(&f.db, &f.cfg, &f.home, &asker, &req, "", 100).unwrap();
-        assert!(matches!(out, Outcome::Refused(_)), "{out:?}");
     }
 
     #[test]
-    fn a_launch_rechecks_stored_paths_and_ignores_a_remote_host() {
+    fn a_launch_rechecks_stored_paths_and_adds_nothing_without_a_view_of_the_host() {
         let f = fixture(true);
         let d = SandboxDelta {
             writable: vec![f.home.join(".ssh/x"), f.home.join("ok")],
@@ -815,11 +816,11 @@ mod tests {
         )
         .unwrap();
         let cfg = AgentHostConfig::default();
-        let got = launch_delta(&f.db, &cfg, SESSION, true, 10);
+        let got = launch_delta(&f.db, &cfg, SESSION, Some(&TestPaths(f.home.clone())), 10);
         // The home of this machine differs from the fixture's, so nothing under the fixture
         // home is a credential here; what matters is the port and that a remote host gets none.
         assert!(!got.loopback_ports.contains(&0));
-        assert!(launch_delta(&f.db, &cfg, SESSION, false, 10).is_empty());
+        assert!(launch_delta(&f.db, &cfg, SESSION, None, 10).is_empty());
     }
 
     fn item_id(f: &Fixture, grant: &str) -> String {

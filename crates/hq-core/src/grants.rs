@@ -93,6 +93,49 @@ pub fn home() -> PathBuf {
     dirs::home_dir().unwrap_or_default()
 }
 
+/// `path` with its longest existing ancestor resolved through symlinks, so a link cannot carry a
+/// grant outside the directory it names. A path with `..`, or a relative one, is returned as
+/// written, for `classify` to refuse.
+pub fn canonical_lenient(path: &str) -> String {
+    let p = PathBuf::from(path);
+    if !p.is_absolute() || p.components().any(|c| matches!(c, Component::ParentDir)) {
+        return path.to_string();
+    }
+    let mut tail = Vec::new();
+    let mut at = p.as_path();
+    loop {
+        if let Ok(real) = at.canonicalize() {
+            let mut out = real;
+            out.extend(tail.iter().rev());
+            return out.to_string_lossy().into_owned();
+        }
+        let (Some(name), Some(parent)) = (at.file_name(), at.parent()) else {
+            return path.to_string();
+        };
+        tail.push(name.to_os_string());
+        at = parent;
+    }
+}
+
+/// How paths are read on the machine a session runs on, which is not always the machine HQ runs
+/// on: the home directory, and a path with its links resolved.
+pub trait PathView {
+    fn home(&self) -> PathBuf;
+    fn canonical(&self, path: &str) -> String;
+}
+
+/// The paths of the machine this code runs on.
+pub struct LocalPaths;
+
+impl PathView for LocalPaths {
+    fn home(&self) -> PathBuf {
+        home()
+    }
+    fn canonical(&self, path: &str) -> String {
+        canonical_lenient(path)
+    }
+}
+
 /// `~` and `~/x` made absolute under `home`; anything else is returned as written.
 pub fn expand_home(raw: &str, home: &Path) -> PathBuf {
     match raw.strip_prefix("~/") {
@@ -568,6 +611,22 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn a_symlink_cannot_carry_a_path_outside_the_directory_it_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("real")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
+        let got = canonical_lenient(&format!("{}/link/new/dir", root.display()));
+        assert_eq!(got, format!("{}/real/new/dir", root.display()));
+        assert_eq!(
+            canonical_lenient("/a/../b"),
+            "/a/../b",
+            "left for classify to refuse"
+        );
+        assert_eq!(canonical_lenient("rel"), "rel");
     }
 
     #[test]

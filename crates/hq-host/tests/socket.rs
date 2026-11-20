@@ -126,6 +126,29 @@ fn a_full_agent_round_trip_over_the_socket() {
 }
 
 #[test]
+fn host_realpath_answers_with_this_machines_home_and_resolved_paths() {
+    let host = Running::start();
+    let mut c = host.client();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("real")).unwrap();
+    std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
+    let asked = [
+        format!("{}/link/new", root.display()),
+        "/a/../b".to_string(),
+    ];
+    let reply = c.call("host.realpath", json!({ "paths": asked })).unwrap();
+    assert!(reply["home"].as_str().is_some_and(|h| h.starts_with('/')));
+    assert_eq!(reply["resolved"][0], format!("{}/real/new", root.display()));
+    assert_eq!(
+        reply["resolved"][1], "/a/../b",
+        "left for the caller to refuse"
+    );
+    let none = c.call("host.realpath", json!({ "paths": [] })).unwrap();
+    assert_eq!(none["resolved"].as_array().unwrap().len(), 0);
+}
+
+#[test]
 fn host_quota_runs_a_profile_reader_over_the_socket() {
     let host = Running::start();
     let mut c = host.client();

@@ -606,6 +606,13 @@ impl HostBackend for NativeBackend {
         .map(|_| ())
     }
 
+    fn realpaths(&self, paths: &[String]) -> Option<super::backend::RealPaths> {
+        // A host too old to know this method fails the call, which reads as "cannot say".
+        let reply = self.call("host.realpath", json!({ "paths": paths })).ok()?;
+        let found: super::backend::RealPaths = serde_json::from_value(reply).ok()?;
+        (found.resolved.len() == paths.len()).then_some(found)
+    }
+
     fn egress_decisions(&self, name: &str) -> Option<Vec<super::backend::EgressDecision>> {
         // A host too old to know this method fails the call, which reads as "cannot say".
         let reply = self.call("agent.egress", json!({ "name": name })).ok()?;

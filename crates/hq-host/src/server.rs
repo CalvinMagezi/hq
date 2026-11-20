@@ -496,6 +496,19 @@ impl Conn {
                     .unwrap_or_default();
                 Ok(json!({ "lockdown": self.host.lockdown(reason, "operator") }))
             }
+            // Paths as this machine sees them, for a grant decided by an HQ that runs elsewhere.
+            "host.realpath" => {
+                let paths: Vec<String> = params
+                    .get("paths")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                let resolved: Vec<String> = paths
+                    .iter()
+                    .take(MAX_REALPATHS)
+                    .map(|p| hq_core::grants::canonical_lenient(p))
+                    .collect();
+                Ok(json!({ "home": hq_core::grants::home(), "resolved": resolved }))
+            }
             "host.programs" => {
                 let names: Vec<String> = params
                     .get("names")
@@ -893,6 +906,9 @@ fn tail_that_fits(text: String) -> (String, bool) {
     }
     (text[start..].to_string(), true)
 }
+
+/// Most paths one `host.realpath` call resolves.
+const MAX_REALPATHS: usize = 64;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
