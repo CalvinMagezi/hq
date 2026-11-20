@@ -143,6 +143,24 @@ mod tests {
     }
 
     #[test]
+    fn frontmatter_never_leaks_into_any_text_format() {
+        let raw = "\n---\nnoteType: research\ntitle: X\nfileName: Y\ncreated: 2026-11-20\ncurrency: UGX\n---\n\n# Heading\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
+        let (v, note) = vault_with_note(raw);
+        for format in [
+            Format::Html,
+            Format::Md,
+            Format::Docx,
+            Format::Pdf,
+            Format::Csv,
+        ] {
+            let out = export_note_blocking(v.path(), &note, format, None, &[]).unwrap();
+            assert_eq!(out.title, "X", "{format:?}");
+            let text = String::from_utf8_lossy(&out.output.bytes);
+            assert!(!text.contains("noteType"), "{format:?} leaked frontmatter");
+        }
+    }
+
+    #[test]
     fn table_export_reads_the_table() {
         let (v, note) = vault_with_note(NOTE);
         let out = export_note_blocking(v.path(), &note, Format::Csv, None, &[]).unwrap();

@@ -120,7 +120,7 @@ dialog.hq-sheet.hq-chats-sheet{top:120px;max-height:none}
 /* HTML dashboard viewer inside the work pane and fullscreen sheet. */
 .hq-html-dash{display:flex;flex-direction:column;gap:8px;flex:1 1 auto;min-height:0}
 .hq-html-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.hq-html-frame{width:100%;min-height:420px;flex:1 1 auto;border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface-000)}
+.hq-html-frame{width:100%;min-height:420px;flex:1 1 auto;border:1px solid var(--line);border-radius:var(--radius-md);background:#fff;color-scheme:light}
 dialog.hq-sheet.hq-html-fullscreen{width:min(96vw,1400px);max-width:96vw;height:90dvh;max-height:90dvh}
 dialog.hq-sheet.hq-html-fullscreen .a-sheet-body{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
 .hq-html-frame-full{min-height:0;height:100%}
