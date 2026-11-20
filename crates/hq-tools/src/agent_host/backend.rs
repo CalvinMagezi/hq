@@ -26,6 +26,16 @@ pub struct QuotaAsk {
 }
 
 /// A program to run once on a host, in a pane of its own that is read and then removed: how
+/// One decision of a session's egress proxy.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct EgressDecision {
+    pub host: String,
+    pub port: u16,
+    pub allowed: bool,
+    #[serde(default)]
+    pub reason: String,
+}
+
 /// HQ installs a helper or starts its sign-in on that computer (`crate::helper_setup`).
 #[derive(Debug, Clone)]
 pub struct CommandRun {
@@ -238,6 +248,12 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
             code: "unsupported".into(),
             message: format!("host '{}' cannot run a setup command", self.name()),
         })
+    }
+
+    /// What the egress proxy decided for `name`'s recent requests, as `(host, port, allowed,
+    /// reason)`. None when the host cannot say (an older host, or one with no proxy).
+    fn egress_decisions(&self, _name: &str) -> Option<Vec<EgressDecision>> {
+        None
     }
 
     fn installed_programs(&self, _names: &[String]) -> Option<Vec<String>> {
@@ -485,6 +501,9 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
         mcp: Option<crate::agent_host::McpAccess>,
     ) -> Result<(), AgentHostError> {
         (**self).resume_awaiting(name, env, mcp)
+    }
+    fn egress_decisions(&self, name: &str) -> Option<Vec<EgressDecision>> {
+        (**self).egress_decisions(name)
     }
     fn installed_programs(&self, names: &[String]) -> Option<Vec<String>> {
         (**self).installed_programs(names)

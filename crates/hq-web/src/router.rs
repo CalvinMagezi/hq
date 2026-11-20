@@ -373,6 +373,19 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         )
         .route("/api/tasks/linked", get(tasks_api::tasks_linked_to_handler))
         // Folders the owner approved for connector and handoff-key sessions. Owner only.
+        .route("/api/sandbox-grants", get(sandbox_grants_api::list_handler))
+        .route(
+            "/api/sandbox-grants/profiles",
+            get(sandbox_grants_api::profiles_handler),
+        )
+        .route(
+            "/api/sandbox-grants/profile",
+            post(sandbox_grants_api::bind_handler),
+        )
+        .route(
+            "/api/sandbox-grants/{id}/revoke",
+            post(sandbox_grants_api::revoke_handler),
+        )
         .route(
             "/api/session-folders",
             get(session_folders_api::list_handler),

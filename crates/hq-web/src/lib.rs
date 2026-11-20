@@ -44,6 +44,7 @@ mod profile_gate;
 mod provider_keys;
 mod restart_api;
 mod router;
+mod sandbox_grants_api;
 mod security_headers;
 mod session_driver;
 mod session_folders_api;

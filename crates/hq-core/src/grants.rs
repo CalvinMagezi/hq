@@ -87,6 +87,12 @@ pub struct GrantProfile {
     pub egress: Vec<String>,
 }
 
+/// The home directory profiles are resolved against, empty when the machine has none (so every
+/// `~` path then fails the credential check and nothing is opened).
+pub fn home() -> PathBuf {
+    dirs::home_dir().unwrap_or_default()
+}
+
 /// `~` and `~/x` made absolute under `home`; anything else is returned as written.
 pub fn expand_home(raw: &str, home: &Path) -> PathBuf {
     match raw.strip_prefix("~/") {

@@ -39,7 +39,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use backend::{
-    AwaitingAgent, CommandRun, Host, HostBackend, HostEvent, HostEvents, QuotaAsk, QuotaProfile,
+    AwaitingAgent, CommandRun, EgressDecision, Host, HostBackend, HostEvent, HostEvents, QuotaAsk,
+    QuotaProfile,
 };
 
 #[cfg(unix)]
