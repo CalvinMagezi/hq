@@ -15,6 +15,7 @@ export type SettingsPath =
   | '/settings/spending'
   | '/settings/safety'
   | '/settings/folders'
+  | '/settings/access'
   | '/settings/backup'
 
 export interface SettingsRowDef {
@@ -85,6 +86,7 @@ export function settingsGroups({ lite, hub }: WhereHqRuns): SettingsGroupDef[] {
       rows: [
         { id: 'safety', label: 'row_safety', path: '/settings/safety' },
         { id: 'folders', label: 'row_folders', path: '/settings/folders' },
+        { id: 'access', label: 'row_access', path: '/settings/access' },
       ],
     },
     { id: 'data', label: 'group_data', rows: [{ id: 'backup', label: 'row_backup', path: '/settings/backup' }] },

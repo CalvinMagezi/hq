@@ -11,8 +11,15 @@ import { TechnicalDetails } from './TechnicalDetails'
 import { PaneHead } from '../ui/Panes'
 import { SessionSendBox, useSend } from './SessionSendBox'
 import { HelperPill, SessionTaskLink } from './SessionRow'
-import { BlockedCallout } from './BlockedCallout'
+import { BlockedCallout, WaitingAccessCallout } from './BlockedCallout'
 import { ActionError, ArchiveButton, ResumeButton, useAction } from './SessionActions'
+import { SessionGrantsTimeline } from './SessionGrantsTimeline'
+import {
+  listSandboxGrants,
+  pendingResourceGrants,
+  revokeSandboxGrant,
+  type SandboxGrant,
+} from '~/lib/sandboxGrantsApi'
 
 const DRIVE_ANSWERER = 'a Drive turn'
 const clock = (when: string | null) => (when ? parseSqliteUtc(when).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')
@@ -33,7 +40,43 @@ interface Props {
 export function SessionDetail({ session: s, onBack, onChanged, onToggleSide, onExpandList }: Props) {
   const [sentCount, setSentCount] = useState(0)
   const [screenText, setScreenText] = useState('')
+  const [grants, setGrants] = useState<SandboxGrant[]>([])
+  const [revokingId, setRevokingId] = useState<string | null>(null)
+  const [grantError, setGrantError] = useState<string | null>(null)
   const action = useAction(onChanged)
+  const loadGrants = useCallback(async () => {
+    try {
+      const res = await listSandboxGrants(s.id)
+      setGrants(res.grants)
+    } catch {
+      // Older servers without sandbox-grants leave the timeline quiet.
+    }
+  }, [s.id])
+  useEffect(() => {
+    let live = true
+    listSandboxGrants(s.id)
+      .then((res) => live && setGrants(res.grants))
+      .catch(() => live && setGrants([]))
+    return () => {
+      live = false
+    }
+  }, [s.id, sentCount])
+  const handleRevokeGrant = useCallback(
+    async (id: string) => {
+      setRevokingId(id)
+      setGrantError(null)
+      try {
+        await revokeSandboxGrant(id)
+        await loadGrants()
+      } catch (e) {
+        setGrantError(e instanceof Error ? e.message : t('grants_revoke_failed'))
+      } finally {
+        setRevokingId(null)
+      }
+    },
+    [loadGrants],
+  )
+  const pendingGrant = pendingResourceGrants(grants)[0] ?? null
   const afterSend = useCallback(async () => {
     setSentCount((n) => n + 1)
     await onChanged()
@@ -63,8 +106,9 @@ export function SessionDetail({ session: s, onBack, onChanged, onToggleSide, onE
         <SessionTaskLink session={s} />
         <ActionError error={action.error} />
       </div>
-      <Body session={s} screenText={screenText} onSent={afterSend} onChanged={onChanged} />
+      <Body session={s} screenText={screenText} pendingGrant={pendingGrant} onSent={afterSend} onChanged={onChanged} />
       <TechnicalDetails session={s} refreshKey={sentCount} pollMs={screenPollMs(s)} onText={setScreenText} onSent={afterSend} />
+      <SessionGrantsTimeline grants={grants} revokingId={revokingId} error={grantError} onRevoke={(id) => void handleRevokeGrant(id)} />
       <Answers sessionId={s.id} />
       <Advanced session={s} />
     </div>
@@ -74,11 +118,12 @@ export function SessionDetail({ session: s, onBack, onChanged, onToggleSide, onE
 interface BodyProps {
   session: HarnessSession
   screenText: string
+  pendingGrant: SandboxGrant | null
   onSent: Refresh
   onChanged: Refresh
 }
 
-function Body({ session: s, screenText, onSent, onChanged }: BodyProps) {
+function Body({ session: s, screenText, pendingGrant, onSent, onChanged }: BodyProps) {
   if (s.status !== 'running') return <ResumePanel session={s} onChanged={onChanged} />
   if (!canSend(s)) {
     const lost = helperState(s) === 'lost'
@@ -88,9 +133,10 @@ function Body({ session: s, screenText, onSent, onChanged }: BodyProps) {
       </p>
     )
   }
-  if (isBlocked(s)) return <BlockedCallout session={s} screenText={screenText} onSent={onSent} />
+  if (isBlocked(s)) return <BlockedCallout session={s} screenText={screenText} pendingGrant={pendingGrant} onSent={onSent} />
   return (
     <>
+      {pendingGrant && <WaitingAccessCallout grant={pendingGrant} />}
       <RightNow session={s} onSent={onSent} />
       <SessionSendBox session={s} onSent={onSent} />
     </>

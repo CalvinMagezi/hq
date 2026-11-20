@@ -1,7 +1,9 @@
 import { t } from '~/strings'
 import { useEffect, useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import { Loader2 } from 'lucide-react'
 import { globalSessionsApi, type DialogKind, type HarnessSession, type PendingDialog } from '~/lib/sessionsApi'
+import { capabilityModeKey, type SandboxGrant } from '~/lib/sandboxGrantsApi'
 import { ANSWER_HOLD_MS, answerHeld, classifyBlocked, readDialog, sessionTitle, tailLines, tappableOptions } from '~/lib/workbench'
 import { canAllowOnce, computerInLine } from '~/lib/helperView'
 import { useDialogAnswer } from './HelperAnswer'
@@ -33,17 +35,43 @@ interface Props {
   session: HarnessSession
   /** The latest terminal text, so the question is readable right here. */
   screenText: string
+  /** A pending sandbox-grants request for this session, shown instead of a generic blocked prompt. */
+  pendingGrant?: SandboxGrant | null
   onSent: () => void | Promise<void>
+}
+
+/** Shown when a session has a pending sandbox-grants request waiting on the owner. */
+export function WaitingAccessCallout({ grant }: { grant: SandboxGrant }) {
+  const mode = t(capabilityModeKey(grant.capability))
+  return (
+    <section aria-label={t('grants_waiting_for', { resource: grant.resource })} className="a-card needs" data-testid="waiting-access-callout">
+      <h3 className="a-body-b a-warn-t">{t('grants_waiting_for', { resource: grant.resource })}</h3>
+      <p className="a-body-sm a-muted">
+        {mode} · <span className="a-mono">{grant.resource}</span>
+      </p>
+      {grant.helper_reason && (
+        <div className="flex flex-col gap-1">
+          <p className="a-cap a-muted">{t('grants_helper_words')}</p>
+          <blockquote className="a-quote a-muted">{grant.helper_reason}</blockquote>
+        </div>
+      )}
+      <div className="a-card-actions">
+        <Link to="/inbox" className="a-btn secondary">
+          {t('grants_waiting_inbox')}
+        </Link>
+      </div>
+    </section>
+  )
 }
 
 /** The common case: the agent asked and waits. A dialog HQ can read gets one button per option;
  *  otherwise Approve and Decline appear only for a plain yes or no question. */
-export function BlockedCallout({ session, screenText, onSent }: Props) {
+export function BlockedCallout({ session, screenText, pendingGrant, onSent }: Props) {
   const { send, busy, error } = useSend(session.id, onSent)
   const [once, setOnce] = useState('')
   // Technical details starts closed, so the question is read once here instead of from a stream.
   useEffect(() => {
-    if (screenText) return
+    if (screenText || pendingGrant) return
     let live = true
     globalSessionsApi
       .screen(session.id, 40)
@@ -52,7 +80,7 @@ export function BlockedCallout({ session, screenText, onSent }: Props) {
     return () => {
       live = false
     }
-  }, [session.id, screenText])
+  }, [session.id, screenText, pendingGrant])
   const text = screenText || once
   const tail = tailLines(text, CALLOUT_LINES)
   const kind = classifyBlocked(text)
@@ -65,6 +93,10 @@ export function BlockedCallout({ session, screenText, onSent }: Props) {
     const timer = setTimeout(() => setAnswered(null), ANSWER_HOLD_MS)
     return () => clearTimeout(timer)
   }, [answered])
+
+  if (pendingGrant) {
+    return <WaitingAccessCallout grant={pendingGrant} />
+  }
 
   const answerWith: typeof send = (payload) => {
     setAnswered(tail)

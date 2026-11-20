@@ -5,6 +5,8 @@ import { Sheet } from '../ui/Sheet'
 import './tasks.css'
 import type { Folder, Initiative, Space, TaskItem, TaskPriority } from '~/lib/tasksApi'
 import { createSpaceClient } from '~/lib/tasksApi'
+import { NO_PROFILE } from '~/lib/sandboxGrantsApi'
+import { AccessProfilePicker } from './AccessProfilePicker'
 import { DateRangeInputs, EstimateInput, FieldLabel, PRIORITIES, isInvalidEstimate, parseEstimate } from './taskFields'
 
 interface Props {
@@ -29,6 +31,7 @@ interface Props {
     parent_task_id?: string
     tags: string[]
     assignees?: string[]
+    grant_profile?: string
   }) => Promise<void>
 }
 
@@ -75,6 +78,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
   const [parentId, setParentId] = useState('')
   const [tags, setTags] = useState<string[]>([])
   const [assignees, setAssignees] = useState<string[]>([])
+  const [grantProfile, setGrantProfile] = useState(NO_PROFILE)
   const [details, setDetails] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [addingSpace, setAddingSpace] = useState(false)
@@ -104,6 +108,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
     setParentId('')
     setTags([])
     setAssignees([])
+    setGrantProfile(NO_PROFILE)
     setDetails(false)
   }
 
@@ -128,6 +133,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
         parent_task_id: parentId || undefined,
         tags,
         assignees,
+        ...(grantProfile !== NO_PROFILE ? { grant_profile: grantProfile } : {}),
       })
       reset()
       onClose()
@@ -277,6 +283,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
               <ChipField chips={tags} onChange={setTags} placeholder={t('task_drawer_tags_hint')} label={t('task_drawer_tags_label')} />
               <p className="a-body-sm a-muted">{t('tasks_words_hq_understood_are')}</p>
             </div>
+            <AccessProfilePicker id="new-task-access-profile" value={grantProfile} onChange={setGrantProfile} />
           </>
         )}
       </div>

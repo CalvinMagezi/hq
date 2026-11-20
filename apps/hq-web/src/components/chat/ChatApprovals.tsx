@@ -1,13 +1,21 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApprovalCard } from '~/components/ui/ApprovalCard'
+import { SandboxGrantCard } from '~/components/ui/SandboxGrantCard'
 import { HqHttpError } from '~/lib/hqAuth'
 import { approvalsForThread, splitSaid } from '~/lib/chatApprovals'
 import { executeNotificationAction, fetchNotificationsClient, type NotificationItem } from '~/lib/notificationsApi'
+import {
+  SANDBOX_GRANTS_QUERY_KEY,
+  isSandboxGrantNotification,
+  listSandboxGrants,
+  parseSandboxGrantNotification,
+  type SandboxGrant,
+} from '~/lib/sandboxGrantsApi'
 import { toastAlert } from '~/lib/toast'
 import { t, tn } from '~/strings'
 
-type ApprovalAction = 'approve' | 'approve_site' | 'approve_folder' | 'reject'
+type ApprovalAction = 'approve' | 'approve_site' | 'approve_folder' | 'reject' | 'dismiss'
 
 const POLL_MS = 4000
 const HTTP_CONFLICT = 409
@@ -15,6 +23,8 @@ const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-dig
 
 interface Props {
   threadId: string | null
+  /** Sessions this chat watches, so their sandbox-grants requests appear here too. */
+  sessionIds?: string[]
   /** The last turn ended while HQ waits for the owner's yes. */
   waiting: boolean
   /** Asks HQ to finish in this chat once the request was answered after it stopped waiting. */
@@ -24,7 +34,7 @@ interface Props {
 }
 
 /** The owner approvals of this chat: the same items as the Inbox, so answering in either answers both. */
-export function ChatApprovals({ threadId, waiting, onKeepGoing, otherwise }: Props) {
+export function ChatApprovals({ threadId, sessionIds = [], waiting, onKeepGoing, otherwise }: Props) {
   const client = useQueryClient()
   const key = ['chat-approvals', threadId]
   const list = useQuery({
@@ -36,9 +46,16 @@ export function ChatApprovals({ threadId, waiting, onKeepGoing, otherwise }: Pro
   const [busy, setBusy] = useState<string | null>(null)
   const seenPending = useRef<Set<string>>(new Set())
 
-  const items = approvalsForThread(list.data ?? [], threadId)
+  const items = approvalsForThread(list.data ?? [], threadId, sessionIds)
   for (const i of items) if (i.state === 'pending') seenPending.current.add(i.id)
   const pending = items.filter((i) => i.state === 'pending')
+  const hasSandboxGrant = pending.some(isSandboxGrantNotification)
+  const grants = useQuery({
+    queryKey: SANDBOX_GRANTS_QUERY_KEY,
+    queryFn: () => listSandboxGrants(),
+    enabled: hasSandboxGrant,
+    retry: false,
+  })
   const answered = items.filter((i) => i.state !== 'pending' && seenPending.current.has(i.id)).length
   const canKeepGoing = pending.length === 0 && waiting && answered !== 0
   const showSummary = answered !== 0 && !waiting
@@ -54,6 +71,9 @@ export function ChatApprovals({ threadId, waiting, onKeepGoing, otherwise }: Pro
     } finally {
       setBusy(null)
       await client.invalidateQueries({ queryKey: key })
+      if (isSandboxGrantNotification(item)) {
+        await client.invalidateQueries({ queryKey: SANDBOX_GRANTS_QUERY_KEY })
+      }
     }
   }
 
@@ -64,7 +84,13 @@ export function ChatApprovals({ threadId, waiting, onKeepGoing, otherwise }: Pro
     <div className="shrink-0 max-h-[45dvh] overflow-y-auto overscroll-contain px-3 sm:px-6 pb-2">
       <div className="max-w-4xl mx-auto space-y-2">
         {pending.map((item) => (
-          <ApprovalEntry key={item.id} item={item} busy={busy === item.id} onAnswer={(a) => void answer(item, a)} />
+          <ApprovalEntry
+            key={item.id}
+            item={item}
+            grants={grants.data?.grants}
+            busy={busy === item.id}
+            onAnswer={(a) => void answer(item, a)}
+          />
         ))}
         {pending.length === 0 && waiting && answered === 0 && (
           <section className="a-card" aria-label={t('chat_approval_head')}>
@@ -90,11 +116,28 @@ export function ChatApprovals({ threadId, waiting, onKeepGoing, otherwise }: Pro
 
 interface EntryProps {
   item: NotificationItem
+  grants?: SandboxGrant[]
   busy: boolean
   onAnswer: (action: ApprovalAction) => void
 }
 
-function ApprovalEntry({ item, busy, onAnswer }: EntryProps) {
+function ApprovalEntry({ item, grants, busy, onAnswer }: EntryProps) {
+  if (isSandboxGrantNotification(item)) {
+    const parsed = parseSandboxGrantNotification(item, grants)
+    return (
+      <div>
+        <p className="text-xs font-semibold px-1 pb-1">
+          {t('chat_approval_head')} · <span style={{ color: 'var(--warn)' }}>{t('chat_approval_state')}</span>
+        </p>
+        <SandboxGrantCard
+          grant={parsed}
+          busy={busy}
+          onAllow={() => onAnswer('approve')}
+          onDecline={() => onAnswer('dismiss')}
+        />
+      </div>
+    )
+  }
   const { said, rest } = splitSaid(item.description)
   const words = said?.replace(/^You said:\s*/, '').replace(/^[“"]|[”"]$/g, '') ?? null
   const site = item.metadata.approval?.site

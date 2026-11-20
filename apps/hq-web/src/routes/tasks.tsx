@@ -53,6 +53,7 @@ import { parseSqliteUtc } from '~/lib/tasksApi'
 import '~/components/tasks/tasks.css'
 import { useBackClosesLayer } from '~/lib/backLayer'
 import { TaskFormModal } from '~/components/tasks/TaskFormModal'
+import { NO_PROFILE, bindSandboxProfile } from '~/lib/sandboxGrantsApi'
 import { ALL_SELECTION, TasksSidebar, type TaskSelection } from '~/components/tasks/TasksSidebar'
 import { useTasksData } from '~/components/tasks/useTasksData'
 import { usePolled } from '~/components/sessions/usePolled'
@@ -380,16 +381,24 @@ function TasksPage() {
 
   const taskOutbox = useTaskOutbox(upsertTask)
 
-  const handleCreate = async (input: Parameters<typeof createTaskClient>[0]) => {
-    const withId = { ...input, client_id: newClientId() }
+  const handleCreate = async (input: Parameters<typeof createTaskClient>[0] & { grant_profile?: string }) => {
+    const { grant_profile, ...taskInput } = input
+    const withId = { ...taskInput, client_id: newClientId() }
+    let created: TaskItem
     try {
-      upsertTask(await createTaskClient(withId))
+      created = await createTaskClient(withId)
+      upsertTask(created)
     } catch (e) {
       // Only a lost connection is kept for later; a refusal from HQ is shown to the person.
       if (!(e instanceof TypeError) || !taskOutbox.enabled) throw e
       const refusal = await taskOutbox.queue(withId)
       if (refusal) throw new Error(refusal)
       return
+    }
+    if (grant_profile && grant_profile !== NO_PROFILE) {
+      await bindSandboxProfile({ scope: 'task', id: created.id, name: grant_profile }).catch((e) => {
+        setNotice(errorMessage(e, t('grants_profile_failed')))
+      })
     }
     await loadTaxonomy()
   }

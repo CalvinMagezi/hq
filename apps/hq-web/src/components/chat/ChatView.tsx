@@ -543,7 +543,13 @@ export function ChatView({ active, threadId }: Props) {
         </p>
       )}
 
-      <ChatApprovals threadId={activeThreadId} waiting={waitingForOwner} onKeepGoing={() => void handleSend(t('chat_keep_going'))} otherwise={slotOffer} />
+      <ChatApprovals
+        threadId={activeThreadId}
+        sessionIds={watched.sessions.map((s) => s.id)}
+        waiting={waitingForOwner}
+        onKeepGoing={() => void handleSend(t('chat_keep_going'))}
+        otherwise={slotOffer}
+      />
 
       <OutboxGroup
         entries={outboxChat.entries}

@@ -35,7 +35,7 @@ describe('the six groups (check 1, the 17 Nov restructure)', () => {
       'AI service and keys', 'Spending limits',
       'Chat', 'Messaging apps', 'Other devices', 'GitHub',
       'Notifications', 'Time zone', 'Install and version', 'Data used', 'Sign out this browser',
-      'Safety and limits', 'Folders helpers may use',
+      'Safety and limits', 'Folders helpers may use', 'Access',
       'Backup and about',
     ])
     expect(JSON.stringify(settingsGroups(HERE))).not.toMatch(/claude/i)

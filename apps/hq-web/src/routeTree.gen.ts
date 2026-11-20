@@ -41,6 +41,7 @@ import { Route as SettingsDataRouteImport } from './routes/settings/data'
 import { Route as SettingsChatRouteImport } from './routes/settings/chat'
 import { Route as SettingsBrowserRouteImport } from './routes/settings/browser'
 import { Route as SettingsBackupRouteImport } from './routes/settings/backup'
+import { Route as SettingsAccessRouteImport } from './routes/settings/access'
 import { Route as NotesTrashRouteImport } from './routes/notes/trash'
 import { Route as NotesSplatRouteImport } from './routes/notes/$'
 import { Route as InboxIdRouteImport } from './routes/inbox/$id'
@@ -208,6 +209,11 @@ const SettingsBackupRoute = SettingsBackupRouteImport.update({
   path: '/backup',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsAccessRoute = SettingsAccessRouteImport.update({
+  id: '/access',
+  path: '/access',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const NotesTrashRoute = NotesTrashRouteImport.update({
   id: '/trash',
   path: '/trash',
@@ -259,6 +265,7 @@ export interface FileRoutesByFullPath {
   '/inbox/$id': typeof InboxIdRoute
   '/notes/$': typeof NotesSplatRoute
   '/notes/trash': typeof NotesTrashRoute
+  '/settings/access': typeof SettingsAccessRoute
   '/settings/backup': typeof SettingsBackupRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/chat': typeof SettingsChatRoute
@@ -297,6 +304,7 @@ export interface FileRoutesByTo {
   '/inbox/$id': typeof InboxIdRoute
   '/notes/$': typeof NotesSplatRoute
   '/notes/trash': typeof NotesTrashRoute
+  '/settings/access': typeof SettingsAccessRoute
   '/settings/backup': typeof SettingsBackupRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/chat': typeof SettingsChatRoute
@@ -338,6 +346,7 @@ export interface FileRoutesById {
   '/inbox/$id': typeof InboxIdRoute
   '/notes/$': typeof NotesSplatRoute
   '/notes/trash': typeof NotesTrashRoute
+  '/settings/access': typeof SettingsAccessRoute
   '/settings/backup': typeof SettingsBackupRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/chat': typeof SettingsChatRoute
@@ -380,6 +389,7 @@ export interface FileRouteTypes {
     | '/inbox/$id'
     | '/notes/$'
     | '/notes/trash'
+    | '/settings/access'
     | '/settings/backup'
     | '/settings/browser'
     | '/settings/chat'
@@ -418,6 +428,7 @@ export interface FileRouteTypes {
     | '/inbox/$id'
     | '/notes/$'
     | '/notes/trash'
+    | '/settings/access'
     | '/settings/backup'
     | '/settings/browser'
     | '/settings/chat'
@@ -458,6 +469,7 @@ export interface FileRouteTypes {
     | '/inbox/$id'
     | '/notes/$'
     | '/notes/trash'
+    | '/settings/access'
     | '/settings/backup'
     | '/settings/browser'
     | '/settings/chat'
@@ -722,6 +734,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsBackupRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/access': {
+      id: '/settings/access'
+      path: '/access'
+      fullPath: '/settings/access'
+      preLoaderRoute: typeof SettingsAccessRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/notes/trash': {
       id: '/notes/trash'
       path: '/trash'
@@ -815,6 +834,7 @@ const NotesRouteChildren: NotesRouteChildren = {
 const NotesRouteWithChildren = NotesRoute._addFileChildren(NotesRouteChildren)
 
 interface SettingsRouteChildren {
+  SettingsAccessRoute: typeof SettingsAccessRoute
   SettingsBackupRoute: typeof SettingsBackupRoute
   SettingsBrowserRoute: typeof SettingsBrowserRoute
   SettingsChatRoute: typeof SettingsChatRoute
@@ -832,6 +852,7 @@ interface SettingsRouteChildren {
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsAccessRoute: SettingsAccessRoute,
   SettingsBackupRoute: SettingsBackupRoute,
   SettingsBrowserRoute: SettingsBrowserRoute,
   SettingsChatRoute: SettingsChatRoute,
