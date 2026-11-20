@@ -433,6 +433,7 @@ mod tests {
     async fn item_action(state: &Arc<WsState>, id: &str, action: &str) -> StatusCode {
         let body = crate::notifications_api::NotificationActionRequest {
             action: action.to_string(),
+            starter: None,
         };
         crate::notifications_api::notification_action_handler(
             State(state.clone()),

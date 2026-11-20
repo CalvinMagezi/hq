@@ -163,6 +163,9 @@ pub(crate) struct ListNotificationsParams {
 #[derive(Debug, Deserialize)]
 pub(crate) struct NotificationActionRequest {
     pub(crate) action: String,
+    /// For `allow_starter` on a helper's access request: which starter set to allow.
+    #[serde(default)]
+    pub(crate) starter: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -609,6 +612,7 @@ pub(crate) fn action_outcome(action: &str) -> Option<&'static str> {
         "approve" | "engage" | OPEN_ACTION | ALLOW_SITE_ACTION | ALLOW_FOLDER_ACTION => {
             Some("approved")
         }
+        a if hq_tools::harness_session::sandbox_access::is_access_action(a) => Some("approved"),
         "dismiss" | "reject" => Some("dismissed"),
         _ => None,
     }
@@ -625,7 +629,8 @@ fn refuse_unanswered_dialog(
     if !matches!(
         action,
         "approve" | "engage" | "reject" | ALLOW_SITE_ACTION | ALLOW_FOLDER_ACTION
-    ) {
+    ) && !hq_tools::harness_session::sandbox_access::is_access_action(action)
+    {
         return Ok(());
     }
     let open = hq_db::dialog_alerts::get(db, val_id)
@@ -791,6 +796,18 @@ pub(crate) async fn notification_action_handler(
     {
         return ApiError::bad_request("open is only for an offer you set aside").into_response();
     }
+    // A standing-access answer is checked before anything is recorded: one that cannot be applied
+    // (no task, unknown starter, not an access request) is refused instead of half-answered.
+    if hq_tools::harness_session::sandbox_access::is_access_action(&body.action)
+        && let Err(e) = hq_tools::harness_session::sandbox_access::check_answer(
+            &state.db,
+            val_id,
+            &body.action,
+            body.starter.as_deref(),
+        )
+    {
+        return ApiError::bad_request(e.to_string()).into_response();
+    }
     // The folder is read from the call itself, never from the request, and checked before the
     // answer is recorded, so a request that names no folder is refused instead of half-answered.
     let folder_grant = if body.action == ALLOW_FOLDER_ACTION {
@@ -830,6 +847,17 @@ pub(crate) async fn notification_action_handler(
             )
         {
             warn!(id = %id, error = %e, "recording a folder allow failed");
+        }
+        if hq_tools::harness_session::sandbox_access::is_access_action(&body.action)
+            && let Err(e) = hq_tools::harness_session::sandbox_access::apply_answer(
+                &state.db,
+                val_id,
+                &body.action,
+                body.starter.as_deref(),
+                chrono::Utc::now().timestamp(),
+            )
+        {
+            warn!(id = %id, error = %e, "recording standing sandbox access failed");
         }
         if let Err(e) = note_helper_offer_answer(&state.db, val_id, engagement) {
             warn!(id = %id, error = %e, "starting the offered helper setup failed");

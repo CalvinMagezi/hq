@@ -24,18 +24,90 @@ pub(crate) struct ListQuery {
     session: Option<String>,
 }
 
+/// Each row, with the starter set a waiting request falls inside so the first card can offer it.
+/// The suggestion reads the session computer's home, so it is worked out off the async runtime.
+fn with_suggestions(grants: Vec<store::Grant>) -> Vec<serde_json::Value> {
+    grants
+        .into_iter()
+        .map(|g| {
+            let starter = hq_tools::harness_session::sandbox_access::suggested_starter(&g);
+            let mut v = serde_json::to_value(&g).unwrap_or_default();
+            v["suggested_starter"] = json!(starter);
+            v
+        })
+        .collect()
+}
+
 pub(crate) async fn list_handler(
     State(state): State<Arc<WsState>>,
     Query(q): Query<ListQuery>,
 ) -> Response {
-    let grants = match q.session.as_deref() {
-        Some(s) => store::for_session(&state.db, s, LIST_LIMIT),
-        None => store::recent(&state.db, LIST_LIMIT),
-    };
-    match grants {
-        Ok(grants) => Json(json!({ "grants": grants })).into_response(),
+    let db = state.db.clone();
+    let session = q.session;
+    let work = tokio::task::spawn_blocking(move || {
+        let grants = match session.as_deref() {
+            Some(s) => store::for_session(&db, s, LIST_LIMIT),
+            None => store::recent(&db, LIST_LIMIT),
+        }?;
+        Ok::<_, anyhow::Error>(with_suggestions(grants))
+    })
+    .await;
+    match work {
+        Ok(Ok(grants)) => Json(json!({ "grants": grants })).into_response(),
+        Ok(Err(e)) => ApiError::from(e).into_response(),
+        Err(e) => ApiError::Internal(e.to_string()).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SummaryQuery {
+    days: Option<i64>,
+}
+
+const SUMMARY_DEFAULT_DAYS: i64 = 7;
+const SUMMARY_MAX_DAYS: i64 = 90;
+const SECS_PER_DAY: i64 = 86_400;
+
+/// What HQ did for the owner lately, as counts. Device-only: nothing here leaves the HQ.
+pub(crate) async fn summary_handler(
+    State(state): State<Arc<WsState>>,
+    Query(q): Query<SummaryQuery>,
+) -> Response {
+    let days = q
+        .days
+        .unwrap_or(SUMMARY_DEFAULT_DAYS)
+        .clamp(1, SUMMARY_MAX_DAYS);
+    let now = chrono::Utc::now().timestamp();
+    match store::summary(&state.db, now - days * SECS_PER_DAY, now) {
+        Ok(s) => Json(json!({ "days": days, "summary": s })).into_response(),
         Err(e) => ApiError::from(e).into_response(),
     }
+}
+
+/// The owner's standing rules, task and repository, with what each allows.
+pub(crate) async fn rules_handler(State(state): State<Arc<WsState>>) -> Response {
+    let now = chrono::Utc::now().timestamp();
+    match store::all_rules(&state.db, now) {
+        Ok(rules) => Json(json!({ "rules": rules })).into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
+pub(crate) async fn starters_handler() -> Response {
+    let starters: Vec<_> = hq_core::grants::STARTER_PROFILES
+        .iter()
+        .filter_map(|name| {
+            let p = hq_core::grants::starter_profile(name)?;
+            Some(json!({
+                "name": name,
+                "writable": p.writable,
+                "readable": p.readable,
+                "loopback_ports": p.loopback_ports,
+                "egress": p.egress,
+            }))
+        })
+        .collect();
+    Json(json!({ "starters": starters })).into_response()
 }
 
 pub(crate) async fn revoke_handler(
@@ -148,7 +220,8 @@ mod tests {
             .method(method)
             .uri(uri)
             .header("host", "127.0.0.1:5678")
-            .header("content-type", "application/json");
+            .header("content-type", "application/json")
+            .header("x-hq-client", "test");
         if let Some(b) = bearer {
             req = req.header("authorization", b);
         }
@@ -199,6 +272,9 @@ mod tests {
             ("GET", "/api/sandbox-grants", None),
             ("POST", "/api/sandbox-grants/abc/revoke", None),
             ("GET", "/api/sandbox-grants/profiles", None),
+            ("GET", "/api/sandbox-grants/summary", None),
+            ("GET", "/api/sandbox-grants/rules", None),
+            ("GET", "/api/sandbox-grants/starters", None),
             ("POST", "/api/sandbox-grants/profile", Some(bind)),
         ] {
             for bearer in [None, Some("Bearer mcp-key"), Some("Bearer s3cre")] {
@@ -267,5 +343,113 @@ mod tests {
         ] {
             assert!(bind(&db, &grants, &bad).is_err());
         }
+    }
+
+    #[tokio::test]
+    async fn the_owner_reads_starters_rules_and_the_summary() {
+        let (state, _vault) = state(Some("s3cret"));
+        filed(&state.db, "s1", "/r/a");
+        let d = hq_core::grants::SandboxDelta::default();
+        store::add_rule(&state.db, "repo:/r", "fs_write", "~/.gradle", &d, "x", 1).unwrap();
+        let app = crate::create_router(state.clone());
+        let owner = Some("Bearer s3cret");
+        let (_, starters) = call(&app, "GET", "/api/sandbox-grants/starters", owner, None).await;
+        let names: Vec<_> = starters["starters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["name"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(names, ["mobile-dev", "node-build", "rust-build"]);
+        let (_, rules) = call(&app, "GET", "/api/sandbox-grants/rules", owner, None).await;
+        assert_eq!(rules["rules"][0]["scope"], "repo");
+        assert_eq!(rules["rules"][0]["resource"], "~/.gradle");
+        let (_, sum) = call(
+            &app,
+            "GET",
+            "/api/sandbox-grants/summary?days=7",
+            owner,
+            None,
+        )
+        .await;
+        assert_eq!(sum["days"], 7);
+        assert_eq!(sum["summary"]["standing_rules"], 1);
+    }
+
+    #[tokio::test]
+    async fn answering_a_helper_request_with_allow_repo_leaves_a_standing_rule() {
+        let (state, _vault) = state(Some("s3cret"));
+        let d = hq_core::grants::SandboxDelta::default();
+        let id = store::file(
+            &state.db,
+            &store::NewGrant {
+                session_id: "s1",
+                task_id: Some("t1"),
+                host: "local",
+                repo: "/work/app",
+                capability: "fs_write",
+                resource: "/work/app/cache",
+                delta: &d,
+                state: store::PENDING,
+                decided_by: store::BY_SYSTEM,
+                helper_reason: "",
+                decision_note: "",
+                expires_at: None,
+            },
+            1,
+        )
+        .unwrap();
+        let item = hq_core::types::ValueItem::new(
+            "sandbox-grants",
+            hq_core::types::ValueKind::ActionNeeded,
+            "t",
+            "b",
+        )
+        .with_dedup_key(format!("sandbox-grant:{id}"));
+        let item_id = item.id.clone();
+        hq_db::value_items::insert(&state.db, &item).unwrap();
+        let app = crate::create_router(state.clone());
+        let owner = Some("Bearer s3cret");
+        let uri = format!("/api/notifications/val_{item_id}/action");
+        let (bad, _) = call(
+            &app,
+            "POST",
+            &uri,
+            owner,
+            Some(r#"{"action":"allow_starter","starter":"nope"}"#),
+        )
+        .await;
+        assert_eq!(
+            bad,
+            StatusCode::BAD_REQUEST,
+            "an unknown starter is refused before anything is recorded"
+        );
+        assert!(
+            store::rules_for(&state.db, &["repo:/work/app".into()], 10)
+                .unwrap()
+                .is_empty()
+        );
+        let (ok, _) = call(
+            &app,
+            "POST",
+            &uri,
+            owner,
+            Some(r#"{"action":"allow_repo"}"#),
+        )
+        .await;
+        assert_eq!(ok, StatusCode::OK);
+        let rules = store::rules_for(&state.db, &["repo:/work/app".into()], 10).unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].resource, "/work/app/cache");
+        // A near-miss token cannot answer.
+        let (denied, _) = call(
+            &app,
+            "POST",
+            &uri,
+            Some("Bearer s3cre"),
+            Some(r#"{"action":"allow_repo"}"#),
+        )
+        .await;
+        assert_eq!(denied, StatusCode::UNAUTHORIZED);
     }
 }

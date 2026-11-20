@@ -964,6 +964,18 @@ session's egress proxy refused recently (host, port, reason). File and local-por
 collected: the helper's own tool errors name the path or port. A refusal by the command policy (for
 example `env`) is not a sandbox grant: the helper reports it, and brokered commands are a later stage.
 
+Standing access, so the owner never edits config or binds profiles: the inbox card for a request
+answers `approve` (this session), `allow_task` (every session on the task), `allow_repo` (every session
+in the repository, the folder a worktree was made from) or `allow_starter` with `starter` set to
+`mobile-dev`, `node-build` or `rust-build` (the toolchain caches and registries HQ ships, for the
+repository). They go through `POST /api/notifications/{id}/action` with `{action, starter?}`. Each leaves
+rules in `sandbox_grants` (`task:<id>` or `repo:<root>` scope; resources with `~` mean the session
+computer's home), and a later request one of them covers is approved without asking, after the same
+checks (credentials and HQ's files are never opened, whatever a rule says). `GET /api/sandbox-grants`
+adds `suggested_starter` to a waiting request. `GET /api/sandbox-grants/rules` lists the rules (revoke with
+the grant revoke route), `/starters` lists the shipped sets, `/summary?days=7` counts what HQ approved by
+policy, approved for the owner, asked, declined and refused (counts only, on this device).
+
 Owner routes (web credential only, never an MCP key or a helper token): `GET /api/sandbox-grants[?session=<id>]`,
 `POST /api/sandbox-grants/{id}/revoke`, `GET /api/sandbox-grants/profiles` (each configured profile with `~`
 resolved and credential paths dropped), and `POST /api/sandbox-grants/profile` with

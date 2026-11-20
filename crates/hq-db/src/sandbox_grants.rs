@@ -37,6 +37,22 @@ pub struct Grant {
     pub applied_at: Option<i64>,
     pub expires_at: Option<i64>,
     pub revoked_at: Option<i64>,
+    /// `session`, `task` or `repo`: who a row applies to. Task and repo rows are the owner's
+    /// standing rules; a session row is one request's own grant.
+    pub scope: String,
+}
+
+/// Prefix of the `session_id` column on a standing rule for every session in a repository.
+pub const REPO_SCOPE: &str = "repo:";
+
+fn scope_of(session_id: &str) -> &'static str {
+    if session_id.starts_with(REPO_SCOPE) {
+        "repo"
+    } else if session_id.starts_with(TASK_SCOPE) {
+        "task"
+    } else {
+        "session"
+    }
 }
 
 /// A request as filed. `state` is pending, active or refused at filing.
@@ -77,6 +93,7 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Grant> {
         applied_at: r.get(13)?,
         expires_at: r.get(14)?,
         revoked_at: r.get(15)?,
+        scope: scope_of(&r.get::<_, String>(1)?).to_string(),
     })
 }
 
@@ -352,18 +369,29 @@ pub fn setbacks(db: &Database, session_id: &str) -> Result<usize> {
     })
 }
 
-/// The sandbox change a launch of `session_id` must carry: every active grant that has not
-/// expired, merged.
+/// The sandbox change a launch of `session_id` must carry: every active grant of the session
+/// that has not expired, merged.
 pub fn delta_for_session(db: &Database, session_id: &str, now: i64) -> Result<SandboxDelta> {
-    let deltas: Vec<String> = db.with_conn(|c| {
-        let mut stmt = c.prepare(
-            "SELECT delta_json FROM sandbox_grants
-             WHERE session_id = ?1 AND state = ?2 AND (expires_at IS NULL OR expires_at > ?3)
-             ORDER BY requested_at, rowid",
-        )?;
-        let rows = stmt.query_map(params![session_id, ACTIVE, now], |r| r.get(0))?;
-        Ok(rows.collect::<rusqlite::Result<Vec<String>>>()?)
-    })?;
+    delta_for_scopes(db, &[session_id.to_string()], now)
+}
+
+/// The same for every scope that applies to a session: the session itself, its task and its
+/// repository. Standing rules for the task and repository come in here.
+pub fn delta_for_scopes(db: &Database, scopes: &[String], now: i64) -> Result<SandboxDelta> {
+    let mut deltas: Vec<String> = Vec::new();
+    for scope in scopes {
+        let rows: Vec<String> = db.with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT delta_json FROM sandbox_grants
+                 WHERE session_id = ?1 AND state = ?2 AND capability <> ?4
+                   AND (expires_at IS NULL OR expires_at > ?3)
+                 ORDER BY requested_at, rowid",
+            )?;
+            let rows = stmt.query_map(params![scope, ACTIVE, now, PROFILE], |r| r.get(0))?;
+            Ok(rows.collect::<rusqlite::Result<Vec<String>>>()?)
+        })?;
+        deltas.extend(rows);
+    }
     let mut merged = SandboxDelta::default();
     for text in deltas {
         // A row this build cannot read adds nothing: fail closed.
@@ -384,6 +412,107 @@ pub fn delta_for_session(db: &Database, session_id: &str, now: i64) -> Result<Sa
     merged.allow.sort();
     merged.allow.dedup();
     Ok(merged)
+}
+
+/// The owner's standing rules for these scopes (task and repository), active and unexpired.
+pub fn rules_for(db: &Database, scopes: &[String], now: i64) -> Result<Vec<Grant>> {
+    let mut out = Vec::new();
+    for scope in scopes {
+        let rows: Vec<Grant> = db.with_conn(|c| {
+            let mut stmt = c.prepare(&format!(
+                "SELECT {COLUMNS} FROM sandbox_grants
+                 WHERE session_id = ?1 AND state = ?2 AND capability <> ?4
+                   AND (expires_at IS NULL OR expires_at > ?3)
+                 ORDER BY requested_at, rowid"
+            ))?;
+            let rows = stmt.query_map(params![scope, ACTIVE, now, PROFILE], row)?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })?;
+        out.extend(rows);
+    }
+    Ok(out)
+}
+
+/// Every standing rule in force, newest first, for the owner's Access view.
+pub fn all_rules(db: &Database, now: i64) -> Result<Vec<Grant>> {
+    db.with_conn(|c| {
+        let mut stmt = c.prepare(&format!(
+            "SELECT {COLUMNS} FROM sandbox_grants
+             WHERE state = ?1 AND capability <> ?3 AND (session_id LIKE 'task:%' OR session_id LIKE 'repo:%')
+               AND (expires_at IS NULL OR expires_at > ?2)
+             ORDER BY requested_at DESC, rowid DESC"
+        ))?;
+        let rows = stmt.query_map(params![ACTIVE, now, PROFILE], row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    })
+}
+
+/// Adds a standing rule for a task or repository scope (`task:<id>` or `repo:<root>`). Asking for
+/// one that is already in force changes nothing and returns `None`. Only the owner's own routes
+/// call this.
+pub fn add_rule(
+    db: &Database,
+    scope: &str,
+    capability: &str,
+    resource: &str,
+    delta: &SandboxDelta,
+    note: &str,
+    now: i64,
+) -> Result<Option<String>> {
+    if open_for(db, scope, capability, resource, now)?.is_some() {
+        return Ok(None);
+    }
+    file(
+        db,
+        &NewGrant {
+            session_id: scope,
+            task_id: None,
+            host: "",
+            repo: "",
+            capability,
+            resource,
+            delta,
+            state: ACTIVE,
+            decided_by: BY_OWNER,
+            helper_reason: "",
+            decision_note: note,
+            expires_at: None,
+        },
+        now,
+    )
+    .map(Some)
+}
+
+/// What HQ did for the owner since `since`: requests it approved under standing access, ones it
+/// took to the owner, and ones it refused. Counts only, never paths.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Summary {
+    pub approved_by_policy: i64,
+    pub approved_by_owner: i64,
+    pub asked_owner: i64,
+    pub declined: i64,
+    pub refused: i64,
+    pub standing_rules: i64,
+}
+
+pub fn summary(db: &Database, since: i64, now: i64) -> Result<Summary> {
+    db.with_conn(|c| {
+        let count = |sql: &str, p: &[&dyn rusqlite::ToSql]| -> rusqlite::Result<i64> {
+            c.query_row(sql, p, |r| r.get(0))
+        };
+        let base = "SELECT COUNT(*) FROM sandbox_grants WHERE requested_at >= ?1 AND capability <> 'profile' AND session_id NOT LIKE 'task:%' AND session_id NOT LIKE 'repo:%'";
+        Ok(Summary {
+            approved_by_policy: count(&format!("{base} AND decided_by = 'policy' AND state IN ('active','revoked','expired')"), &[&since])?,
+            approved_by_owner: count(&format!("{base} AND decided_by = 'owner' AND state IN ('active','revoked','expired')"), &[&since])?,
+            asked_owner: count(&format!("{base} AND (state = 'pending' OR decided_by = 'owner' OR state = 'declined')"), &[&since])?,
+            declined: count(&format!("{base} AND state = 'declined'"), &[&since])?,
+            refused: count(&format!("{base} AND state = 'refused'"), &[&since])?,
+            standing_rules: count(
+                "SELECT COUNT(*) FROM sandbox_grants WHERE state = 'active' AND capability <> 'profile' AND (session_id LIKE 'task:%' OR session_id LIKE 'repo:%') AND (expires_at IS NULL OR expires_at > ?1)",
+                &[&now],
+            )?,
+        })
+    })
 }
 
 #[cfg(test)]
@@ -558,5 +687,110 @@ mod tests {
             !restart_due(&db, "s1").unwrap(),
             "a binding needs no restart"
         );
+    }
+
+    #[test]
+    fn standing_rules_reach_every_session_in_their_scope_and_are_listed_apart() {
+        let db = Database::open_memory().unwrap();
+        let d = delta("/repo/cache");
+        assert!(
+            add_rule(
+                &db,
+                "repo:/repo",
+                "fs_write",
+                "/repo/cache",
+                &d,
+                "always",
+                1
+            )
+            .unwrap()
+            .is_some()
+        );
+        assert!(
+            add_rule(
+                &db,
+                "repo:/repo",
+                "fs_write",
+                "/repo/cache",
+                &d,
+                "always",
+                2
+            )
+            .unwrap()
+            .is_none(),
+            "idempotent"
+        );
+        add_rule(
+            &db,
+            "task:t1",
+            "fs_write",
+            "/repo/t",
+            &delta("/repo/t"),
+            "task",
+            3,
+        )
+        .unwrap();
+        let scopes = |s: &str| {
+            vec![
+                s.to_string(),
+                "task:t1".to_string(),
+                "repo:/repo".to_string(),
+            ]
+        };
+        let got = delta_for_scopes(&db, &scopes("s1"), 10).unwrap();
+        assert_eq!(got.writable.len(), 2);
+        let other = delta_for_scopes(
+            &db,
+            &[
+                "s2".to_string(),
+                "task:t9".to_string(),
+                "repo:/else".to_string(),
+            ],
+            10,
+        )
+        .unwrap();
+        assert!(other.is_empty(), "another repo and task get nothing");
+        let rules = rules_for(&db, &scopes("s1"), 10).unwrap();
+        assert_eq!(
+            rules.iter().map(|r| r.scope.as_str()).collect::<Vec<_>>(),
+            vec!["task", "repo"]
+        );
+        assert!(revoke(&db, &rules[1].id, 20).unwrap());
+        assert_eq!(
+            delta_for_scopes(&db, &scopes("s1"), 30)
+                .unwrap()
+                .writable
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn the_summary_counts_by_outcome_and_leaves_rules_and_bindings_out_of_requests() {
+        let db = Database::open_memory().unwrap();
+        let d = SandboxDelta::default();
+        file(&db, &at("/r/1", new("s1", &d, ACTIVE)), 100).unwrap();
+        let mut owner = new("s1", &d, ACTIVE);
+        owner.decided_by = BY_OWNER;
+        file(&db, &at("/r/2", owner), 100).unwrap();
+        file(&db, &at("/r/3", new("s1", &d, PENDING)), 100).unwrap();
+        file(&db, &at("/r/4", new("s1", &d, REFUSED)), 100).unwrap();
+        add_rule(&db, "repo:/r", "fs_write", "/r", &d, "x", 100).unwrap();
+        bind_profile(&db, "task:t", "mobile", 100).unwrap();
+        let s = summary(&db, 50, 200).unwrap();
+        assert_eq!(
+            (
+                s.approved_by_policy,
+                s.approved_by_owner,
+                s.refused,
+                s.standing_rules
+            ),
+            (1, 1, 1, 1)
+        );
+        assert_eq!(
+            s.asked_owner, 2,
+            "the pending one and the owner-approved one"
+        );
+        assert_eq!(summary(&db, 500, 600).unwrap().approved_by_policy, 0);
     }
 }

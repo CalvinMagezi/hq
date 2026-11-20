@@ -743,6 +743,7 @@ async fn action_approves_known_items_and_404s_unknown_ones() {
     let act = |id: &str, action: &str| {
         let body = NotificationActionRequest {
             action: action.into(),
+            starter: None,
         };
         notification_action_handler(State(state.clone()), AxumPath(id.into()), Json(body))
     };
@@ -774,6 +775,7 @@ async fn approving_by_id_approves_exactly_that_item_and_signs_it() {
     let act = |id: &str, action: &str| {
         let body = NotificationActionRequest {
             action: action.into(),
+            starter: None,
         };
         notification_action_handler(State(state.clone()), AxumPath(id.into()), Json(body))
     };
@@ -853,6 +855,7 @@ async fn an_open_dialog_is_not_approved_through_its_notice() {
     let act = |action: &str| {
         let body = NotificationActionRequest {
             action: action.into(),
+            starter: None,
         };
         notification_action_handler(State(state.clone()), AxumPath(id.clone()), Json(body))
     };

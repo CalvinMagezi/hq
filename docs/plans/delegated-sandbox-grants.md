@@ -221,3 +221,14 @@ more credential stores (case-folded compare, longer list); loopback grants did n
 behind the proxy (private rules added); stored paths were not re-checked at launch (now they are).
 Not done: a vault location in the deny list, and checking on a real Mac that `canonicalize` keeps the
 typed case.
+
+## Built: standing access (P6, owner-first flow)
+
+Live use showed that editing config and binding a profile per task is not a flow anyone will follow.
+The owner's first answer now teaches HQ. The inbox card offers Allow (this session), Allow for this task,
+Allow for this repository, and a starter set when the request falls inside one (`suggested_starter`).
+Starters ship in `hq_core::grants::STARTER_PROFILES`; profiles in config remain for people who want them.
+Rules live in `sandbox_grants` under `task:` and `repo:` scopes and are read against the session
+computer's home. The repository is the folder a worktree was made from. A summary endpoint counts
+outcomes without paths. Still to do on the UI side: the card choices on web and Android, a rules list
+with revoke in Settings > Access, and the weekly summary line.

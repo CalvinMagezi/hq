@@ -1,0 +1,1 @@
+Answering a helper's access request can now allow it for the task, for the repository, or as a starter set (mobile dev, Node, Rust caches and registries), so the next request HQ can cover is approved without asking. The web API lists those rules and a weekly summary of what HQ approved, asked and refused.
