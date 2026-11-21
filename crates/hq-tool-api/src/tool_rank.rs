@@ -215,6 +215,55 @@ pub fn rank_scored(docs: &[RankDoc<'_>], query: &str, max_results: usize) -> Vec
     scored
 }
 
+/// Edit distance between two short strings, counting single-character inserts, deletes and
+/// replacements. Names are a few dozen characters, so the plain two-row version is plenty.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            cur.push((prev[j] + cost).min(prev[j + 1] + 1).min(cur[j] + 1));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+/// The names closest to a name that does not exist, best first, at most `n`. Used for "did you
+/// mean": a typo (`vault_serach`) is near by edit distance, and a guess in other words
+/// (`search_vault`, `find_notes`) shares words with the real name. Returns indices into `names`;
+/// a name with neither a small edit distance nor a shared word is left out.
+pub fn nearest(names: &[&str], wanted: &str, n: usize) -> Vec<usize> {
+    let wanted_lower = wanted.trim().to_lowercase();
+    if wanted_lower.is_empty() || n == 0 {
+        return Vec::new();
+    }
+    let wanted_terms = token_set(&wanted_lower);
+    let close = (wanted_lower.chars().count() / 3).max(2);
+    let mut found: Vec<(usize, usize, usize, usize)> = names
+        .iter()
+        .enumerate()
+        .filter_map(|(i, name)| {
+            let lower = name.to_lowercase();
+            let dist = edit_distance(&wanted_lower, &lower);
+            let shared = token_set(&lower).intersection(&wanted_terms).count();
+            let is_close = dist <= close;
+            (is_close || shared > 0).then_some((
+                usize::from(!is_close),
+                dist,
+                usize::MAX - shared,
+                i,
+            ))
+        })
+        .collect();
+    // Close spellings first, then smaller distance, then more shared words, then catalogue order.
+    found.sort();
+    found.into_iter().take(n).map(|(_, _, _, i)| i).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,5 +370,27 @@ mod tests {
         ];
         assert_eq!(rank(&docs, "spreadsheet", 5), vec![1]);
         assert_eq!(rank(&docs, "receipts", 5), vec![1]);
+    }
+
+    #[test]
+    fn nearest_catches_a_typo_and_a_reworded_name() {
+        let names = [
+            "vault_search",
+            "vault_write_note",
+            "web_fetch",
+            "task_create",
+        ];
+        let pick = |wanted: &str| -> Vec<&str> {
+            nearest(&names, wanted, 3)
+                .into_iter()
+                .map(|i| names[i])
+                .collect()
+        };
+        assert_eq!(pick("vault_serach")[0], "vault_search");
+        assert_eq!(pick("search_vault")[0], "vault_search");
+        assert_eq!(pick("fetch_web")[0], "web_fetch");
+        assert!(pick("completely_unrelated_thing").is_empty());
+        assert!(nearest(&names, "", 3).is_empty());
+        assert_eq!(nearest(&names, "vault", 1).len(), 1);
     }
 }

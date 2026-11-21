@@ -310,41 +310,7 @@ impl ToolSummary {
     /// A `*` marks a required argument, a `?` an optional one. No descriptions, so it costs a
     /// fraction of the full schema while still telling the model what to pass.
     pub fn signature(&self) -> String {
-        let props = self
-            .parameters
-            .get("properties")
-            .and_then(|p| p.as_object());
-        let required: Vec<&str> = self
-            .parameters
-            .get("required")
-            .and_then(|r| r.as_array())
-            .map(|r| r.iter().filter_map(|v| v.as_str()).collect())
-            .unwrap_or_default();
-        let mut args: Vec<String> = Vec::new();
-        if let Some(props) = props {
-            let mut keys: Vec<&String> = props.keys().collect();
-            // Required first, then optional, each in name order, so the line is stable.
-            keys.sort_by_key(|k| (!required.contains(&k.as_str()), k.to_string()));
-            for k in keys {
-                let ty = match props[k].get("type") {
-                    Some(Value::String(t)) => t.clone(),
-                    Some(Value::Array(a)) => a
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .find(|t| *t != "null")
-                        .unwrap_or("any")
-                        .to_string(),
-                    _ => "any".to_string(),
-                };
-                let mark = if required.contains(&k.as_str()) {
-                    "*"
-                } else {
-                    "?"
-                };
-                args.push(format!("{k}{mark}: {ty}"));
-            }
-        }
-        format!("{}({})", self.name, args.join(", "))
+        signature_of(&self.name, &self.parameters)
     }
 
     fn from_tool(t: &dyn HqTool) -> Self {
@@ -357,6 +323,59 @@ impl ToolSummary {
             behavioral_prompt: t.behavioral_prompt().map(|s| s.to_string()),
         }
     }
+}
+
+/// One-line call shape for a tool: `name(path*: string, limit?: integer)`. `*` marks a required
+/// argument and `?` an optional one. Shared by the gateway and the native session so both show
+/// the same shape.
+pub fn signature_of(name: &str, parameters: &Value) -> String {
+    let props = parameters.get("properties").and_then(|p| p.as_object());
+    let required: Vec<&str> = parameters
+        .get("required")
+        .and_then(|r| r.as_array())
+        .map(|r| r.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+    let mut args: Vec<String> = Vec::new();
+    if let Some(props) = props {
+        let mut keys: Vec<&String> = props.keys().collect();
+        // Required first, then optional, each in name order, so the line is stable.
+        keys.sort_by_key(|k| (!required.contains(&k.as_str()), k.to_string()));
+        for k in keys {
+            let ty = match props[k].get("type") {
+                Some(Value::String(t)) => t.clone(),
+                Some(Value::Array(a)) => a
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .find(|t| *t != "null")
+                    .unwrap_or("any")
+                    .to_string(),
+                _ => "any".to_string(),
+            };
+            let mark = if required.contains(&k.as_str()) {
+                "*"
+            } else {
+                "?"
+            };
+            args.push(format!("{k}{mark}: {ty}"));
+        }
+    }
+    format!("{name}({})", args.join(", "))
+}
+
+/// The ` Did you mean: ...?` suffix for an unknown tool name, built from the call shapes of the
+/// closest names, or an empty string when nothing is close. `tools` is `(name, parameters)` for
+/// every tool the caller may use. At most three are offered.
+pub fn did_you_mean(wanted: &str, tools: &[(&str, &Value)]) -> String {
+    let names: Vec<&str> = tools.iter().map(|(n, _)| *n).collect();
+    let near = crate::tool_rank::nearest(&names, wanted, 3);
+    if near.is_empty() {
+        return String::new();
+    }
+    let shapes: Vec<String> = near
+        .into_iter()
+        .map(|i| signature_of(tools[i].0, tools[i].1))
+        .collect();
+    format!(" Did you mean: {}?", shapes.join("; "))
 }
 
 /// Central registry of all available tools.
@@ -471,6 +490,21 @@ impl ToolRegistry {
             })
             .map(ToolSummary::from_tool)
             .collect()
+    }
+
+    /// The suffix to append to an `unknown tool` error: the closest real tools and their call
+    /// shapes. `allowed` limits suggestions to what a scoped caller may use, so the error never
+    /// names a tool the caller cannot call. Empty when nothing is close.
+    pub fn did_you_mean(&self, wanted: &str, allowed: Option<&[&str]>) -> String {
+        let params: Vec<(String, Value)> = self
+            .tools
+            .values()
+            .filter(|t| allowed.is_none_or(|a| a.contains(&t.name())))
+            .map(|t| (t.name().to_string(), t.parameters()))
+            .collect();
+        let mut sorted: Vec<(&str, &Value)> = params.iter().map(|(n, p)| (n.as_str(), p)).collect();
+        sorted.sort_by(|a, b| a.0.cmp(b.0));
+        did_you_mean(wanted, &sorted)
     }
 
     /// Return tool summaries visible at or below `max_policy`.
@@ -980,5 +1014,18 @@ mod tests {
             behavioral_prompt: None,
         };
         assert_eq!(summary.signature(), "ping()");
+    }
+
+    #[test]
+    fn did_you_mean_offers_close_names_with_their_call_shape() {
+        let params = serde_json::json!({
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        });
+        let tools = [("vault_search", &params), ("web_fetch", &params)];
+        let hint = did_you_mean("vault_serach", &tools);
+        assert_eq!(hint, " Did you mean: vault_search(query*: string)?");
+        assert_eq!(did_you_mean("zzzzzzzz_qqqq", &tools), "");
     }
 }

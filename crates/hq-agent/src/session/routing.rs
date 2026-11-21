@@ -131,7 +131,11 @@ impl AgentSession {
                         .and_then(|d| d.for_removed_tool(&tc.name));
                     return match hint {
                         Some(text) => Ok(text_result(text)),
-                        None => Err(anyhow::anyhow!("unknown tool: {}", tc.name)),
+                        None => Err(anyhow::anyhow!(
+                            "unknown tool: {}.{}",
+                            tc.name,
+                            tools.did_you_mean(&tc.name)
+                        )),
                     };
                 }
             }
@@ -260,38 +264,51 @@ impl AgentSession {
         let matches = rank_tool_matches(&catalog, query, max_results);
 
         if matches.is_empty() {
+            let names: Vec<&str> = catalog.iter().map(|(n, _)| n.as_str()).collect();
+            let near: Vec<&str> = hq_tool_api::tool_rank::nearest(&names, query, 5)
+                .into_iter()
+                .map(|i| names[i])
+                .collect();
+            let text = if near.is_empty() {
+                format!(
+                    "No deferred tools match query \"{query}\". {} deferred tools exist; try other words for what you want to do.",
+                    catalog.len()
+                )
+            } else {
+                format!(
+                    "No deferred tools match query \"{query}\". Closest names: {}.",
+                    near.join(", ")
+                )
+            };
             return Ok(hq_core::types::ToolResult {
                 content: vec![ToolResultContent {
                     r#type: "text".to_string(),
-                    text: format!(
-                        "No deferred tools match query \"{}\". Available deferred tools: {}",
-                        query,
-                        catalog
-                            .iter()
-                            .map(|(n, _)| n.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
+                    text,
                 }],
                 details: None,
                 context_modifier: None,
             });
         }
 
-        let mut output = String::new();
         let found: Vec<String> = matches.iter().map(|(name, _)| name.clone()).collect();
         for name in &found {
             // Declared from the next request on, so the model can call it like any other tool.
             tools.activate(name);
         }
+        // The full schema reaches the model as a declared tool on the next request, so the
+        // result only needs the call shape and what the tool is for.
+        let mut output = String::from(
+            "Loaded. You can call these now; the full parameter schema is attached to each.\n\n",
+        );
         for name in &found {
             if let Some(def) = tools.definition_for(name) {
-                output.push_str(&format!(
-                    "## {}\n{}\n\nParameters:\n```json\n{}\n```\n\n",
-                    def.name,
-                    def.description,
-                    serde_json::to_string_pretty(&def.parameters).unwrap_or_default()
-                ));
+                let shape = hq_tool_api::registry::signature_of(&def.name, &def.parameters);
+                let hint = catalog
+                    .iter()
+                    .find(|(n, _)| n == name)
+                    .map(|(_, h)| h.as_str())
+                    .unwrap_or("");
+                output.push_str(&format!("- {shape}: {hint}\n"));
             }
         }
 

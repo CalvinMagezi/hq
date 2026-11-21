@@ -208,6 +208,18 @@ impl ToolRegistry {
         out
     }
 
+    /// The ` Did you mean: ...?` suffix for a tool name that is not registered: the closest
+    /// registered names with their call shapes, or an empty string when nothing is close.
+    pub fn did_you_mean(&self, wanted: &str) -> String {
+        let mut defs: Vec<ToolDefinition> = self.tools.values().map(definition_of).collect();
+        defs.sort_by(|a, b| a.name.cmp(&b.name));
+        let tools: Vec<(&str, &serde_json::Value)> = defs
+            .iter()
+            .map(|d| (d.name.as_str(), &d.parameters))
+            .collect();
+        hq_tool_api::registry::did_you_mean(wanted, &tools)
+    }
+
     /// Return the full definition for a single tool by name.
     /// Used by ToolSearch to load schemas on demand.
     pub fn definition_for(&self, name: &str) -> Option<ToolDefinition> {

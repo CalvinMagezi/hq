@@ -2180,6 +2180,57 @@ async fn a_deferred_tool_is_found_declared_and_called() {
             .any(|m| m.role == MessageRole::Tool && m.content == "tool output"),
         "and it ran"
     );
+    // The search result is the compact call shape: the schema arrives as a declared tool.
+    let found = requests[1]
+        .messages
+        .iter()
+        .find(|m| m.role == MessageRole::Tool)
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
+    assert!(found.contains("contract_tool("), "{found}");
+    assert!(!found.contains("Parameters:"), "{found}");
+}
+
+#[tokio::test]
+async fn a_misspelt_tool_name_gets_the_closest_real_names() {
+    let provider = Arc::new(MockProvider::new(
+        vec![
+            BufferedReply::ToolCall {
+                id: "call-typo".to_string(),
+                name: "contract_tol".to_string(),
+                arguments: serde_json::json!({"input": "value"}),
+            },
+            BufferedReply::Complete("done".to_string()),
+        ],
+        vec![],
+    ));
+    let allowed_path = std::env::current_dir().unwrap();
+    let registry = crate::governance::ToolGuardian::with_default_mode(
+        vec![allowed_path],
+        SecurityProfile::Guarded,
+    )
+    .build_registry(
+        vec![Box::new(ContractTool { cancel: None })],
+        crate::governance::LiveUserTurn::unattended(),
+    );
+    let config = SessionConfig {
+        max_retries: 0,
+        max_duration_secs: None,
+        ..SessionConfig::default()
+    };
+    let mut agent = AgentSession::new(provider.clone(), registry, config);
+
+    agent.prompt("use the contract tool").await.unwrap();
+
+    let requests = provider.requests.lock().unwrap();
+    let reply = requests[1]
+        .messages
+        .iter()
+        .find(|m| m.role == MessageRole::Tool)
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
+    assert!(reply.contains("unknown tool: contract_tol"), "{reply}");
+    assert!(reply.contains("Did you mean: contract_tool("), "{reply}");
 }
 
 #[tokio::test]

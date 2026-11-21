@@ -506,9 +506,16 @@ async fn handle_call_as(
         ));
     }
 
-    let tool = registry
-        .get(&args.tool)
-        .ok_or_else(|| ErrorData::invalid_params(format!("unknown tool: {}", args.tool), None))?;
+    let tool = registry.get(&args.tool).ok_or_else(|| {
+        ErrorData::invalid_params(
+            format!(
+                "unknown tool: {}.{}",
+                args.tool,
+                registry.did_you_mean(&args.tool, allowed)
+            ),
+            None,
+        )
+    })?;
 
     let mut call_args = args.args.unwrap_or(json!({}));
     if call_args.is_null() {
@@ -572,9 +579,12 @@ pub async fn call_tool_whole(
     if allowed.is_some_and(|a| !a.contains(&tool)) {
         return Err(format!("tool not permitted for this connection: {tool}"));
     }
-    let t = registry
-        .get(tool)
-        .ok_or_else(|| format!("unknown tool: {tool}"))?;
+    let t = registry.get(tool).ok_or_else(|| {
+        format!(
+            "unknown tool: {tool}.{}",
+            registry.did_you_mean(tool, allowed)
+        )
+    })?;
     let mut args = if args.is_null() { json!({}) } else { args };
     mark_scope(&mut args, allowed, None);
     hq_tool_api::registry::validate_and_execute(t, args)
@@ -1693,6 +1703,35 @@ mod tests {
         let full = discover_json(&registry, json!({"query": "notes", "detail": true}), None);
         let (c, f) = (compact.to_string().len(), full.to_string().len());
         assert!(c * 2 < f, "compact {c} bytes vs full {f} bytes");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_tool_name_gets_the_closest_real_ones() {
+        let registry = registry_of(&["vault_search", "vault_write_note"]);
+        let db = hq_db::Database::open_memory().unwrap();
+        let args = json!({"tool": "vault_serach", "args": {}});
+        let map = args.as_object().unwrap().clone();
+        let err = handle_call(&registry, Some(&map), &db, None)
+            .await
+            .unwrap_err();
+        assert!(
+            err.message.contains("unknown tool: vault_serach"),
+            "{}",
+            err.message
+        );
+        assert!(
+            err.message.contains("Did you mean: vault_search("),
+            "{}",
+            err.message
+        );
+
+        // Nothing close, nothing suggested.
+        let args = json!({"tool": "zzzz_qqqq", "args": {}});
+        let map = args.as_object().unwrap().clone();
+        let err = handle_call(&registry, Some(&map), &db, None)
+            .await
+            .unwrap_err();
+        assert!(!err.message.contains("Did you mean"), "{}", err.message);
     }
 
     #[tokio::test]
