@@ -60,13 +60,27 @@ pub fn export_note_blocking(
     languages: &[String],
 ) -> Result<NoteExport, ExportError> {
     let raw = std::fs::read_to_string(note_abs)?;
+    export_note_text(vault, note_abs, &raw, format, brand, languages)
+}
+
+/// Like [`export_note_blocking`], for a note whose text the caller has already prepared (for
+/// example with its typed blocks written out as tables). `note_abs` still says where the note
+/// lives, so its title, relative links and pictures resolve as they would for the file.
+pub fn export_note_text(
+    vault: &Path,
+    note_abs: &Path,
+    raw: &str,
+    format: Format,
+    brand: Option<&BrandKit>,
+    languages: &[String],
+) -> Result<NoteExport, ExportError> {
     let stem = note_abs
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Note".to_owned());
     let note_dir = note_abs.parent().unwrap_or(vault);
     // Callouts are kept as written: this renderer draws them as real boxes.
-    let prepared = prepare_note_with(&raw, &stem, note_dir, vault, true);
+    let prepared = prepare_note_with(raw, &stem, note_dir, vault, true);
     let doc = Document::from_markdown(prepared.title.clone(), &prepared.markdown);
     let opts = ExportOptions {
         render: RenderOptions {

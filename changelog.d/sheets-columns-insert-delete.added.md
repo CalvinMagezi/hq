@@ -1,0 +1,1 @@
+**Insert and delete columns in a sheet.** On a phone or in chat you can add a column before any column or delete one. Formulas, totals, other sheets, tiles and charts that read the columns after it follow the change, and a chart that depends on a deleted column by name is not left silently broken: the delete is refused with a sentence saying which one.

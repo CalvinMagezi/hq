@@ -38,6 +38,7 @@ initiative_shelve
 note_review
 notify_owner
 office_create
+office_edit
 office_export
 office_file
 sandbox_request

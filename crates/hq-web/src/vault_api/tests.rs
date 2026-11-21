@@ -377,6 +377,20 @@ fn update_keeps_frontmatter_and_stamps_modified() {
 }
 
 #[test]
+fn update_with_a_body_that_carries_its_own_frontmatter_keeps_one_block() {
+    let existing = "---\ntitle: Deck\nsuite_kind: slides\n---\nold\n";
+    // What a viewer holding the whole note sends back: its frontmatter, then the edited text.
+    let whole = "---\ntitle: Deck\nsuite_kind: slides\n---\n# Deck\n\n## One\n";
+    let out = update_preserving_frontmatter(existing, whole, "t");
+    assert_eq!(out.matches("suite_kind: slides").count(), 1, "{out}");
+    assert_eq!(out.matches("---\n").count(), 2, "{out}");
+    assert!(out.ends_with("---\n# Deck\n\n## One\n"), "{out}");
+    // A body that only starts with a horizontal rule (no closing fence) is left as written.
+    let rule = update_preserving_frontmatter(existing, "---\nnot frontmatter", "t");
+    assert!(rule.ends_with("---\nnot frontmatter"), "{rule}");
+}
+
+#[test]
 fn split_frontmatter_handles_missing_and_present() {
     assert_eq!(
         split_frontmatter("---\na: 1\n---\nbody"),

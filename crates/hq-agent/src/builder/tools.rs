@@ -198,6 +198,7 @@ impl SessionBuilder {
         #[cfg(feature = "suite")]
         tools.extend(hq_tools_office::create_office_tools(
             vault_path.to_path_buf(),
+            hq_tools::provenance::office_seam(shared_db.as_ref(), vault_path),
         ));
 
         // Mechanical AI-slop check for document/report drafts.

@@ -81,7 +81,9 @@ pub use relay::*;
 pub use self_update::SelfUpdateConfig;
 pub use skills::{BuiltinSkillsConfig, SkillsConfig};
 pub use stack::{Specialist, StackConfig};
-pub use suite::SuiteConfig;
+pub use suite::{
+    DASHBOARD_REFRESH_MAX_NOTES, DASHBOARD_REFRESH_MIN_MINUTES, DashboardRefreshConfig, SuiteConfig,
+};
 pub use tasks::{
     ALL_TIERS, AutonomyGate, DEFAULT_LEASE_TTL_SECS, DEFAULT_STALE_AFTER_HOURS, LeaseMode,
     MAX_AUTO_ARCHIVE_DAYS, MIN_AUTO_ARCHIVE_DAYS, MIN_LEASE_TTL_SECS, ReleaseCheck, TasksConfig,

@@ -10,6 +10,7 @@
 //! lives under: no I/O, no HQ crates, nothing here reads a path or a clock.
 
 pub mod block;
+pub mod comment;
 pub mod doc;
 pub mod frontmatter;
 pub mod hash;
@@ -21,6 +22,7 @@ pub mod sheet;
 pub mod validate;
 
 pub use block::{BlockError, BlockType, Problem, Severity, TypedBlock};
+pub use comment::{Comment, CommentState, comments, strip_comments};
 pub use doc::{Document, MAX_DOC_BYTES, Node, NodeKind};
 pub use frontmatter::Scalar;
 pub use info::{Attr, Info, InfoError};

@@ -66,18 +66,18 @@ export function CodeViewer({ content, path }: { content: string; path: string })
     }
 
     return (
-        <div className="flex flex-col h-full w-full rounded-lg overflow-hidden border" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-            <div className="flex justify-between items-center p-2 border-b flex-shrink-0" style={{ borderColor: 'var(--border)', background: 'var(--bg-surface)' }}>
-                <span className="text-xs font-mono" style={{ color: 'var(--text-dim)' }}>
+        <div className="flex flex-col h-full w-full rounded-lg overflow-hidden border" style={{ background: 'var(--surface-200)', border: '1px solid var(--hairline)' }}>
+            <div className="flex justify-between items-center p-2 border-b flex-shrink-0" style={{ borderColor: 'var(--hairline)', background: 'var(--surface-100)' }}>
+                <span className="text-xs font-mono" style={{ color: 'var(--ink-muted)' }}>
                     {path.split('/').pop()}
                 </span>
                 <button
                     onClick={copyToClipboard}
                     className="px-3 py-1 text-[10px] font-mono rounded uppercase tracking-wider transition-colors"
                     style={{
-                        background: copied ? 'rgba(0, 255, 163, 0.1)' : 'var(--bg-base)',
-                        color: copied ? 'var(--accent-green)' : 'var(--text-dim)',
-                        border: '1px solid var(--border)'
+                        background: copied ? 'var(--surface-200)' : 'var(--surface-000)',
+                        color: copied ? 'var(--text-green)' : 'var(--ink-muted)',
+                        border: '1px solid var(--hairline)'
                     }}
                 >
                     {copied ? 'Copied' : 'Copy'}
@@ -85,7 +85,7 @@ export function CodeViewer({ content, path }: { content: string; path: string })
             </div>
 
             {isTruncated && (
-                <div className="px-3 py-1 text-[10px] text-center font-mono" style={{ background: 'rgba(255, 179, 0, 0.1)', color: 'var(--accent-amber)' }}>
+                <div className="px-3 py-1 text-[10px] text-center font-mono" style={{ background: 'var(--surface-100)', color: 'var(--warn)' }}>
                     File exceeds 500KB. Showing first 500KB only.
                 </div>
             )}
@@ -95,7 +95,7 @@ export function CodeViewer({ content, path }: { content: string; path: string })
                     <div dangerouslySetInnerHTML={{ __html: html }} />
                 ) : (
                     <div className="flex items-center justify-center h-full">
-                        <span className="text-xs font-mono animate-pulse" style={{ color: 'var(--text-dim)' }}>Loading snippet...</span>
+                        <span className="text-xs font-mono animate-pulse" style={{ color: 'var(--ink-muted)' }}>Loading snippet...</span>
                     </div>
                 )}
             </div>

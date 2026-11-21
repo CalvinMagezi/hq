@@ -1,0 +1,314 @@
+import { useId, useState } from 'react'
+import { t } from '~/strings'
+import { MAX_POINTS, MAX_SLICES, SERIES_DASH, areaPoints, compactNumber, isNumberText, markerPath, seriesColor, seriesDashed, stackBands, xScale, yScale, yValuesOf } from '~/lib/chart'
+import type { Series } from '~/lib/dashQuery'
+import { formatValue } from '~/lib/sheetCalc'
+
+// The same frame the chat's charts use (lib/chart.ts), drawn as React so a tap can read a value.
+const W = 360
+const H = 240
+const M = { left: 52, right: 12, top: 14, bottom: 44 }
+const PW = W - M.left - M.right
+const PH = H - M.top - M.bottom
+const LABEL_LIMIT = 12
+/** A scatter chart keeps its first and last points off the edges of the frame. */
+const INSET = 8
+const TICK_CHARS = 10
+const PIE_R = 90
+const HOLE = 0.55
+
+export interface PlotProps {
+  kind: string
+  title: string
+  labels: string[]
+  series: Series[]
+  format: string
+}
+
+/** The id of the hatch laid over every series after the first, so bars differ by more than colour. */
+const hatchId = (id: string) => `${id.replace(/[^a-z0-9]/gi, '')}hatch`
+const clip = (s: string) => (s.length > TICK_CHARS ? `${s.slice(0, TICK_CHARS - 1)}…` : s)
+const round = (n: number) => Math.round(n * 100) / 100
+
+/** The kinds a plot block can name. Any other is not drawn, and says so. */
+export const PLOT_KINDS = ['bar', 'line', 'area', 'stacked', 'scatter', 'pie', 'donut'] as const
+
+/** Bar, line, area, stacked, scatter, pie and donut from a plot block, with axes, value labels and a tap-to-read line. A scatter point is its label (a number) across and its value up; a missing point is NaN. */
+export function PlotChart({ kind, title, labels, series, format }: PlotProps) {
+  const [active, setActive] = useState<number | null>(null)
+  const id = useId()
+  const pie = kind === 'pie' || kind === 'donut'
+  const cap = pie ? MAX_SLICES : MAX_POINTS
+  // Only the kinds above are drawn, a scatter needs a number for every label, and every kind has a limit.
+  const known = (PLOT_KINDS as readonly string[]).includes(kind)
+  const refusal = !known || (kind === 'scatter' && !labels.every(isNumberText)) ? t('suite_plot_failed') : labels.length > cap ? t('suite_plot_too_many', { limit: String(cap) }) : null
+  if (refusal) {
+    return <p className="a-body-sm a-muted">{refusal}</p>
+  }
+  const fmt = (v: number) => (Number.isFinite(v) ? formatValue(v, format) : '-')
+  const summary = labels.map((l, i) => `${l} ${series.map((s) => fmt(s.values[i])).join(' ')}`).join(', ')
+  const here = active === null ? [] : series.filter((s) => Number.isFinite(s.values[active]))
+  const reading = active === null ? null : `${labels[active]}: ${here.map((s) => (series.length > 1 ? `${s.name} ${fmt(s.values[active])}` : fmt(s.values[active]))).join(', ')}`
+
+  return (
+    <div className="su-chart">
+      {pie ? (
+        <Pie id={id} kind={kind} labels={labels} values={series[0].values} active={active} setActive={setActive} aria={`${title} ${summary}`.trim()} />
+      ) : (
+        <Cartesian id={id} kind={kind} labels={labels} series={series} active={active} setActive={setActive} fmt={fmt} aria={`${title} ${summary}`.trim()} />
+      )}
+      <p className="a-body-sm su-reading" role="status" aria-live="polite">
+        {reading ?? <span className="a-muted">{t('suite_plot_tap')}</span>}
+      </p>
+      <ul className="su-legend">
+        {(pie ? labels : series.map((s) => s.name)).map((name, i) => (
+          <li key={i}>
+            <LegendKey kind={kind} i={i} hatch={hatchId(id)} />
+            <span className="su-legend-name">{name}</span>
+            {pie && <span className="a-cap a-muted">{fmt(series[0].values[i])}</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/** The index whose position is closest to `x`. */
+function nearest(order: number[], at: (i: number) => number, x: number): number {
+  let best = order[0]
+  for (const i of order) {
+    if (Math.abs(at(i) - x) - Math.abs(at(best) - x) < 0) best = i
+  }
+  return best
+}
+
+/** The small swatch beside a legend name: a line for a line, a filled strip for an area, the marker for a scatter, a block for the rest. */
+function LegendKey({ kind, i, hatch }: { kind: string; i: number; hatch: string }) {
+  const dash = seriesDashed(i) ? SERIES_DASH : undefined
+  if (kind === 'line') {
+    return (
+      <svg className="su-key" viewBox="0 0 16 10" aria-hidden="true">
+        <line x1="0" x2="16" y1="5" y2="5" stroke={seriesColor(i)} strokeWidth="2" strokeDasharray={dash} />
+      </svg>
+    )
+  }
+  if (kind === 'area') {
+    return (
+      <svg className="su-key" viewBox="0 0 16 10" aria-hidden="true">
+        <rect y="3" width="16" height="7" fill={seriesColor(i)} opacity="0.25" />
+        <line x1="0" x2="16" y1="3" y2="3" stroke={seriesColor(i)} strokeWidth="2" strokeDasharray={dash} />
+      </svg>
+    )
+  }
+  if (kind === 'scatter') {
+    return (
+      <svg className="su-key" viewBox="0 0 16 10" aria-hidden="true">
+        <path d={markerPath(i, 8, 5, 3.5)} fill={seriesColor(i)} />
+      </svg>
+    )
+  }
+  const hatched = (kind === 'bar' || kind === 'stacked') && i > 0
+  return (
+    <svg className="su-key" viewBox="0 0 16 10" aria-hidden="true">
+      <rect width="16" height="10" rx="2" fill={seriesColor(i)} />
+      {hatched && <rect width="16" height="10" rx="2" fill={`url(#${hatch})`} />}
+    </svg>
+  )
+}
+
+function Cartesian({ id, kind, labels, series, active, setActive, fmt, aria }: { id: string; kind: string; labels: string[]; series: Series[]; active: number | null; setActive: (n: number | null) => void; fmt: (v: number) => string; aria: string }) {
+  const scatter = kind === 'scatter'
+  const scale = yScale(yValuesOf(kind, series))
+  const y = (v: number) => M.top + (1 - (v - scale.min) / (scale.max - scale.min)) * PH
+  const band = PW / labels.length
+  const xs = scatter ? labels.map(Number) : []
+  const xAxis = scatter ? xScale(xs) : null
+  const atX = (v: number) => (xAxis ? M.left + INSET + ((v - xAxis.min) / (xAxis.max - xAxis.min)) * (PW - 2 * INSET) : 0)
+  const cx = (i: number) => (scatter ? atX(xs[i]) : M.left + (i + 0.5) * band)
+  const every = Math.ceil(labels.length / 6)
+  const labelled = labels.length * series.length <= LABEL_LIMIT
+  const barW = (band * 0.8) / series.length
+  const stackW = band * 0.7
+  // A scatter chart reads the point nearest across, and the arrow keys walk the points from left to right.
+  const across = scatter ? labels.map((_, i) => i).sort((p, q) => xs[p] - xs[q]) : []
+  const near = (clientX: number, el: SVGSVGElement) => {
+    const box = el.getBoundingClientRect()
+    const x = ((clientX - box.left) / box.width) * W
+    if (scatter) return nearest(across, (i) => cx(i), x)
+    return Math.min(labels.length - 1, Math.max(0, Math.floor((x - M.left) / band)))
+  }
+  const step = (dir: 1 | -1): number => {
+    if (!scatter) return dir === 1 ? Math.min(labels.length - 1, (active ?? -1) + 1) : Math.max(0, (active ?? labels.length) - 1)
+    const at = active === null ? -1 : across.indexOf(active)
+    return across[Math.min(across.length - 1, Math.max(0, at === -1 ? (dir === 1 ? 0 : across.length - 1) : at + dir))]
+  }
+  const stacks = kind === 'stacked' ? stackBands(series) : []
+  /** One scatter point; a point a group does not have is not drawn. */
+  const dot = (si: number, i: number, v: number) => {
+    if (!Number.isFinite(v)) return null
+    return <path key={i} d={markerPath(si, cx(i), y(v), active === i ? 5 : 3.5)} fill={seriesColor(si)} opacity="0.85" className="su-dot" />
+  }
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="su-svg"
+      role="img"
+      aria-label={t('suite_chart_label', { kind, title: aria })}
+      aria-describedby={`${id}-help`}
+      tabIndex={0}
+      onPointerDown={(e) => setActive(near(e.clientX, e.currentTarget))}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowRight') setActive(step(1))
+        else if (e.key === 'ArrowLeft') setActive(step(-1))
+        else if (e.key === 'Escape') setActive(null)
+        else return
+        e.preventDefault()
+      }}
+    >
+      <desc id={`${id}-help`}>{t('suite_plot_keys')}</desc>
+      <defs>
+        <pattern id={hatchId(id)} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="6" className="su-hatch" />
+        </pattern>
+      </defs>
+      {scale.ticks.map((tick) => (
+        <g key={tick}>
+          <line x1={M.left} x2={W - M.right} y1={round(y(tick))} y2={round(y(tick))} className="su-grid-line" />
+          <text x={M.left - 6} y={round(y(tick) + 3)} textAnchor="end" className="su-axis">
+            {compactNumber(tick)}
+          </text>
+        </g>
+      ))}
+      <line x1={M.left} x2={W - M.right} y1={round(y(0))} y2={round(y(0))} className="su-zero" />
+      {xAxis
+        ? xAxis.ticks.map((tick) => (
+            <text key={tick} x={round(atX(tick))} y={H - M.bottom + 14} textAnchor="middle" className="su-axis">
+              {compactNumber(tick)}
+            </text>
+          ))
+        : labels.map((l, i) => {
+            if (i % every !== 0) return null
+            return (
+              <text key={i} x={round(cx(i))} y={H - M.bottom + 14} textAnchor="middle" className="su-axis">
+                {clip(l)}
+              </text>
+            )
+          })}
+      {active !== null && !scatter && <rect x={round(M.left + active * band)} y={M.top} width={round(band)} height={PH} className="su-active" />}
+      {active !== null && scatter && <line x1={round(cx(active))} x2={round(cx(active))} y1={M.top} y2={M.top + PH} className="su-active-line" />}
+      {kind === 'bar' &&
+        series.map((s, si) =>
+          s.values.map((v, i) => {
+            const x = cx(i) - (band * 0.8) / 2 + si * barW
+            const top = Math.min(y(v), y(0))
+            return (
+              <g key={`${si}-${i}`}>
+                <rect x={round(x)} y={round(top)} width={round(barW)} height={round(Math.max(Math.abs(y(v) - y(0)), 1))} fill={seriesColor(si)} />
+                {si > 0 && <rect x={round(x)} y={round(top)} width={round(barW)} height={round(Math.max(Math.abs(y(v) - y(0)), 1))} fill={`url(#${hatchId(id)})`} />}
+                {labelled && (
+                  <text x={round(x + barW / 2)} y={round(top - 3)} textAnchor="middle" className="su-vlabel">
+                    {compactNumber(v)}
+                  </text>
+                )}
+              </g>
+            )
+          }),
+        )}
+      {kind === 'stacked' &&
+        stacks.map((row, si) =>
+          row.map((b, i) => {
+            const top = y(b.hi)
+            const h = round(Math.max(y(b.lo) - top, 1))
+            return (
+              <g key={`${si}-${i}`}>
+                <rect x={round(cx(i) - stackW / 2)} y={round(top)} width={round(stackW)} height={h} fill={seriesColor(si)} className="su-seg" />
+                {si > 0 && <rect x={round(cx(i) - stackW / 2)} y={round(top)} width={round(stackW)} height={h} fill={`url(#${hatchId(id)})`} />}
+              </g>
+            )
+          }),
+        )}
+      {kind === 'area' &&
+        series.map((s, si) => (
+          <g key={si}>
+            <polygon points={areaPoints(s.values.map((v, i) => ({ x: cx(i), y: y(v) })), y(0))} fill={seriesColor(si)} opacity="0.25" />
+            <polyline points={s.values.map((v, i) => `${round(cx(i))},${round(y(v))}`).join(' ')} fill="none" stroke={seriesColor(si)} strokeWidth="2" strokeDasharray={seriesDashed(si) ? SERIES_DASH : undefined} />
+            {s.values.length <= 30 && s.values.map((v, i) => <circle key={i} cx={round(cx(i))} cy={round(y(v))} r={active === i ? 4.5 : 2.5} fill={seriesColor(si)} />)}
+          </g>
+        ))}
+      {kind === 'line' &&
+        series.map((s, si) => (
+          <g key={si}>
+            <polyline points={s.values.map((v, i) => `${round(cx(i))},${round(y(v))}`).join(' ')} fill="none" stroke={seriesColor(si)} strokeWidth="2" strokeDasharray={seriesDashed(si) ? SERIES_DASH : undefined} />
+            {s.values.length <= 30 && s.values.map((v, i) => <circle key={i} cx={round(cx(i))} cy={round(y(v))} r={active === i ? 4.5 : 2.5} fill={seriesColor(si)} />)}
+            {active === null && (
+              <text x={round(cx(s.values.length - 1))} y={round(y(s.values[s.values.length - 1]) - 6)} textAnchor="middle" className="su-vlabel">
+                {fmt(s.values[s.values.length - 1])}
+              </text>
+            )}
+          </g>
+        ))}
+      {scatter &&
+        series.map((s, si) => (
+          <g key={si}>
+            {s.values.map((v, i) => dot(si, i, v))}
+          </g>
+        ))}
+    </svg>
+  )
+}
+
+function Pie({ id, kind, labels, values, active, setActive, aria }: { id: string; kind: string; labels: string[]; values: number[]; active: number | null; setActive: (n: number | null) => void; aria: string }) {
+  const total = values.reduce((a, b) => a + b, 0)
+  const cx = W / 2
+  const cy = H / 2
+  let angle = 0
+  const pt = (r: number, a: number) => `${round(cx + r * Math.sin(a))},${round(cy - r * Math.cos(a))}`
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="su-svg"
+      role="img"
+      aria-label={t('suite_chart_label', { kind, title: aria })}
+      aria-describedby={`${id}-help`}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'ArrowRight') setActive(Math.min(labels.length - 1, (active ?? -1) + 1))
+        else if (e.key === 'ArrowLeft') setActive(Math.max(0, (active ?? labels.length) - 1))
+        else if (e.key === 'Escape') setActive(null)
+        else return
+        e.preventDefault()
+      }}
+    >
+      <desc id={`${id}-help`}>{t('suite_plot_keys')}</desc>
+      {values.map((v, i) => {
+        const sweep = total > 0 ? (v / total) * Math.PI * 2 : 0
+        const a0 = angle
+        const a1 = Math.min(a0 + sweep, a0 + Math.PI * 2 - 0.0001)
+        angle += sweep
+        if (v <= 0) return null
+        const r0 = kind === 'donut' ? PIE_R * HOLE : 0
+        const large = a1 - a0 > Math.PI ? 1 : 0
+        const outer = `M ${pt(PIE_R, a0)} A ${PIE_R} ${PIE_R} 0 ${large} 1 ${pt(PIE_R, a1)}`
+        const d = r0 === 0 ? `${outer} L ${cx},${cy} Z` : `${outer} L ${pt(r0, a1)} A ${r0} ${r0} 0 ${large} 0 ${pt(r0, a0)} Z`
+        return <path key={i} d={d} fill={seriesColor(i)} className={`su-slice${active === i ? ' is-on' : ''}`} onPointerDown={() => setActive(i)} />
+      })}
+    </svg>
+  )
+}
+
+/** A line of numbers as a small picture, with no axes. The last point is marked. */
+export function Sparkline({ values }: { values: number[] }) {
+  const w = 96
+  const h = 28
+  const lo = Math.min(...values)
+  const hi = Math.max(...values)
+  const span = hi === lo ? 1 : hi - lo
+  const pts = values.map((v, i) => [round((i / Math.max(values.length - 1, 1)) * (w - 6) + 3), round(h - 4 - ((v - lo) / span) * (h - 8))])
+  const last = pts[pts.length - 1]
+  return (
+    <svg className="su-spark" viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
+      <polyline points={pts.map((p) => p.join(',')).join(' ')} fill="none" stroke={seriesColor(0)} strokeWidth="2" />
+      <circle cx={last[0]} cy={last[1]} r="3" fill={seriesColor(0)} />
+    </svg>
+  )
+}

@@ -152,6 +152,8 @@ M0, then made a hard CI limit.
 - 2026-11-18: slides gain speaker notes (`<!-- notes: ... -->`): a notes master and a notes page per card, read back by the suite's pptx reader and parsed by LibreOffice. `docs/suite/SLIDES.md`.
 - 2026-11-18: slides gain per-card transitions and background and text colours (comments under a card's heading, or before the first card for the whole deck), with a contrast warning. Opened in Keynote and LibreOffice. `docs/suite/SLIDES.md`.
 
+- 2026-11-20: HQ edits suite notes: `office_edit` (block, cell, row, column, card, notes, style, tile, plot, comment actions; preview then apply for deletes and bulk edits; the owner's Undo and provenance work for agent writes), `office_create` templates in UGX, a `note_changed` push to open clients, a second batch of 40 formula functions and whole-column ranges, native xlsx charts from `plot` blocks, docx contents and header, review comments in hqmd (never exported), PDF and PNG snapshots of a dashboard. The web editors for sheets, slides, docs and dashboards were rebuilt for a phone screen. Not verified in Word, Excel or PowerPoint, not compiled for Android in the same session.
+
 ## Next
 
 1. **More sinks (M3).** The folder sink exists (sealed per original, recovery code, restore drill). Missing: a sink chosen through Android's document picker, a paired-peer sink (built 2026-11-17: `hq suite sink peer-serve`, `add-peer`, `register-peer`; sealed on the phone, the peer holds ciphertext; setup of the forward is by hand), a cloud-folder sink, key shares as an alternative to one code, a lost-phone drill on a wiped device, and a button on the phone.

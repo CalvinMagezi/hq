@@ -277,6 +277,15 @@ impl WsState {
         self.broadcast(&serde_json::json!({ "type": format!("{place}:change") }).to_string());
     }
 
+    /// Tells open pages that the note at `path` was written and is now at `hash`, so the one that
+    /// has it open reloads it instead of showing the text from before an agent or another device
+    /// changed it. Sent for the REST suite edits and for `office_edit` writes.
+    pub(crate) fn announce_note(&self, path: &str, hash: &str) {
+        self.broadcast(
+            &serde_json::json!({ "type": "note_changed", "path": path, "hash": hash }).to_string(),
+        );
+    }
+
     pub(crate) fn broadcast(&self, msg: &str) {
         let _ = self.tx.send(msg.to_string());
     }

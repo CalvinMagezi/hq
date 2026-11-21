@@ -4,9 +4,12 @@ A small office suite inside HQ for people whose phone is their only computer. It
 documents in the smallest form that is still faithful, helps them put the originals somewhere
 they own, and shares work back out as Word, Excel, PDF and PowerPoint files.
 
-Status: milestone M0 (spec, corpus, measurement) is built apart from the numbers from real files and
-the reference phone; milestone M1 has its storage layer and the shrink pipeline, and is missing the
-storage governor. Everything is on the command line; nothing is in the web app yet.
+Status: the storage layer (shrink, governor, sinks and recovery), the docx, xlsx and pptx writers, a
+formula engine, and editors on the web and the phone for sheets, decks and dashboards are built. HQ itself
+can make a note (`office_create`, with starter templates), change part of one (`office_edit`), leave
+review comments, and export it as Word, Excel (with native charts), PowerPoint, PDF or a PNG snapshot.
+The plan's status log (`docs/plans/hq-suite.md`) is the full record, and what is not done yet is
+listed under "Next" there.
 
 ## The problem
 
@@ -62,3 +65,20 @@ is the regenerate check from the conversion contract: it reads a Word file into 
 the record, reads that, and requires the two records to be equal on headings, paragraphs, lists,
 tables, links and the pictures they hold. It does not prove what the first read never saw, so the
 preview's list of what a shrink leaves out stays the guard for that.
+
+## Scheduled dashboard snapshots
+
+A daemon task, `suite-dashboard-refresh`, can write a PDF and a PNG snapshot of dashboard notes on a schedule. It is off by default:
+
+```yaml
+suite:
+  dashboard_refresh:
+    enabled: false
+    every_minutes: 1440          # the daemon looks every 10 minutes; below 10 acts as 10
+    notes:                       # vault-relative paths, at most 20
+      - "Notebooks/Sales dashboard.md"
+```
+
+Each run renders every listed note the way the Export sheet does (numbers with labels, charts as tables of their values, tiles and plots reading other notes included) into `Exports/<yyyy-mm>/<name>-<yyyy-mm-dd>.pdf` and `.png` (with the time added when `every_minutes` is under a day). Nothing is overwritten: a second file the same day gets `-2`. One line per run goes to the daemon log, saying how many notes were snapshotted and naming any that failed. The time of the last run lives in `_data/suite/` in the vault.
+
+The task sends nothing anywhere. Delivering a snapshot to a chat is an explicit act through `file_deliver`.

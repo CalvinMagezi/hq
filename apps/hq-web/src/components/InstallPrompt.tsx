@@ -78,9 +78,9 @@ export function InstallPrompt() {
   return (
     <div
       className="flex items-center justify-between px-4 py-2 text-sm gap-3"
-      style={{ background: 'rgba(68,136,255,0.08)', borderBottom: '1px solid rgba(68,136,255,0.2)' }}
+      style={{ background: 'var(--surface-100)', borderBottom: '1px solid var(--hairline)' }}
     >
-      <span style={{ color: 'var(--text-secondary, var(--text-dim))' }} className="text-xs font-mono">
+      <span style={{ color: 'var(--ink-muted)' }} className="text-xs font-mono">
         {showIOSHint
           ? '📲 Install HQ: tap the Share button then "Add to Home Screen"'
           : '📲 Install HQ to your home screen for faster access'}
@@ -90,7 +90,7 @@ export function InstallPrompt() {
           <button
             onClick={handleInstall}
             className="px-3 py-1.5 rounded text-xs font-mono font-bold"
-            style={{ background: 'var(--accent-blue)', color: '#fff', minHeight: 36 }}
+            style={{ background: 'var(--brand-blue)', color: 'var(--on-blue)', minHeight: 36 }}
           >
             Install
           </button>
@@ -98,7 +98,7 @@ export function InstallPrompt() {
         <button
           onClick={handleDismiss}
           className="px-2 py-1 rounded text-xs font-mono"
-          style={{ color: 'var(--text-dim)', minHeight: 36 }}
+          style={{ color: 'var(--ink-muted)', minHeight: 36 }}
         >
           ✕
         </button>

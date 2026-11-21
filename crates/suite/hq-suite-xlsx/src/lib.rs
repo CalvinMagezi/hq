@@ -9,7 +9,10 @@
 //! program to recalculate on open, so nothing is ever guessed.
 
 mod cells;
+mod chart;
 mod package;
+
+pub use chart::{ChartKind, ChartSeries, ChartSpec, MAX_SERIES};
 
 use hq_suite_md::ColType;
 
@@ -44,6 +47,8 @@ pub struct XlsxReport {
     pub formulas_as_text: usize,
     /// Formulas stored with no value, left for the spreadsheet program to calculate.
     pub formulas_without_value: usize,
+    /// Charts written as native charts.
+    pub charts: usize,
 }
 
 impl XlsxReport {
@@ -66,7 +71,16 @@ impl XlsxReport {
                 }
             ));
         }
-        line.push_str(" Charts and pictures are not included.");
+        if self.charts > 0 {
+            line.push_str(&format!(
+                " {} chart{} kept as native chart{}. Pictures are not included.",
+                self.charts,
+                plural(self.charts),
+                plural(self.charts)
+            ));
+        } else {
+            line.push_str(" Charts and pictures are not included.");
+        }
         line
     }
 }
@@ -77,11 +91,26 @@ fn plural(n: usize) -> &'static str {
 
 /// The workbook's bytes and a report of what went in.
 pub fn write_xlsx(sheets: &[SheetSpec]) -> Result<(Vec<u8>, XlsxReport), XlsxError> {
+    write_xlsx_with_charts(sheets, &[])
+}
+
+/// As [`write_xlsx`], with native charts. A chart that cannot be drawn
+/// ([`ChartSpec::is_drawable`]) or names a sheet that is not there is left out and not counted.
+pub fn write_xlsx_with_charts(
+    sheets: &[SheetSpec],
+    charts: &[ChartSpec],
+) -> Result<(Vec<u8>, XlsxReport), XlsxError> {
     if sheets.is_empty() {
         return Err(XlsxError::NoSheets);
     }
-    let built = cells::build(sheets);
-    let bytes = package::pack(&built)?;
+    let mut built = cells::build(sheets);
+    let drawable: Vec<ChartSpec> = charts
+        .iter()
+        .filter(|c| c.is_drawable() && c.sheet < built.sheets.len())
+        .cloned()
+        .collect();
+    built.report.charts = drawable.len();
+    let bytes = package::pack(&built, &drawable)?;
     Ok((bytes, built.report))
 }
 

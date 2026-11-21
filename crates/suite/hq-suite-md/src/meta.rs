@@ -12,6 +12,8 @@ pub const KEY_ORIGINAL_SINK: &str = "suite_original_sink";
 pub const KEY_ORIGINAL_BYTES: &str = "suite_original_bytes";
 pub const KEY_SHRUNK_AT: &str = "suite_shrunk_at";
 pub const KEY_SAVED_BYTES: &str = "suite_saved_bytes";
+pub const KEY_TOC: &str = "suite_toc";
+pub const KEY_HEADER: &str = "suite_header";
 
 /// Every key above, for tools that list or strip them.
 pub const KEYS: &[&str] = &[
@@ -22,6 +24,8 @@ pub const KEYS: &[&str] = &[
     KEY_ORIGINAL_BYTES,
     KEY_SHRUNK_AT,
     KEY_SAVED_BYTES,
+    KEY_TOC,
+    KEY_HEADER,
 ];
 
 macro_rules! vocabulary {
@@ -99,6 +103,10 @@ pub struct SuiteMeta {
     pub original_bytes: Option<u64>,
     pub shrunk_at: Option<String>,
     pub saved_bytes: Option<i64>,
+    /// A Word export gets a table of contents (`suite_toc: true`).
+    pub toc: Option<bool>,
+    /// Plain text for the page header of a Word export (`suite_header`).
+    pub header: Option<String>,
 }
 
 /// A problem with the suite's keys on one note.
@@ -170,6 +178,15 @@ impl SuiteMeta {
                 ),
             }
         }
+
+        if let Some(v) = frontmatter::get(raw, KEY_TOC) {
+            match v.as_str() {
+                "true" => meta.toc = Some(true),
+                "false" => meta.toc = Some(false),
+                _ => bad(KEY_TOC, format!("`{v}` is not true or false")),
+            }
+        }
+        meta.header = frontmatter::get(raw, KEY_HEADER).filter(|s| !s.trim().is_empty());
 
         // Keys that only make sense together.
         if meta.original_state == Some(OriginalState::Offloaded) && meta.original_sink.is_none() {
@@ -271,5 +288,15 @@ mod tests {
         let (_, p) =
             SuiteMeta::read("---\nsuite_fidelity: view\nsuite_original_state: trash\n---\n");
         assert!(p.iter().any(|x| x.key == KEY_FIDELITY));
+    }
+
+    #[test]
+    fn toc_and_header_are_read_and_a_bad_toc_is_reported() {
+        let (m, p) = SuiteMeta::read("---\nsuite_toc: true\nsuite_header: \"Draft v2\"\n---\n");
+        assert!(p.is_empty(), "{p:?}");
+        assert_eq!(m.toc, Some(true));
+        assert_eq!(m.header.as_deref(), Some("Draft v2"));
+        let (m, p) = SuiteMeta::read("---\nsuite_toc: maybe\n---\n");
+        assert_eq!((m.toc, p.len()), (None, 1));
     }
 }
