@@ -62,6 +62,7 @@ pub fn validate(doc: &Document) -> Vec<Diagnostic> {
     let mut names: HashMap<String, usize> = HashMap::new();
     let mut has_local_sheet = false;
     let mut local_refs: Vec<(usize, String)> = Vec::new();
+    let mut comments: Vec<(usize, String)> = Vec::new();
 
     for (i, node) in doc.nodes().iter().enumerate() {
         match node.kind() {
@@ -90,6 +91,12 @@ pub fn validate(doc: &Document) -> Vec<Diagnostic> {
                             code: "block.duplicate_id",
                             message: format!("id `{id}` is already used by block {first}"),
                         });
+                    }
+                    if *ty == BlockType::Comment
+                        && let Some(on) = b.info.get("on")
+                        && crate::block::is_block_hash(on)
+                    {
+                        comments.push((i, on.to_string()));
                     }
                     if *ty == BlockType::Sheet {
                         has_local_sheet = true;
@@ -155,6 +162,21 @@ pub fn validate(doc: &Document) -> Vec<Diagnostic> {
                 }
             }
             _ => {}
+        }
+    }
+    for (i, on) in comments {
+        let anchored = doc.nodes().iter().enumerate().any(|(j, n)| {
+            j != i && n.kind() != &NodeKind::Typed(BlockType::Comment) && n.hash() == on
+        });
+        if !anchored {
+            out.push(Diagnostic {
+                node: Some(i),
+                severity: Severity::Info,
+                code: "comment.orphaned",
+                message: format!(
+                    "no block has the hash `{on}` any more; the block was edited or removed"
+                ),
+            });
         }
     }
     if !has_local_sheet {

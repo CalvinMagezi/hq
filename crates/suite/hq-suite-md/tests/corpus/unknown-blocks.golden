@@ -1,5 +1,5 @@
 frontmatter: 43 bytes
-meta: SuiteMeta { kind: None, fidelity: None, original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None }
+meta: SuiteMeta { kind: None, fidelity: None, original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None, toc: None, header: None }
  0 Paragraph | Text before.
  1 Code { lang: Some("sheet2") } | ```sheet2 name=future
  2 Code { lang: Some("fields") } | ```fields

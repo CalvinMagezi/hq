@@ -1,0 +1,1 @@
+**Notes can carry review comments.** A `comment` block is anchored to another block and holds a note from a reviewer, who is named by a typed label only. When the block it points at is edited the comment is reported as orphaned. Comments never leave the note: Word, PDF, PowerPoint and Excel exports leave them out, so a shared file carries no review notes.

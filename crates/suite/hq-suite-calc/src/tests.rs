@@ -419,22 +419,33 @@ fn a_column_past_xfd_is_not_a_cell() {
 
 #[test]
 fn every_function_the_evaluator_handles_is_in_the_public_list() {
-    let source = include_str!("eval.rs");
-    let body = &source[source.find("fn call(name: &str").expect("call exists")..];
-    for line in body
-        .lines()
-        .filter(|l| l.starts_with("        \"") && l.contains("=>"))
-    {
-        let arm = line.split("=>").next().unwrap_or_default();
-        let names = arm.split('|').map(|n| n.trim().trim_matches('"'));
-        // `+` is the unary plus, an operator written as a call, not a function a person types.
-        for name in names.filter(|n| n.chars().all(|c| c.is_ascii_uppercase())) {
-            assert!(
-                FUNCTIONS.contains(&name),
-                "{name} is handled but missing from FUNCTIONS, so reports would call it unsupported"
-            );
+    let sources = [
+        include_str!("eval.rs"),
+        include_str!("fnlib/more.rs"),
+        include_str!("fnlib/dates.rs"),
+    ];
+    let mut seen = 0;
+    for source in sources {
+        let body = &source[source.find("fn call(name: &str").expect("call exists")..];
+        for line in body
+            .lines()
+            .filter(|l| l.starts_with("        \"") && l.contains("=>"))
+        {
+            let arm = line.split("=>").next().unwrap_or_default();
+            let names = arm.split('|').map(|n| n.trim().trim_matches('"'));
+            // `+` is the unary plus, an operator written as a call, not a function a person types.
+            for name in names
+                .filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_uppercase() || c == '.'))
+            {
+                seen += 1;
+                assert!(
+                    FUNCTIONS.contains(&name),
+                    "{name} is handled but missing from FUNCTIONS, so reports would call it unsupported"
+                );
+            }
         }
     }
+    assert!(seen > 60, "the scan found only {seen} arms");
 }
 
 #[test]
@@ -503,11 +514,8 @@ fn counting_searching_and_text_functions_agree_with_a_spreadsheet() {
     assert_eq!(at(&s, "F1"), Value::Text("1,234,568".into()));
     assert_eq!(at(&s, "F2"), Value::Text("25.6%".into()));
     assert_eq!(at(&s, "F3"), Value::Text("-5.50".into()));
-    assert_eq!(
-        at(&s, "F4"),
-        Value::Err(CalcError::Name),
-        "a date format is not reproduced, so it is not guessed"
-    );
+    // Date formats are reproduced now; a time format still is not, and is not guessed.
+    assert_eq!(at(&s, "F4"), Value::Text("2022-01-31".into()));
 }
 
 #[test]

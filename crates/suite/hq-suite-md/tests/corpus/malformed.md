@@ -31,3 +31,7 @@ suite_kind: spreadsheet
 | a |
 |---|
 ```
+
+```comment on=short state=maybe
+Bad anchor and state.
+```

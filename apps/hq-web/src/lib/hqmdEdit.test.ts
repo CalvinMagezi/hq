@@ -65,7 +65,7 @@ describe('editing slides', () => {
     const next = setSlideBody(DECK, 1, 'World', 'Sugar and rice')!
     expect(next).toContain('<!-- layout: two-column -->')
     const slides = readHqmd(next).slides
-    expect(slides[1]).toEqual({ title: 'Two', body: 'Sugar and rice', layout: 'two-column' })
+    expect(slides[1]).toMatchObject({ title: 'Two', body: 'Sugar and rice', layout: 'two-column' })
     expect(slides[0].body).toBe('Hello')
   })
   test('a body edit is refused when the card moved on', () => {

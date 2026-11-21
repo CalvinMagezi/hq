@@ -120,6 +120,21 @@ pub enum Block {
     Rule,
     /// Markdown that is already final, such as footnote definitions.
     Raw(String),
+    /// A review comment on the block before it. Only the Word reader makes one, and only when
+    /// asked (`ConvertOptions::word_comments`); [`render_checked`] writes it as a `comment` block
+    /// through the caller's [`CommentCodec`].
+    Comment(DocComment),
+}
+
+/// A comment from the source file, ready to be written as a `comment` block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocComment {
+    /// Author label, already cleaned; empty when the file names none.
+    pub by: String,
+    /// `YYYY-MM-DD`, when the file gives a date.
+    pub at: Option<String>,
+    pub resolved: bool,
+    pub text: String,
 }
 
 /// Collapses every run of whitespace to one space, as HTML and ODF do for text.
@@ -211,13 +226,54 @@ enum Mode {
 ///
 /// A document with a title block gets that title as the only `#` heading and
 /// every other heading moves down one level.
-pub fn render(mut blocks: Vec<Block>) -> String {
+pub fn render(blocks: Vec<Block>) -> String {
+    render_checked(blocks, None).0
+}
+
+/// How a caller that owns the note format writes a Word comment into the note. The importer
+/// knows nothing of that format: it hands each comment and the block it sits on to this codec,
+/// so the `comment` block syntax and the block hash stay with the crate that defines them.
+pub trait CommentCodec: Send + Sync {
+    /// The anchor of the last block in `markdown_part` (the text of one rendered block, tidied
+    /// the way the note will hold it), or `None` when it holds no block.
+    fn last_block_hash(&self, markdown_part: &str) -> Option<String>;
+    /// One comment as the note's text, anchored on the block whose anchor is `on`. `at` is
+    /// `YYYY-MM-DD` when the file gives a date; `by` is empty when it names no author.
+    fn render_comment(
+        &self,
+        on: &str,
+        by: &str,
+        at: Option<&str>,
+        resolved: bool,
+        text: &str,
+    ) -> String;
+    /// How many comments in the finished `markdown` point at a block it does not hold.
+    fn orphans(&self, markdown: &str) -> usize;
+}
+
+/// [`render`], and how many `comment` blocks ended up anchored to a hash no block of the written
+/// text has (zero when there are no comments). Without a `codec`, comments are not written.
+pub fn render_checked(mut blocks: Vec<Block>, codec: Option<&dyn CommentCodec>) -> (String, usize) {
     shift_headings(&mut blocks);
     let blocks = merge_adjacent(blocks);
     let mut parts: Vec<String> = Vec::new();
+    let mut has_comments = false;
+    let mut anchor: Option<String> = None;
     for block in &blocks {
+        if let Block::Comment(c) = block {
+            has_comments = true;
+            if let (Some(codec), Some(on)) = (codec, &anchor) {
+                parts.push(codec.render_comment(on, &c.by, c.at.as_deref(), c.resolved, &c.text));
+            }
+            continue;
+        }
         let text = render_block(block);
         if !text.trim().is_empty() {
+            // The hash is that of the block as the note will hold it, so ask the note's own
+            // parser. A part that parses to several blocks is anchored on its last.
+            if codec.is_some() {
+                anchor = codec.and_then(|c| c.last_block_hash(&tidy(&text)));
+            }
             parts.push(text);
         }
     }
@@ -226,7 +282,11 @@ pub fn render(mut blocks: Vec<Block>) -> String {
     if !out.is_empty() {
         out.push('\n');
     }
-    out
+    let orphaned = match codec {
+        Some(codec) if has_comments => codec.orphans(&out),
+        _ => 0,
+    };
+    (out, orphaned)
 }
 
 fn shift_headings(blocks: &mut [Block]) {
@@ -335,6 +395,7 @@ fn render_block(block: &Block) -> String {
         }
         Block::Rule => "---".to_string(),
         Block::Raw(text) => text.clone(),
+        Block::Comment(_) => String::new(),
     }
 }
 

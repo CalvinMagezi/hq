@@ -88,10 +88,10 @@ export function PdfViewer({ path }: { path: string }) {
     }, [pdf, pageNumber, scale, loading])
 
     return (
-        <div className="flex flex-col h-full w-full rounded-lg overflow-hidden border" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+        <div className="flex flex-col h-full w-full rounded-lg overflow-hidden border" style={{ background: 'var(--surface-200)', border: '1px solid var(--hairline)' }}>
             {/* Toolbar */}
-            <div className="p-2 w-full flex justify-between items-center flex-shrink-0 border-b" style={{ borderColor: 'var(--border)', background: 'var(--bg-surface)' }}>
-                <span className="text-xs font-mono truncate max-w-[200px]" style={{ color: 'var(--text-dim)' }}>
+            <div className="p-2 w-full flex justify-between items-center flex-shrink-0 border-b" style={{ borderColor: 'var(--hairline)', background: 'var(--surface-100)' }}>
+                <span className="text-xs font-mono truncate max-w-[200px]" style={{ color: 'var(--ink-muted)' }}>
                     {path.split('/').pop()}
                 </span>
 
@@ -128,7 +128,7 @@ export function PdfViewer({ path }: { path: string }) {
                         href={fileUrl ?? undefined}
                         download
                         className="px-3 py-1 text-xs rounded flex items-center justify-center transition-colors"
-                        style={{ background: 'var(--accent-blue)', color: '#fff' }}
+                        style={{ background: 'var(--brand-blue)', color: 'var(--on-blue)' }}
                     >
                         Download
                     </a>
@@ -139,10 +139,10 @@ export function PdfViewer({ path }: { path: string }) {
             <div className="flex-1 overflow-auto w-full flex items-start justify-center p-4">
                 {loading ? (
                     <div className="flex items-center justify-center h-full">
-                        <span className="text-xs font-mono animate-pulse" style={{ color: 'var(--accent-green)' }}>Loading PDF...</span>
+                        <span className="text-xs font-mono animate-pulse" style={{ color: 'var(--text-green)' }}>Loading PDF...</span>
                     </div>
                 ) : error ? (
-                    <div className="flex items-center justify-center h-full text-xs font-mono" style={{ color: 'var(--accent-red)' }}>
+                    <div className="flex items-center justify-center h-full text-xs font-mono" style={{ color: 'var(--danger)' }}>
                         {error}
                     </div>
                 ) : (

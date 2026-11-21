@@ -1,0 +1,1 @@
+**Doc tools.** A doc made by the suite has an outline of its headings, find and replace, a table and a picture from your vault to insert, and Edit by block on the web. A block that changed since you opened the list is refused with a sentence and nothing is written.

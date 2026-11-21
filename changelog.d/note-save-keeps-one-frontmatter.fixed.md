@@ -1,0 +1,1 @@
+**Editing a sheet, deck or dashboard in the web app no longer doubles the note's header block.** The editors send the whole note back when they save, and HQ added the note's own header a second time at the top. HQ now keeps the one that was already there.

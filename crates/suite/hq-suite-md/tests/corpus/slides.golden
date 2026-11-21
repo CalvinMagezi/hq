@@ -1,5 +1,5 @@
 frontmatter: 77 bytes
-meta: SuiteMeta { kind: Some(Slides), fidelity: Some(Native), original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None }
+meta: SuiteMeta { kind: Some(Slides), fidelity: Some(Native), original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None, toc: None, header: None }
  0 Heading { level: 1 } | # Savings group intro
  1 Heading { level: 2 } | ## Why we meet
  2 Html | <!-- layout: title -->

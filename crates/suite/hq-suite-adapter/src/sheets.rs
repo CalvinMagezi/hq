@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use crate::crossnote::{Source, source};
 use crate::filter::{Condition, parse_where};
 use anyhow::{Context, Result, bail};
 use hq_suite_calc::{Value, Workbook, column_name};
@@ -100,14 +101,14 @@ fn show(value: &Value, kind: &str) -> String {
 
 /// Every `sheet` block of a note as one workbook, so a formula can read another block by its name
 /// (`=Prices!B2`). A block without a `name` is `Sheet1`, `Sheet2` and so on, in order.
-struct NoteBook {
-    book: Workbook,
+pub(crate) struct NoteBook {
+    pub(crate) book: Workbook,
     /// The table of each sheet block, in note order; its number here is its sheet number.
-    tables: Vec<Vec<Vec<String>>>,
+    pub(crate) tables: Vec<Vec<Vec<String>>>,
 }
 
 impl NoteBook {
-    fn new(blocks: &[TypedBlock]) -> NoteBook {
+    pub(crate) fn new(blocks: &[TypedBlock]) -> NoteBook {
         let sheets: Vec<&TypedBlock> = blocks.iter().filter(|b| b.ty == BlockType::Sheet).collect();
         let names: Vec<String> = sheets
             .iter()
@@ -203,9 +204,9 @@ pub fn view(vault: &Path, note: &str, index: usize, row0: u32, col0: u32) -> Res
 }
 
 /// Excel's last column is XFD, the 16,384th.
-const MAX_EDIT_COLUMN: u32 = 16_384;
+pub(crate) const MAX_EDIT_COLUMN: u32 = 16_384;
 /// Longest text one cell may hold when edited from the phone.
-const MAX_CELL_CHARS: usize = 2000;
+pub(crate) const MAX_CELL_CHARS: usize = 2000;
 
 /// The table lines of a sheet block's text: the lines that start with `|`, other than the rule
 /// under the header, as indexes into `lines`.
@@ -237,17 +238,32 @@ pub fn edit_cell(
     expected: &str,
     text: &str,
 ) -> Result<()> {
+    let paths = SuitePaths::new(vault);
+    let file = paths.resolve(note)?;
+    let source =
+        std::fs::read_to_string(&file).with_context(|| format!("{note} cannot be read"))?;
+    let doc = Document::parse(&source);
+    let patched = cell_patched(&doc, index, row, col, expected, text)?;
+    fsx::atomic_write(&file, patched.render().as_bytes())?;
+    Ok(())
+}
+
+/// The note with one cell of its `index`th `sheet` block set to `text`, nothing written. The checks
+/// of [`edit_cell`] apply.
+pub fn cell_patched(
+    doc: &Document,
+    index: usize,
+    row: u32,
+    col: u32,
+    expected: &str,
+    text: &str,
+) -> Result<Document> {
     if text.chars().count() > MAX_CELL_CHARS {
         bail!("a cell holds at most {MAX_CELL_CHARS} characters");
     }
     if text.contains('|') || text.contains('\n') || text.contains('\r') {
         bail!("a cell cannot hold a | or a line break");
     }
-    let paths = SuitePaths::new(vault);
-    let file = paths.resolve(note)?;
-    let source =
-        std::fs::read_to_string(&file).with_context(|| format!("{note} cannot be read"))?;
-    let doc = Document::parse(&source);
     let (node, _) = doc
         .typed_blocks()
         .filter_map(|(i, b)| b.ok().map(|b| (i, b)))
@@ -291,10 +307,7 @@ pub fn edit_cell(
             markdown: out.join("\n"),
         }],
     };
-    let patched =
-        apply(&doc, &patch).map_err(|e| anyhow::anyhow!("the note could not be changed: {e}"))?;
-    fsx::atomic_write(&file, patched.render().as_bytes())?;
-    Ok(())
+    apply(doc, &patch).map_err(|e| anyhow::anyhow!("the note could not be changed: {e}"))
 }
 
 /// The column (one-based, in the sheet) each condition names, found in the range's first row.
@@ -330,6 +343,9 @@ fn resolve_columns(
 const MAX_PLOT_LABELS: usize = 50;
 const MAX_SLICES: usize = 12;
 const MAX_SERIES: usize = 6;
+/// The `type=` values of a `plot` block, and of the chart JSON built from it. The first four are
+/// what the phone and the web draw today (`docs/CHART_BLOCKS.md`).
+pub const CHART_TYPES: [&str; 7] = ["bar", "line", "pie", "donut", "area", "stacked", "scatter"];
 
 /// The `index`th `plot` block of the note as a chart in the format the phone and the web already
 /// draw (`docs/CHART_BLOCKS.md`): the range's first row names the columns, `x` gives the labels
@@ -338,19 +354,31 @@ pub fn plot(vault: &Path, note: &str, index: usize) -> Result<String> {
     let paths = SuitePaths::new(vault);
     let text = std::fs::read_to_string(paths.resolve(note)?)
         .with_context(|| format!("{note} cannot be read"))?;
-    let doc = Document::parse(&text);
+    plot_in(Some(vault), &Document::parse(&text), note, index)
+}
+
+/// [`plot`] over a note already read, so a block can be tried before it is written. Without the
+/// vault a range in another note is refused; [`plot_in`] takes it.
+pub fn plot_of(doc: &Document, note: &str, index: usize) -> Result<String> {
+    plot_in(None, doc, note, index)
+}
+
+/// [`plot_of`] that can read a range in another note of the vault.
+pub fn plot_in(vault: Option<&Path>, doc: &Document, note: &str, index: usize) -> Result<String> {
     let blocks: Vec<_> = doc.typed_blocks().filter_map(|(_, b)| b.ok()).collect();
     let Some(plot) = blocks.iter().filter(|b| b.ty == BlockType::Plot).nth(index) else {
         bail!("that note has no plot number {}", index + 1);
     };
     let kind = plot.info.get("type").unwrap_or_default();
-    if !["bar", "line", "pie", "donut"].contains(&kind) {
-        bail!("`{kind}` is not a chart type: bar, line, pie or donut");
+    if !CHART_TYPES.contains(&kind) {
+        bail!("`{kind}` is not a chart type: {}", CHART_TYPES.join(", "));
     }
     let from = RangeRef::parse(plot.info.get("from").unwrap_or_default())
         .map_err(|e| anyhow::anyhow!("from=: {e}"))?;
-    let sheet_id = sheet_of_range(&blocks, note, &from, "a plot")?;
-    let book = NoteBook::new(&blocks).book;
+    let Source {
+        book,
+        sheet: sheet_id,
+    } = source(vault, &blocks, note, &from, "a plot")?;
     let (x_name, y_name) = (
         plot.info.get("x").unwrap_or_default().trim().to_lowercase(),
         plot.info.get("y").unwrap_or_default().trim().to_lowercase(),
@@ -385,7 +413,12 @@ pub fn plot(vault: &Path, note: &str, index: usize) -> Result<String> {
     if group_col.is_some() && matches!(kind, "pie" | "donut") {
         bail!("a {kind} chart takes no group; use a bar or line chart to compare groups");
     }
+    let scatter = kind == "scatter";
+    if scatter && group_col.is_some() {
+        bail!("a scatter chart takes no group; it draws one series of points");
+    }
     let mut rows: Vec<(String, String, f64)> = Vec::new();
+    let mut x_values: Vec<f64> = Vec::new();
     for row in (from.start.row + 1)..=from.end.row {
         let passes = conditions
             .iter()
@@ -400,6 +433,14 @@ pub fn plot(vault: &Path, note: &str, index: usize) -> Result<String> {
         let group = group_col
             .map(|g| book.get(sheet_id, g - 1, row - 1).to_string())
             .unwrap_or_default();
+        if scatter {
+            let Value::Num(x) = book.get(sheet_id, x_col - 1, row - 1) else {
+                bail!(
+                    "row {row} of `{x_name}` is not a number, so a scatter chart cannot place it"
+                );
+            };
+            x_values.push(x);
+        }
         rows.push((book.get(sheet_id, x_col - 1, row - 1).to_string(), group, v));
     }
     // One series per group, over the labels in the order they first appear; a label a group lacks is 0.
@@ -474,6 +515,10 @@ pub fn plot(vault: &Path, note: &str, index: usize) -> Result<String> {
     if let Some(title) = plot.info.get("title") {
         chart["title"] = title.into();
     }
+    if scatter {
+        // The points keep their own x; `labels` repeats them as text for a reader that only knows categories.
+        chart["xValues"] = serde_json::json!(x_values);
+    }
     if !matches!(kind, "pie" | "donut") {
         chart["xLabel"] = plot.info.get("x").unwrap_or_default().into();
         chart["yLabel"] = plot.info.get("y").unwrap_or_default().into();
@@ -492,8 +537,13 @@ pub struct TileView {
 
 /// The `index`th `tile` block of the note, computed over a range of a sheet in the same note.
 /// The number (among the note's `sheet` blocks) of the sheet a range reads: the block it names, or
-/// the first. A range in another note is refused for now.
-fn sheet_of_range(blocks: &[TypedBlock], note: &str, from: &RangeRef, what: &str) -> Result<usize> {
+/// the first. Only a range in the note itself; `crossnote::source` reaches another note.
+pub(crate) fn sheet_of_range(
+    blocks: &[TypedBlock],
+    note: &str,
+    from: &RangeRef,
+    what: &str,
+) -> Result<usize> {
     let stem = note
         .rsplit('/')
         .next()
@@ -516,15 +566,27 @@ pub fn tile(vault: &Path, note: &str, index: usize) -> Result<TileView> {
     let paths = SuitePaths::new(vault);
     let text = std::fs::read_to_string(paths.resolve(note)?)
         .with_context(|| format!("{note} cannot be read"))?;
-    let doc = Document::parse(&text);
+    tile_in(Some(vault), &Document::parse(&text), note, index)
+}
+
+/// [`tile`] over a note already read, so a block can be tried before it is written. Without the
+/// vault a range in another note is refused; [`tile_in`] takes it.
+pub fn tile_of(doc: &Document, note: &str, index: usize) -> Result<TileView> {
+    tile_in(None, doc, note, index)
+}
+
+/// [`tile_of`] that can read a range in another note of the vault.
+pub fn tile_in(vault: Option<&Path>, doc: &Document, note: &str, index: usize) -> Result<TileView> {
     let blocks: Vec<_> = doc.typed_blocks().filter_map(|(_, b)| b.ok()).collect();
     let Some(tile) = blocks.iter().filter(|b| b.ty == BlockType::Tile).nth(index) else {
         bail!("that note has no tile number {}", index + 1);
     };
     let from = RangeRef::parse(tile.info.get("from").unwrap_or_default())
         .map_err(|e| anyhow::anyhow!("from=: {e}"))?;
-    let sheet_id = sheet_of_range(&blocks, note, &from, "a tile")?;
-    let note_book = NoteBook::new(&blocks);
+    let Source {
+        book,
+        sheet: sheet_id,
+    } = source(vault, &blocks, note, &from, "a tile")?;
     if tile.info.get("group").is_some() {
         bail!("a tile shows one number; put group= on a plot to compare groups");
     }
@@ -536,7 +598,7 @@ pub fn tile(vault: &Path, note: &str, index: usize) -> Result<TileView> {
     if conditions.is_empty() {
         for r in from.start.row..=from.end.row {
             for c in from.start.col..=from.end.col {
-                if let Value::Num(n) = note_book.book.get(sheet_id, c - 1, r - 1) {
+                if let Value::Num(n) = book.get(sheet_id, c - 1, r - 1) {
                     numbers.push(n);
                 }
             }
@@ -544,13 +606,13 @@ pub fn tile(vault: &Path, note: &str, index: usize) -> Result<TileView> {
     } else {
         // With a where, the range's first row names the columns and the number comes from its last.
         let header = from.start.row - 1;
-        let cols = resolve_columns(&note_book.book, sheet_id, &from, header, &conditions)?;
+        let cols = resolve_columns(&book, sheet_id, &from, header, &conditions)?;
         for r in (from.start.row + 1)..=from.end.row {
             let passes = conditions
                 .iter()
                 .zip(&cols)
-                .all(|(cond, c)| cond.passes(&note_book.book.get(sheet_id, c - 1, r - 1)));
-            if passes && let Value::Num(n) = note_book.book.get(sheet_id, from.end.col - 1, r - 1) {
+                .all(|(cond, c)| cond.passes(&book.get(sheet_id, c - 1, r - 1)));
+            if passes && let Value::Num(n) = book.get(sheet_id, from.end.col - 1, r - 1) {
                 numbers.push(n);
             }
         }

@@ -1,5 +1,5 @@
 frontmatter: 75 bytes
-meta: SuiteMeta { kind: Some(Dashboard), fidelity: Some(Native), original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None }
+meta: SuiteMeta { kind: Some(Dashboard), fidelity: Some(Native), original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None, toc: None, header: None }
  0 Heading { level: 1 } | # Shop dashboard
  1 Typed(Tile) | ```tile from="[[Stock]]!D2:D40" fn=sum label="Stock value" f
      header: tile from="[[Stock]]!D2:D40" fn=sum label="Stock value" format=ugx

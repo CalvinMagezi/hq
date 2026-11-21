@@ -198,3 +198,146 @@ async fn the_importer_reads_the_file_back_with_its_values_and_formulas() {
         done.report.warnings
     );
 }
+
+fn stock_chart(kind: ChartKind, series: usize) -> ChartSpec {
+    ChartSpec {
+        sheet: 0,
+        kind,
+        title: Some("Stock <by> item".into()),
+        x_col: 0,
+        labels: vec!["Sugar".into(), "Salt".into()],
+        series: (0..series)
+            .map(|i| ChartSeries {
+                name: if i == 0 { "qty".into() } else { "price".into() },
+                col: 1 + i as u32,
+                values: vec![40.0, 10.0],
+            })
+            .collect(),
+        first_row: 2,
+        x_title: Some("item".into()),
+        y_title: Some("qty".into()),
+    }
+}
+
+#[test]
+fn a_chart_becomes_native_parts_that_are_wired_together() {
+    let charts = [
+        stock_chart(ChartKind::Bar, 2),
+        stock_chart(ChartKind::Pie, 1),
+    ];
+    let (bytes, report) = write_xlsx_with_charts(&[stock_sheet()], &charts).unwrap();
+    assert_eq!(report.charts, 2);
+    assert!(
+        report
+            .fidelity_line()
+            .contains("2 charts kept as native charts")
+    );
+    for name in [
+        "[Content_Types].xml",
+        "xl/worksheets/sheet1.xml",
+        "xl/worksheets/_rels/sheet1.xml.rels",
+        "xl/drawings/drawing1.xml",
+        "xl/drawings/_rels/drawing1.xml.rels",
+        "xl/charts/chart1.xml",
+        "xl/charts/chart2.xml",
+    ] {
+        roxmltree::Document::parse(&part(&bytes, name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+    }
+    let types = part(&bytes, "[Content_Types].xml");
+    assert!(types.contains("/xl/drawings/drawing1.xml") && types.contains("/xl/charts/chart2.xml"));
+    assert!(part(&bytes, "xl/worksheets/sheet1.xml").contains(r#"<drawing r:id="rId1"/>"#));
+    let bar = part(&bytes, "xl/charts/chart1.xml");
+    // The series read the sheet's own cells, with the title escaped.
+    assert!(
+        bar.contains("'Stock'!$B$2:$B$3") && bar.contains("'Stock'!$A$2:$A$3"),
+        "{bar}"
+    );
+    assert!(
+        bar.contains("'Stock'!$B$1:$B$1") && bar.contains("Stock &lt;by&gt; item"),
+        "{bar}"
+    );
+    assert!(part(&bytes, "xl/charts/chart2.xml").contains("c:pieChart"));
+}
+
+#[test]
+fn a_chart_that_cannot_be_drawn_is_left_out_not_half_written() {
+    let mut short = stock_chart(ChartKind::Line, 1);
+    short.series[0].values.pop();
+    let two_pie = stock_chart(ChartKind::Pie, 2);
+    let mut elsewhere = stock_chart(ChartKind::Bar, 1);
+    elsewhere.sheet = 5;
+    let (bytes, report) =
+        write_xlsx_with_charts(&[stock_sheet()], &[short, two_pie, elsewhere]).unwrap();
+    assert_eq!(report.charts, 0);
+    assert!(
+        report
+            .fidelity_line()
+            .contains("Charts and pictures are not included")
+    );
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
+    assert!(z.by_name("xl/charts/chart1.xml").is_err());
+}
+
+#[test]
+fn a_sheet_name_with_a_quote_is_quoted_in_the_chart_reference() {
+    let mut s = stock_sheet();
+    s.name = "Bob's stock".into();
+    let (bytes, _) = write_xlsx_with_charts(&[s], &[stock_chart(ChartKind::Line, 1)]).unwrap();
+    assert!(part(&bytes, "xl/charts/chart1.xml").contains("'Bob''s stock'!$B$2:$B$3"));
+}
+
+#[tokio::test]
+async fn the_importer_still_reads_a_workbook_that_has_charts() {
+    let (bytes, _) =
+        write_xlsx_with_charts(&[stock_sheet()], &[stock_chart(ChartKind::Bar, 1)]).unwrap();
+    let done = convert_bytes(bytes, "xlsx", None, &opts()).await.unwrap();
+    assert!(
+        done.markdown.contains("| Sugar | 40 |"),
+        "{}",
+        done.markdown
+    );
+}
+
+#[test]
+fn area_stacked_and_scatter_charts_are_well_formed_parts_of_the_right_kind() {
+    let mut scatter = stock_chart(ChartKind::Scatter, 1);
+    scatter.labels = vec!["1.5".into(), "20".into()];
+    let charts = [
+        stock_chart(ChartKind::Area, 2),
+        stock_chart(ChartKind::StackedBar, 2),
+        scatter,
+    ];
+    let (bytes, report) = write_xlsx_with_charts(&[stock_sheet()], &charts).unwrap();
+    assert_eq!(report.charts, 3);
+    for n in 1..=3 {
+        let name = format!("xl/charts/chart{n}.xml");
+        roxmltree::Document::parse(&part(&bytes, &name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+    }
+    let area = part(&bytes, "xl/charts/chart1.xml");
+    assert!(
+        area.contains("<c:areaChart>") && area.contains("<c:catAx>"),
+        "{area}"
+    );
+    let stacked = part(&bytes, "xl/charts/chart2.xml");
+    assert!(
+        stacked.contains(r#"<c:grouping val="stacked"/>"#)
+            && stacked.contains(r#"<c:overlap val="100"/>"#),
+        "{stacked}"
+    );
+    let xy = part(&bytes, "xl/charts/chart3.xml");
+    assert!(
+        xy.contains("<c:scatterChart>")
+            && xy.contains("<c:xVal>")
+            && xy.contains("<c:yVal>")
+            && xy.contains("<c:v>1.5</c:v>")
+            && !xy.contains("<c:catAx>"),
+        "{xy}"
+    );
+}
+
+#[test]
+fn a_scatter_chart_whose_x_is_not_a_number_is_left_out() {
+    let words = stock_chart(ChartKind::Scatter, 1);
+    let (_, report) = write_xlsx_with_charts(&[stock_sheet()], &[words]).unwrap();
+    assert_eq!(report.charts, 0);
+}

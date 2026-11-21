@@ -1,0 +1,1 @@
+**The pairing tests now run on a machine with no IPv6.** They used the IPv6 loopback address as a second source and failed at the first bind where it did not exist. They now use a second IPv4 loopback address there and keep IPv6 where it is available.

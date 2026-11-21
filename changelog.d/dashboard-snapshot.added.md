@@ -1,0 +1,1 @@
+**A dashboard can be shared as a PDF or a PNG.** `office_export` makes a picture or a PDF of a dashboard note with its tiles as labelled numbers and its plots and sheets as tables of values, and says in one line what was kept (charts are tables, not drawn). A PDF of any suite note now writes its sheets as calculated tables and leaves review comments out.

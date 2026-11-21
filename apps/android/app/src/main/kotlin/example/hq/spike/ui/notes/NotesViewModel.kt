@@ -7,6 +7,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.R
+import example.hq.spike.data.ChatEvent
 import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqUnavailable
@@ -23,6 +24,7 @@ import example.hq.spike.ui.shell.Undo
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -94,6 +96,8 @@ class NotesActions(
     val scrollOf: (String) -> Pair<Int, Int>? = { null },
     /** Reads the open note again, for when something outside the editor changed it (the suite's bar). */
     val onReload: () -> Unit = {},
+    /** A dialog over the open note opened (true) or closed (false): while any is open a change made elsewhere waits, then the note reloads. */
+    val onHoldReload: (Boolean) -> Unit = {},
 )
 
 class NotesViewModel(app: Application) : AndroidViewModel(app) {
@@ -128,11 +132,44 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         onKeep = ::keepChange, onMoreFolders = { open -> _state.update { it.copy(foldersOpen = open) } }, onNewSheet = { open -> _state.update { it.copy(newOpen = open) } }, onPasteNew = ::pasteNew, onShown = ::shown,
         onScrolled = scrolls::save, scrollOf = scrolls::restore,
         onReload = { (_state.value.top as? NotesRoute.Reader)?.let { loadReader(it.path) } },
+        onHoldReload = ::holdReload,
     )
 
+    /** How many dialogs over the open note are up, and whether the note changed while one was. */
+    private var holds = 0
+    private var staleWhileHeld = false
 
     init {
         viewModelScope.launch { exporter.state.collect { e -> _state.update { it.copy(export = e) } } }
+        viewModelScope.launch { services.connection.events.filterIsInstance<ChatEvent.NoteEdited>().collect { noteEdited(it.path) } }
+    }
+
+    private fun holdReload(on: Boolean) {
+        if (on) { holds++; return }
+        holds = (holds - 1).coerceAtLeast(0)
+        if (holds == 0 && staleWhileHeld) {
+            staleWhileHeld = false
+            (_state.value.top as? NotesRoute.Reader)?.let { quietReload(it.path) }
+        }
+    }
+
+    /** hq says the note at [path] was written. If it is the one being read, it is read again without leaving the page. */
+    private fun noteEdited(path: String) {
+        val top = _state.value.top as? NotesRoute.Reader ?: return
+        if (top.path != path || _state.value.reader !is ReaderPhase.Ready) return
+        if (holds > 0) staleWhileHeld = true else quietReload(path)
+    }
+
+    /** Swaps the open note's text for what hq has now, keeping the page, its scroll place and every dialog as they are. */
+    private fun quietReload(path: String) {
+        viewModelScope.launch {
+            val body = try { client.note(path) } catch (e: NoteNotFound) { return@launch } catch (e: HqUnavailable) { return@launch }
+            _state.update { s ->
+                val ready = s.reader as? ReaderPhase.Ready
+                if (s.top != NotesRoute.Reader(path) || ready == null || (body.hash != null && ready.note.hash == body.hash)) s
+                else s.copy(reader = ready.copy(note = ready.note.copy(body = body.content, truncated = body.truncated, hash = body.hash, writtenBy = body.writtenBy, review = body.review, why = body.why, tags = body.tags)))
+            }
+        }
     }
 
     /** Draws a fixed state for checking the pages against the design with no hq. */

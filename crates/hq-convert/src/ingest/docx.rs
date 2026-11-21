@@ -20,15 +20,22 @@ const R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relations
 const MC: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
 
 pub fn read(pkg: &mut Package<'_>) -> Result<Parsed, ConvertError> {
-    read_inner(pkg, false)
+    read_with(pkg, false, false)
 }
 
 /// Like [`read`], with each picture's part named in the output (`ConvertOptions::image_markers`).
+#[cfg(test)]
 pub fn read_marked(pkg: &mut Package<'_>) -> Result<Parsed, ConvertError> {
-    read_inner(pkg, true)
+    read_with(pkg, true, false)
 }
 
-fn read_inner(pkg: &mut Package<'_>, markers: bool) -> Result<Parsed, ConvertError> {
+/// The reader with both opt-ins: `markers` names each picture's part, `comments` carries Word
+/// comments as [`Block::Comment`] after the block they sit on (`ConvertOptions::word_comments`).
+pub fn read_with(
+    pkg: &mut Package<'_>,
+    markers: bool,
+    comments: bool,
+) -> Result<Parsed, ConvertError> {
     let max = pkg.nodes_limit();
     let document = pkg.read_text("word/document.xml")?.ok_or_else(|| {
         ConvertError::InboundFailed("no word/document.xml: not a Word document".into())
@@ -42,6 +49,14 @@ fn read_inner(pkg: &mut Package<'_>, markers: bool) -> Result<Parsed, ConvertErr
     let footnotes_xml = pkg.read_text("word/footnotes.xml")?;
     let endnotes_xml = pkg.read_text("word/endnotes.xml")?;
     let core_xml = pkg.read_text("docProps/core.xml")?;
+    let word_comments = if comments {
+        let main = pkg.read_text("word/comments.xml")?;
+        let ext = pkg.read_text("word/commentsExtended.xml")?;
+        main.map(|m| super::docx_comments::parse(&m, ext.as_deref(), max))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
 
     let mut ctx = Ctx {
         rels,
@@ -55,6 +70,9 @@ fn read_inner(pkg: &mut Package<'_>, markers: bool) -> Result<Parsed, ConvertErr
         cited: Vec::new(),
         losses: Losses::default(),
         markers,
+        nest: 0,
+        anchors: Vec::new(),
+        tracked: 0,
     };
     for xml in [footnotes_xml, endnotes_xml].into_iter().flatten() {
         ctx.load_notes(&xml, max);
@@ -64,6 +82,11 @@ fn read_inner(pkg: &mut Package<'_>, markers: bool) -> Result<Parsed, ConvertErr
     let body = child(doc.root_element(), W, "body")
         .ok_or_else(|| ConvertError::InboundFailed("word/document.xml has no body".into()))?;
     let mut blocks = ctx.blocks(body);
+    ctx.losses.hit_n(LossKind::TrackedChanges, ctx.tracked);
+    if !word_comments.is_empty() {
+        let anchors = std::mem::take(&mut ctx.anchors);
+        blocks = super::docx_comments::place(blocks, &word_comments, &anchors, &mut ctx.losses);
+    }
 
     if !ctx.cited.is_empty() {
         let mut defs = Vec::new();
@@ -221,6 +244,14 @@ impl Styles {
     }
 }
 
+/// Items in the last block when it is a list, so a paragraph that only joined it still counts.
+fn list_len(out: &[Block]) -> usize {
+    match out.last() {
+        Some(Block::List(items)) => items.len(),
+        _ => 0,
+    }
+}
+
 fn num_pr(np: Node<'_, '_>) -> (String, usize) {
     let id = child(np, W, "numId")
         .and_then(|n| attr(n, W, "val"))
@@ -308,6 +339,12 @@ struct Ctx {
     losses: Losses,
     /// Name each picture's package part in its `Inline::Image` (see `read_marked`).
     markers: bool,
+    /// How many `blocks` calls are open: 1 is the body itself, more is inside a table cell.
+    nest: usize,
+    /// Body-level block index and the Word comment ids that sit on it.
+    anchors: Vec<(usize, Vec<String>)>,
+    /// Tracked insertions, deletions and moves met.
+    tracked: usize,
 }
 
 #[derive(Default, Clone)]
@@ -398,8 +435,28 @@ impl Ctx {
 
     fn blocks(&mut self, parent: Node<'_, '_>) -> Vec<Block> {
         let mut out: Vec<Block> = Vec::new();
+        self.nest += 1;
         self.blocks_into(parent, &mut out);
+        self.nest -= 1;
         out
+    }
+
+    /// Notes the Word comments met inside `n`, which produced whatever `out` gained since `before`.
+    fn anchor(&mut self, n: Node<'_, '_>, out: &[Block], before: (usize, usize)) {
+        if self.nest != 1 {
+            return;
+        }
+        let ids = super::docx_comments::refs(n);
+        let now = (out.len(), list_len(out));
+        if ids.is_empty() || now == before {
+            return;
+        }
+        let at = if out.len() > before.0 {
+            before.0
+        } else {
+            out.len() - 1
+        };
+        self.anchors.push((at, ids));
     }
 
     fn blocks_into(&mut self, parent: Node<'_, '_>, out: &mut Vec<Block>) {
@@ -407,19 +464,32 @@ impl Ctx {
             let name = n.tag_name().name();
             let ns = n.tag_name().namespace();
             match (ns, name) {
-                (Some(W), "p") => self.paragraph(n, out),
+                (Some(W), "p") => {
+                    let before = (out.len(), list_len(out));
+                    self.paragraph(n, out);
+                    self.anchor(n, out, before);
+                }
                 (Some(W), "tbl") => {
+                    let before = (out.len(), list_len(out));
                     if let Some(b) = self.table(n) {
                         out.push(b);
                     }
+                    self.anchor(n, out, before);
                 }
                 (Some(W), "sdt") => {
                     if let Some(c) = child(n, W, "sdtContent") {
                         self.blocks_into(c, out);
                     }
                 }
-                (Some(W), "ins" | "moveTo" | "customXml" | "smartTag") => self.blocks_into(n, out),
-                (Some(W), "del" | "moveFrom") => self.losses.hit(LossKind::HiddenContentSkipped),
+                (Some(W), "ins" | "moveTo") => {
+                    self.tracked += 1;
+                    self.blocks_into(n, out)
+                }
+                (Some(W), "customXml" | "smartTag") => self.blocks_into(n, out),
+                (Some(W), "del" | "moveFrom") => {
+                    self.tracked += 1;
+                    self.losses.hit(LossKind::HiddenContentSkipped)
+                }
                 (Some(MC), "AlternateContent") => {
                     if let Some(c) = child(n, MC, "Choice") {
                         self.blocks_into(c, out);
@@ -556,7 +626,11 @@ impl Ctx {
                         self.inline_children(n, &fmt, walk, extra, out);
                     }
                 }
-                (Some(W), "ins" | "smartTag" | "moveTo" | "customXml") => {
+                (Some(W), "ins" | "moveTo") => {
+                    self.tracked += 1;
+                    self.inline_children(n, base, walk, extra, out)
+                }
+                (Some(W), "smartTag" | "customXml") => {
                     self.inline_children(n, base, walk, extra, out)
                 }
                 (Some(W), "sdt") => {
@@ -564,7 +638,10 @@ impl Ctx {
                         self.inline_children(c, base, walk, extra, out);
                     }
                 }
-                (Some(W), "del" | "moveFrom") => self.losses.hit(LossKind::HiddenContentSkipped),
+                (Some(W), "del" | "moveFrom") => {
+                    self.tracked += 1;
+                    self.losses.hit(LossKind::HiddenContentSkipped)
+                }
                 (Some(MC), "AlternateContent") => {
                     if let Some(c) = child(n, MC, "Choice") {
                         self.inline_children(c, base, walk, extra, out);
@@ -994,6 +1071,72 @@ mod tests {
         let mut pkg = Package::open(bytes, &Limits::default()).unwrap();
         let parsed = read_marked(&mut pkg).unwrap();
         super::super::ir::render(parsed.blocks)
+    }
+
+    const W14: &str = "http://schemas.microsoft.com/office/word/2010/wordml";
+    const W15: &str = "http://schemas.microsoft.com/office/word/2012/wordml";
+
+    fn commented_doc() -> Vec<u8> {
+        let comments = format!(
+            r#"<w:comments {NS} xmlns:w14="{W14}"><w:comment w:id="0" w:author="Sam &quot;the&quot; `Reviewer`" w:date="2026-11-20T10:15:00Z"><w:p w14:paraId="AAA1"><w:r><w:t>Is this the final figure?</w:t></w:r></w:p><w:p w14:paraId="AAA2"><w:r><w:t>Please check.</w:t></w:r></w:p></w:comment>
+              <w:comment w:id="1" w:author="Ana" w:date="2026-11-21T09:00:00Z"><w:p w14:paraId="BBB1"><w:r><w:t>Agreed, fixed.</w:t></w:r></w:p></w:comment>
+              <w:comment w:id="2" w:author="Lee"><w:p w14:paraId="CCC1"><w:r><w:t>On the table.</w:t></w:r></w:p></w:comment>
+              <w:comment w:id="3" w:author="Kim" w:date="2026-11-22T09:00:00Z"><w:p w14:paraId="DDD1"><w:r><w:t>In a header only.</w:t></w:r></w:p></w:comment></w:comments>"#
+        );
+        let ext = format!(
+            r#"<w15:commentsEx xmlns:w15="{W15}"><w15:commentEx w15:paraId="AAA2" w15:done="1"/><w15:commentEx w15:paraId="BBB1" w15:paraIdParent="AAA2" w15:done="1"/><w15:commentEx w15:paraId="CCC1" w15:done="0"/></w15:commentsEx>"#
+        );
+        let body = r#"<w:p><w:r><w:t>Intro line</w:t></w:r></w:p>
+          <w:p><w:commentRangeStart w:id="0"/><w:r><w:t>Budget is 6,000.</w:t></w:r><w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r></w:p>
+          <w:tbl><w:tr><w:tc><w:p><w:r><w:t>Item</w:t></w:r></w:p></w:tc><w:tc><w:p><w:commentRangeStart w:id="2"/><w:r><w:t>Cost</w:t></w:r><w:commentRangeEnd w:id="2"/></w:p></w:tc></w:tr>
+            <w:tr><w:tc><w:p><w:r><w:t>Bags</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>6</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+          <w:p><w:r><w:t>Closing line</w:t></w:r></w:p>"#;
+        docx(
+            body,
+            &[
+                ("word/comments.xml", &comments),
+                ("word/commentsExtended.xml", &ext),
+            ],
+        )
+    }
+
+    #[test]
+    fn without_the_option_comments_change_nothing() {
+        let with_parts = commented_doc();
+        let bare = docx(
+            r#"<w:p><w:r><w:t>Intro line</w:t></w:r></w:p>
+          <w:p><w:commentRangeStart w:id="0"/><w:r><w:t>Budget is 6,000.</w:t></w:r><w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r></w:p>"#,
+            &[],
+        );
+        let out = md(&with_parts);
+        assert!(!out.contains("comment"), "{out}");
+        assert!(out.starts_with("Intro line\n\nBudget is 6,000.\n\n| Item | Cost |"));
+        assert_eq!(md(&bare), "Intro line\n\nBudget is 6,000.\n");
+        let mut pkg = Package::open(&with_parts, &Limits::default()).unwrap();
+        let warnings = read(&mut pkg).unwrap().losses.into_warnings();
+        assert!(warnings.iter().all(|w| !w.detail.contains("comment")));
+    }
+
+    #[test]
+    fn tracked_changes_are_counted_in_the_report() {
+        let body = r#"<w:p><w:r><w:t>Keep </w:t></w:r><w:ins w:id="1" w:author="A"><w:r><w:t>added</w:t></w:r></w:ins><w:del w:id="2" w:author="A"><w:r><w:delText>gone</w:delText></w:r></w:del></w:p>
+          <w:ins w:id="3" w:author="A"><w:p><w:r><w:t>whole paragraph</w:t></w:r></w:p></w:ins>"#;
+        let bytes = docx(body, &[]);
+        let mut pkg = Package::open(&bytes, &Limits::default()).unwrap();
+        let parsed = read(&mut pkg).unwrap();
+        let details: Vec<String> = parsed
+            .losses
+            .into_warnings()
+            .into_iter()
+            .map(|w| w.detail)
+            .collect();
+        assert!(
+            details.contains(
+                &"3 tracked changes: inserted text is kept as plain text, deleted text is dropped"
+                    .to_string()
+            ),
+            "{details:?}"
+        );
     }
 
     fn picture_doc() -> Vec<u8> {
