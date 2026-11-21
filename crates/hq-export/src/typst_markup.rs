@@ -169,6 +169,7 @@ impl Writer {
                 )
             }
             Block::Table(t) => self.table(t),
+            Block::Svg(_) => String::new(),
             Block::Rule => "#line(length: 100%, stroke: 0.5pt + luma(190))\n\n".to_owned(),
         }
     }

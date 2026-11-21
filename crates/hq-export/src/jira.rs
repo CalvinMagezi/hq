@@ -46,6 +46,7 @@ fn block(b: &Block, marks: &str) -> String {
             format!("{{code{lang}}}\n{text}\n{{code}}")
         }
         Block::Table(t) => table(t),
+        Block::Svg(_) => String::new(),
         Block::Rule => "----".to_owned(),
     }
 }

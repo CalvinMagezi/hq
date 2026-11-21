@@ -37,6 +37,9 @@ pub enum Block {
         text: String,
     },
     Table(Table),
+    /// A chart or drawing written as inline SVG, already sanitised by
+    /// [`crate::svg::extract_svgs`]. Only the HTML and Markdown writers draw it.
+    Svg(String),
     Rule,
 }
 
@@ -260,10 +263,51 @@ fn parse_blocks(markdown: &str) -> Vec<Block> {
     options.insert(Options::ENABLE_TASKLISTS);
 
     let mut stack = vec![Frame::Root(Vec::new())];
+    // Raw HTML is dropped, except that inline `<svg>` charts are rebuilt from
+    // an allowlist (`svg.rs`). `html` gathers a block of HTML; `svg_raw` gathers
+    // an `<svg>` that sits inside a paragraph, text and all, up to `</svg>`.
+    let mut html = String::new();
+    let mut svg_raw: Option<String> = None;
+    let mut charts: Vec<String> = Vec::new();
     for event in Parser::new_ext(markdown, options) {
+        if !matches!(event, Event::Html(_)) && !html.is_empty() {
+            charts.extend(crate::svg::extract_svgs(&std::mem::take(&mut html)));
+        }
+        if let Some(raw) = svg_raw.as_mut() {
+            match &event {
+                Event::InlineHtml(t) | Event::Html(t) => {
+                    raw.push_str(t);
+                    if t.to_ascii_lowercase().contains("</svg") {
+                        charts.extend(crate::svg::extract_svgs(raw));
+                        svg_raw = None;
+                    }
+                }
+                Event::Text(t) | Event::Code(t) => raw.push_str(t),
+                Event::SoftBreak | Event::HardBreak => raw.push('\n'),
+                Event::End(_) => {
+                    // The paragraph ended before the svg did: give up on it.
+                    svg_raw = None;
+                }
+                _ => {}
+            }
+            if svg_raw.is_some() {
+                continue;
+            }
+        }
         match event {
+            Event::Html(t) => html.push_str(&t),
+            Event::InlineHtml(t) if t.len() >= 4 && t[..4].eq_ignore_ascii_case("<svg") => {
+                if t.to_ascii_lowercase().contains("</svg") {
+                    charts.extend(crate::svg::extract_svgs(&t));
+                } else {
+                    svg_raw = Some(t.into_string());
+                }
+            }
             Event::Start(tag) => start(&mut stack, tag),
-            Event::End(end) => finish(&mut stack, end),
+            Event::End(end) => {
+                finish(&mut stack, end);
+                drain_charts(&mut stack, &mut charts);
+            }
             Event::Text(t) => match stack.last_mut() {
                 Some(Frame::Code { text, .. }) => text.push_str(&t),
                 _ => push_inline(&mut stack, Inline::Text(t.into_string())),
@@ -280,13 +324,31 @@ fn parse_blocks(markdown: &str) -> Vec<Block> {
             Event::FootnoteReference(label) => {
                 push_inline(&mut stack, Inline::Text(format!("[{label}]")))
             }
-            // Raw HTML never reaches a shareable document.
+            // Other raw HTML never reaches a shareable document.
             _ => {}
         }
+        drain_charts(&mut stack, &mut charts);
     }
+    charts.extend(crate::svg::extract_svgs(&html));
+    drain_charts(&mut stack, &mut charts);
     match stack.pop() {
         Some(Frame::Root(blocks)) => blocks,
         _ => Vec::new(),
+    }
+}
+
+/// Put gathered charts into the document once the top frame can hold blocks.
+fn drain_charts(stack: &mut [Frame], charts: &mut Vec<String>) {
+    if charts.is_empty()
+        || !matches!(
+            stack.last(),
+            Some(Frame::Root(_) | Frame::Quote(_) | Frame::Item { .. })
+        )
+    {
+        return;
+    }
+    for svg in std::mem::take(charts) {
+        push_block(stack, Block::Svg(svg));
     }
 }
 
@@ -366,6 +428,7 @@ fn finish(stack: &mut Vec<Frame>, end: TagEnd) {
     }
     let Some(frame) = stack.pop() else { return };
     match frame {
+        Frame::Para(content) if content.is_empty() => {}
         Frame::Para(content) => push_block(stack, Block::Paragraph(content)),
         Frame::Heading(level, content) => push_block(stack, Block::Heading { level, content }),
         Frame::Quote(blocks) => push_block(stack, into_quote_or_callout(blocks)),
@@ -610,6 +673,20 @@ mod tests {
     fn raw_html_is_dropped() {
         let blocks = parse("before <b>x</b> after\n\n<div>gone</div>\n");
         assert!(!format!("{blocks:?}").contains("div"));
+    }
+
+    #[test]
+    fn inline_svg_becomes_a_chart_block() {
+        for md in [
+            "intro\n\n<div><svg viewBox=\"0 0 9 9\"><rect width=\"4\" height=\"4\"/></svg></div>\n\nafter\n",
+            "intro\n\n<svg viewBox=\"0 0 9 9\"><text>bar chart</text></svg>\n\nafter\n",
+            "intro\n<svg viewBox=\"0 0 9 9\"><text>bar chart</text></svg>\nafter\n",
+        ] {
+            let blocks = parse(md);
+            let n = blocks.iter().filter(|b| matches!(b, Block::Svg(_))).count();
+            assert_eq!(n, 1, "{md}: {blocks:?}");
+            assert!(!format!("{blocks:?}").contains("div"), "{blocks:?}");
+        }
     }
 
     #[test]
