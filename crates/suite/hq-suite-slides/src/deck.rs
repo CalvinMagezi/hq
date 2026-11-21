@@ -319,7 +319,7 @@ fn blocks_to_items(blocks: &[Block], out: &mut Vec<Item>, pictures: &mut Vec<(St
                 }
                 out.push(Item::Table(rows));
             }
-            Block::Rule => {}
+            Block::Rule | Block::Svg(_) => {}
         }
     }
 }
