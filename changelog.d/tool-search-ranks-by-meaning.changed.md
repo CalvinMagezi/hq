@@ -1,0 +1,1 @@
+**HQ finds the right tool faster.** When HQ looks for a tool to do a job, it now scores each tool on its name, hint and description, understands everyday words like "spreadsheet" or "remind me", and ranks rarer words higher. This runs on the device with no model call, so it costs nothing extra and finds the right tool in fewer tries.

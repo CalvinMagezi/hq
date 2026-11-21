@@ -536,53 +536,26 @@ mod arg_preview_tests {
     }
 }
 
-/// Splits a tool-search query into lowercase words (three or more characters and not a
-/// stop word, so "the" and "of" match nothing by accident).
-const STOP_WORDS: &[&str] = &[
-    "the", "and", "for", "with", "that", "this", "from", "into", "you", "are", "need", "want",
-];
-
-fn query_terms(query: &str) -> Vec<String> {
-    let mut terms: Vec<String> = query
-        .to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.chars().count() >= 3 && !STOP_WORDS.contains(w))
-        .map(str::to_string)
-        .collect();
-    terms.sort();
-    terms.dedup();
-    terms
-}
-
-/// Catalogue entries that match any query word in the name or hint, the most words first and
-/// catalogue order among equals, at most `max_results`. A name match counts double so
-/// `office_create` outranks a tool that only mentions "office" in its hint.
+/// Catalogue entries that match the query, best first and catalogue order among equals, at most
+/// `max_results`. Scoring is the shared offline ranker in `hq_tool_api::tool_rank`, so native
+/// `tool_search` and the gateway's `hq_discover` find the same tools for the same words.
 fn rank_tool_matches<'a>(
     catalog: &'a [(String, String)],
     query: &str,
     max_results: usize,
 ) -> Vec<&'a (String, String)> {
-    let terms = query_terms(query);
-    let mut scored: Vec<(usize, &(String, String))> = catalog
+    let docs: Vec<hq_tool_api::tool_rank::RankDoc<'_>> = catalog
         .iter()
-        .filter_map(|entry| {
-            let name = entry.0.to_lowercase();
-            let hint = entry.1.to_lowercase();
-            let score: usize = terms
-                .iter()
-                .map(|t| {
-                    usize::from(name.contains(t.as_str())) * 2
-                        + usize::from(hint.contains(t.as_str()))
-                })
-                .sum();
-            (score > 0).then_some((score, entry))
+        .map(|(name, hint)| hq_tool_api::tool_rank::RankDoc {
+            name,
+            hint,
+            description: "",
+            keywords: &[],
         })
         .collect();
-    scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-    scored
+    hq_tool_api::tool_rank::rank(&docs, query, max_results)
         .into_iter()
-        .take(max_results)
-        .map(|(_, e)| e)
+        .map(|i| &catalog[i])
         .collect()
 }
 

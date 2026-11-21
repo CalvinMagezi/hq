@@ -11,4 +11,5 @@ pub mod family_guest;
 pub mod files;
 pub mod office;
 pub mod registry;
+pub mod tool_rank;
 pub mod util;
