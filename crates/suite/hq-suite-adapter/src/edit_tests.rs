@@ -323,3 +323,22 @@ fn an_agent_comments_on_a_block_and_resolves_it_and_a_stale_anchor_writes_nothin
     assert_eq!(text(&d), before_stale);
     assert_ne!(before, before_stale);
 }
+
+#[test]
+fn an_agent_cannot_open_a_note_in_a_private_folder_but_the_owner_can() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("_data/finance")).unwrap();
+    let sheet = "---\nsuite_kind: sheet\n---\n\n```sheet name=L types=\"text\"\n| a |\n|---|\n| secret |\n```\n";
+    std::fs::write(d.path().join("_data/finance/ledger.md"), sheet).unwrap();
+    for action in ["blocks", "cards", "comments", "set_cell"] {
+        let args = json!({"action": action, "note": "_data/finance/ledger.md", "sheet": 0, "row": 1, "col": 0, "value": "x"});
+        let err = run(d.path(), &args, Gate::Agent).unwrap_err().to_string();
+        assert!(err.contains("keeps private"), "{action}: {err}");
+        assert!(!err.contains("secret"));
+    }
+    let blocks = json!({"action": "blocks", "note": "_data/finance/ledger.md"});
+    assert!(
+        run(d.path(), &blocks, Gate::Owner).is_ok(),
+        "the owner's apps still open it"
+    );
+}
