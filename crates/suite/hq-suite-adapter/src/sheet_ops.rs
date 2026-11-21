@@ -5,10 +5,11 @@
 //! it was read is refused. Only the lines an action must change are rebuilt; the other rows keep
 //! their own spacing.
 //!
-//! Formulas that read rows: adding rows in the middle of a sheet and deleting rows move every row
-//! below them, so the references that read those rows are moved too (`ref_shift`): formulas on
+//! Formulas that read rows or columns: adding rows in the middle of a sheet and deleting rows move
+//! every row below them, and adding a column in the middle or deleting one moves every column to
+//! its right, so the references that read those cells are moved too (`ref_shift`): formulas on
 //! this sheet and on others, and the `from=` of tiles and plots. The only refusal is deleting the
-//! rows a tile or plot reads and nothing else.
+//! rows or columns a tile or plot reads and nothing else.
 
 use anyhow::{Context, Result, bail};
 use hq_suite_calc::column_name;
@@ -19,7 +20,7 @@ use serde_json::{Value, json};
 use crate::edit_plan::{
     Planned, addr, opt_str, opt_u64, patch, place_after, plural, req_str, req_u64,
 };
-use crate::ref_shift::{FromShift, RowChange, shift_formula, shift_from};
+use crate::ref_shift::{Change, ColChange, FromShift, RowChange, shift_formula, shift_from};
 use crate::sheets::{MAX_CELL_CHARS, NoteBook, sheet_of_range};
 
 /// Most cells one `set_cells` call may carry, and most rows one `add_rows` call may add.
@@ -259,6 +260,8 @@ struct Shift {
     plots: usize,
     /// Rewritten formulas that now hold a `#REF!`.
     broken: usize,
+    /// What moved, for the sentences: `row` or `column`.
+    what: &'static str,
     /// (sheet number, label, old text, new text) of every rewritten formula.
     checks: Vec<(usize, String, String, String)>,
 }
@@ -285,15 +288,21 @@ fn sheet_name(blocks: &[TypedBlock], n: usize) -> String {
         .map_or_else(|| format!("Sheet{}", n + 1), str::to_string)
 }
 
-/// Works out how `change` to the rows of table `t` rewrites every formula and block that reads
-/// them. Rows in `gone` are being deleted and are not rewritten. Nothing is written here.
+/// Works out how `change` to the rows or columns of table `t` rewrites every formula and block that
+/// reads them. Cells (table row, column) for which `gone` is true are being deleted and are not
+/// rewritten. Nothing is written here.
 fn plan_shift(
     doc: &Document,
     note: &str,
     t: &Table,
-    change: RowChange,
-    gone: std::ops::Range<usize>,
+    change: impl Into<Change>,
+    gone: &dyn Fn(usize, usize) -> bool,
 ) -> Result<Shift> {
+    let change = change.into();
+    let (what, whats) = match change {
+        Change::Row(_) => ("row", "rows"),
+        Change::Col(_) => ("column", "columns"),
+    };
     let all: Vec<(usize, TypedBlock)> = doc
         .typed_blocks()
         .filter_map(|(i, b)| b.ok().map(|b| (i, b)))
@@ -307,16 +316,12 @@ fn plan_shift(
         tiles: 0,
         plots: 0,
         broken: 0,
+        what,
         checks: Vec::new(),
     };
-    for (r, row) in t
-        .cells
-        .iter()
-        .enumerate()
-        .filter(|(r, _)| !gone.contains(r))
-    {
+    for (r, row) in t.cells.iter().enumerate() {
         for (c, text) in row.iter().enumerate() {
-            if !text.trim_start().starts_with('=') {
+            if gone(r, c) || !text.trim_start().starts_with('=') {
                 continue;
             }
             let new = shift_formula(text, &edited, &edited, change);
@@ -348,7 +353,7 @@ fn plan_shift(
                     .map(|n| n.src().to_string())
                     .unwrap_or_default();
                 if src.lines().any(|l| l.contains("| =") || l.contains("|=")) {
-                    bail!("sheet `{name}` reads rows that would move, and {e}");
+                    bail!("sheet `{name}` reads {whats} that would move, and {e}");
                 }
                 continue;
             }
@@ -394,7 +399,7 @@ fn plan_shift(
             FromShift::Same => continue,
             FromShift::Moved(to) => to,
             FromShift::Gone => bail!(
-                "a {} block reads only the rows you are deleting (`{from}`); change or remove that block first",
+                "a {} block reads only the {whats} you are deleting (`{from}`); change or remove that block first",
                 b.ty.name()
             ),
         };
@@ -483,8 +488,9 @@ impl Shift {
         let mut s = format!(". Adjusted {joined}");
         if self.broken > 0 {
             s.push_str(&format!(
-                "; {} now show #REF! because they read a deleted row",
-                plural(self.broken, "formula", "formulas")
+                "; {} now show #REF! because they read a deleted {}",
+                plural(self.broken, "formula", "formulas"),
+                self.what
             ));
         }
         s
@@ -573,15 +579,16 @@ pub fn set_cells(doc: &Document, args: &Value) -> Result<Planned> {
 
 // ---------------------------------------------------------------- rows
 
-/// Writes the edited block and every block the shift rewrote as one patch, and checks that the
-/// rewritten formulas still read.
+/// Writes the edited block (with a new header when `info` is given) and every block the shift
+/// rewrote as one patch, and checks that the rewritten formulas still read.
 fn write_rows(
     doc: &Document,
     t: &Table,
     lines: Vec<String>,
+    info: Option<&Info>,
     shift: Option<&Shift>,
 ) -> Result<Document> {
-    let mut ops = vec![block_op(doc, t, lines, None)?];
+    let mut ops = vec![block_op(doc, t, lines, info)?];
     if let Some(shift) = shift {
         ops.extend(shift.ops.iter().cloned());
     }
@@ -631,7 +638,7 @@ pub fn add_rows(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
                 at_row: at as u32 + 1,
                 n: texts.len() as u32,
             },
-            0..0,
+            &|_, _| false,
         )?)
     } else {
         None
@@ -648,7 +655,7 @@ pub fn add_rows(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
     for (k, cells) in texts.iter().enumerate() {
         lines.insert(place + k, line_of_cells(cells));
     }
-    let new = write_rows(doc, &t, lines, shift.as_ref())?;
+    let new = write_rows(doc, &t, lines, None, shift.as_ref())?;
     let formulas: Vec<(String, String)> = texts
         .iter()
         .enumerate()
@@ -709,14 +716,14 @@ pub fn delete_rows(doc: &Document, note: &str, args: &Value) -> Result<Planned> 
             first_row: row as u32 + 1,
             count: count as u32,
         },
-        row..row + count,
+        &|r, _| (row..row + count).contains(&r),
     )?;
     let mut lines = t.lines.clone();
     shift.apply_own(&t, &mut lines)?;
     for r in (row..row + count).rev() {
         lines.remove(t.line_of(r));
     }
-    let new = write_rows(doc, &t, lines, Some(&shift))?;
+    let new = write_rows(doc, &t, lines, None, Some(&shift))?;
     let shown: Vec<String> = (row..(row + count).min(row + 3))
         .map(|r| format!("row {}: {}", r + 1, t.cells[r].join(" | ")))
         .collect();
@@ -771,16 +778,57 @@ fn declared_types(t: &Table) -> Result<Vec<ColType>> {
     }
 }
 
-fn append_cell(line: &str, text: &str) -> Result<String> {
+/// The pieces of a table line split at its `|`s: a blank before the first, one piece per cell and
+/// a blank after the last. Each piece keeps its own spacing.
+fn line_pieces(line: &str, cols: usize) -> Result<Vec<String>> {
     let l = line.trim_end();
-    if !l.ends_with('|') {
-        bail!("a line of this sheet's table does not end with a |");
+    let pieces: Vec<String> = l.split('|').map(str::to_string).collect();
+    if !l.ends_with('|') || pieces.len() != cols + 2 || !pieces[0].trim().is_empty() {
+        bail!("a line of this sheet's table does not have the same cells as its header");
     }
-    Ok(format!("{l} {text} |"))
+    Ok(pieces)
 }
 
-/// Adds a column on the right with a name, an optional type and an optional default for every row.
-pub fn add_column(doc: &Document, args: &Value) -> Result<Planned> {
+/// `line` with a cell holding `text` put in before cell `at` (`cols` puts it at the end).
+fn insert_cell_in_line(line: &str, cols: usize, at: usize, text: &str) -> Result<String> {
+    let mut pieces = line_pieces(line, cols)?;
+    let piece = if text == "---" {
+        text.to_string()
+    } else {
+        format!(" {text} ")
+    };
+    pieces.insert(at + 1, piece);
+    Ok(pieces.join("|"))
+}
+
+/// `line` without cell `col`.
+fn remove_cell_in_line(line: &str, cols: usize, col: usize) -> Result<String> {
+    let mut pieces = line_pieces(line, cols)?;
+    pieces.remove(col + 1);
+    Ok(pieces.join("|"))
+}
+
+/// The header with the types list of a table whose columns change: `edit` gets the declared types.
+fn types_after(
+    t: &Table,
+    force: bool,
+    edit: impl FnOnce(&mut Vec<ColType>),
+) -> Result<Option<Info>> {
+    if !force && t.tb.info.get("types").is_none() {
+        return Ok(None);
+    }
+    let mut types = declared_types(t)?;
+    if types.len() != t.columns() {
+        bail!("the sheet's types list does not match its columns; fix the block's header first");
+    }
+    edit(&mut types);
+    Ok(Some(with_types(&t.tb, &types)))
+}
+
+/// Adds a column with a name, an optional type and an optional default for every row. It goes on
+/// the right, or before column `at` (0 is the first) when `at` is given; the formulas, tiles and
+/// plots that read the columns it pushes right are moved with them.
+pub fn add_column(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
     let sheet = opt_u64(args, "sheet")?.unwrap_or(0) as usize;
     let t = load(doc, sheet, Some(req_str(args, "hash")?))?;
     let name = cell_text(&json!(req_str(args, "name")?))?;
@@ -797,35 +845,159 @@ pub fn add_column(doc: &Document, args: &Value) -> Result<Planned> {
         );
     }
     let kind = opt_str(args, "type").map(parse_type).transpose()?;
-    let mut lines = t.lines.clone();
-    lines[t.head] = append_cell(&lines[t.head], &name)?;
-    lines[t.rule] = format!("{}---|", lines[t.rule].trim_end());
-    for &i in &t.rows {
-        lines[i] = append_cell(&lines[i], &default)?;
+    let cols = t.columns();
+    if cols >= hq_suite_md::sheet::MAX_COLUMNS {
+        bail!(
+            "a sheet holds at most {} columns",
+            hq_suite_md::sheet::MAX_COLUMNS
+        );
     }
-    let info = if kind.is_some() || t.tb.info.get("types").is_some() {
-        let mut types = declared_types(&t)?;
-        types.push(kind.unwrap_or(ColType::Text));
-        Some(with_types(&t.tb, &types))
+    let at = match opt_u64(args, "at")? {
+        None => cols,
+        Some(a) if a as usize <= cols => a as usize,
+        Some(a) => bail!(
+            "`at` must be from 0 (before the first column) to {cols} (the right end); got {a}"
+        ),
+    };
+    let shift = if at < cols {
+        Some(plan_shift(
+            doc,
+            note,
+            &t,
+            ColChange::Insert {
+                at_col: at as u32 + 1,
+                n: 1,
+            },
+            &|_, _| false,
+        )?)
     } else {
         None
     };
-    let new = finish(doc, &t, lines, info.as_ref())?;
-    let col = t.columns();
+    let mut lines = t.lines.clone();
+    if let Some(shift) = &shift {
+        shift.apply_own(&t, &mut lines)?;
+    }
+    lines[t.head] = insert_cell_in_line(&lines[t.head], cols, at, &name)?;
+    lines[t.rule] = insert_cell_in_line(&lines[t.rule], cols, at, "---")?;
+    for &i in &t.rows {
+        lines[i] = insert_cell_in_line(&lines[i], cols, at, &default)?;
+    }
+    let info = types_after(&t, kind.is_some(), |types| {
+        types.insert(at, kind.unwrap_or(ColType::Text));
+    })?;
+    let new = write_rows(doc, &t, lines, info.as_ref(), shift.as_ref())?;
     let summary = format!(
         "Added column {} `{name}`{}{}",
-        column_name(col as u32),
+        column_name(at as u32),
         opt_str(args, "type").map_or(String::new(), |k| format!(" of type {k}")),
         if default.is_empty() {
             String::new()
         } else {
             format!(", every row set to `{default}`")
         }
-    );
+    ) + &shift.as_ref().map(Shift::sentence).unwrap_or_default();
     let extra = after(&t, &new);
     Ok(Planned::new(new, summary)
         .touching(t.rows_total())
         .with(extra))
+}
+
+/// Deletes column `col` (0 is the first). `expected` is the header it should have, so a column that
+/// moved since it was read is refused. Formulas that read it show `#REF!`; the ones that read the
+/// columns to its right are moved.
+pub fn delete_column(doc: &Document, note: &str, args: &Value) -> Result<Planned> {
+    let sheet = opt_u64(args, "sheet")?.unwrap_or(0) as usize;
+    let t = load(doc, sheet, Some(req_str(args, "hash")?))?;
+    let col = req_u64(args, "col")? as usize;
+    let cols = t.columns();
+    if col >= cols {
+        bail!("the sheet has {cols} columns; column {col} is not one");
+    }
+    if cols == 1 {
+        bail!("a sheet needs at least one column, so its only column cannot be deleted");
+    }
+    let header = t.cells[0][col].clone();
+    if let Some(want) = opt_str(args, "expected")
+        && want.trim() != header
+    {
+        bail!(
+            "column {} is `{header}`, not `{}`; read the sheet again and retry",
+            column_name(col as u32),
+            want.trim()
+        );
+    }
+    guard_named_column(doc, note, &t, &header)?;
+    let shift = plan_shift(
+        doc,
+        note,
+        &t,
+        ColChange::Delete {
+            first_col: col as u32 + 1,
+            count: 1,
+        },
+        &|_, c| c == col,
+    )?;
+    let mut lines = t.lines.clone();
+    shift.apply_own(&t, &mut lines)?;
+    for r in 0..t.rows_total() {
+        let li = t.line_of(r);
+        lines[li] = remove_cell_in_line(&lines[li], cols, col)?;
+    }
+    lines[t.rule] = remove_cell_in_line(&lines[t.rule], cols, col)?;
+    let info = types_after(&t, false, |types| {
+        types.remove(col);
+    })?;
+    let new = write_rows(doc, &t, lines, info.as_ref(), Some(&shift))?;
+    let summary = format!(
+        "Deleted column {} `{header}` ({})",
+        column_name(col as u32),
+        plural(t.rows_total() - 1, "row", "rows")
+    ) + &shift.sentence();
+    let extra = after(&t, &new);
+    Ok(Planned::new(new, summary)
+        .touching(t.rows_total())
+        .removing()
+        .with(extra))
+}
+
+/// Refuses to delete a column that a tile or plot over this sheet names by its header (`x=`, `y=`,
+/// `group=` or a `where=` condition): those names never shift, so the block would break silently.
+fn guard_named_column(doc: &Document, note: &str, t: &Table, header: &str) -> Result<()> {
+    let want = header.trim().to_lowercase();
+    if want.is_empty() {
+        return Ok(());
+    }
+    let blocks: Vec<TypedBlock> = doc.typed_blocks().filter_map(|(_, b)| b.ok()).collect();
+    for b in blocks
+        .iter()
+        .filter(|b| matches!(b.ty, BlockType::Tile | BlockType::Plot))
+    {
+        let Ok(range) = RangeRef::parse(b.info.get("from").unwrap_or_default()) else {
+            continue;
+        };
+        if sheet_of_range(&blocks, note, &range, "a block").ok() != Some(t.sheet) {
+            continue;
+        }
+        let named = |key: &str| {
+            b.info
+                .get(key)
+                .is_some_and(|v| v.trim().to_lowercase() == want)
+        };
+        // A `where` holds conditions such as `qty>30 and item=Sugar`: look for the name as a word.
+        let in_where = b.info.get("where").is_some_and(|w| {
+            w.to_lowercase()
+                .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ' '))
+                .flat_map(|part| part.split(" and "))
+                .any(|word| word.trim() == want)
+        });
+        if named("x") || named("y") || named("group") || in_where {
+            bail!(
+                "a {} block uses the column `{header}` by name; change or remove that block first",
+                b.ty.name()
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Declares a column's type. The cells are not converted; only how they are read and shown changes.

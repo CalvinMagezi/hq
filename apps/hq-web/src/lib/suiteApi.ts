@@ -125,7 +125,8 @@ const edit =
 export const sheetSetCells = edit<{ sheet?: number; row: number; col: number; values: Cells; expected: Cells }>('set_cells')
 export const sheetAddRows = edit<{ sheet?: number; hash: string; rows: Cells; at?: number }>('add_rows')
 export const sheetDeleteRows = edit<{ sheet?: number; hash: string; row: number; count?: number; expected?: Cells }>('delete_rows')
-export const sheetAddColumn = edit<{ sheet?: number; hash: string; name: string; type?: string; default?: string }>('add_column')
+export const sheetAddColumn = edit<{ sheet?: number; hash: string; name: string; type?: string; default?: string; at?: number }>('add_column')
+export const sheetDeleteColumn = edit<{ sheet?: number; hash: string; col: number; expected?: string }>('delete_column')
 export const sheetSetColumnType = edit<{ sheet?: number; hash: string; col: number; type: string }>('set_column_type')
 export const sheetAdd = edit<{ name: string; columns: string[]; types?: string[]; rows?: Cells; afterIndex?: number; hash?: string }>('add_sheet')
 

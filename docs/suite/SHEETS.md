@@ -39,7 +39,7 @@ number here comes with the command that reproduces it.
 
 ## What is not built
 
-Inserting a column in the middle, deleting a column, pivots, array results (`FILTER`, `SORT`, `UNIQUE`), table references (`Table1[Column]`), conditional formatting, and the sidecar for very large sheets. Editing, UGX formats, references between sheets and charts are built; see the sections below.
+Pivots, array results (`FILTER`, `SORT`, `UNIQUE`), table references (`Table1[Column]`), conditional formatting, and the sidecar for very large sheets. Editing, UGX formats, references between sheets and charts are built; see the sections below.
 
 ## On the phone
 
@@ -166,3 +166,7 @@ Sheet actions (`sheet` is the sheet block's number from 0; row 0 is the header r
 **Dashboards.** `add_tile` and `add_plot` build the block from structured arguments, draw it with the evaluators above before writing, and refuse with the evaluator's own sentence if it would not draw.
 
 **Telling open pages.** Every suite write sends `{"type": "note_changed", "path", "hash"}` on the socket, and the web app reloads the note it has open. The existing `notes:change` event is coarser (a count and a time from the search index) and still arrives.
+
+## Columns: insert and delete
+
+`add_column` takes an optional `at` (a column number from 0) to insert before that column; without it the column goes on the right. `delete_column` takes `col` and, as a stale guard, optionally the column's header as `expected`. Both rewrite the header, the rule line, every row and the block's `types=` list, and move every reference the way Excel does: formulas in this sheet and in other sheets that name it, whole-column references such as `B:B`, and the `from=` range of tiles and plots. A reference to a deleted column becomes `#REF!` (the formula engine shows an error for it), and a tile or plot whose range would lose all its columns is refused. A tile or plot that names the deleted column by header in `x=`, `y=`, `group=` or `where=` is refused too, since those names do not shift. The last column cannot be deleted, and for the agent `delete_column` is previewed before it is applied.

@@ -187,3 +187,133 @@ fn from_ranges_move_with_their_rows() {
     assert_eq!(shift_from("B2:B5", DEL3), FromShift::Moved("B2:B4".into()));
     assert_eq!(shift_from("not a range", DEL3), FromShift::Same);
 }
+
+// ---------------------------------------------------------------- columns
+
+const CINS2: ColChange = ColChange::Insert { at_col: 2, n: 1 };
+const CDEL2: ColChange = ColChange::Delete {
+    first_col: 2,
+    count: 1,
+};
+
+fn cins(f: &str) -> String {
+    shift_formula(f, "S", "S", CINS2)
+}
+
+fn cdel(f: &str) -> String {
+    shift_formula(f, "S", "S", CDEL2)
+}
+
+#[test]
+fn column_points_move_when_at_or_right_of_the_insert() {
+    assert_eq!(cins("=A2+B2+C2"), "=A2+C2+D2");
+    assert_eq!(cins("=$B$2*C$3+$D5"), "=$C$2*D$3+$E5");
+    assert_eq!(cins("=Z1"), "=AA1");
+    assert_eq!(cins("=a1+b1"), "=a1+C1");
+}
+
+#[test]
+fn a_column_range_grows_inside_and_moves_at_its_start() {
+    assert_eq!(cins("=SUM(A2:C2)"), "=SUM(A2:D2)");
+    assert_eq!(cins("=SUM(B2:C2)"), "=SUM(C2:D2)");
+    assert_eq!(cins("=SUM(C2:D2)"), "=SUM(D2:E2)");
+    assert_eq!(cins("=SUM(A2:A9)"), "=SUM(A2:A9)");
+    let c = ColChange::Insert { at_col: 4, n: 2 };
+    assert_eq!(shift_formula("=SUM(A1:C1)", "S", "S", c), "=SUM(A1:C1)");
+    assert_eq!(shift_formula("=SUM(A1:D1)", "S", "S", c), "=SUM(A1:F1)");
+}
+
+#[test]
+fn deleting_a_column_shrinks_ranges_and_breaks_points() {
+    assert_eq!(cdel("=SUM(A2:D2)"), "=SUM(A2:C2)");
+    assert_eq!(cdel("=SUM(B2:D2)"), "=SUM(B2:C2)");
+    assert_eq!(cdel("=SUM(A2:B2)"), "=SUM(A2:A2)");
+    assert_eq!(cdel("=B2+C2"), "=#REF!+B2");
+    assert_eq!(cdel("=SUM(B2:B9)"), "=SUM(#REF!)");
+    assert_eq!(cdel("=SUM(B2:B9)+D1"), "=SUM(#REF!)+C1");
+    let two = ColChange::Delete {
+        first_col: 2,
+        count: 2,
+    };
+    assert_eq!(shift_formula("=SUM(B1:C1)", "S", "S", two), "=SUM(#REF!)");
+    assert_eq!(shift_formula("=SUM(C1:F1)", "S", "S", two), "=SUM(B1:D1)");
+}
+
+#[test]
+fn whole_columns_move_and_whole_rows_stay() {
+    assert_eq!(
+        cins("=SUM(B:B)+SUM($C:$D)+SUM(A:A)"),
+        "=SUM(C:C)+SUM($D:$E)+SUM(A:A)"
+    );
+    assert_eq!(cins("=SUM(A:C)"), "=SUM(A:D)");
+    assert_eq!(cdel("=SUM(B:B)"), "=SUM(#REF!)");
+    assert_eq!(cdel("=SUM(A:D)"), "=SUM(A:C)");
+    assert_eq!(cins("=SUM(2:5)+B2"), "=SUM(2:5)+C2");
+    // And a row change leaves whole columns alone, as before.
+    assert_eq!(ins("=SUM(B:B)+SUM($C:$D)"), "=SUM(B:B)+SUM($C:$D)");
+}
+
+#[test]
+fn column_changes_follow_the_sheet_names() {
+    assert_eq!(shift_formula("=B2", "Other", "S", CINS2), "=B2");
+    assert_eq!(
+        shift_formula("=S!B2+'S'!B3", "Other", "S", CINS2),
+        "=S!C2+'S'!C3"
+    );
+    assert_eq!(
+        shift_formula("=SUM(S!B:B)", "Other", "s", CINS2),
+        "=SUM(S!C:C)"
+    );
+    assert_eq!(
+        shift_formula("=SUM(Other!B:B)", "S", "S", CINS2),
+        "=SUM(Other!B:B)"
+    );
+    assert_eq!(shift_formula("=S!B2", "Other", "S", CDEL2), "=#REF!");
+    assert_eq!(cins("=\"B2\"&LOG10(B2)"), "=\"B2\"&LOG10(C2)");
+}
+
+#[test]
+fn a_reference_pushed_past_the_last_column_is_gone() {
+    let c = ColChange::Insert { at_col: 1, n: 2 };
+    assert_eq!(shift_formula("=XFD1", "S", "S", c), "=#REF!");
+}
+
+#[test]
+fn column_insert_then_delete_is_identity() {
+    let formulas = [
+        "=A2+B$9*$C$12",
+        "=SUM(A2:F2)",
+        "=SUM(C5:E9)+LOG10(B30)",
+        "=IF(A20>1,\"A21\",D22)",
+        "=S!B9+S!B2:F20+SUM(S!C:D)",
+    ];
+    for at in 1..8u32 {
+        for n in 1..4u32 {
+            for f in formulas {
+                let up = shift_formula(f, "S", "S", ColChange::Insert { at_col: at, n });
+                let back = shift_formula(
+                    &up,
+                    "S",
+                    "S",
+                    ColChange::Delete {
+                        first_col: at,
+                        count: n,
+                    },
+                );
+                assert_eq!(back, f, "insert {n} at {at}: {up}");
+            }
+        }
+    }
+}
+
+#[test]
+fn from_ranges_move_with_their_columns() {
+    assert_eq!(shift_from("A2:C4", CINS2), FromShift::Moved("A2:D4".into()));
+    assert_eq!(shift_from("A2:A4", CINS2), FromShift::Same);
+    assert_eq!(
+        shift_from("[[Stock#Prices]]!C1:D6", CINS2),
+        FromShift::Moved("[[Stock#Prices]]!D1:E6".into())
+    );
+    assert_eq!(shift_from("B2:B4", CDEL2), FromShift::Gone);
+    assert_eq!(shift_from("B2:D4", CDEL2), FromShift::Moved("B2:C4".into()));
+}

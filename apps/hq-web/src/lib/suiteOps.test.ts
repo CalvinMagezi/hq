@@ -40,8 +40,13 @@ describe('sheet structure edits go to the one edit route', () => {
     expect(calls[1].body).toMatchObject({ action: 'delete_rows', sheet: 0, hash: 'bbbbbbbbbbbb', row: 1, count: 1 })
     await suiteOps.addColumn({ path: 'N/a.md', index: 0 }, 'Notes')
     expect(calls[3].body).toMatchObject({ action: 'add_column', name: 'Notes' })
+    expect(calls[3].body).not.toHaveProperty('at')
+    await suiteOps.addColumn({ path: 'N/a.md', index: 0 }, 'Notes', 1)
+    expect(calls[5].body).toMatchObject({ action: 'add_column', at: 1 })
+    await suiteOps.deleteColumn({ path: 'N/a.md', index: 0 }, 2)
+    expect(calls[7].body).toMatchObject({ action: 'delete_column', sheet: 0, hash: 'bbbbbbbbbbbb', col: 2 })
     await suiteOps.columnType({ path: 'N/a.md', index: 0 }, 2, 'ugx')
-    expect(calls[5].body).toMatchObject({ action: 'set_column_type', col: 2, type: 'ugx' })
+    expect(calls[9].body).toMatchObject({ action: 'set_column_type', col: 2, type: 'ugx' })
   })
 
   test("HQ's sentence for a refused change comes back; a missing sheet is refused before any edit is sent", async () => {

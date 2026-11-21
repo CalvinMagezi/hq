@@ -64,10 +64,10 @@ impl HqTool for OfficeEditTool {
          Sheets (`sheet` is the sheet's number from 0; `row` 0 is the header row; `col` from 0; a \
          formula starts with `=`): `set_cell`, `set_cells` (a rectangle of `values` from `row`, \
          `col`, with the `expected` text of each cell), `add_rows` (at the end, or before `at`), \
-         `delete_rows`, `add_column` (on the right: `name`, `type`, `default`), `set_column_type`, \
+         `delete_rows`, `add_column` (`name`, `type`, `default`; on the right, or before column `at`), `delete_column` (`col`), `set_column_type`, \
          `add_sheet` (`name`, `columns`, optional `types` and `rows`). The sheet actions that \
-         change structure quote the sheet block's `hash`. Rows inserted or deleted move the \
-         formulas, tiles and plots that read the rows below, and the answer says how many. Decks: `add_card` \
+         change structure quote the sheet block's `hash`. Rows or columns inserted or deleted move the \
+         formulas, tiles and plots that read what is below or to the right, and the answer says how many. Decks: `add_card` \
          (`title`, `markdown`, after `after_card`), `replace_card`, `move_card` (`to`), \
          `delete_card`, `set_notes` (`text`), `set_card_style` (`transition`, `background`, \
          `color`, `layout`; null clears one); a card is quoted by its `card` number and `hash`. \
@@ -115,11 +115,15 @@ impl HqTool for OfficeEditTool {
                 "integer",
                 "Table row, 0 is the header. delete_rows: the first row to delete.",
             ),
-            ("col", "integer", "Column, from 0."),
+            (
+                "col",
+                "integer",
+                "Column, from 0. delete_column: the column to delete.",
+            ),
             (
                 "at",
                 "integer",
-                "add_rows: insert before this table row (1 is the first row under the header); omit to add at the end.",
+                "add_rows: insert before this table row (1 is the first row under the header); omit to add at the end. add_column: insert before this column (from 0); omit to add on the right.",
             ),
             (
                 "count",
@@ -235,7 +239,7 @@ impl HqTool for OfficeEditTool {
         }
         props.insert(
             "expected".into(),
-            json!({"description": "set_cell: the text the cell holds now. set_cells: a grid of what each cell holds now. delete_rows: optionally, the rows being deleted."}),
+            json!({"description": "set_cell: the text the cell holds now. set_cells: a grid of what each cell holds now. delete_rows: optionally, the rows being deleted. delete_column: optionally, the column's header."}),
         );
         for (name, description) in [
             ("columns", "add_sheet: column names."),

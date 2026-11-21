@@ -1,9 +1,9 @@
 // Structure edits for sheets, sent to HQ's one edit route (`POST /api/suite/edit`, see suiteApi.ts).
 //
 // Every call quotes the sheet block's hash, read just before the call, so HQ refuses an edit made
-// from a page that is out of date (a 409/422 with a sentence). Inserting or deleting a column in the
-// middle is not something HQ does yet, so only a column on the right and a column's type are here.
-import { fetchBlocks, sheetAddColumn, sheetAddRows, sheetDeleteRows, sheetSetColumnType } from './suiteApi'
+// from a page that is out of date (a 409/422 with a sentence). Rows and columns inserted or deleted
+// move the formulas, tiles and plots that read what lies beyond them; HQ does that and says how many.
+import { fetchBlocks, sheetAddColumn, sheetAddRows, sheetDeleteColumn, sheetDeleteRows, sheetSetColumnType } from './suiteApi'
 
 export type OpResult = { ok: true } | { ok: false; reason: 'stale' | 'failed'; message: string }
 
@@ -17,8 +17,10 @@ export interface Target {
 export interface SuiteOps {
   /** Inserts a blank row at `at` (a data row number from 0), or deletes the row there. */
   rows(t: Target, action: 'insert' | 'delete', at: number): Promise<OpResult>
-  /** Adds a column on the right. */
-  addColumn(t: Target, name: string): Promise<OpResult>
+  /** Adds a column named `name` before column `at` (from 0), or on the right when `at` is left out. */
+  addColumn(t: Target, name: string, at?: number): Promise<OpResult>
+  /** Deletes column `col` (from 0). */
+  deleteColumn(t: Target, col: number): Promise<OpResult>
   columnType(t: Target, col: number, type: string): Promise<OpResult>
 }
 
@@ -47,7 +49,8 @@ export const suiteOps: SuiteOps = {
         ? sheetAddRows(t.path, { sheet: t.index, hash, rows: [['']], at: at + 1 })
         : sheetDeleteRows(t.path, { sheet: t.index, hash, row: at + 1, count: 1 }),
     ),
-  addColumn: (t, name) => guarded(t, (hash) => sheetAddColumn(t.path, { sheet: t.index, hash, name })),
+  addColumn: (t, name, at) => guarded(t, (hash) => sheetAddColumn(t.path, { sheet: t.index, hash, name, ...(at === undefined ? {} : { at }) })),
+  deleteColumn: (t, col) => guarded(t, (hash) => sheetDeleteColumn(t.path, { sheet: t.index, hash, col })),
   columnType: (t, col, type) => guarded(t, (hash) => sheetSetColumnType(t.path, { sheet: t.index, hash, col, type })),
 }
 

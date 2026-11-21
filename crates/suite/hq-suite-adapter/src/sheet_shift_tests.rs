@@ -171,3 +171,208 @@ fn spacing_and_other_blocks_are_untouched_and_a_formula_on_a_sidecar_sheet_is_no
         "# n\n\n```sheet name=S\n|  a |   b   |\n|----|-------|\n| 0 |  |\n|  1 | =A3+1 |\n|  2 | =A4+1 |\n```\n\nText with A3 in it.\n"
     );
 }
+
+// ---------------------------------------------------------------- columns
+
+fn without_col(rows: &[Vec<String>], col: usize) -> Vec<Vec<String>> {
+    rows.iter()
+        .map(|r| {
+            let mut r = r.clone();
+            r.remove(col);
+            r
+        })
+        .collect()
+}
+
+#[test]
+fn a_column_inserted_before_b_keeps_every_value_and_moves_the_formulas() {
+    let d = vault(NOTE);
+    let before = shown(&d, 0);
+    let h = hash(&d, 0);
+    let out = go(
+        &d,
+        json!({"action": "add_column", "hash": h, "at": 1, "name": "sku", "type": "text"}),
+    )
+    .unwrap();
+    let s = out["summary"].as_str().unwrap();
+    assert!(s.contains("Added column B `sku`"), "{s}");
+    assert!(s.contains("Adjusted 4 formulas"), "{s}");
+    let t = text(&d);
+    assert!(t.contains("types=\"text,text,int,ugx,ugx\""), "{t}");
+    assert!(t.contains("=C2*D2"), "{t}");
+    assert!(t.contains("=SUM(E2:E4)"), "{t}");
+    let after = shown(&d, 0);
+    assert_eq!(without_col(&after, 1), before);
+    assert_eq!(after[0][1], "sku");
+}
+
+#[test]
+fn add_column_without_at_still_goes_on_the_right_and_at_past_the_end_is_refused() {
+    let d = vault(NOTE);
+    let h = hash(&d, 0);
+    let e = go(
+        &d,
+        json!({"action": "add_column", "hash": h, "at": 9, "name": "x"}),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(e.contains("`at` must be from 0"), "{e}");
+    let out = go(
+        &d,
+        json!({"action": "add_column", "hash": h, "at": 4, "name": "x"}),
+    )
+    .unwrap();
+    assert!(!out["summary"].as_str().unwrap().contains("Adjusted"));
+    // The header keeps its own padding; the new cell is appended after it.
+    assert!(
+        text(&d).contains("| item  | qty | price | total  | x |"),
+        "{}",
+        text(&d)
+    );
+}
+
+#[test]
+fn deleting_a_column_a_formula_reads_shows_ref_and_keeps_the_others() {
+    let d = vault(NOTE);
+    let before = shown(&d, 0);
+    let h = hash(&d, 0);
+    let out = go(
+        &d,
+        json!({"action": "delete_column", "hash": h, "col": 1, "expected": "qty"}),
+    )
+    .unwrap();
+    let s = out["summary"].as_str().unwrap();
+    assert!(s.contains("Deleted column B `qty`"), "{s}");
+    assert!(s.contains("#REF!"), "{s}");
+    let t = text(&d);
+    assert!(t.contains("types=\"text,ugx,ugx\""), "{t}");
+    assert!(t.contains("=#REF!*B2"), "{t}");
+    assert!(t.contains("=SUM(C2:C4)"), "{t}");
+    let after = shown(&d, 0);
+    assert_eq!(after[1][..2], without_col(&before, 1)[1][..2]);
+    // The calc engine cannot read a #REF! token, so the cell shows an error rather than a number.
+    assert!(after[1][2].starts_with('#'), "{}", after[1][2]);
+}
+
+#[test]
+fn deleting_a_column_nothing_reads_leaves_every_other_value() {
+    let d = vault(NOTE);
+    let before = shown(&d, 0);
+    let h = hash(&d, 0);
+    go(&d, json!({"action": "delete_column", "hash": h, "col": 0})).unwrap();
+    let after = shown(&d, 0);
+    assert_eq!(after, without_col(&before, 0));
+    let t = text(&d);
+    assert!(t.contains("=A2*B2"), "{t}");
+}
+
+#[test]
+fn delete_column_is_checked_and_an_agent_sees_a_preview_first() {
+    let d = vault(NOTE);
+    let h = hash(&d, 0);
+    let stale = go(
+        &d,
+        json!({"action": "delete_column", "hash": h, "col": 1, "expected": "price"}),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(stale.contains("is `qty`, not `price`"), "{stale}");
+    let past = go(&d, json!({"action": "delete_column", "hash": h, "col": 7}))
+        .unwrap_err()
+        .to_string();
+    assert!(past.contains("is not one"), "{past}");
+    let mut args = json!({"action": "delete_column", "hash": h, "col": 0, "note": REL});
+    args["note"] = json!(REL);
+    let before = text(&d);
+    let out = run(d.path(), &args, Gate::Agent).unwrap();
+    assert_eq!(out["preview"], true);
+    assert_eq!(out["destructive"], true);
+    assert_eq!(text(&d), before);
+}
+
+#[test]
+fn the_last_column_cannot_be_deleted() {
+    let d = vault("```sheet name=S\n| a |\n|---|\n| 1 |\n```\n");
+    let h = hash(&d, 0);
+    let e = go(&d, json!({"action": "delete_column", "hash": h, "col": 0}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("only column cannot be deleted"), "{e}");
+}
+
+#[test]
+fn tiles_plots_other_sheets_and_whole_columns_follow_a_column_insert() {
+    let note = "# n\n\n```sheet name=Names\n| who | n | m |\n|-----|---|---|\n| Ann | 1 | 2 |\n| Bob | 2 | 3 |\n```\n\n```tile from=\"B2:B3\" fn=sum label=Total\n```\n\n```plot from=\"[[n]]!A1:C3\" kind=bar\n```\n\n```tile from=\"[[Elsewhere]]!B2:B3\" fn=sum label=Far\n```\n\n```sheet name=Other\n| v |\n|---|\n| =SUM(names!B:B) |\n| =SUM(B2:B3) |\n```\n";
+    let d = vault(note);
+    let h = hash(&d, 0);
+    let out = go(
+        &d,
+        json!({"action": "add_column", "hash": h, "at": 0, "name": "id"}),
+    )
+    .unwrap();
+    let after = text(&d);
+    assert!(after.contains("from=\"C2:C3\""), "{after}");
+    assert!(after.contains("[[n]]!B1:D3"), "{after}");
+    assert!(after.contains("[[Elsewhere]]!B2:B3"), "{after}");
+    assert!(after.contains("=SUM(names!C:C)"), "{after}");
+    assert!(after.contains("| =SUM(B2:B3) |"), "{after}");
+    let s = out["summary"].as_str().unwrap();
+    assert!(s.contains("Adjusted 1 formula, 1 tile and 1 chart"), "{s}");
+}
+
+#[test]
+fn deleting_every_column_a_tile_reads_is_refused_in_one_plain_sentence() {
+    let note = "```sheet name=Names\n| who | n |\n|-----|---|\n| Ann | 1 |\n```\n\n```tile from=\"B2:B2\" fn=sum label=Total\n```\n";
+    let d = vault(note);
+    let h = hash(&d, 0);
+    let before = text(&d);
+    let e = go(&d, json!({"action": "delete_column", "hash": h, "col": 1}))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("a tile block reads only the columns you are deleting"),
+        "{e}"
+    );
+    assert_eq!(text(&d), before);
+}
+
+#[test]
+fn inserting_then_deleting_a_column_gives_the_note_back() {
+    let note = "# n\n\n```sheet name=S types=\"int,int\"\n| a | b |\n|---|---|\n| 1 | =A2+1 |\n| 2 | =SUM(A2:B3) |\n```\n\n```tile from=\"A2:B3\" fn=sum label=T\n```\n";
+    let d = vault(note);
+    let h = hash(&d, 0);
+    go(
+        &d,
+        json!({"action": "add_column", "hash": h, "at": 1, "name": "x", "type": "num"}),
+    )
+    .unwrap();
+    assert_ne!(text(&d), note);
+    let h = hash(&d, 0);
+    go(
+        &d,
+        json!({"action": "delete_column", "hash": h, "col": 1, "expected": "x"}),
+    )
+    .unwrap();
+    assert_eq!(text(&d), note);
+}
+
+#[test]
+fn deleting_a_column_a_plot_names_is_refused_but_one_it_does_not_name_goes() {
+    let note =
+        format!("{NOTE}\n```plot type=bar from=\"A1:D4\" x=item y=qty where=\"price>1000\"\n```\n");
+    let d = vault(&note);
+    let h = hash(&d, 0);
+    for col in [0, 1, 2] {
+        let e = go(
+            &d,
+            json!({"action": "delete_column", "hash": h, "col": col}),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            e.contains("uses the column") && e.contains("by name"),
+            "{col}: {e}"
+        );
+    }
+    assert_eq!(text(&d), note);
+}
