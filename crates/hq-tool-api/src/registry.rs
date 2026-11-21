@@ -306,6 +306,47 @@ pub struct ToolSummary {
 }
 
 impl ToolSummary {
+    /// One-line call shape built from the parameter schema: `name(path*: string, limit?: integer)`.
+    /// A `*` marks a required argument, a `?` an optional one. No descriptions, so it costs a
+    /// fraction of the full schema while still telling the model what to pass.
+    pub fn signature(&self) -> String {
+        let props = self
+            .parameters
+            .get("properties")
+            .and_then(|p| p.as_object());
+        let required: Vec<&str> = self
+            .parameters
+            .get("required")
+            .and_then(|r| r.as_array())
+            .map(|r| r.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        let mut args: Vec<String> = Vec::new();
+        if let Some(props) = props {
+            let mut keys: Vec<&String> = props.keys().collect();
+            // Required first, then optional, each in name order, so the line is stable.
+            keys.sort_by_key(|k| (!required.contains(&k.as_str()), k.to_string()));
+            for k in keys {
+                let ty = match props[k].get("type") {
+                    Some(Value::String(t)) => t.clone(),
+                    Some(Value::Array(a)) => a
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .find(|t| *t != "null")
+                        .unwrap_or("any")
+                        .to_string(),
+                    _ => "any".to_string(),
+                };
+                let mark = if required.contains(&k.as_str()) {
+                    "*"
+                } else {
+                    "?"
+                };
+                args.push(format!("{k}{mark}: {ty}"));
+            }
+        }
+        format!("{}({})", self.name, args.join(", "))
+    }
+
     fn from_tool(t: &dyn HqTool) -> Self {
         Self {
             name: t.name().to_string(),
@@ -385,29 +426,51 @@ impl ToolRegistry {
     /// - If `category` is `Some`, only tools whose category matches are returned.
     /// - If `query` is `Some`, the name and description are searched (case-insensitive substring).
     pub fn discover(&self, category: Option<&str>, query: Option<&str>) -> Vec<ToolSummary> {
-        let mut out: Vec<ToolSummary> = self
+        // Name order first, so equal scores (and a category-only call) come back alphabetically.
+        let mut tools: Vec<&dyn HqTool> = self
             .tools
             .values()
-            .filter(|t| {
-                if let Some(cat) = category
-                    && t.category() != cat
-                {
-                    return false;
-                }
-                if let Some(q) = query {
-                    let q_lower = q.to_lowercase();
-                    let in_name = t.name().to_lowercase().contains(&q_lower);
-                    let in_desc = t.description().to_lowercase().contains(&q_lower);
-                    if !in_name && !in_desc {
-                        return false;
-                    }
-                }
-                true
-            })
-            .map(|t| ToolSummary::from_tool(t.as_ref()))
+            .map(|t| t.as_ref())
+            .filter(|t| category.is_none_or(|cat| t.category() == cat))
             .collect();
-        out.sort_by(|a, b| a.name.cmp(&b.name));
-        out
+        tools.sort_by(|a, b| a.name().cmp(b.name()));
+
+        let Some(q) = query.map(str::trim).filter(|q| !q.is_empty()) else {
+            return tools.into_iter().map(ToolSummary::from_tool).collect();
+        };
+
+        // Ranked by the shared offline scorer, best match first.
+        let hints: Vec<std::borrow::Cow<'_, str>> =
+            tools.iter().map(|t| t.effective_hint()).collect();
+        let docs: Vec<crate::tool_rank::RankDoc<'_>> = tools
+            .iter()
+            .zip(&hints)
+            .map(|(t, hint)| crate::tool_rank::RankDoc {
+                name: t.name(),
+                hint,
+                description: t.description(),
+                keywords: &[],
+            })
+            .collect();
+        let ranked = crate::tool_rank::rank(&docs, q, usize::MAX);
+        if !ranked.is_empty() {
+            return ranked
+                .into_iter()
+                .map(|i| ToolSummary::from_tool(tools[i]))
+                .collect();
+        }
+
+        // Nothing scored: fall back to the old literal substring test, so a fragment such as
+        // "vault_s" still finds what it used to.
+        let q_lower = q.to_lowercase();
+        tools
+            .into_iter()
+            .filter(|t| {
+                t.name().to_lowercase().contains(&q_lower)
+                    || t.description().to_lowercase().contains(&q_lower)
+            })
+            .map(ToolSummary::from_tool)
+            .collect()
     }
 
     /// Return tool summaries visible at or below `max_policy`.
@@ -880,5 +943,42 @@ mod tests {
         let mut reg = ToolRegistry::new();
         reg.register(Box::new(FakeTool::new("plain", "Does a thing", "misc")));
         assert!(reg.behavioral_block(180).is_empty());
+    }
+
+    #[test]
+    fn signature_marks_required_first_then_optional_with_types() {
+        let summary = ToolSummary {
+            name: "file_read".into(),
+            description: String::new(),
+            category: "files".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer"},
+                    "path": {"type": "string"},
+                    "mode": {"type": ["string", "null"]},
+                },
+                "required": ["path"],
+            }),
+            search_hint: None,
+            behavioral_prompt: None,
+        };
+        assert_eq!(
+            summary.signature(),
+            "file_read(path*: string, limit?: integer, mode?: string)"
+        );
+    }
+
+    #[test]
+    fn signature_of_a_tool_with_no_parameters_is_empty_parens() {
+        let summary = ToolSummary {
+            name: "ping".into(),
+            description: String::new(),
+            category: "x".into(),
+            parameters: serde_json::json!({}),
+            search_hint: None,
+            behavioral_prompt: None,
+        };
+        assert_eq!(summary.signature(), "ping()");
     }
 }

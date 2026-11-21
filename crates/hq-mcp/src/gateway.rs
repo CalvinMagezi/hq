@@ -15,7 +15,19 @@ use tracing::debug;
 struct DiscoverArgs {
     category: Option<String>,
     query: Option<String>,
+    /// Most tools to return. Defaults to 5 for a query and 25 for a category.
+    limit: Option<usize>,
+    /// Return the full description and parameter schema for each tool.
+    #[serde(default)]
+    detail: bool,
 }
+
+/// Most tools one compact `hq_discover` call returns, whatever `limit` says.
+const MAX_COMPACT: usize = 50;
+/// Most tools one `detail: true` call returns: full schemas are the expensive form.
+const MAX_DETAIL: usize = 10;
+const DEFAULT_QUERY_LIMIT: usize = 5;
+const DEFAULT_CATEGORY_LIMIT: usize = 25;
 
 /// Parameters for the `hq_call` tool.
 #[derive(Debug, Deserialize)]
@@ -193,7 +205,15 @@ pub fn create_gateway_tools_scoped(registry: &ToolRegistry, allowed: Option<&[&s
             },
             "query": {
                 "type": "string",
-                "description": "Free-text search across tool names and descriptions"
+                "description": "What you want to do, in your own words. Results are ranked best first."
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Most tools to return (default 5 for a query, 25 for a category)"
+            },
+            "detail": {
+                "type": "boolean",
+                "description": "Return full descriptions and parameter schemas instead of the compact call shape"
             }
         },
         "required": []
@@ -217,7 +237,7 @@ pub fn create_gateway_tools_scoped(registry: &ToolRegistry, allowed: Option<&[&s
     vec![
         Tool::new(
             "hq_discover",
-            "Discover available Agent-HQ tools. With no arguments, returns an index of every tool by category with a one-line summary. With category and/or query, returns the matching tools with descriptions and parameter schemas.",
+            "Discover available Agent-HQ tools. With no arguments, returns an index of every tool by category with a one-line summary. With category and/or query, returns the best matches ranked, each with its call shape (* required, ? optional); pass detail true or a tool's exact name for the full parameter schema.",
             rmcp::model::object(discover_schema),
         ),
         Tool::new(
@@ -250,11 +270,65 @@ pub(crate) fn handle_discover(
     let body = if args.category.is_none() && args.query.is_none() {
         discover_index(&results)
     } else {
-        serde_json::to_value(&results).unwrap_or_else(|_| json!([]))
+        discover_matches(&results, &args)
     };
     let json_str = serde_json::to_string_pretty(&body).unwrap_or_else(|_| "[]".to_string());
 
     Ok(CallToolResult::success(vec![ContentBlock::text(json_str)]))
+}
+
+/// The matches for a category or query. Compact by default: the call shape and a one-line
+/// summary, about a tenth of the full schema. `detail: true` (or a query that is exactly one
+/// tool's name) returns the full description and parameter schema instead. A cut list says how
+/// many more there were, so the model can narrow the query rather than guess.
+fn discover_matches(results: &[hq_tool_api::registry::ToolSummary], args: &DiscoverArgs) -> Value {
+    let exact = args.query.as_deref().is_some_and(|q| {
+        results
+            .first()
+            .is_some_and(|t| t.name.eq_ignore_ascii_case(q.trim()))
+    });
+    let full = args.detail || exact;
+    let default = if args.query.is_some() {
+        DEFAULT_QUERY_LIMIT
+    } else {
+        DEFAULT_CATEGORY_LIMIT
+    };
+    let ceiling = if full { MAX_DETAIL } else { MAX_COMPACT };
+    // An exact name is one tool, whatever the limit says.
+    let limit = if exact {
+        1
+    } else {
+        args.limit.unwrap_or(default).clamp(1, ceiling)
+    };
+    let shown = &results[..results.len().min(limit)];
+    let tools: Vec<Value> = shown
+        .iter()
+        .map(|t| {
+            if full {
+                serde_json::to_value(t).unwrap_or(Value::Null)
+            } else {
+                json!({
+                    "name": t.name,
+                    "category": t.category,
+                    "call": t.signature(),
+                    "summary": index_summary(t),
+                })
+            }
+        })
+        .collect();
+    let mut out = json!({ "tools": tools });
+    let more = results.len() - shown.len();
+    if more > 0 {
+        out["more"] = json!(more);
+        out["next"] = json!(
+            "More tools match. Narrow the query, raise limit, or call one tool by name with detail true for its full schema."
+        );
+    } else if !full && !shown.is_empty() {
+        out["next"] = json!(
+            "Call hq_discover with a tool's exact name for its full schema, or hq_call it using the call shape (* required, ? optional)."
+        );
+    }
+    out
 }
 
 /// Longest one-line summary the index gives a tool.
@@ -790,6 +864,35 @@ mod tests {
         }
         fn parameters(&self) -> serde_json::Value {
             serde_json::json!({})
+        }
+        async fn execute(&self, _args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+            Ok(serde_json::json!({"ok": true}))
+        }
+    }
+
+    /// A tool with a realistic schema: several arguments, each with a sentence of description.
+    struct WideTool;
+
+    #[async_trait::async_trait]
+    impl HqTool for WideTool {
+        fn name(&self) -> &str {
+            "note_find"
+        }
+        fn description(&self) -> &str {
+            "Find notes in the vault by words, folder, tag or date. Returns titles and short excerpts."
+        }
+        fn parameters(&self) -> serde_json::Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Words to look for in the title and body of each note, matched without regard to case."},
+                    "folder": {"type": "string", "description": "Only look inside this folder of the vault, given as a path relative to the vault root."},
+                    "tag": {"type": "string", "description": "Only return notes carrying this tag, written without the leading hash sign."},
+                    "since": {"type": "string", "description": "Only return notes changed on or after this date, written as year-month-day."},
+                    "limit": {"type": "integer", "description": "The most notes to return, between one and fifty. Defaults to ten."}
+                },
+                "required": ["query"]
+            })
         }
         async fn execute(&self, _args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
             Ok(serde_json::json!({"ok": true}))
@@ -1503,10 +1606,93 @@ mod tests {
         assert_eq!(entry["summary"], "test tool");
         assert!(!index.to_string().contains("parameters"));
 
+        // A query is compact by default: the call shape and a summary, no schema.
         let query = json!({"query": "vault"});
         let found = text_of(query.as_object());
-        assert_eq!(found[0]["name"], "vault_search");
-        assert!(found[0].get("parameters").is_some());
+        assert_eq!(found["tools"][0]["name"], "vault_search");
+        assert!(
+            found["tools"][0]["call"]
+                .as_str()
+                .unwrap()
+                .starts_with("vault_search(")
+        );
+        assert!(found["tools"][0].get("parameters").is_none());
+
+        // `detail: true` brings the schema back.
+        let query = json!({"query": "vault", "detail": true});
+        let found = text_of(query.as_object());
+        assert!(found["tools"][0].get("parameters").is_some());
+
+        // So does asking for one tool by its exact name.
+        let query = json!({"query": "vault_search"});
+        let found = text_of(query.as_object());
+        assert!(found["tools"][0].get("parameters").is_some());
+    }
+
+    fn registry_of(names: &[&'static str]) -> ToolRegistry {
+        let mut registry = ToolRegistry::new();
+        for name in names {
+            registry.register(Box::new(DummyTool { name }));
+        }
+        registry
+    }
+
+    fn discover_json(registry: &ToolRegistry, args: Value, allowed: Option<&[&str]>) -> Value {
+        let map = args.as_object().unwrap().clone();
+        let r = handle_discover(registry, Some(&map), allowed).unwrap();
+        serde_json::from_str(&r.content[0].as_text().unwrap().text).unwrap()
+    }
+
+    #[test]
+    fn a_multi_word_query_finds_tools_the_old_phrase_match_missed() {
+        let registry = registry_of(&["vault_search", "vault_write_note", "web_fetch"]);
+        let found = discover_json(&registry, json!({"query": "search my vault"}), None);
+        assert_eq!(found["tools"][0]["name"], "vault_search");
+    }
+
+    #[test]
+    fn a_fragment_that_matches_no_word_still_falls_back_to_substring() {
+        let registry = registry_of(&["vault_search", "web_fetch"]);
+        let found = discover_json(&registry, json!({"query": "ault_sea"}), None);
+        assert_eq!(found["tools"][0]["name"], "vault_search");
+    }
+
+    #[test]
+    fn results_are_capped_and_say_how_many_more_there_were() {
+        let registry = registry_of(&[
+            "vault_a", "vault_b", "vault_c", "vault_d", "vault_e", "vault_f", "vault_g",
+        ]);
+        let found = discover_json(&registry, json!({"query": "vault"}), None);
+        assert_eq!(found["tools"].as_array().unwrap().len(), 5);
+        assert_eq!(found["more"], 2);
+
+        let found = discover_json(&registry, json!({"query": "vault", "limit": 2}), None);
+        assert_eq!(found["tools"].as_array().unwrap().len(), 2);
+        assert_eq!(found["more"], 5);
+    }
+
+    #[test]
+    fn the_allowlist_applies_before_the_cap() {
+        let registry = registry_of(&["vault_a", "vault_b", "vault_c"]);
+        let allowed = ["vault_c"];
+        let found = discover_json(&registry, json!({"query": "vault"}), Some(&allowed));
+        assert_eq!(found["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(found["tools"][0]["name"], "vault_c");
+        assert!(found.get("more").is_none());
+    }
+
+    #[test]
+    fn the_compact_form_is_far_smaller_than_the_full_schema() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(WideTool));
+        let compact = discover_json(&registry, json!({"query": "notes"}), None);
+        assert_eq!(
+            compact["tools"][0]["call"],
+            "note_find(query*: string, folder?: string, limit?: integer, since?: string, tag?: string)"
+        );
+        let full = discover_json(&registry, json!({"query": "notes", "detail": true}), None);
+        let (c, f) = (compact.to_string().len(), full.to_string().len());
+        assert!(c * 2 < f, "compact {c} bytes vs full {f} bytes");
     }
 
     #[tokio::test]
