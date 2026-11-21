@@ -77,7 +77,7 @@ pub(crate) fn broadcast_related(state: &Arc<WsState>, ids: Vec<String>) {
 }
 
 pub(crate) async fn list_spaces_handler(State(state): State<Arc<WsState>>) -> Response {
-    match state.db.with_conn(t::list_spaces) {
+    match state.db_blocking(t::list_spaces).await {
         Ok(spaces) => Json(json!({
             "spaces": spaces.iter().map(|s| json!({
                 "id": s.id, "name": s.name, "slug": s.slug, "created_at": s.created_at,
@@ -103,8 +103,8 @@ pub(crate) async fn create_space_handler(
     let id = hq_tool_api::util::generate_id("sp");
     let space_slug = slug(&body.name);
     match state
-        .db
-        .with_conn(move |c| t::create_space(c, &id, &body.name, &space_slug))
+        .db_blocking(move |c| t::create_space(c, &id, &body.name, &space_slug))
+        .await
     {
         Ok(space) => {
             Json(json!({ "id": space.id, "name": space.name, "slug": space.slug })).into_response()
@@ -123,8 +123,8 @@ pub(crate) async fn list_folders_handler(
     Query(params): Query<ListFoldersParams>,
 ) -> Response {
     match state
-        .db
-        .with_conn(move |c| t::list_folders(c, params.space_id.as_deref()))
+        .db_blocking(move |c| t::list_folders(c, params.space_id.as_deref()))
+        .await
     {
         Ok(folders) => Json(json!({
             "folders": folders.iter().map(|f| json!({
@@ -150,8 +150,8 @@ pub(crate) async fn create_folder_handler(
         return ApiError::bad_request("space_id and name are required").into_response();
     }
     let result = state
-        .db
-        .with_conn(move |c| find_or_create_folder(c, &body.space_id, &body.name));
+        .db_blocking(move |c| find_or_create_folder(c, &body.space_id, &body.name))
+        .await;
     match result {
         Ok(folder) => {
             Json(json!({ "id": folder.id, "space_id": folder.space_id, "name": folder.name, "slug": folder.slug }))
@@ -177,14 +177,17 @@ pub(crate) async fn list_initiatives_handler(
         Ok(shelf) => shelf,
         Err(e) => return ApiError::from(e).into_response(),
     };
-    match state.db.with_conn(move |c| {
-        t::list_initiatives_on_shelf(
-            c,
-            params.space_id.as_deref(),
-            params.folder_id.as_deref().map(Some),
-            shelf,
-        )
-    }) {
+    match state
+        .db_blocking(move |c| {
+            t::list_initiatives_on_shelf(
+                c,
+                params.space_id.as_deref(),
+                params.folder_id.as_deref().map(Some),
+                shelf,
+            )
+        })
+        .await
+    {
         Ok(initiatives) => Json(json!({
             "initiatives": initiatives.iter().map(|i| json!({
                 "id": i.id, "space_id": i.space_id, "folder_id": i.folder_id, "name": i.name,
@@ -213,30 +216,32 @@ pub(crate) async fn create_initiative_handler(
     }
     let id = hq_tool_api::util::generate_id("in");
     let initiative_slug = slug(&body.name);
-    let result = state.db.with_conn(move |c| {
-        let space_id = resolve_space_id(c, &body.space_id)?;
-        let space = t::get_space(c, &space_id)?
-            .ok_or_else(|| not_found(format!("space '{space_id}' does not exist")))?;
-        let folder_id = match &body.folder {
-            Some(fname) if !fname.trim().is_empty() => {
-                Some(find_or_create_folder(c, &space_id, fname)?.id)
-            }
-            _ => None,
-        };
-        let id_prefix = match body.id_prefix {
-            Some(p) if !p.trim().is_empty() => p,
-            _ => derive_id_prefix(c, &space.slug, &body.name)?,
-        };
-        t::create_initiative(
-            c,
-            &id,
-            &space.id,
-            folder_id.as_deref(),
-            &body.name,
-            &initiative_slug,
-            &id_prefix,
-        )
-    });
+    let result = state
+        .db_blocking(move |c| {
+            let space_id = resolve_space_id(c, &body.space_id)?;
+            let space = t::get_space(c, &space_id)?
+                .ok_or_else(|| not_found(format!("space '{space_id}' does not exist")))?;
+            let folder_id = match &body.folder {
+                Some(fname) if !fname.trim().is_empty() => {
+                    Some(find_or_create_folder(c, &space_id, fname)?.id)
+                }
+                _ => None,
+            };
+            let id_prefix = match body.id_prefix {
+                Some(p) if !p.trim().is_empty() => p,
+                _ => derive_id_prefix(c, &space.slug, &body.name)?,
+            };
+            t::create_initiative(
+                c,
+                &id,
+                &space.id,
+                folder_id.as_deref(),
+                &body.name,
+                &initiative_slug,
+                &id_prefix,
+            )
+        })
+        .await;
     match result {
         Ok(initiative) => Json(json!({
             "id": initiative.id, "space_id": initiative.space_id, "folder_id": initiative.folder_id,
@@ -309,8 +314,8 @@ pub(crate) async fn list_tasks_handler(
     };
     let offset = filter.offset;
     let page = state
-        .db
-        .with_conn(move |c| Ok((t::list_tasks(c, &filter)?, t::count_tasks(c, &filter)?)));
+        .db_blocking(move |c| Ok((t::list_tasks(c, &filter)?, t::count_tasks(c, &filter)?)))
+        .await;
     match page {
         Ok((tasks, total)) => Json(json!({
             "count": tasks.len(),
@@ -382,57 +387,59 @@ pub(crate) async fn create_task_handler(
         hq_db::client_ids::usable(body.client_id.as_deref())
             .map(|c| format!("{CLIENT_ID_PREFIX}{c}"))
     });
-    let result = state.db.with_conn(move |c| {
-        let parent = match &body.parent_task_id {
-            Some(pid) => Some(
-                t::get_task(c, pid)?
-                    .ok_or_else(|| not_found(format!("parent task {pid} not found")))?,
-            ),
-            None => None,
-        };
-        let initiative_id = match (&body.initiative_id, &parent) {
-            (Some(iid), _) => {
-                t::get_initiative(c, iid)?
-                    .ok_or_else(|| not_found(format!("initiative '{iid}' does not exist")))?
+    let result = state
+        .db_blocking(move |c| {
+            let parent = match &body.parent_task_id {
+                Some(pid) => Some(
+                    t::get_task(c, pid)?
+                        .ok_or_else(|| not_found(format!("parent task {pid} not found")))?,
+                ),
+                None => None,
+            };
+            let initiative_id = match (&body.initiative_id, &parent) {
+                (Some(iid), _) => {
+                    t::get_initiative(c, iid)?
+                        .ok_or_else(|| not_found(format!("initiative '{iid}' does not exist")))?
+                        .id
+                }
+                (None, Some(p)) => p.initiative_id.clone(),
+                (None, None) => {
+                    find_or_create_initiative(
+                        c,
+                        &body.space_id,
+                        body.folder.as_deref(),
+                        &body.initiative,
+                    )?
                     .id
+                }
+            };
+            let (task, created) = t::create_task_dedup(
+                c,
+                &id,
+                &initiative_id,
+                &t::NewTask {
+                    title: &body.title,
+                    description: &body.description,
+                    priority: body.priority.as_deref(),
+                    due_date: body.due_date.as_deref(),
+                    start_date: body.start_date.as_deref(),
+                    parent_task_id: body.parent_task_id.as_deref(),
+                    tags: &body.tags,
+                    assignees: &body.assignees,
+                    created_by: &body.created_by,
+                    external_id: external_id.as_deref(),
+                    estimate_minutes: body.estimate_minutes,
+                    long_horizon: body.long_horizon,
+                },
+            )?;
+            if body.depends_on.is_empty() || !created {
+                return Ok((task, created));
             }
-            (None, Some(p)) => p.initiative_id.clone(),
-            (None, None) => {
-                find_or_create_initiative(
-                    c,
-                    &body.space_id,
-                    body.folder.as_deref(),
-                    &body.initiative,
-                )?
-                .id
-            }
-        };
-        let (task, created) = t::create_task_dedup(
-            c,
-            &id,
-            &initiative_id,
-            &t::NewTask {
-                title: &body.title,
-                description: &body.description,
-                priority: body.priority.as_deref(),
-                due_date: body.due_date.as_deref(),
-                start_date: body.start_date.as_deref(),
-                parent_task_id: body.parent_task_id.as_deref(),
-                tags: &body.tags,
-                assignees: &body.assignees,
-                created_by: &body.created_by,
-                external_id: external_id.as_deref(),
-                estimate_minutes: body.estimate_minutes,
-                long_horizon: body.long_horizon,
-            },
-        )?;
-        if body.depends_on.is_empty() || !created {
-            return Ok((task, created));
-        }
-        apply_dependency_changes(c, &task.id, &body.depends_on, &[], &body.created_by)?;
-        let task = t::get_task(c, &task.id)?.ok_or_else(|| vanished(&task.id))?;
-        Ok((task, created))
-    });
+            apply_dependency_changes(c, &task.id, &body.depends_on, &[], &body.created_by)?;
+            let task = t::get_task(c, &task.id)?.ok_or_else(|| vanished(&task.id))?;
+            Ok((task, created))
+        })
+        .await;
     match result {
         Ok((task, false)) => {
             let mut out = task_json(&task);
@@ -519,38 +526,41 @@ pub(crate) async fn update_task_handler(
     let (add_deps, remove_deps) = (body.add_depends_on, body.remove_depends_on);
     // One transaction: the status and the dependency change commit together or
     // not at all, and `previous` is read under the same write lock.
-    let result = state.db.with_conn(move |c| {
-        t::in_write_tx(c, |c| {
-            let previous =
-                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
-            if let Some(expected) = expected_status.as_deref().filter(|e| *e != previous.status) {
-                return Err(ApiError::Conflict(format!(
-                    "task {id} was not in expected status '{expected}' (claim conflict)"
-                ))
-                .into());
-            }
-            // A person at the board, not an agent: the events say so, which is what lets a
-            // completion here count as someone other than the worker accepting the task.
-            let ctx = t::WriteCtx {
-                actor: Some(t::WEB_ACTOR),
-                work_session_id: None,
-                // The web credential is the owner's: the one caller that may complete a task
-                // directly while completion is verified.
-                owner: true,
-                verdict_id: None,
-            };
-            let mut task = t::update_task_as(c, &id, &patch, expected_status.as_deref(), &ctx)?;
-            if !add_deps.is_empty() || !remove_deps.is_empty() {
-                apply_dependency_changes(c, &task.id, &add_deps, &remove_deps, "web")?;
-                task = t::get_task(c, &task.id)?.ok_or_else(|| vanished(&id))?;
-            }
-            let previous_status = Some(previous.status.as_str());
-            let became_ready = task.status == t::STATUS_READY_FOR_REVIEW
-                && previous_status != Some(t::STATUS_READY_FOR_REVIEW);
-            let unblocked = unblocked_by_transition(c, previous_status, &task)?;
-            Ok((task, became_ready, unblocked, previous))
+    let result = state
+        .db_blocking(move |c| {
+            t::in_write_tx(c, |c| {
+                let previous =
+                    t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+                if let Some(expected) = expected_status.as_deref().filter(|e| *e != previous.status)
+                {
+                    return Err(ApiError::Conflict(format!(
+                        "task {id} was not in expected status '{expected}' (claim conflict)"
+                    ))
+                    .into());
+                }
+                // A person at the board, not an agent: the events say so, which is what lets a
+                // completion here count as someone other than the worker accepting the task.
+                let ctx = t::WriteCtx {
+                    actor: Some(t::WEB_ACTOR),
+                    work_session_id: None,
+                    // The web credential is the owner's: the one caller that may complete a task
+                    // directly while completion is verified.
+                    owner: true,
+                    verdict_id: None,
+                };
+                let mut task = t::update_task_as(c, &id, &patch, expected_status.as_deref(), &ctx)?;
+                if !add_deps.is_empty() || !remove_deps.is_empty() {
+                    apply_dependency_changes(c, &task.id, &add_deps, &remove_deps, "web")?;
+                    task = t::get_task(c, &task.id)?.ok_or_else(|| vanished(&id))?;
+                }
+                let previous_status = Some(previous.status.as_str());
+                let became_ready = task.status == t::STATUS_READY_FOR_REVIEW
+                    && previous_status != Some(t::STATUS_READY_FOR_REVIEW);
+                let unblocked = unblocked_by_transition(c, previous_status, &task)?;
+                Ok((task, became_ready, unblocked, previous))
+            })
         })
-    });
+        .await;
     match result {
         Ok((task, became_ready_for_review, unblocked, previous)) => {
             let old_parent = previous.parent_task_id.clone();
@@ -582,10 +592,13 @@ pub(crate) async fn list_task_events_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
 ) -> Response {
-    let result = state.db.with_conn(move |c| {
-        let task = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
-        t::list_task_events(c, &task.id)
-    });
+    let result = state
+        .db_blocking(move |c| {
+            let task =
+                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            t::list_task_events(c, &task.id)
+        })
+        .await;
     match result {
         Ok(events) => Json(json!({ "events": events })).into_response(),
         Err(e) => ApiError::from(e).into_response(),
@@ -598,10 +611,13 @@ pub(crate) async fn task_time_handler(
     AxumPath(id): AxumPath<String>,
 ) -> Response {
     let ttl = hq_tools::tasks::lease_ttl_secs();
-    let result = state.db.with_conn(move |c| {
-        let task = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
-        t::time_summary(c, &task.id, ttl)
-    });
+    let result = state
+        .db_blocking(move |c| {
+            let task =
+                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            t::time_summary(c, &task.id, ttl)
+        })
+        .await;
     match result {
         Ok(summary) => Json(json!(summary)).into_response(),
         Err(e) => ApiError::from(e).into_response(),
@@ -633,7 +649,10 @@ pub(crate) async fn time_report_handler(
 ) -> Response {
     let days = window_days(&params);
     let ttl = hq_tools::tasks::lease_ttl_secs();
-    match state.db.with_conn(move |c| t::time_report(c, days, ttl)) {
+    match state
+        .db_blocking(move |c| t::time_report(c, days, ttl))
+        .await
+    {
         Ok(report) => Json(json!({ "days": days, "report": report })).into_response(),
         Err(e) => ApiError::from(e).into_response(),
     }
@@ -646,11 +665,13 @@ pub(crate) async fn recent_work_sessions_handler(
 ) -> Response {
     let days = window_days(&params);
     let ttl = hq_tools::tasks::lease_ttl_secs();
-    let result = state.db.with_conn(move |c| {
-        t::expire_stale_leases(c, ttl)?;
-        // One more than the cap, so a cut list can say it was cut.
-        t::list_recent_work_sessions(c, days, TIMELINE_SESSIONS_CAP + 1)
-    });
+    let result = state
+        .db_blocking(move |c| {
+            t::expire_stale_leases(c, ttl)?;
+            // One more than the cap, so a cut list can say it was cut.
+            t::list_recent_work_sessions(c, days, TIMELINE_SESSIONS_CAP + 1)
+        })
+        .await;
     match result {
         Ok(mut sessions) => {
             let truncated = sessions.len() > TIMELINE_SESSIONS_CAP;
@@ -666,10 +687,13 @@ pub(crate) async fn list_task_links_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
 ) -> Response {
-    let result = state.db.with_conn(move |c| {
-        let task = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
-        t::list_task_links(c, &task.id)
-    });
+    let result = state
+        .db_blocking(move |c| {
+            let task =
+                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            t::list_task_links(c, &task.id)
+        })
+        .await;
     match result {
         Ok(links) => Json(json!({ "links": links })).into_response(),
         Err(e) => ApiError::from(e).into_response(),
@@ -689,8 +713,8 @@ pub(crate) async fn tasks_linked_to_handler(
     Query(params): Query<LinkedParams>,
 ) -> Response {
     let result = state
-        .db
-        .with_conn(move |c| t::tasks_linked_to(c, &params.kind, &params.reference));
+        .db_blocking(move |c| t::tasks_linked_to(c, &params.kind, &params.reference))
+        .await;
     match result {
         Ok(tasks) => Json(json!({
             "count": tasks.len(),
@@ -707,10 +731,13 @@ pub(crate) async fn task_checkpoint_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
 ) -> Response {
-    let result = state.db.with_conn(move |c| {
-        let task = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
-        t::latest_checkpoint(c, &task.id)
-    });
+    let result = state
+        .db_blocking(move |c| {
+            let task =
+                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            t::latest_checkpoint(c, &task.id)
+        })
+        .await;
     match result {
         Ok(checkpoint) => Json(json!({ "checkpoint": checkpoint })).into_response(),
         Err(e) => ApiError::from(e).into_response(),
@@ -822,8 +849,8 @@ pub(crate) async fn stale_tasks_handler(
         .unwrap_or_else(|| i64::try_from(settings.stale_hours()).unwrap_or(i64::MAX));
     let ttl = hq_tools::tasks::lease_ttl_secs();
     match state
-        .db
-        .with_conn(move |c| t::stale_tasks(c, hours, ttl, STALE_LIST_CAP))
+        .db_blocking(move |c| t::stale_tasks(c, hours, ttl, STALE_LIST_CAP))
+        .await
     {
         Ok(tasks) => {
             Json(json!({ "stale_after_hours": hours, "count": tasks.len(), "tasks": tasks }))
@@ -850,8 +877,8 @@ pub(crate) async fn initiative_progress_handler(
     let hours = i64::try_from(settings.stale_hours()).unwrap_or(i64::MAX);
     let ttl = hq_tools::tasks::lease_ttl_secs();
     match state
-        .db
-        .with_conn(move |c| t::initiative_rollup(c, &id, hours, ttl))
+        .db_blocking(move |c| t::initiative_rollup(c, &id, hours, ttl))
+        .await
     {
         Ok(rollup) => Json(json!(rollup)).into_response(),
         Err(e) => ApiError::from(e).into_response(),
@@ -868,11 +895,14 @@ pub(crate) async fn list_work_sessions_handler(
     AxumPath(id): AxumPath<String>,
 ) -> Response {
     let ttl = hq_tools::tasks::lease_ttl_secs();
-    let result = state.db.with_conn(move |c| {
-        let task = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
-        t::expire_stale_leases(c, ttl)?;
-        t::list_work_sessions(c, &task.id, WORK_SESSIONS_SHOWN)
-    });
+    let result = state
+        .db_blocking(move |c| {
+            let task =
+                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            t::expire_stale_leases(c, ttl)?;
+            t::list_work_sessions(c, &task.id, WORK_SESSIONS_SHOWN)
+        })
+        .await;
     match result {
         Ok(sessions) => Json(json!({ "work_sessions": sessions })).into_response(),
         Err(e) => ApiError::from(e).into_response(),
@@ -894,21 +924,23 @@ pub(crate) async fn delete_task_handler(
     Query(params): Query<DeleteTaskParams>,
 ) -> Response {
     let target = id.clone();
-    let result = state.db.with_conn(move |c| {
-        let task =
-            t::get_task(c, &target)?.ok_or_else(|| not_found("no task found for that id"))?;
-        let dependents: Vec<String> = t::list_dependents(c, &task.id)?
-            .into_iter()
-            .map(|d| d.id)
-            .collect();
-        // Removing archives, so nothing is lost; only an already archived task can be purged.
-        let deleted = if params.purge {
-            t::purge_task(c, &task.id, "web")?
-        } else {
-            t::archive_task(c, &task.id, params.cascade, "web")?
-        };
-        Ok::<_, anyhow::Error>((task, deleted, dependents))
-    });
+    let result = state
+        .db_blocking(move |c| {
+            let task =
+                t::get_task(c, &target)?.ok_or_else(|| not_found("no task found for that id"))?;
+            let dependents: Vec<String> = t::list_dependents(c, &task.id)?
+                .into_iter()
+                .map(|d| d.id)
+                .collect();
+            // Removing archives, so nothing is lost; only an already archived task can be purged.
+            let deleted = if params.purge {
+                t::purge_task(c, &task.id, "web")?
+            } else {
+                t::archive_task(c, &task.id, params.cascade, "web")?
+            };
+            Ok::<_, anyhow::Error>((task, deleted, dependents))
+        })
+        .await;
     let (task, deleted, dependents) = match result {
         Ok(r) => r,
         Err(e) => return ApiError::from(e).into_response(),
@@ -939,7 +971,10 @@ pub(crate) async fn restore_task_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
 ) -> Response {
-    match state.db.with_conn(move |c| t::restore_task(c, &id, "web")) {
+    match state
+        .db_blocking(move |c| t::restore_task(c, &id, "web"))
+        .await
+    {
         Ok(task) => {
             // Restored, not new: nobody is mailed again.
             notify_and_broadcast(&state, &task, "task:created", Some(&task.clone()));
@@ -955,9 +990,12 @@ pub(crate) async fn get_task_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
 ) -> Response {
-    match state.db.with_conn(move |c| {
-        t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))
-    }) {
+    match state
+        .db_blocking(move |c| {
+            t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))
+        })
+        .await
+    {
         Ok(task) => Json(task_json(&task)).into_response(),
         Err(e) => ApiError::from(e).into_response(),
     }
@@ -970,23 +1008,26 @@ pub(crate) async fn related_tasks_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
 ) -> Response {
-    let result = state.db.with_conn(move |c| {
-        let task = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
-        let mut related: Vec<t::Task> = Vec::new();
-        if let Some(parent) = &task.parent_task_id {
-            related.extend(t::get_task(c, parent)?);
-        }
-        for waiting_on in &task.depends_on {
-            related.extend(t::get_task(c, waiting_on)?);
-        }
-        related.extend(t::list_subtasks(c, &task.id)?);
-        related.extend(t::list_dependents(c, &task.id)?);
-        // A deleted task is not a relation anyone can act on.
-        related.retain(|r| r.archived_at.is_none());
-        let mut seen = std::collections::HashSet::new();
-        related.retain(|r| seen.insert(r.id.clone()));
-        Ok::<_, anyhow::Error>(related)
-    });
+    let result = state
+        .db_blocking(move |c| {
+            let task =
+                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            let mut related: Vec<t::Task> = Vec::new();
+            if let Some(parent) = &task.parent_task_id {
+                related.extend(t::get_task(c, parent)?);
+            }
+            for waiting_on in &task.depends_on {
+                related.extend(t::get_task(c, waiting_on)?);
+            }
+            related.extend(t::list_subtasks(c, &task.id)?);
+            related.extend(t::list_dependents(c, &task.id)?);
+            // A deleted task is not a relation anyone can act on.
+            related.retain(|r| r.archived_at.is_none());
+            let mut seen = std::collections::HashSet::new();
+            related.retain(|r| seen.insert(r.id.clone()));
+            Ok::<_, anyhow::Error>(related)
+        })
+        .await;
     match result {
         Ok(related) => Json(json!({ "tasks": related.iter().map(task_json).collect::<Vec<_>>() }))
             .into_response(),
@@ -1004,7 +1045,10 @@ pub(crate) async fn shelve_tasks_handler(
     State(state): State<Arc<WsState>>,
     Json(body): Json<ShelveBody>,
 ) -> Response {
-    match state.db.with_conn(move |c| t::shelve_tasks(c, &body.ids)) {
+    match state
+        .db_blocking(move |c| t::shelve_tasks(c, &body.ids))
+        .await
+    {
         Ok(out) => Json(json!({ "changed": out.changed, "skipped": out.skipped })).into_response(),
         Err(e) => ApiError::from(e).into_response(),
     }
@@ -1014,7 +1058,10 @@ pub(crate) async fn unshelve_tasks_handler(
     State(state): State<Arc<WsState>>,
     Json(body): Json<ShelveBody>,
 ) -> Response {
-    match state.db.with_conn(move |c| t::unshelve_tasks(c, &body.ids)) {
+    match state
+        .db_blocking(move |c| t::unshelve_tasks(c, &body.ids))
+        .await
+    {
         Ok(out) => Json(json!({ "changed": out.changed, "skipped": out.skipped })).into_response(),
         Err(e) => ApiError::from(e).into_response(),
     }
@@ -1044,8 +1091,8 @@ pub(crate) async fn shelve_completed_handler(
         initiative_id: body.initiative_id.filter(|s| !s.is_empty()),
     };
     match state
-        .db
-        .with_conn(move |c| t::shelve_completed(c, body.older_than_days, &scope, body.dry_run))
+        .db_blocking(move |c| t::shelve_completed(c, body.older_than_days, &scope, body.dry_run))
+        .await
     {
         Ok(out) => Json(json!({
             "matched": out.matched, "changed": out.changed, "dry_run": out.dry_run,
@@ -1066,10 +1113,13 @@ pub(crate) async fn shelve_initiative_handler(
     AxumPath(id): AxumPath<String>,
     Json(body): Json<ShelfBody>,
 ) -> Response {
-    match state.db.with_conn(move |c| {
-        t::get_initiative(c, &id)?.ok_or_else(|| not_found("no list found for that id"))?;
-        t::set_initiative_shelved(c, &id, body.shelved)
-    }) {
+    match state
+        .db_blocking(move |c| {
+            t::get_initiative(c, &id)?.ok_or_else(|| not_found("no list found for that id"))?;
+            t::set_initiative_shelved(c, &id, body.shelved)
+        })
+        .await
+    {
         Ok((list, open)) => Json(json!({
             "id": list.id, "name": list.name, "shelved_at": list.shelved_at, "open_tasks": open,
         }))
@@ -1082,10 +1132,13 @@ pub(crate) async fn list_comments_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
 ) -> Response {
-    let result = state.db.with_conn(move |c| {
-        let task = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
-        t::list_comments(c, &task.id)
-    });
+    let result = state
+        .db_blocking(move |c| {
+            let task =
+                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            t::list_comments(c, &task.id)
+        })
+        .await;
     match result {
         Ok(comments) => Json(json!({
             "comments": comments.iter().map(|c| json!({
@@ -1112,11 +1165,14 @@ pub(crate) async fn add_comment_handler(
     if payload.body.trim().is_empty() {
         return ApiError::bad_request("body is required").into_response();
     }
-    let result = state.db.with_conn(move |c| {
-        let task = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
-        let comment = t::add_comment(c, &task.id, &payload.author, &payload.body, None)?;
-        Ok((task, comment))
-    });
+    let result = state
+        .db_blocking(move |c| {
+            let task =
+                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            let comment = t::add_comment(c, &task.id, &payload.author, &payload.body, None)?;
+            Ok((task, comment))
+        })
+        .await;
     match result {
         Ok((task, comment)) => {
             state.broadcast(
@@ -1292,14 +1348,14 @@ mod tests {
             .into();
         let task_id = id.clone();
         state
-            .db
-            .with_conn(move |c| {
+            .db_blocking(move |c| {
                 let who = t::LeaseIdentity {
                     actor: "builder",
                     ..Default::default()
                 };
                 t::claim(c, &task_id, &who, 900, false).map(|_| ())
             })
+            .await
             .unwrap();
         let listed =
             body_json(list_work_sessions_handler(State(state.clone()), AxumPath(id)).await).await;
@@ -1377,8 +1433,7 @@ mod tests {
             .into();
         let task_id = id.clone();
         state
-            .db
-            .with_conn(move |c| {
+            .db_blocking(move |c| {
                 t::add_task_link(
                     c,
                     &task_id,
@@ -1390,6 +1445,7 @@ mod tests {
                 )
                 .map(|_| ())
             })
+            .await
             .unwrap();
         let links =
             body_json(list_task_links_handler(State(state.clone()), AxumPath(id.clone())).await)
@@ -1585,8 +1641,8 @@ mod tests {
         .await;
         assert_eq!(failed.status(), StatusCode::BAD_REQUEST);
         let task = state
-            .db
-            .with_conn(move |c| t::get_task(c, &id))
+            .db_blocking(move |c| t::get_task(c, &id))
+            .await
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -1687,8 +1743,7 @@ mod tests {
         let initiative = created["initiative_id"].as_str().unwrap().to_string();
         let done = id.clone();
         state
-            .db
-            .with_conn(move |c| {
+            .db_blocking(move |c| {
                 let patch = t::TaskPatch {
                     status: Some(t::STATUS_COMPLETE.to_string()),
                     ..Default::default()
@@ -1700,6 +1755,7 @@ mod tests {
                 )?;
                 Ok(())
             })
+            .await
             .unwrap();
 
         let body = |dry_run| ShelveCompletedBody {
@@ -1779,8 +1835,8 @@ mod tests {
         let child_id = child["id"].as_str().unwrap().to_string();
         let shelved = child_id.clone();
         state
-            .db
-            .with_conn(move |c| t::shelve_tasks(c, &[shelved]))
+            .db_blocking(move |c| t::shelve_tasks(c, &[shelved]))
+            .await
             .unwrap();
 
         let related = body_json(
@@ -1791,8 +1847,8 @@ mod tests {
 
         let deleted = child_id.clone();
         state
-            .db
-            .with_conn(move |c| t::archive_task(c, &deleted, false, "test"))
+            .db_blocking(move |c| t::archive_task(c, &deleted, false, "test"))
+            .await
             .unwrap();
         let after = body_json(
             related_tasks_handler(State(state.clone()), AxumPath(parent_id.clone())).await,
@@ -1845,11 +1901,11 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK, "{status}");
         }
         let events = state
-            .db
-            .with_conn({
+            .db_blocking({
                 let id = id.clone();
                 move |c| t::list_task_events(c, &id)
             })
+            .await
             .unwrap();
         assert_eq!(events.len(), 3);
         assert!(
@@ -1864,8 +1920,7 @@ mod tests {
     async fn the_owner_at_the_board_can_complete_a_task_while_completion_is_verified() {
         let state = test_state();
         state
-            .db
-            .with_conn(|c| {
+            .db_blocking(|c| {
                 t::sync_verification_policy(
                     c,
                     &hq_core::config::VerificationConfig {
@@ -1874,6 +1929,7 @@ mod tests {
                     },
                 )
             })
+            .await
             .unwrap();
         let response = create_task_handler(
             State(state.clone()),
@@ -1888,11 +1944,11 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK, "{status}");
         }
         let verdict = state
-            .db
-            .with_conn({
+            .db_blocking({
                 let id = id.clone();
                 move |c| t::latest_verdict(c, &id)
             })
+            .await
             .unwrap()
             .expect("a completion at the board says how it was verified");
         assert_eq!(
@@ -1943,8 +1999,8 @@ mod tests {
         .await;
         let dependent_id: String = dependent["id"].as_str().unwrap().into();
         let refreshed = state
-            .db
-            .with_conn(move |c| t::get_task(c, &dependent_id))
+            .db_blocking(move |c| t::get_task(c, &dependent_id))
+            .await
             .unwrap()
             .unwrap();
         assert_eq!(task_json(&refreshed)["blocked_by"], json!([]));
@@ -1983,8 +2039,7 @@ mod tests {
         let state = test_state();
         let id = hq_tool_api::util::generate_id("tk");
         let task = state
-            .db
-            .with_conn(move |c| {
+            .db_blocking(move |c| {
                 let initiative = find_or_create_initiative(c, "personal", None, "Inbox")?;
                 t::create_task(
                     c,
@@ -1997,6 +2052,7 @@ mod tests {
                     },
                 )
             })
+            .await
             .unwrap();
 
         let first = update_task_handler(
@@ -2095,8 +2151,8 @@ mod tests {
         .await;
         let id = body_json(created).await["id"].as_str().unwrap().to_string();
         state
-            .db
-            .with_conn(|c| Ok(c.execute_batch("DROP TABLE task_comments")?))
+            .db_blocking(|c| Ok(c.execute_batch("DROP TABLE task_comments")?))
+            .await
             .unwrap();
         let faulted = list_comments_handler(State(state.clone()), AxumPath(id)).await;
         assert_eq!(faulted.status(), StatusCode::INTERNAL_SERVER_ERROR);
