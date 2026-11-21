@@ -89,7 +89,7 @@ fun SlidesView(path: String, version: String?, onNotice: (String) -> Unit, onHol
 }
 
 @Composable
-private fun CardList(data: DeckData, onOpen: (Int) -> Unit, onAdd: () -> Unit) {
+internal fun CardList(data: DeckData, onOpen: (Int) -> Unit, onAdd: () -> Unit) {
     LazyColumn(Modifier.fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (data.cards.isEmpty()) item { Text(stringResource(R.string.slides_empty), style = HqType.Body, color = Mts.Ink) }
         items(data.cards, key = { it.index to it.hash }) { card -> CardTile(card, SlideBodies.preview(SlideBodies.bodyOf(data.blocks, card.index), PREVIEW_LINES)) { onOpen(card.index) } }

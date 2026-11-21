@@ -118,7 +118,7 @@ private fun CommentsHeader(onClose: () -> Unit, onAdd: () -> Unit, canAdd: Boole
 }
 
 @Composable
-private fun CommentsList(comments: Result<List<CommentRow>>?, modifier: Modifier, onResolve: (CommentRow) -> Unit) {
+internal fun CommentsList(comments: Result<List<CommentRow>>?, modifier: Modifier, onResolve: (CommentRow) -> Unit) {
     val list = comments?.getOrNull()
     when {
         comments == null -> Text(stringResource(R.string.comments_loading), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp))
@@ -129,7 +129,7 @@ private fun CommentsList(comments: Result<List<CommentRow>>?, modifier: Modifier
 }
 
 @Composable
-private fun CommentItem(c: CommentRow, onResolve: (CommentRow) -> Unit) {
+internal fun CommentItem(c: CommentRow, onResolve: (CommentRow) -> Unit) {
     val who = listOfNotNull(c.by, c.at).joinToString(" · ")
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
         if (who.isNotEmpty()) Text(who, style = HqType.Caption, color = Mts.InkMuted)
