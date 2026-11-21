@@ -88,7 +88,7 @@ fun ChartCard(spec: ChartSpec, onExpand: () -> Unit) {
         BlockHeader(HqIcons.BarChart, spec.title.ifBlank { chartDescription(spec) }, HqType.BodySmBold, Mts.Ink) { IconAction(HqIcons.Expand, "Expand chart", onClick = onExpand) }
         if (spec.type.isRound) DonutBody(spec) else {
             Legend(spec, Modifier.padding(start = 12.dp, top = 10.dp, end = 12.dp))
-            ChartCanvas(spec, height = if (spec.type == ChartType.Bar) BAR_HEIGHT else LINE_HEIGHT, selected = null, onSelect = null, modifier = Modifier.padding(top = if (spec.type == ChartType.Bar) 12.dp else 4.dp, bottom = 8.dp).clickableCanvas(onExpand))
+            ChartCanvas(spec, height = if (spec.type.isColumns) BAR_HEIGHT else LINE_HEIGHT, selected = null, onSelect = null, modifier = Modifier.padding(top = if (spec.type.isColumns) 12.dp else 4.dp, bottom = 8.dp).clickableCanvas(onExpand))
         }
     }
 }
@@ -114,7 +114,7 @@ private fun LegendMarker(type: ChartType, index: Int) {
     val color = seriesColor(index)
     Canvas(Modifier.size(14.dp)) {
         val c = Offset(size.width / 2, size.height / 2)
-        if (type == ChartType.Bar) drawRoundRect(color, Offset(2.dp.toPx(), 2.dp.toPx()), Size(10.dp.toPx(), 10.dp.toPx()), CornerRadius(2.dp.toPx()))
+        if (type.isColumns || type == ChartType.Area) drawRoundRect(color, Offset(2.dp.toPx(), 2.dp.toPx()), Size(10.dp.toPx(), 10.dp.toPx()), CornerRadius(2.dp.toPx()))
         else marker(markerOf(index), c, 4.5.dp.toPx(), color, Color.Transparent, 2.5.dp.toPx())
     }
 }
@@ -123,7 +123,7 @@ private fun LegendMarker(type: ChartType, index: Int) {
 @Composable
 fun ChartCanvas(spec: ChartSpec, height: Int, selected: Int?, onSelect: ((Int?) -> Unit)?, modifier: Modifier = Modifier) {
     val measurer = rememberTextMeasurer()
-    val scale = remember(spec) { Charts.yScale(spec.series.flatMap { it.values }) }
+    val scale = remember(spec) { Charts.yScale(Charts.yValuesOf(spec)) }
     val description = chartDescription(spec)
     var input = modifier.fillMaxWidth().height(height.dp).semantics { contentDescription = description; role = Role.Image }
     if (onSelect != null) {
@@ -134,7 +134,7 @@ fun ChartCanvas(spec: ChartSpec, height: Int, selected: Int?, onSelect: ((Int?) 
 }
 
 private fun plotLeft(spec: ChartSpec) = if (spec.yLabel.isNotBlank()) LEFT + 12f else LEFT
-private fun plotRight(spec: ChartSpec) = if (spec.type == ChartType.Bar) 8f else 12f
+private fun plotRight(spec: ChartSpec) = if (spec.type.isColumns) 8f else 12f
 private fun bottomInset(spec: ChartSpec) = if (spec.xLabel.isNotBlank()) 50f else 30f
 
 private fun indexAt(spec: ChartSpec, widthPx: Float, density: Float, xPx: Float): Int {
@@ -142,7 +142,7 @@ private fun indexAt(spec: ChartSpec, widthPx: Float, density: Float, xPx: Float)
     val left = plotLeft(spec) * density
     val right = widthPx - plotRight(spec) * density
     val x = xPx.coerceIn(left, right)
-    return if (spec.type == ChartType.Bar) (((x - left) / (right - left)) * n).toInt().coerceIn(0, n - 1)
+    return if (spec.type.isColumns) (((x - left) / (right - left)) * n).toInt().coerceIn(0, n - 1)
     else if (n == 1) 0 else (((x - left) / (right - left)) * (n - 1)).roundToInt().coerceIn(0, n - 1)
 }
 
@@ -157,20 +157,28 @@ private fun DrawScope.drawCartesian(spec: ChartSpec, scale: Charts.YScale, tm: T
     val slot = (right - left) / n
     fun xBar(i: Int) = left + (i + 0.5f) * slot
     fun xLine(i: Int) = if (n == 1) (left + right) / 2 else left + i * (right - left) / (n - 1)
-    val cx: (Int) -> Float = if (spec.type == ChartType.Bar) ::xBar else ::xLine
+    val xs = if (spec.type == ChartType.Scatter) spec.labels.map { it.trim().toDoubleOrNull() ?: 0.0 } else emptyList()
+    val xRange = if (xs.isNotEmpty()) Charts.xScale(xs) else 0.0 to 1.0
+    fun xScatter(i: Int) = left + ((xs[i] - xRange.first) / (xRange.second - xRange.first)).toFloat() * (right - left)
+    val cx: (Int) -> Float = if (spec.type.isColumns) ::xBar else if (spec.type == ChartType.Scatter) ::xScatter else ::xLine
 
     scale.ticks.forEach { t ->
         drawLine(Mts.Hairline, Offset(left, y(t)), Offset(right, y(t)), 1.dp.toPx())
         text(tm, Charts.compact(t), TickStyle, left - 6.dp.toPx(), y(t) + 4.dp.toPx(), Align.End)
     }
     val every = Charts.labelEvery(n)
-    val labelBase = base + (if (spec.type == ChartType.Bar) 18 else 22).dp.toPx()
+    val labelBase = base + (if (spec.type.isColumns) 18 else 22).dp.toPx()
     spec.labels.forEachIndexed { i, l -> if (i % every == 0) text(tm, Charts.clip(l), TickStyle, cx(i), labelBase, Align.Center) }
     if (spec.xLabel.isNotBlank()) text(tm, spec.xLabel, TickStyle, (left + right) / 2, size.height - 6.dp.toPx(), Align.Center)
     if (spec.yLabel.isNotBlank()) rotate(-90f, Offset(10.dp.toPx(), (top + base) / 2)) { text(tm, spec.yLabel, TickStyle, 10.dp.toPx(), (top + base) / 2, Align.Center) }
 
-    if (spec.type == ChartType.Bar) drawBars(spec, tm, ::y, ::xBar, slot, base)
-    else drawLines(spec, ::y, ::xLine)
+    when (spec.type) {
+        ChartType.Bar -> drawBars(spec, tm, ::y, ::xBar, slot, base)
+        ChartType.Stacked -> drawStacked(spec, ::y, ::xBar, slot)
+        ChartType.Area -> { drawAreas(spec, ::y, ::xLine, base); drawLines(spec, ::y, ::xLine) }
+        ChartType.Scatter -> drawPoints(spec, ::y, ::xScatter)
+        else -> drawLines(spec, ::y, ::xLine)
+    }
     if (selected != null) drawSelection(spec, tm, selected, cx(selected), top, base, right)
 }
 
@@ -187,6 +195,37 @@ private fun DrawScope.drawBars(spec: ChartSpec, tm: TextMeasurer, y: (Double) ->
             drawRoundRect(seriesColor(si), Offset(x, topY), Size(barW, h), CornerRadius(min(3.dp.toPx(), barW / 2)))
             if (showValues) text(tm, Charts.compact(v), ValueStyle, x + barW / 2, (if (v >= 0) topY else topY + h) - 5.dp.toPx(), Align.Center)
         }
+    }
+}
+
+/** Each series' columns stacked from zero, positives up and negatives down. */
+private fun DrawScope.drawStacked(spec: ChartSpec, y: (Double) -> Float, cx: (Int) -> Float, slot: Float) {
+    val w = min(slot * 0.7f, BAR_MAX.dp.toPx() * 2)
+    Charts.stackBands(spec.series).forEachIndexed { si, row ->
+        row.forEachIndexed { i, (lo, hi) ->
+            val top = y(hi)
+            drawRect(seriesColor(si), Offset(cx(i) - w / 2, top), Size(w, max(y(lo) - top, 1.dp.toPx())))
+        }
+    }
+}
+
+/** A translucent fill from each line down to the baseline. */
+private fun DrawScope.drawAreas(spec: ChartSpec, y: (Double) -> Float, cx: (Int) -> Float, base: Float) {
+    spec.series.forEachIndexed { si, s ->
+        if (s.values.isEmpty()) return@forEachIndexed
+        val path = Path()
+        s.values.forEachIndexed { i, v -> if (i == 0) path.moveTo(cx(i), y(v)) else path.lineTo(cx(i), y(v)) }
+        path.lineTo(cx(s.values.size - 1), base)
+        path.lineTo(cx(0), base)
+        path.close()
+        drawPath(path, seriesColor(si).copy(alpha = 0.3f))
+    }
+}
+
+/** One marker per point, a different shape for each series, with no line between them. */
+private fun DrawScope.drawPoints(spec: ChartSpec, y: (Double) -> Float, cx: (Int) -> Float) {
+    spec.series.forEachIndexed { si, s ->
+        s.values.forEachIndexed { i, v -> marker(markerOf(si), Offset(cx(i), y(v)), 5.dp.toPx(), seriesColor(si), seriesColor(si).copy(alpha = 0.35f), 2.dp.toPx()) }
     }
 }
 
