@@ -473,3 +473,69 @@ fn a_followup_turn_that_ends_cleanly_leaves_no_unverified_run() {
         "nothing is left for the unfinished-work alert"
     );
 }
+
+#[test]
+fn duplicate_escalation_for_same_run_produces_one_open_alert() {
+    let db = db();
+    add_run(&db, "run-dup11111", "t1", 1);
+    settle_minutes_ago(&db, "run-dup11111", runs::ACCEPT_PARTIAL, 20);
+    let run = db
+        .with_conn(|c| runs::get(c, "run-dup11111"))
+        .unwrap()
+        .unwrap();
+
+    // Concurrent and repeated escalations for the same run must create only one alert.
+    std::thread::scope(|s| {
+        for _ in 0..4 {
+            let db = db.clone();
+            let run = run.clone();
+            s.spawn(move || escalate(&db, &run, "duplicate check"));
+        }
+    });
+    escalate(&db, &run, "repeat check");
+
+    let count: i64 = db
+        .with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT COUNT(*) FROM value_items WHERE dedup_key = 'subagent-run-run-dup11111'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(count, 1, "at most one open alert per run");
+}
+
+#[test]
+fn settling_a_run_dismisses_its_open_alert_while_unsettled_run_alert_stays() {
+    let db = db();
+    add_run(&db, "run-set11111", "t1", 1);
+    add_run(&db, "run-stay2222", "t2", 1);
+    for id in ["run-set11111", "run-stay2222"] {
+        let run = db.with_conn(|c| runs::get(c, id)).unwrap().unwrap();
+        escalate(&db, &run, "open alert");
+    }
+
+    settle(&db, "run-set11111", runs::ACCEPT_UNVERIFIED, "done");
+
+    let state_of = |id: &str| -> String {
+        db.with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT state FROM value_items WHERE dedup_key = ?1",
+                [format!("subagent-run-{id}")],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap()
+    };
+    assert_eq!(
+        state_of("run-set11111"),
+        "dismissed",
+        "settled run alert is dismissed, not deleted"
+    );
+    assert_eq!(
+        state_of("run-stay2222"),
+        "pending",
+        "unsettled run alert stays open"
+    );
+}
