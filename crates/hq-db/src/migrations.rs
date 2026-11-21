@@ -1197,4 +1197,98 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn settled_delegated_work_notices_are_dismissed_and_duplicates_collapsed() {
+        let db = Database::open_memory().unwrap();
+        let older = (chrono::Utc::now() - chrono::Duration::hours(23)).to_rfc3339();
+        let newer = (chrono::Utc::now() - chrono::Duration::minutes(5)).to_rfc3339();
+        let title = "A background task did not finish";
+        let body = "A background task did not finish. Open the chat to see what is missing.";
+
+        let rows: Vec<(String, String)> = db
+            .with_conn(|c| {
+                // Settled, unreviewed, young (5m old): must be dismissed.
+                c.execute(
+                    "INSERT INTO subagent_runs (run_id, child_id, goal, exec_status, accept_status, started_at, last_activity_at, settled_at, reviewed_at)
+                     VALUES ('settled-young', 'x', 'g', 'completed', 'partial', 1, 1, 1, NULL)",
+                    [],
+                )?;
+                c.execute(
+                    "INSERT INTO value_items (id, source_task, kind, title, body, dedup_key, state, created_at, link)
+                     VALUES ('v-settled-young', 'subagent_runs', 'action_needed', ?1, ?2, 'subagent-run-settled-young', 'delivered', ?3, '/chat?thread=t1')",
+                    rusqlite::params![title, body, newer],
+                )?;
+
+                // Settled, unreviewed, 23h old: must be dismissed.
+                c.execute(
+                    "INSERT INTO subagent_runs (run_id, child_id, goal, exec_status, accept_status, started_at, last_activity_at, settled_at, reviewed_at)
+                     VALUES ('settled-23h', 'x', 'g', 'failed', 'blocked', 1, 1, 1, NULL)",
+                    [],
+                )?;
+                c.execute(
+                    "INSERT INTO value_items (id, source_task, kind, title, body, dedup_key, state, created_at, link)
+                     VALUES ('v-settled-23h', 'subagent_runs', 'action_needed', ?1, ?2, 'subagent-run-settled-23h', 'delivered', ?3, '/chat?thread=t1')",
+                    rusqlite::params![title, body, older],
+                )?;
+
+                // Orphaned notice with no run row: must be dismissed.
+                c.execute(
+                    "INSERT INTO value_items (id, source_task, kind, title, body, dedup_key, state, created_at)
+                     VALUES ('v-orphan', 'subagent_runs', 'action_needed', ?1, ?2, 'subagent-run-missing', 'pending', ?3)",
+                    rusqlite::params![title, body, newer],
+                )?;
+
+                // Unsettled running run with a unique link: must stay open.
+                c.execute(
+                    "INSERT INTO subagent_runs (run_id, child_id, goal, exec_status, accept_status, started_at, last_activity_at, settled_at)
+                     VALUES ('open-solo', 'x', 'g', 'running', 'unverified', 1, 1, NULL)",
+                    [],
+                )?;
+                c.execute(
+                    "INSERT INTO value_items (id, source_task, kind, title, body, dedup_key, state, created_at, link)
+                     VALUES ('v-open-solo', 'subagent_runs', 'action_needed', ?1, ?2, 'subagent-run-open-solo', 'delivered', ?3, '/chat?thread=solo')",
+                    rusqlite::params![title, body, older],
+                )?;
+
+                // Two identical open alerts for unsettled runs in the same chat: newest stays, older dismissed.
+                for id in ["open-dup-1", "open-dup-2"] {
+                    c.execute(
+                        "INSERT INTO subagent_runs (run_id, child_id, goal, exec_status, accept_status, started_at, last_activity_at, settled_at)
+                         VALUES (?1, 'x', 'g', 'running', 'unverified', 1, 1, NULL)",
+                        [id],
+                    )?;
+                }
+                c.execute(
+                    "INSERT INTO value_items (id, source_task, kind, title, body, dedup_key, state, created_at, link)
+                     VALUES ('v-dup-old', 'subagent_runs', 'action_needed', ?1, ?2, 'subagent-run-open-dup-1', 'delivered', ?3, '/chat?thread=dup')",
+                    rusqlite::params![title, body, older],
+                )?;
+                c.execute(
+                    "INSERT INTO value_items (id, source_task, kind, title, body, dedup_key, state, created_at, link)
+                     VALUES ('v-dup-new', 'subagent_runs', 'action_needed', ?1, ?2, 'subagent-run-open-dup-2', 'delivered', ?3, '/chat?thread=dup')",
+                    rusqlite::params![title, body, newer],
+                )?;
+
+                for _ in 0..2 {
+                    c.execute_batch(include_str!(
+                        "../sql/149_clear_settled_delegated_work_notices.sql"
+                    ))?;
+                }
+                let mut stmt =
+                    c.prepare("SELECT id, state FROM value_items ORDER BY id")?;
+                let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                Ok(rows.collect::<Result<_, _>>()?)
+            })
+            .unwrap();
+
+        assert_eq!(rows.len(), 6, "rows are dismissed, never deleted");
+        let state = |id: &str| rows.iter().find(|r| r.0 == id).unwrap().1.as_str();
+        assert_eq!(state("v-settled-young"), "dismissed");
+        assert_eq!(state("v-settled-23h"), "dismissed");
+        assert_eq!(state("v-orphan"), "dismissed");
+        assert_eq!(state("v-open-solo"), "delivered");
+        assert_eq!(state("v-dup-old"), "dismissed");
+        assert_eq!(state("v-dup-new"), "delivered");
+    }
 }
