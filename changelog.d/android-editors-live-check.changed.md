@@ -1,0 +1,1 @@
+**The phone's slide editor and comments screen are checked against a real HQ.** An opt-in test now opens the slide screen, edits a card in the real card editor and resolves a comment in the real comments dialog, and checks the change reached the note.
