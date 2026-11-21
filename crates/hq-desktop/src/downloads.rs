@@ -189,15 +189,15 @@ mod tests {
     #[test]
     fn a_finished_download_is_named_from_where_it_was_sent() {
         let pending = PendingDownloads::default();
-        let sent = PathBuf::from("/Users/x/Downloads/a.html");
+        let sent = PathBuf::from("a.html");
         pending.remember("blob:http://127.0.0.1:1/id", &sent);
         assert_eq!(
             pending.resolve("blob:http://127.0.0.1:1/id", None),
             Some(sent)
         );
         assert_eq!(pending.resolve("blob:http://127.0.0.1:1/id", None), None);
-        let reported = PathBuf::from("/Users/x/Downloads/b.html");
-        pending.remember("u", Path::new("/Users/x/Downloads/other.html"));
+        let reported = PathBuf::from("b.html");
+        pending.remember("u", Path::new("other.html"));
         assert_eq!(pending.resolve("u", Some(reported.clone())), Some(reported));
         assert_eq!(pending.resolve("never-started", None), None);
     }
