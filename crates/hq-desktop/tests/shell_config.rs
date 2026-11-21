@@ -227,7 +227,7 @@ fn both_windows_are_made_in_code_with_a_navigation_guard_and_no_new_windows() {
     assert_eq!(main.matches("WebviewWindowBuilder::new").count(), 2);
     assert_eq!(main.matches(".on_navigation(").count(), 2);
     assert_eq!(main.matches("NewWindowResponse::Deny").count(), 2);
-    assert!(main.contains("app_page_allowed") && main.contains("main_page_allowed"));
+    assert!(main.contains("app_page_allowed") && main.contains("navigation_allowed"));
 }
 
 #[test]
