@@ -1,7 +1,6 @@
-# Fees a payment message does not state
+# A payment message does not always state its fee
 
-Some merchant-payment messages carry no fee, yet the balance moved by more than the amount (gaps of 100, 500 and 950 shillings in a real export). The ledger leaves `fee` empty, so "Fees paid" can undercount. Inferring a fee from consecutive balances is a guess, so it is not done.
-
-Fix when: a second message type or a statement import states the fee, or the owner asks for an "unexplained balance change" row.
-
-File: `crates/hq-finance/src/validate.rs`, `ledger.rs`.
+**Reason skipped:** some merchant-payment messages carry no fee, yet the balance moved by more than the amount (gaps of 100, 500 and 950 shillings in a real export). Inferring a fee from consecutive balances is a guess, so the ledger leaves `fee` empty and "Fees paid" can undercount.
+**Date:** 2026-11-21
+**Where:** `crates/hq-finance/src/validate.rs`, `crates/hq-finance/src/ledger.rs`
+**Remove when:** a second message type or a statement import states the fee, or the owner asks for an "unexplained balance change" row.
