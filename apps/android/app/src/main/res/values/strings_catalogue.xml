@@ -4817,7 +4817,20 @@
         <item quantity="one">%1$s comment</item>
         <item quantity="other">%1$s comments</item>
     </plurals>
-    <string name="suite_comments_offline">Adding or resolving a comment needs HQ, so it waits until HQ can be reached. You can still read them.</string>
+    <string name="suite_comments_offline">HQ cannot be reached right now. A comment you add or resolve waits on this device and is sent when HQ is back.</string>
+    <string name="suite_comments_offline_shared">Adding or resolving a comment needs HQ, so it waits until HQ can be reached. You can still read them.</string>
+    <string name="suite_comments_saved_copy">Showing the comments as last saved on this device.</string>
+    <string name="suite_comments_no_copy">The saved comments are not on this device, so only the ones waiting to be sent are shown.</string>
+    <string name="suite_comments_kept_label">Comments, one could not be sent</string>
+    <string name="suite_comment_queued">Saved on this device. It will be sent when HQ is back.</string>
+    <string name="suite_comment_waiting">Waiting to send</string>
+    <string name="suite_comment_resolve_waiting">Resolved here. Waiting to send.</string>
+    <string name="suite_comment_no_saved_blocks">Open this note once while HQ can be reached, then you can add comments to it here with no connection.</string>
+    <string name="suite_comment_refused_add">The comment could not be added: %1$s</string>
+    <string name="suite_comment_refused_resolve">The comment could not be resolved: %1$s</string>
+    <string name="suite_comment_refused_toast">A comment could not be sent. Open Comments to copy it or discard it.</string>
+    <string name="suite_comment_copy_text">Copy text</string>
+    <string name="suite_comment_discard">Discard</string>
     <string name="suite_comments_failed">Could not load the comments. Try again in a moment.</string>
     <string name="suite_comments_none">No open comments.</string>
     <plurals name="suite_comments_resolved">

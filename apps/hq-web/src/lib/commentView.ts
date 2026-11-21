@@ -20,7 +20,7 @@ export function countComments(text: string): CommentCounts {
 }
 
 /** Open comments first, in the order they were written; resolved ones after, for a collapsed list. */
-export function splitComments(list: SuiteComment[]): { open: SuiteComment[]; resolved: SuiteComment[] } {
+export function splitComments<C extends SuiteComment>(list: C[]): { open: C[]; resolved: C[] } {
   return { open: list.filter((c) => c.state !== 'resolved'), resolved: list.filter((c) => c.state === 'resolved') }
 }
 

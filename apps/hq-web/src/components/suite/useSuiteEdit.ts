@@ -5,7 +5,7 @@ import { HqHttpError } from '~/lib/hqAuth'
 import { toastAlert } from '~/lib/toast'
 import { editable } from '~/lib/hqmdEdit'
 import { useSharedConnection } from '~/lib/connection'
-import { browserStore, createOutbox } from '~/lib/outbox'
+import { replayLive, suiteOutbox as outbox } from '~/lib/commentOutbox'
 import { currentHqId } from '~/lib/savedCopy'
 import { isSharedComputer } from '~/lib/sharedComputer'
 import { dropWaiting, queueSuiteEdit, removeConflict, replaySuiteEdits, suiteConflicts, waitingCount } from '~/lib/suiteOutbox'
@@ -27,8 +27,6 @@ interface Options {
   /** The note was saved: the page can load it again. */
   onSaved?: () => void
 }
-
-const outbox = createOutbox(browserStore)
 
 /**
  * The note text a suite viewer draws, with edits saved one at a time against the hash this page last saw.
@@ -85,6 +83,10 @@ export function useSuiteEdit({ path, content, hash, onSaved }: Options) {
         onSaved?.()
       }
       await refreshConflict()
+      // Comments wait behind note edits, so the blocks they name are the ones HQ now has.
+      const c = await replayLive()
+      if (c.refused > 0) toastAlert(t('suite_comment_refused_toast'))
+      if (c.sent.includes(path)) onSaved?.()
     })
   }, [connection, path, onSaved, refreshConflict])
 

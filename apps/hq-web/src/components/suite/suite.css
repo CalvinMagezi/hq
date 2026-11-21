@@ -236,3 +236,7 @@
 @media (prefers-reduced-motion:reduce){
   .su-tr-fade,.su-tr-dissolve,.su-tr-push,.su-tr-cover,.su-tr-wipe,.su-tr-split{animation:none}
 }
+.su-badge-warn{background:var(--warn);color:var(--on-green)}
+.su-cmt.is-waiting{border-style:dashed}
+.su-cmt-wait{margin:0}
+.su-cmt-refused{margin-bottom:12px}
