@@ -1,0 +1,1 @@
+**The phone's suite calls are now checked against a real running HQ.** A new opt-in test drives the Android app's own deck, comment, row, column and chart code against a live server, and the offline-comment refusal notice now follows the app's one-short-sentence rule.

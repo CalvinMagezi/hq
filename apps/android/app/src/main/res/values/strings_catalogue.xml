@@ -4831,7 +4831,7 @@
     <string name="suite_comment_no_saved_blocks">Open this note once while HQ can be reached, then you can add comments to it here with no connection.</string>
     <string name="suite_comment_refused_add">The comment could not be added: %1$s</string>
     <string name="suite_comment_refused_resolve">The comment could not be resolved: %1$s</string>
-    <string name="suite_comment_refused_toast">A comment could not be sent. Open Comments to copy it or discard it.</string>
+    <string name="suite_comment_refused_toast">A comment was refused: open Comments to copy its text</string>
     <string name="suite_comment_copy_text">Copy text</string>
     <string name="suite_comment_discard">Discard</string>
     <string name="suite_comments_failed">Could not load the comments. Try again in a moment.</string>

@@ -2709,7 +2709,7 @@ export const en = {
   suite_comment_no_saved_blocks: "Open this note once while HQ can be reached, then you can add comments to it here with no connection.",
   suite_comment_refused_add: "The comment could not be added: {reason}",
   suite_comment_refused_resolve: "The comment could not be resolved: {reason}",
-  suite_comment_refused_toast: "A comment could not be sent. Open Comments to copy it or discard it.",
+  suite_comment_refused_toast: "A comment was refused: open Comments to copy its text",
   suite_comment_copy_text: "Copy text",
   suite_comment_discard: "Discard",
   suite_comments_failed: "Could not load the comments. Try again in a moment.",
