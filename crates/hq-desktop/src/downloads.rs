@@ -7,7 +7,9 @@
 //! DOM event. Everything that decides is here, as pure functions, so it is tested without a window.
 
 use reqwest::Url;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 /// The window event the page listens for (`apps/hq-web/src/lib/desktopDownload.ts`).
 pub const EVENT_NAME: &str = "hq-desktop-download";
@@ -124,6 +126,30 @@ pub fn destination_for(
     Some(unique_destination(dir, &sanitize_file_name(&raw), exists))
 }
 
+/// Most downloads the shell remembers at once; a page cannot start more than a few by hand.
+const MAX_PENDING: usize = 64;
+
+/// Where each running download was told to go. macOS reports no path when a download ends, so
+/// without this the page would be told every download failed, even one that landed.
+#[derive(Default)]
+pub struct PendingDownloads(Mutex<HashMap<String, PathBuf>>);
+
+impl PendingDownloads {
+    pub fn remember(&self, url: &str, path: &Path) {
+        let Ok(mut map) = self.0.lock() else { return };
+        if map.len() >= MAX_PENDING {
+            map.clear();
+        }
+        map.insert(url.to_string(), path.to_path_buf());
+    }
+
+    /// The path a finished download went to: the one the system reported, else the one remembered.
+    pub fn resolve(&self, url: &str, reported: Option<PathBuf>) -> Option<PathBuf> {
+        let kept = self.0.lock().ok().and_then(|mut map| map.remove(url));
+        reported.or(kept)
+    }
+}
+
 /// The script that tells the page how a download ended: one `CustomEvent` with `{name, path,
 /// success}`. The detail is built with serde_json, so a file name cannot break out of the string.
 pub fn finished_script(path: Option<&Path>, success: bool) -> String {
@@ -158,6 +184,22 @@ mod tests {
         let json = script.split_once("detail: ").unwrap().1;
         let end = json.rfind(" }));").unwrap();
         serde_json::from_str(&json[..end]).unwrap()
+    }
+
+    #[test]
+    fn a_finished_download_is_named_from_where_it_was_sent() {
+        let pending = PendingDownloads::default();
+        let sent = PathBuf::from("/Users/x/Downloads/a.html");
+        pending.remember("blob:http://127.0.0.1:1/id", &sent);
+        assert_eq!(
+            pending.resolve("blob:http://127.0.0.1:1/id", None),
+            Some(sent)
+        );
+        assert_eq!(pending.resolve("blob:http://127.0.0.1:1/id", None), None);
+        let reported = PathBuf::from("/Users/x/Downloads/b.html");
+        pending.remember("u", Path::new("/Users/x/Downloads/other.html"));
+        assert_eq!(pending.resolve("u", Some(reported.clone())), Some(reported));
+        assert_eq!(pending.resolve("never-started", None), None);
     }
 
     #[test]

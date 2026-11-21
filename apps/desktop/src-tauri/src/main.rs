@@ -231,6 +231,7 @@ pub async fn show_main(
         .parse()
         .map_err(|_| "the proxy address is not a URL".to_string())?;
     let download_origin = origin.clone();
+    let pending = Arc::new(hq_desktop::downloads::PendingDownloads::default());
     WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(parsed))
         .title(hq_desktop::window::main_title(desktop.hub_web_active()))
         .inner_size(1200.0, 800.0)
@@ -249,6 +250,7 @@ pub async fn show_main(
                     p.exists()
                 }) {
                     Some(path) => {
+                        pending.remember(url.as_str(), &path);
                         *destination = path;
                         true
                     }
@@ -258,7 +260,8 @@ pub async fn show_main(
                     }
                 }
             }
-            DownloadEvent::Finished { path, success, .. } => {
+            DownloadEvent::Finished { url, path, success } => {
+                let path = pending.resolve(url.as_str(), path);
                 let script = hq_desktop::downloads::finished_script(path.as_deref(), success);
                 let _ = webview.eval(script);
                 true
