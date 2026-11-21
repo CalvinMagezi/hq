@@ -1,0 +1,1 @@
+**A document can have a table of contents and a page header in Word.** Set `suite_toc: true` in a note's frontmatter and the Word export gets a real contents field over headings 1 to 3, which Word offers to refresh with page numbers when the file is opened. `suite_header: "Draft"` puts that text in the page header.

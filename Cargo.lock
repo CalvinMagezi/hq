@@ -3863,6 +3863,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml 0.8.2",
+ "zip 9.0.5",
 ]
 
 [[package]]

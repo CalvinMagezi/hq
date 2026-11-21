@@ -24,7 +24,7 @@ export function ThinkingPanel({ content, live = false }: { content: string; live
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         className="w-full flex items-center gap-1.5 px-3 min-h-9 py-1.5 text-left transition-colors hover:bg-amber-500/5"
-        style={{ color: 'var(--accent-amber)' }}
+        style={{ color: 'var(--warn)' }}
       >
         <Brain className={`w-3.5 h-3.5 shrink-0 ${live ? 'animate-pulse' : ''}`} />
         <span className="text-[11px] font-bold uppercase tracking-wider shrink-0">
@@ -39,7 +39,7 @@ export function ThinkingPanel({ content, live = false }: { content: string; live
 
       {open && (
         <div className="px-3 pb-2.5 pt-1 border-t border-amber-500/10 max-h-80 overflow-y-auto">
-          <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words opacity-80" style={{ color: 'var(--text-dim)' }}>
+          <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words opacity-80" style={{ color: 'var(--ink-muted)' }}>
             {content}
           </p>
         </div>

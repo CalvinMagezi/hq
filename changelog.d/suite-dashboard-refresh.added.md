@@ -1,0 +1,1 @@
+**Scheduled dashboard snapshots.** With `suite.dashboard_refresh.enabled: true` and a list of dashboard notes, the daemon writes a PDF and a PNG snapshot of each into `Exports/<yyyy-mm>/` every `every_minutes` (daily by default) and logs one line. It is off by default and never sends the files anywhere.

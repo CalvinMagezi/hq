@@ -127,6 +127,7 @@ impl Sheet {
 struct Run<'a> {
     sheet: &'a Sheet,
     done: HashMap<(u32, u32), Value>,
+    max_row: Option<u32>,
 }
 
 impl<'a> Run<'a> {
@@ -134,6 +135,7 @@ impl<'a> Run<'a> {
         Run {
             sheet,
             done: HashMap::new(),
+            max_row: None,
         }
     }
 
@@ -231,6 +233,13 @@ impl<'a> Run<'a> {
 }
 
 impl Cells for Run<'_> {
+    fn max_row(&mut self) -> u32 {
+        let sheet = self.sheet;
+        *self
+            .max_row
+            .get_or_insert_with(|| sheet.cells.keys().map(|(_, r)| *r).max().unwrap_or(0))
+    }
+
     fn cell(&mut self, at: CellRef) -> Value {
         let key = (at.col, at.row);
         if !self.done.contains_key(&key) {

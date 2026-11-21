@@ -2,12 +2,24 @@
 
 use std::cmp::Ordering;
 
-use crate::parse::{CellRef, Expr};
+use crate::parse::{CellRef, Expr, MAX_ROWS};
 use crate::value::{CalcError, Value};
+
+#[path = "fnlib/dates.rs"]
+mod dates;
+#[path = "fnlib/more.rs"]
+mod more;
+#[path = "fnlib/numfmt.rs"]
+mod numfmt;
+#[path = "fnlib/rounding.rs"]
+mod rounding;
 
 /// Where cells come from while evaluating.
 pub(crate) trait Cells {
     fn cell(&mut self, at: CellRef) -> Value;
+    /// The last row (zero-based) that holds anything anywhere in the workbook. A whole-column
+    /// range is cut back to it, so `$B:$B` never copies a million empty cells.
+    fn max_row(&mut self) -> u32;
 }
 
 /// Largest range a formula may read, so `A1:ZZZ999999` cannot ask for the world.
@@ -67,7 +79,86 @@ pub const FUNCTIONS: &[&str] = &[
     "ROWS",
     "TEXTJOIN",
     "LET",
+    "TRUE",
+    "FALSE",
+    "IFNA",
+    "COUNTIFS",
+    "SUMIFS",
+    "AVERAGEIF",
+    "AVERAGEIFS",
+    "MAXIFS",
+    "MINIFS",
+    "MEDIAN",
+    "LARGE",
+    "SMALL",
+    "RANK",
+    "RANK.EQ",
+    "MATCH",
+    "LOOKUP",
+    "HLOOKUP",
+    "VALUE",
+    "REPT",
+    "PROPER",
+    "MID",
+    "EXACT",
+    "TRUNC",
+    "SIGN",
+    "CEILING",
+    "FLOOR",
+    "DATE",
+    "YEAR",
+    "MONTH",
+    "DAY",
+    "WEEKDAY",
+    "EOMONTH",
+    "DATEDIF",
 ];
+
+/// Functions that are left out on purpose, with the reason. Each one gives `#NAME?` ("cannot
+/// calculate"), never a guess, and the calc-check report names it.
+pub const NOT_PLANNED: &[(&str, &str)] = &[
+    (
+        "TODAY",
+        "depends on the clock, so a saved answer cannot be repeated",
+    ),
+    (
+        "NOW",
+        "depends on the clock, so a saved answer cannot be repeated",
+    ),
+    ("RAND", "random, so a saved answer cannot be repeated"),
+    (
+        "RANDBETWEEN",
+        "random, so a saved answer cannot be repeated",
+    ),
+    ("OFFSET", "volatile: what it reads depends on a calculation"),
+    ("INDIRECT", "volatile: what it reads depends on a text"),
+    (
+        "SUMPRODUCT",
+        "works on whole arrays; the engine has no array values yet",
+    ),
+    ("CHOOSE", "not built yet"),
+    (
+        "UNIQUE",
+        "returns an array that spills over cells; a cell here holds one value",
+    ),
+    (
+        "SORT",
+        "returns an array that spills over cells; a cell here holds one value",
+    ),
+    (
+        "FILTER",
+        "returns an array that spills over cells; a cell here holds one value",
+    ),
+];
+
+/// Why a function is not calculated, in a few words, or `None` if it is unknown or supported.
+pub fn why_unsupported(name: &str) -> Option<&'static str> {
+    let upper = name.to_ascii_uppercase();
+    NOT_PLANNED
+        .iter()
+        .find(|(n, _)| *n == upper)
+        .map(|(_, why)| *why)
+}
 
 type R = Result<Value, CalcError>;
 
@@ -116,6 +207,8 @@ pub(crate) fn num(v: &Value) -> Result<f64, CalcError> {
             .trim()
             .parse::<f64>()
             .ok()
+            // Rust reads "inf" and "nan"; a spreadsheet does not.
+            .filter(|n| n.is_finite())
             .or_else(|| iso_date_serial(t))
             .ok_or(CalcError::Value),
         Value::Err(e) => Err(*e),
@@ -232,10 +325,37 @@ fn compare(op: char, a: &Value, b: &Value) -> bool {
     }
 }
 
+/// (first column, last column, first row, last row) of a range. A range that runs to the last row
+/// Excel has (`$B:$B`) stops at the last row anything is written in, because the cells below hold
+/// nothing; a range that does not keep its own bounds.
+fn bounds(a: CellRef, b: CellRef, ctx: &mut dyn Cells) -> (u32, u32, u32, u32) {
+    let (c0, c1) = (a.col.min(b.col), a.col.max(b.col));
+    let (r0, mut r1) = (a.row.min(b.row), a.row.max(b.row));
+    if r1 >= MAX_ROWS - 1 {
+        r1 = r1.min(ctx.max_row().max(r0));
+    }
+    (c0, c1, r0, r1)
+}
+
+/// Whether an argument is a range that runs to the bottom of the sheet (`$B:$B`, `B2:B1048576`).
+fn open_ended(e: &Expr) -> bool {
+    matches!(e, Expr::Range(a, b) if a.row.max(b.row) >= MAX_ROWS - 1)
+}
+
+/// Rows and columns a range names, before any cutting back.
+fn shape(e: &Expr) -> (u64, u64) {
+    match e {
+        Expr::Range(a, b) => (
+            u64::from(a.row.abs_diff(b.row)) + 1,
+            u64::from(a.col.abs_diff(b.col)) + 1,
+        ),
+        _ => (1, 1),
+    }
+}
+
 /// Every cell of a range, row by row.
 fn range_values(a: CellRef, b: CellRef, ctx: &mut dyn Cells) -> Result<Vec<Value>, CalcError> {
-    let (c0, c1) = (a.col.min(b.col), a.col.max(b.col));
-    let (r0, r1) = (a.row.min(b.row), a.row.max(b.row));
+    let (c0, c1, r0, r1) = bounds(a, b, ctx);
     let cells = u64::from(c1 - c0 + 1) * u64::from(r1 - r0 + 1);
     if cells > MAX_RANGE_CELLS {
         return Err(CalcError::Ref);
@@ -281,17 +401,6 @@ fn arity(args: &[Expr], min: usize, max: usize) -> Result<(), CalcError> {
         Err(CalcError::Value)
     } else {
         Ok(())
-    }
-}
-
-/// Rounds half away from zero, as a spreadsheet does (Rust's `round` already does).
-fn round_to(x: f64, digits: f64) -> f64 {
-    let d = digits.trunc().clamp(-15.0, 15.0) as i32;
-    let m = 10f64.powi(d.abs());
-    if d >= 0 {
-        (x * m).round() / m
-    } else {
-        (x / m).round() * m
     }
 }
 
@@ -454,14 +563,12 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
         "ROUNDUP" | "ROUNDDOWN" => {
             arity(args, 2, 2)?;
             let (x, d) = (num(&run(&args[0], ctx)?)?, num(&run(&args[1], ctx)?)?);
-            let m = 10f64.powi(d.trunc().clamp(-15.0, 15.0) as i32);
-            let scaled = x * m;
-            let cut = if name == "ROUNDUP" {
-                scaled.signum() * scaled.abs().ceil()
+            let mode = if name == "ROUNDUP" {
+                rounding::Mode::Up
             } else {
-                scaled.trunc()
+                rounding::Mode::Down
             };
-            Ok(Value::Num(cut / m))
+            Ok(Value::Num(rounding::round_dec(x, d, mode)))
         }
         "LEFT" | "RIGHT" => {
             arity(args, 1, 2)?;
@@ -654,11 +761,9 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
             let Value::Text(format) = run(&args[1], ctx)? else {
                 return Err(CalcError::Value);
             };
-            // Only number formats are reproduced; a date or free-form format stays "cannot calculate".
-            let Some(shown) = format_text(num(&value)?, &format) else {
-                return Err(CalcError::Name);
-            };
-            Ok(Value::Text(shown))
+            // Number, date and currency-like formats are reproduced; anything else (times, colours,
+            // fractions, scientific) stays "cannot calculate".
+            numfmt::text(&value, &format).map(Value::Text)
         }
         "ABS" => one(args, ctx, f64::abs),
         "INT" => one(args, ctx, f64::floor),
@@ -674,7 +779,7 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
         "ROUND" => {
             arity(args, 2, 2)?;
             let (x, d) = (num(&run(&args[0], ctx)?)?, num(&run(&args[1], ctx)?)?);
-            Ok(Value::Num(round_to(x, d)))
+            Ok(Value::Num(rounding::round_dec(x, d, rounding::Mode::Half)))
         }
         "MOD" => {
             arity(args, 2, 2)?;
@@ -697,7 +802,7 @@ fn call(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
             }
             Ok(Value::Text(s))
         }
-        _ => Err(CalcError::Name),
+        _ => more::call(name, args, ctx),
     }
 }
 
@@ -706,13 +811,17 @@ fn one(args: &[Expr], ctx: &mut dyn Cells, f: fn(f64) -> f64) -> R {
     Ok(Value::Num(f(num(&run(&args[0], ctx)?)?)))
 }
 
-/// The values of a range as rows, for the functions that look inside a table.
+/// The values of a range as rows, for the functions that look inside a table. A range down to the
+/// bottom of the sheet stops at the last row in use.
 fn table(e: &Expr, ctx: &mut dyn Cells) -> Result<Vec<Vec<Value>>, CalcError> {
     let Expr::Range(a, b) = e else {
         return Err(CalcError::Value);
     };
-    let (c0, c1) = (a.col.min(b.col), a.col.max(b.col));
-    let (r0, r1) = (a.row.min(b.row), a.row.max(b.row));
+    let (c0, c1, r0, r1) = bounds(*a, *b, ctx);
+    let cells = u64::from(c1 - c0 + 1) * u64::from(r1 - r0 + 1);
+    if cells > MAX_RANGE_CELLS {
+        return Err(CalcError::Ref);
+    }
     Ok((r0..=r1)
         .map(|r| {
             (c0..=c1)
@@ -738,7 +847,15 @@ fn table_lookup(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
         let cell = t
             .get(r as usize - 1)
             .and_then(|row| row.get(c as usize - 1));
-        return cell.cloned().ok_or(CalcError::Ref);
+        if let Some(v) = cell {
+            return Ok(v.clone());
+        }
+        // Inside the range as written but below what the sheet uses: an empty cell.
+        let (rows, cols) = shape(&args[0]);
+        if (r as u64) <= rows && (c as u64) <= cols && open_ended(&args[0]) {
+            return Ok(Value::Empty);
+        }
+        return Err(CalcError::Ref);
     }
     arity(args, 3, 4)?;
     let key = run(&args[0], ctx)?;
@@ -754,21 +871,32 @@ fn table_lookup(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
         },
         None => true,
     };
+    let first: Vec<Value> = t.iter().map(|row| row[0].clone()).collect();
+    let lines: Vec<&[Value]> = t.iter().map(|r| r.as_slice()).collect();
+    lookup_row(&key, &first, &lines, col as usize, approx)
+}
+
+/// The shared part of `VLOOKUP` and `HLOOKUP`: `first` is the line searched, and the answer is
+/// element `pick` (1-based) of the matching entry of `lines`.
+fn lookup_row(key: &Value, first: &[Value], lines: &[&[Value]], pick: usize, approx: bool) -> R {
     let mut hit = None;
-    for (i, row) in t.iter().enumerate() {
-        match order(&row[0], &key) {
+    for (i, cell) in first.iter().enumerate() {
+        match order(cell, key) {
             Ordering::Equal => {
                 hit = Some(i);
                 if !approx {
                     break;
                 }
             }
-            Ordering::Less if approx && rank(&row[0]) == rank(&key) => hit = Some(i),
+            // Cells below the data (a whole-column table) are not part of it.
+            Ordering::Less if approx && rank(cell) == rank(key) && *cell != Value::Empty => {
+                hit = Some(i)
+            }
             _ => {}
         }
     }
     let i = hit.ok_or(CalcError::Na)?;
-    t[i].get(col as usize - 1).cloned().ok_or(CalcError::Ref)
+    lines[i].get(pick - 1).cloned().ok_or(CalcError::Ref)
 }
 
 /// A spreadsheet date moved by whole months, keeping the day or the month's last day. Excel counts
@@ -859,12 +987,27 @@ fn range_list(e: &Expr, ctx: &mut dyn Cells) -> Result<Vec<Value>, CalcError> {
 /// A `COUNTIF` or `SUMIF` test: `5`, `"text"`, `">5"`, `"<=3"`, `"<>x"`.
 fn criterion_matches(cell: &Value, criterion: &Value) -> bool {
     let Value::Text(c) = criterion else {
-        return order(cell, criterion) == Ordering::Equal && rank(cell) == rank(criterion);
+        // An empty cell is not 0: `COUNTIF(A:A, 0)` does not count blanks.
+        return !matches!(cell, Value::Empty)
+            && order(cell, criterion) == Ordering::Equal
+            && rank(cell) == rank(criterion);
     };
     let (op, rest) = ["<>", "<=", ">=", "<", ">", "="]
         .iter()
         .find_map(|op| c.strip_prefix(op).map(|r| (*op, r)))
         .unwrap_or(("=", c.as_str()));
+    // `""` counts blank cells and empty texts, `"="` only blank cells, `"<>"` every cell that is
+    // not blank (an empty text included), as in Excel.
+    if rest.is_empty() {
+        match op {
+            "=" if c.is_empty() => {
+                return matches!(cell, Value::Empty) || *cell == Value::Text(String::new());
+            }
+            "=" => return matches!(cell, Value::Empty),
+            "<>" => return !matches!(cell, Value::Empty),
+            _ => {}
+        }
+    }
     if (op == "=" || op == "<>") && (rest.contains('*') || rest.contains('?')) {
         let hit = matches!(cell, Value::Text(t) if wildcard_match(&rest.to_lowercase(), &t.to_lowercase()));
         return if op == "=" { hit } else { !hit };
@@ -891,6 +1034,10 @@ fn count_or_sum_if(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
     arity(args, 2, if counting { 2 } else { 3 })?;
     let tested = range_list(&args[0], ctx)?;
     let criterion = run(&args[1], ctx)?;
+    // A range cut back to the rows in use would count fewer blanks than Excel does.
+    if open_ended(&args[0]) && criterion_matches(&Value::Empty, &criterion) {
+        return Err(CalcError::Name);
+    }
     let summed = if !counting && args.len() == 3 {
         Some(range_list(&args[2], ctx)?)
     } else {
@@ -912,44 +1059,6 @@ fn count_or_sum_if(name: &str, args: &[Expr], ctx: &mut dyn Cells) -> R {
         }
     }
     Ok(Value::Num(total))
-}
-
-/// `0`, `0.00`, `#,##0`, `#,##0.00`, `0%`, `0.0%`: the formats a sheet of money and counts uses.
-fn format_text(n: f64, format: &str) -> Option<String> {
-    let percent = format.ends_with('%');
-    let body = format.trim_end_matches('%');
-    let (int_part, frac_part) = body.split_once('.').map_or((body, ""), |(a, b)| (a, b));
-    let valid = |s: &str, allowed: &[char]| s.chars().all(|c| allowed.contains(&c));
-    if body.is_empty() || !valid(int_part, &['0', '#', ',']) || !valid(frac_part, &['0', '#']) {
-        return None;
-    }
-    let grouping = int_part.contains(',');
-    let decimals = frac_part.len();
-    let scaled = if percent { n * 100.0 } else { n };
-    let rounded = round_to(scaled, decimals as f64);
-    let fixed = format!("{:.*}", decimals, rounded.abs());
-    let (whole, frac) = fixed
-        .split_once('.')
-        .map_or((fixed.as_str(), ""), |(a, b)| (a, b));
-    let whole = if grouping {
-        let digits: Vec<char> = whole.chars().collect();
-        let mut out = String::new();
-        for (i, c) in digits.iter().enumerate() {
-            if i > 0 && (digits.len() - i).is_multiple_of(3) {
-                out.push(',');
-            }
-            out.push(*c);
-        }
-        out
-    } else {
-        whole.to_string()
-    };
-    let sign = if rounded < 0.0 { "-" } else { "" };
-    let dot = if decimals > 0 { "." } else { "" };
-    Some(format!(
-        "{sign}{whole}{dot}{frac}{}",
-        if percent { "%" } else { "" }
-    ))
 }
 
 /// `*` is any run of characters and `?` any one, as in a `COUNTIF` criterion.

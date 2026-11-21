@@ -17,6 +17,8 @@ struct NoteForRender {
     rel: String,
     title: String,
     body: String,
+    /// What the frontmatter asks of a Word file (`suite_toc`, `suite_header`).
+    docx: hq_suite_docs::DocxOptions,
 }
 
 fn read_note(vault: &Path, note: &Path) -> Result<NoteForRender> {
@@ -35,8 +37,15 @@ fn read_note(vault: &Path, note: &Path) -> Result<NoteForRender> {
             .trim_end_matches(".md")
             .to_string()
     });
-    let body = body_of(&text).to_string();
-    Ok(NoteForRender { rel, title, body })
+    // Review comments never reach a rendered file.
+    let body = hq_suite_md::strip_comments(body_of(&text));
+    let docx = hq_suite_docs::DocxOptions::from_frontmatter(doc.frontmatter());
+    Ok(NoteForRender {
+        rel,
+        title,
+        body,
+        docx,
+    })
 }
 
 /// Where a render goes: the path asked for, or beside the note with the extension changed. Never a
@@ -62,7 +71,7 @@ pub fn render(vault: &Path, note: &Path, out: Option<&Path>) -> Result<PathBuf> 
     let n = read_note(vault, note)?;
     let dir = n.rel.rsplit_once('/').map_or("", |(d, _)| d);
     let rebased = hq_suite_docs::rebase_pictures(&n.body, dir);
-    let bytes = hq_suite_docs::render_docx(&n.title, &rebased, Some(vault))?;
+    let bytes = hq_suite_docs::render_docx_with(&n.title, &rebased, Some(vault), &n.docx)?;
     let target = target_for(vault, &n.rel, out, "docx")?;
     fsx::atomic_write(&target, &bytes)?;
     Ok(target)
@@ -328,5 +337,83 @@ mod picture_tests {
         assert!(load_picture(v, "Notebooks", "missing.png").is_none());
         std::fs::write(d.path().join("Notebooks/bad.png"), b"not an image").unwrap();
         assert!(load_picture(v, "Notebooks", "bad.png").is_none());
+    }
+}
+
+#[cfg(test)]
+mod fidelity_tests {
+    const SECRET: &str = "Ask finance before sending this";
+
+    fn comment() -> String {
+        format!("```comment on=2c3f0ef6ba07 by=Sam state=open\n{SECRET}\n```")
+    }
+
+    async fn read_back(bytes: Vec<u8>, ext: &str) -> String {
+        hq_convert::ingest::convert_bytes(
+            bytes,
+            ext,
+            None,
+            &hq_convert::ingest::ConvertOptions::default(),
+        )
+        .await
+        .unwrap()
+        .markdown
+    }
+
+    fn vault_with(name: &str, text: &str) -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("Notebooks")).unwrap();
+        std::fs::write(d.path().join("Notebooks").join(name), text).unwrap();
+        d
+    }
+
+    fn export(d: &tempfile::TempDir, name: &str, format: &str) -> Vec<u8> {
+        let out = d.path().join(format!("out.{format}"));
+        crate::author::export_note(d.path(), &format!("Notebooks/{name}"), format, &out).unwrap();
+        std::fs::read(out).unwrap()
+    }
+
+    #[tokio::test]
+    async fn review_comments_never_reach_a_word_file_and_the_note_asks_for_toc_and_header() {
+        let note = format!(
+            "---\ntitle: Plan\nsuite_kind: doc\nsuite_toc: true\nsuite_header: \"Draft for review\"\n---\n# Plan\n\nThe revenue figure is final.\n\n{}\n\n## Costs\n\nMore.\n",
+            comment()
+        );
+        let d = vault_with("plan.md", &note);
+        let docx = export(&d, "plan.md", "docx");
+        let text = read_back(docx.clone(), "docx").await;
+        assert!(
+            !text.contains(SECRET) && !text.contains("comment"),
+            "{text}"
+        );
+        assert!(text.contains("revenue figure") && text.contains("Costs"));
+        let opts = hq_suite_docs::DocxOptions::from_frontmatter(
+            hq_suite_md::frontmatter::split(&note).raw,
+        );
+        assert!(opts.toc && opts.header == "Draft for review");
+        // The TOC and header parts make the package larger than the same body without them.
+        let plain = hq_suite_docs::render_docx("Plan", "# Plan\n\n## Costs\n", None).unwrap();
+        assert_ne!(docx.len(), plain.len());
+    }
+
+    #[tokio::test]
+    async fn review_comments_never_reach_a_deck_or_a_workbook() {
+        let deck = format!(
+            "---\ntitle: Deck\nsuite_kind: slides\n---\n\n# Deck\n\n## One\n\n- point\n\n{}\n",
+            comment()
+        );
+        let d = vault_with("deck.md", &deck);
+        let text = read_back(export(&d, "deck.md", "pptx"), "pptx").await;
+        assert!(!text.contains(SECRET), "{text}");
+        assert!(text.contains("point"));
+
+        let sheet = format!(
+            "---\ntitle: Stock\nsuite_kind: sheet\n---\n# Stock\n\n```sheet name=Stock types=\"text,int\"\n| item | qty |\n|---|---|\n| Sugar | 40 |\n```\n\n{}\n",
+            comment()
+        );
+        let d = vault_with("stock.md", &sheet);
+        let text = read_back(export(&d, "stock.md", "xlsx"), "xlsx").await;
+        assert!(!text.contains(SECRET), "{text}");
+        assert!(text.contains("Sugar"));
     }
 }

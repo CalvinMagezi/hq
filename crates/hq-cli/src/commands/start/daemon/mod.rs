@@ -479,6 +479,9 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("disk-watchdog", Duration::from_secs(21600)),
         // HQ Suite storage: orphan pictures, aged-out originals, the budget (`suite.governor`).
         DaemonTask::with_default_timeout("suite-governor", Duration::from_secs(21600)),
+        // Scheduled PDF and PNG snapshots of listed dashboard notes. Off unless
+        // `suite.dashboard_refresh.enabled`; wakes often and acts when `every_minutes` have passed.
+        DaemonTask::with_default_timeout("suite-dashboard-refresh", Duration::from_secs(600)),
         // Wakes hourly and acts only when `backup.enabled` and the newest backup is old enough.
         // The backup itself runs detached, so the task returns at once however big the vault is.
         DaemonTask::with_default_timeout("backup", Duration::from_secs(3600)),
@@ -667,6 +670,9 @@ async fn dispatch_task(
         }
         "disk-watchdog" => tasks_periodic::run_disk_watchdog(vault_path, db, config).await,
         "suite-governor" => tasks_periodic::run_suite_governor(vault_path, config).await,
+        "suite-dashboard-refresh" => {
+            tasks_periodic::run_suite_dashboard_refresh(vault_path, config).await
+        }
         "backup" => tasks_periodic::run_backup(config).await,
         "copilot-usage" => tasks_periodic::run_copilot_usage(db, config).await,
         "lane-quotas" => tasks_periodic::run_lane_quotas(db, config).await,

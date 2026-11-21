@@ -28,6 +28,6 @@ mod util;
 pub use doc::Document;
 pub use error::ExportError;
 pub use formats::{ExportOptions, Format, Output, export};
-pub use note::{NoteExport, export_note, export_note_blocking};
+pub use note::{NoteExport, export_note, export_note_blocking, export_note_text};
 pub use render::RenderOptions;
 pub use theme::Theme;

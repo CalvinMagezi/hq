@@ -41,6 +41,7 @@ class CalmCopyTest {
         "hd_conn_toast",
         "helpers_allowed_toast",
         "helpers_declined_toast",
+        "suite_comment_refused_toast",
     )
 
     private val pillKeys = listOf(

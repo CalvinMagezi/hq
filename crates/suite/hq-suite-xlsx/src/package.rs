@@ -4,6 +4,7 @@ use std::io::{Cursor, Write};
 
 use crate::XlsxError;
 use crate::cells::{Built, BuiltSheet, CachedValue, Cell, Style, cell_ref};
+use crate::chart::{ChartSpec, chart_xml, drawing_rels, drawing_xml};
 
 const MAIN_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -12,12 +13,12 @@ const PKG_REL_NS: &str = "http://schemas.openxmlformats.org/package/2006/relatio
 const FIRST_CUSTOM_FORMAT: u32 = 164;
 const WHOLE_CURRENCIES: &[&str] = &["ugx", "kes", "rwf", "tzs", "jpy"];
 
-pub(crate) fn pack(built: &Built) -> Result<Vec<u8>, XlsxError> {
+pub(crate) fn pack(built: &Built, charts: &[ChartSpec]) -> Result<Vec<u8>, XlsxError> {
     let styles = StyleTable::from(&built.sheets);
     let mut parts: Vec<(String, String)> = vec![
         (
             "[Content_Types].xml".into(),
-            content_types(built.sheets.len()),
+            content_types(built.sheets.len(), charts, built.sheets.len()),
         ),
         ("_rels/.rels".into(), root_rels()),
         ("xl/workbook.xml".into(), workbook(&built.sheets)),
@@ -27,11 +28,44 @@ pub(crate) fn pack(built: &Built) -> Result<Vec<u8>, XlsxError> {
         ),
         ("xl/styles.xml".into(), styles.xml()),
     ];
+    // Charts are numbered across the workbook; a sheet with charts gets one drawing.
+    let mut next_chart = 1;
+    let mut drawing_no = 0;
     for (i, sheet) in built.sheets.iter().enumerate() {
+        let mine: Vec<&ChartSpec> = charts.iter().filter(|c| c.sheet == i).collect();
+        let drawing = if mine.is_empty() {
+            None
+        } else {
+            drawing_no += 1;
+            Some(drawing_no)
+        };
         parts.push((
             format!("xl/worksheets/sheet{}.xml", i + 1),
-            sheet_xml(sheet, &styles),
+            sheet_xml(sheet, &styles, drawing.is_some()),
         ));
+        if let Some(n) = drawing {
+            parts.push((
+                format!("xl/worksheets/_rels/sheet{}.xml.rels", i + 1),
+                format!(
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="{PKG_REL_NS}"><Relationship Id="rId1" Type="{REL_NS}/drawing" Target="../drawings/drawing{n}.xml"/></Relationships>"#
+                ),
+            ));
+            parts.push((
+                format!("xl/drawings/drawing{n}.xml"),
+                drawing_xml(sheet.widths.len(), mine.len()),
+            ));
+            parts.push((
+                format!("xl/drawings/_rels/drawing{n}.xml.rels"),
+                drawing_rels(next_chart, mine.len()),
+            ));
+            for spec in mine {
+                parts.push((
+                    format!("xl/charts/chart{next_chart}.xml"),
+                    chart_xml(spec, &sheet.name),
+                ));
+                next_chart += 1;
+            }
+        }
     }
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options = zip::write::SimpleFileOptions::default()
@@ -61,12 +95,22 @@ fn esc(s: &str) -> String {
     out
 }
 
-fn content_types(sheets: usize) -> String {
+fn content_types(sheets: usize, charts: &[ChartSpec], sheet_count: usize) -> String {
     let mut s = String::from(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>"#,
     );
     for i in 1..=sheets {
         s.push_str(&format!(r#"<Override PartName="/xl/worksheets/sheet{i}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>"#));
+    }
+    let mut drawn = 0;
+    for i in 0..sheet_count {
+        if charts.iter().any(|c| c.sheet == i) {
+            drawn += 1;
+            s.push_str(&format!(r#"<Override PartName="/xl/drawings/drawing{drawn}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>"#));
+        }
+    }
+    for n in 1..=charts.len() {
+        s.push_str(&format!(r#"<Override PartName="/xl/charts/chart{n}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>"#));
     }
     s.push_str("</Types>");
     s
@@ -188,9 +232,9 @@ impl StyleTable {
     }
 }
 
-fn sheet_xml(sheet: &BuiltSheet, styles: &StyleTable) -> String {
+fn sheet_xml(sheet: &BuiltSheet, styles: &StyleTable, drawing: bool) -> String {
     let mut s = format!(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="{MAIN_NS}"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>"#
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="{MAIN_NS}" xmlns:r="{REL_NS}"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>"#
     );
     if !sheet.widths.is_empty() {
         s.push_str("<cols>");
@@ -213,7 +257,11 @@ fn sheet_xml(sheet: &BuiltSheet, styles: &StyleTable) -> String {
         }
         s.push_str("</row>");
     }
-    s.push_str("</sheetData></worksheet>");
+    s.push_str("</sheetData>");
+    if drawing {
+        s.push_str(r#"<drawing r:id="rId1"/>"#);
+    }
+    s.push_str("</worksheet>");
     s
 }
 

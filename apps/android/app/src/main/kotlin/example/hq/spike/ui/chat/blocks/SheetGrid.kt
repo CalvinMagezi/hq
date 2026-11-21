@@ -43,6 +43,8 @@ import example.hq.spike.data.SheetView
 import example.hq.spike.data.TileView
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
+import example.hq.spike.data.suiteAddColumn
+import example.hq.spike.data.suiteAddRow
 import example.hq.spike.data.suiteEditCell
 import example.hq.spike.data.suitePlot
 import example.hq.spike.data.suiteSheet
@@ -81,15 +83,18 @@ fun SheetBlockView(block: Block.Sheet, onCopied: () -> Unit) {
         BlockFrame { Text(stringResource(R.string.suite_sheet_drawing), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(12.dp)) }
         return
     }
-    val client = HqServices.get(LocalContext.current).client
-    val loaded by produceState<Result<SheetView>?>(fixed?.let { Result.success(it) }, path, block.index) {
+    val context = LocalContext.current
+    val client = HqServices.get(context).client
+    val revision = LocalBlocksRevision.current
+    // The revision moves when the note was written by someone else (a `note_changed` event), so the cells are asked for again.
+    val outside = revision?.intValue
+    val loaded by produceState<Result<SheetView>?>(fixed?.let { Result.success(it) }, path, block.index, outside) {
         if (fixed == null && path != null) value = runCatching { client.suiteSheet(path, block.index) }
     }
     // What hq sent back after an edit replaces what was first loaded.
-    var edited by remember(path, block.index) { mutableStateOf<SheetView?>(null) }
+    var edited by remember(path, block.index, outside) { mutableStateOf<SheetView?>(null) }
     var editing by remember { mutableStateOf<EditTarget?>(null) }
     val scope = rememberCoroutineScope()
-    val revision = LocalBlocksRevision.current
     when (val r = loaded) {
         null -> BlockFrame { Text(stringResource(R.string.suite_sheet_drawing), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(12.dp)) }
         else -> r.fold({
@@ -101,6 +106,18 @@ fun SheetBlockView(block: Block.Sheet, onCopied: () -> Unit) {
                 CellEditDialog(
                     target,
                     onDismiss = { editing = null },
+                    onStructure = { column, failed ->
+                        scope.launch {
+                            runCatching {
+                                // Table row 1 is the first row under the header, so "below this row" is before row + 1.
+                                if (column) client.suiteAddColumn(path!!, block.index, context.getString(R.string.suite_sheet_new_column, (edited ?: it).rows.firstOrNull()?.size?.plus(1) ?: 1))
+                                else client.suiteAddRow(path!!, block.index, (target.row + 1).takeIf { row -> row <= (edited ?: it).rowCount })
+                                client.suiteSheet(path, block.index)
+                            }
+                                .onSuccess { fresh -> edited = fresh; editing = null; revision?.let { r -> r.intValue++ } }
+                                .onFailure { failed() }
+                        }
+                    },
                     onSave = { text, failed ->
                         scope.launch {
                             runCatching { client.suiteEditCell(path!!, block.index, target.row, target.col, target.raw, text) }
@@ -129,7 +146,7 @@ private fun columnLetters(col: Int): String {
 }
 
 @Composable
-private fun CellEditDialog(target: EditTarget, onDismiss: () -> Unit, onSave: (String, () -> Unit) -> Unit) {
+private fun CellEditDialog(target: EditTarget, onDismiss: () -> Unit, onStructure: (column: Boolean, failed: () -> Unit) -> Unit, onSave: (String, () -> Unit) -> Unit) {
     var text by remember(target) { mutableStateOf(target.raw) }
     var failed by remember(target) { mutableStateOf(false) }
     var saving by remember(target) { mutableStateOf(false) }
@@ -140,6 +157,15 @@ private fun CellEditDialog(target: EditTarget, onDismiss: () -> Unit, onSave: (S
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(text, { text = it; failed = false }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (failed) Text(stringResource(R.string.suite_sheet_edit_failed), style = HqType.BodySm, color = Mts.InkMuted)
+                // Structure: the header row has no "row below" that means anything to a person, so it only offers a column.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (target.row > 0) TextButton({ saving = true; onStructure(false) { saving = false; failed = true } }, Modifier.heightIn(min = 48.dp), enabled = !saving) {
+                        Text(stringResource(R.string.suite_sheet_add_row), style = HqType.BodySmBold, color = Mts.BrandBlue)
+                    }
+                    TextButton({ saving = true; onStructure(true) { saving = false; failed = true } }, Modifier.heightIn(min = 48.dp), enabled = !saving) {
+                        Text(stringResource(R.string.suite_sheet_add_column), style = HqType.BodySmBold, color = Mts.BrandBlue)
+                    }
+                }
             }
         },
         confirmButton = {

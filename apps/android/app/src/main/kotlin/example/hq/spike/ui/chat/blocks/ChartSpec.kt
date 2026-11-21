@@ -10,9 +10,11 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
-enum class ChartType { Line, Bar, Pie, Donut;
+enum class ChartType { Line, Bar, Area, Stacked, Scatter, Pie, Donut;
     val isRound: Boolean get() = this == Pie || this == Donut
-    val title: String get() = when (this) { Line -> "Line"; Bar -> "Bar"; Pie -> "Pie"; Donut -> "Donut" }
+    /** Drawn as columns in slots: a bar chart and a stacked one. */
+    val isColumns: Boolean get() = this == Bar || this == Stacked
+    val title: String get() = when (this) { Line -> "Line"; Bar -> "Bar"; Area -> "Area"; Stacked -> "Stacked"; Scatter -> "Scatter"; Pie -> "Pie"; Donut -> "Donut" }
 }
 
 data class ChartSeries(val name: String, val values: List<Double>)
@@ -55,12 +57,14 @@ object Charts {
         if (source.length > MAX_SOURCE_CHARS || source.count { it == '[' || it == '{' } > MAX_BRACKETS || nesting(source) > MAX_DEPTH) return bad("payload is too large")
         val raw = try { JSONTokenerStrict.value(source) } catch (e: JSONException) { return bad("payload is not valid JSON") }
         if (raw !is JSONObject) return bad("payload must be a JSON object")
-        val type = ChartType.entries.firstOrNull { it.name.lowercase() == raw.opt("type") } ?: return bad("type must be one of line, bar, pie, donut")
+        val type = ChartType.entries.firstOrNull { it.name.lowercase() == raw.opt("type") } ?: return bad("type must be one of line, bar, area, stacked, scatter, pie, donut")
         val rawLabels = raw.opt("labels") as? JSONArray
         if (rawLabels == null || rawLabels.length() == 0) return bad("labels must be a non-empty array")
         val limit = if (type.isRound) MAX_SLICES else MAX_POINTS
         if (rawLabels.length() > limit) return bad("at most $limit labels are supported for ${type.name.lowercase()} charts")
         val labels = (0 until rawLabels.length()).map { text(rawLabels.opt(it)) }
+        // A scatter chart puts each point at a number on the x axis, so every label must be one.
+        if (type == ChartType.Scatter && !labels.all { isNumberText(it) }) return bad("scatter charts need a number for every label, the x position of each point")
         val series = parseSeries(raw.opt("series"), labels.size)
         if (series is String) return bad(series)
         @Suppress("UNCHECKED_CAST") val parsed = series as List<ChartSeries>
@@ -70,6 +74,33 @@ object Charts {
             if (values.sum() <= 0) return bad("pie and donut values must sum to more than zero")
         }
         return ChartParse.Ok(ChartSpec(type, text(raw.opt("title")), text(raw.opt("xLabel")), text(raw.opt("yLabel")), labels, parsed))
+    }
+
+    /** A label that reads as a finite number (`3`, `-1.5`, `1e3`): the x of a scatter point. */
+    fun isNumberText(s: String): Boolean = s.trim().toDoubleOrNull()?.isFinite() == true
+
+    /** Where each series sits in a stacked column: from lo to hi, positives stacking up from zero and negatives down. */
+    fun stackBands(series: List<ChartSeries>): List<List<Pair<Double, Double>>> {
+        val up = DoubleArray(series.maxOfOrNull { it.values.size } ?: 0)
+        val down = DoubleArray(up.size)
+        return series.map { s ->
+            s.values.mapIndexed { i, v ->
+                if (v >= 0) { val lo = up[i]; up[i] = lo + v; lo to up[i] } else { val hi = down[i]; down[i] = hi + v; down[i] to hi }
+            }
+        }
+    }
+
+    /** Every number the y axis has to hold: the values, or for a stacked chart the tops and bottoms of the stacks. */
+    fun yValuesOf(spec: ChartSpec): List<Double> =
+        if (spec.type == ChartType.Stacked) stackBands(spec.series).flatMap { row -> row.flatMap { listOf(it.first, it.second) } } else spec.series.flatMap { it.values }
+
+    /** The x axis of a scatter chart: round ends around the numbers, never forced to include zero. */
+    fun xScale(xs: List<Double>): Pair<Double, Double> {
+        val lo = xs.minOrNull() ?: 0.0
+        val hi = xs.maxOrNull() ?: 1.0
+        if (hi == lo) return lo - 1 to hi + 1
+        val step = niceStep(hi - lo, Y_TICKS)
+        return floor(lo / step) * step to ceil(hi / step) * step
     }
 
     /** A Mermaid `pie` block, which models often write instead of a chart block. */

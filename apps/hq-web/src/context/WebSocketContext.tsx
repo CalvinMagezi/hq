@@ -11,7 +11,7 @@ type MessageHandler = (msg: Record<string, unknown>) => void
 /** Chat events subscribers also hear: a reply ending, and HQ's answer about a sent message (the outbox waits on these). */
 export const SHARED_CHAT_EVENTS = new Set(['turn_end', 'turn_start', 'chat_duplicate', 'chat_rejected'])
 /** What changed on HQ: a page that shows it refetches instead of polling (data budget, rule 5). */
-export const CHANGE_EVENTS = new Set(['inbox:change', 'notes:change', 'helpers:change', 'budget:change', 'settings:change', 'task:sync', 'sessions:sync'])
+export const CHANGE_EVENTS = new Set(['inbox:change', 'notes:change', 'helpers:change', 'budget:change', 'settings:change', 'task:sync', 'sessions:sync', 'note_changed'])
 
 /** Whether a frame that chat handling consumed is still one subscribers must hear. */
 export function sharedWithSubscribers(type: unknown): boolean {

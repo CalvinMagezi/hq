@@ -15,6 +15,10 @@ pub struct Theme {
     pub font: Option<String>,
     /// Short text printed in the footer, usually the brand name.
     pub footer: String,
+    /// Word only: a table of contents after the title, over heading levels 1 to 3.
+    pub toc: bool,
+    /// Word only: plain text printed in the page header. Empty for none.
+    pub header: String,
 }
 
 impl Default for Theme {
@@ -23,6 +27,8 @@ impl Default for Theme {
             accent: DEFAULT_ACCENT.to_owned(),
             font: None,
             footer: String::new(),
+            toc: false,
+            header: String::new(),
         }
     }
 }
@@ -33,6 +39,7 @@ impl Theme {
             accent: valid_hex(&brand.primary_color).unwrap_or_else(|| DEFAULT_ACCENT.to_owned()),
             font: clean_name(&brand.font),
             footer: brand.brand.trim().chars().take(60).collect(),
+            ..Theme::default()
         }
     }
 }

@@ -1,0 +1,1 @@
+**Area, stacked and scatter charts.** Plots and chat charts can be drawn as an area (the space under each line filled), as stacked columns, or as a scatter of points placed by a number on the x axis, each series with its own marker shape. A kind that is still not drawn says so instead of showing an empty frame.

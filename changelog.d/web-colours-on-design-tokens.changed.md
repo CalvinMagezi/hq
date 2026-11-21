@@ -1,0 +1,1 @@
+**Notes, files and the chat views follow the design's colours.** The note, code, image and PDF viewers, the selection bar and the install banner now take their colours from the same tokens as the rest of the app, so bold text, inline code and block quotes read in the light theme too. The older colour names and a number of unused styles were removed from the web stylesheet.

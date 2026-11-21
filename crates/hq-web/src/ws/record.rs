@@ -493,7 +493,7 @@ mod tests {
     async fn a_spreadsheet_request_ends_with_a_note_a_file_in_exports_and_a_card() {
         let vault = tempfile::tempdir().unwrap();
         let scratch = tempfile::tempdir().unwrap();
-        let tools = hq_tools_office::author::create_author_tools(vault.path().to_path_buf());
+        let tools = hq_tools_office::author::create_author_tools(vault.path().to_path_buf(), None);
         let tool = |name: &str| tools.iter().find(|t| t.name() == name).unwrap();
         let mut rec = TurnRecord::default();
         rec.set_vault(vault.path().to_path_buf());

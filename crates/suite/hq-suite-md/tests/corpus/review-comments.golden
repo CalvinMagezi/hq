@@ -1,0 +1,12 @@
+frontmatter: 118 bytes
+meta: SuiteMeta { kind: Some(Doc), fidelity: Some(Native), original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None, toc: Some(true), header: Some("Draft for review") }
+ 0 Heading { level: 1 } | # Quarterly note
+ 1 Paragraph | The revenue figure is final.
+ 2 Typed(Comment) | ```comment on=2c3f0ef6ba07 by="Sam" at=2026-11-20 state=open
+     header: comment on=2c3f0ef6ba07 by="Sam" at=2026-11-20 state=open mood=hopeful
+     closed: true
+ 3 Typed(Comment) | ```comment on=aaaaaaaaaaaa by="Ola" at=2026-11-18 state=reso
+     header: comment on=aaaaaaaaaaaa by="Ola" at=2026-11-18 state=resolved
+     closed: true
+diag Warning block.unknown_attr [block 2] `mood` is not an attribute of comment
+diag Info comment.orphaned [block 3] no block has the hash `aaaaaaaaaaaa` any more; the block was edited or removed

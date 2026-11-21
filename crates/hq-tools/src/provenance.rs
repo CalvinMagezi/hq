@@ -540,3 +540,37 @@ enum Kept {
 
 #[cfg(test)]
 mod tests;
+
+/// The seam office tools write through: the per-note lock, the kept earlier text and the record.
+pub struct DbWriteSeam {
+    pub db: Arc<Database>,
+    pub vault_path: PathBuf,
+}
+
+impl hq_tool_api::office::NoteWriteSeam for DbWriteSeam {
+    fn write(
+        &self,
+        rel: &str,
+        args: &Value,
+        write: &mut dyn FnMut() -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        locked_tool_write(Some(&self.db), &self.vault_path, rel, args, write)
+    }
+
+    fn created(&self, rel: &str, args: &Value) {
+        Recorder::new(self.db.clone(), self.vault_path.clone()).after_write(rel, args);
+    }
+}
+
+/// A seam over `db` for the office tools, or none when there is no database.
+pub fn office_seam(
+    db: Option<&Arc<Database>>,
+    vault_path: &Path,
+) -> Option<hq_tool_api::office::SharedSeam> {
+    db.map(|db| {
+        Arc::new(DbWriteSeam {
+            db: db.clone(),
+            vault_path: vault_path.to_path_buf(),
+        }) as hq_tool_api::office::SharedSeam
+    })
+}

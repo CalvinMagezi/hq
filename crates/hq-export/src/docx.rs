@@ -29,6 +29,7 @@ enum Child {
     // each, and clippy rightly objects to a Vec of such large variants.
     P(Box<d::Paragraph>),
     T(Box<d::Table>),
+    Toc(Box<d::TableOfContents>),
 }
 
 impl Child {
@@ -109,6 +110,9 @@ pub fn to_docx(
             .style("Title")
             .add_run(d::Run::new().add_text(&doc.title)),
     )];
+    if theme.toc {
+        children.push(Child::Toc(Box::new(contents(&doc.blocks))));
+    }
     children.extend(w.blocks(&doc.blocks, Ctx::default()));
 
     let font = theme.font.clone().unwrap_or_else(|| "Calibri".to_owned());
@@ -158,11 +162,30 @@ pub fn to_docx(
     }
     footer = footer.add_page_num(d::PageNum::new());
     docx = docx.footer(d::Footer::new().add_paragraph(footer));
+    let header_text: String = theme
+        .header
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(200)
+        .collect();
+    if !header_text.trim().is_empty() {
+        docx = docx.header(
+            d::Header::new().add_paragraph(
+                d::Paragraph::new().align(d::AlignmentType::Left).add_run(
+                    d::Run::new()
+                        .add_text(header_text.trim())
+                        .size(16)
+                        .color("777777"),
+                ),
+            ),
+        );
+    }
 
     for child in children {
         docx = match child {
             Child::P(p) => docx.add_paragraph(*p),
             Child::T(t) => docx.add_table(*t),
+            Child::Toc(t) => docx.add_table_of_contents(*t),
         };
     }
     for a in w.abstracts {
@@ -530,6 +553,35 @@ fn run(text: &str, fmt: &Fmt) -> d::Run {
     r
 }
 
+/// A real Word table-of-contents field over heading levels 1 to 3. The entries are a preview of
+/// the headings (no page numbers); the field is marked dirty, so Word offers to refresh it with
+/// real page numbers when the file is opened. docx-rs has no `updateFields` setting.
+fn contents(blocks: &[Block]) -> d::TableOfContents {
+    let mut toc = d::TableOfContents::new()
+        .heading_styles_range(1, 3)
+        .hyperlink()
+        .alias("Contents")
+        .dirty();
+    let mut n = 0;
+    for block in blocks {
+        if let Block::Heading { level, content } = block
+            && (1..=3).contains(level)
+        {
+            let text = crate::doc::plain_text(content);
+            if !text.trim().is_empty() {
+                n += 1;
+                toc = toc.add_item(
+                    d::TableOfContentsItem::new()
+                        .text(text.trim())
+                        .toc_key(format!("_Toc{n:08}"))
+                        .level(usize::from(*level)),
+                );
+            }
+        }
+    }
+    toc
+}
+
 fn mono_fonts() -> d::RunFonts {
     d::RunFonts::new().ascii(MONO).hi_ansi(MONO).cs(MONO)
 }
@@ -578,6 +630,8 @@ fn boxed(
                 cell = cell.add_table(*t);
                 last_was_table = true;
             }
+            // A contents field is only ever made for the page body, never inside a cell.
+            Child::Toc(_) => {}
         }
     }
     // A cell must end in a paragraph.
@@ -845,6 +899,7 @@ mod tests {
             accent: "#c62828".into(),
             font: Some("Poppins".into()),
             footer: "Acme".into(),
+            ..Theme::default()
         };
         let b = to_docx(&Document::from_markdown("T", "## h\n"), &theme, None).unwrap();
         let styles = part(&b, "word/styles.xml");
@@ -854,5 +909,30 @@ mod tests {
         );
         assert!(styles.contains("Poppins"), "default font");
         assert!(has_part(&b, "word/footer1.xml"));
+    }
+
+    #[test]
+    fn a_toc_is_a_real_field_over_headings_one_to_three_and_a_header_is_plain_text() {
+        let theme = Theme {
+            toc: true,
+            header: "Draft <b>1</b>".into(),
+            ..Theme::default()
+        };
+        let md = "# One\n\n## Two\n\n### Three\n\n#### Four\n\ntext\n";
+        let b = to_docx(&Document::from_markdown("T", md), &theme, None).unwrap();
+        let xml = part(&b, "word/document.xml");
+        assert!(xml.contains("TOC \\o"), "a TOC field instruction: {xml}");
+        assert!(xml.contains("1-3"), "levels 1 to 3");
+        assert!(xml.contains("Three"));
+        assert!(
+            xml.find("TOC \\o").unwrap() < xml.find("text").unwrap(),
+            "the contents come before the body"
+        );
+        let header = part(&b, "word/header1.xml");
+        assert!(header.contains("Draft &lt;b&gt;1&lt;/b&gt;"), "{header}");
+        // Off by default: no field, no header part.
+        let plain = to_docx(&Document::from_markdown("T", md), &Theme::default(), None).unwrap();
+        assert!(!part(&plain, "word/document.xml").contains("TOC \\o"));
+        assert!(!has_part(&plain, "word/header1.xml"));
     }
 }

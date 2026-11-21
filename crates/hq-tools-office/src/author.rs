@@ -20,10 +20,14 @@ fn text<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
         .with_context(|| format!("`{key}` is needed for this action"))
 }
 
-pub fn create_author_tools(vault: PathBuf) -> Vec<Box<dyn HqTool>> {
+pub fn create_author_tools(
+    vault: PathBuf,
+    seam: Option<hq_tool_api::office::SharedSeam>,
+) -> Vec<Box<dyn HqTool>> {
     vec![
         Box::new(OfficeCreateTool {
             vault: vault.clone(),
+            seam,
         }),
         Box::new(OfficeExportTool { vault }),
     ]
@@ -46,8 +50,8 @@ pub async fn export_to_exports(vault: &Path, path: &str, format: &str) -> Result
         format.to_string(),
         out.clone(),
     );
-    let done = if fmt == "pdf" {
-        export_pdf(&vault_owned, &note, &dest).await?
+    let done = if fmt == "pdf" || fmt == "png" {
+        export_snapshot(&vault_owned, &note, &fmt, &dest).await?
     } else {
         tokio::task::spawn_blocking(move || {
             hq_suite_adapter::author::export_note(&vault_owned, &note, &fmt, &dest)
@@ -75,32 +79,46 @@ pub fn export_formats(kind: &str) -> &'static [&'static str] {
         "sheet" => &["xlsx", "csv", "pdf"],
         "doc" => &["docx", "pdf", "md"],
         "slides" => &["pptx", "pdf"],
+        "dashboard" => &["pdf", "png"],
         _ => &[],
     }
 }
 
-/// The note as a PDF, by the same exporter `vault_export` uses.
-async fn export_pdf(
+/// The note as a PDF or a PNG by the same exporter `vault_export` uses, after the suite's typed
+/// blocks are written out (tiles as numbers, plots and sheets as tables, comments left out).
+async fn export_snapshot(
     vault: &Path,
     note_rel: &str,
+    format: &str,
     dest: &Path,
 ) -> Result<hq_suite_adapter::author::Exported> {
     let note = hq_convert::note_pdf::resolve_note(vault, note_rel)
         .with_context(|| format!("note not found in the vault: {note_rel}"))?;
-    let done = hq_export::export_note(vault, &note, hq_export::Format::Pdf, None, &[])
-        .await
-        .map_err(|e| anyhow::anyhow!("pdf export failed: {e}"))?;
+    let (v, rel) = (vault.to_path_buf(), note_rel.to_string());
+    let prepared =
+        tokio::task::spawn_blocking(move || hq_suite_adapter::snapshot::prepare(&v, &rel))
+            .await??;
+    let fmt = if format == "png" {
+        hq_export::Format::Png
+    } else {
+        hq_export::Format::Pdf
+    };
+    let (v, text) = (vault.to_path_buf(), prepared.text);
+    let done = tokio::task::spawn_blocking(move || {
+        hq_export::export_note_text(&v, &note, &text, fmt, None, &[])
+    })
+    .await?
+    .map_err(|e| anyhow::anyhow!("{format} export failed: {e}"))?;
     std::fs::write(dest, &done.output.bytes)?;
     Ok(hq_suite_adapter::author::Exported {
-        fidelity:
-            "A fixed-layout copy of the note's text, tables and pictures. Sheets appear as tables."
-                .into(),
+        fidelity: prepared.fidelity,
     })
 }
 
 /// `office_create`: a native sheet, document or deck note, written from structured content.
 pub struct OfficeCreateTool {
     vault: PathBuf,
+    seam: Option<hq_tool_api::office::SharedSeam>,
 }
 
 #[async_trait]
@@ -116,15 +134,18 @@ impl HqTool for OfficeCreateTool {
          cell starting with `=` is a formula, a blank cell stays blank) or `content` (Markdown, \
          for a document; for slides one `## heading` per slide). The note is the truth; call \
          `office_export` next to make the .xlsx, .docx or .pptx file the owner opens. Never \
-         write a deliverable anywhere else."
+         write a deliverable anywhere else. To start from a ready-made note instead, give \
+         `template` (invoice, stock, savings-group, school-fees, sales-dashboard or board-deck) \
+         and a `title`; money is in UGX and the owner overwrites the sample rows."
     }
 
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["kind", "title"],
+            "required": ["title"],
             "properties": {
-                "kind": { "type": "string", "enum": ["sheet", "doc", "slides"] },
+                "kind": { "type": "string", "enum": ["sheet", "doc", "slides"], "description": "Needed unless `template` is given." },
+                "template": { "type": "string", "enum": hq_suite_adapter::templates::NAMES },
                 "title": { "type": "string" },
                 "folder": { "type": "string", "description": "Vault-relative folder, default Notebooks/Office." },
                 "content": { "type": "string", "description": "Markdown body for doc or slides." },
@@ -161,12 +182,27 @@ impl HqTool for OfficeCreateTool {
 
     async fn execute(&self, args: Value) -> Result<Value> {
         use hq_suite_adapter::author::{Kind, SheetInput, create_note};
-        let kind = Kind::parse(text(&args, "kind")?)?;
         let title = text(&args, "title")?.to_string();
         let folder = args
             .get("folder")
             .and_then(Value::as_str)
             .map(str::to_string);
+        if let Some(name) = args.get("template").and_then(Value::as_str) {
+            let vault = self.vault.clone();
+            let name = name.to_string();
+            let rel = tokio::task::spawn_blocking(move || {
+                hq_suite_adapter::templates::create(&vault, &name, &title, folder.as_deref())
+            })
+            .await??;
+            if let Some(seam) = &self.seam {
+                seam.created(&rel, &args);
+            }
+            return Ok(json!({
+                "note": rel,
+                "next": "Open the note and replace the sample rows. Call office_export to make the file the owner opens.",
+            }));
+        }
+        let kind = Kind::parse(text(&args, "kind")?)?;
         let content = args
             .get("content")
             .and_then(Value::as_str)
@@ -187,6 +223,9 @@ impl HqTool for OfficeCreateTool {
             )
         })
         .await??;
+        if let Some(seam) = &self.seam {
+            seam.created(&rel, &args);
+        }
         Ok(json!({
             "note": rel,
             "next": "Call office_export with this note to make the file the owner opens.",
@@ -207,7 +246,7 @@ impl HqTool for OfficeExportTool {
 
     fn description(&self) -> &str {
         "Turn an office note into a file the owner can open or share: `path` is the note, \
-         `format` is xlsx or csv (a note with sheets), docx (a document), pptx (a deck) or pdf. \
+         `format` is xlsx or csv (a note with sheets), docx (a document), pptx (a deck), pdf, or png (a dashboard as one picture to share). \
          The file is saved under Exports/ in the vault and returned as a `files` entry the chat \
          shows as a card. The result's `fidelity` says in one line what was kept; repeat it to \
          the owner."
@@ -219,7 +258,7 @@ impl HqTool for OfficeExportTool {
             "required": ["path", "format"],
             "properties": {
                 "path": { "type": "string", "description": "The note, vault-relative." },
-                "format": { "type": "string", "enum": ["xlsx", "csv", "docx", "pptx", "pdf"] }
+                "format": { "type": "string", "enum": ["xlsx", "csv", "docx", "pptx", "pdf", "png"] }
             }
         })
     }
@@ -244,11 +283,12 @@ mod tests {
         assert_eq!(export_formats("sheet"), ["xlsx", "csv", "pdf"]);
         assert_eq!(export_formats("doc"), ["docx", "pdf", "md"]);
         assert_eq!(export_formats("slides"), ["pptx", "pdf"]);
+        assert_eq!(export_formats("dashboard"), ["pdf", "png"]);
         assert!(export_formats("drive-item").is_empty());
     }
 
     fn author_tools(vault: &std::path::Path) -> (Box<dyn HqTool>, Box<dyn HqTool>) {
-        let mut t = create_author_tools(vault.to_path_buf());
+        let mut t = create_author_tools(vault.to_path_buf(), None);
         let export = t.pop().unwrap();
         let create = t.pop().unwrap();
         (create, export)
@@ -272,6 +312,28 @@ mod tests {
                 ]
             }]
         })
+    }
+
+    #[tokio::test]
+    async fn a_template_makes_a_working_note_the_owner_can_export() {
+        let vault = tempfile::tempdir().unwrap();
+        let (create, export) = author_tools(vault.path());
+        let made = create
+            .execute(json!({"template": "stock", "title": "Shop stock"}))
+            .await
+            .unwrap();
+        let note = made["note"].as_str().unwrap().to_string();
+        assert!(vault.path().join(&note).exists());
+        let out = export
+            .execute(json!({"path": note, "format": "xlsx"}))
+            .await
+            .unwrap();
+        assert!(out["files"][0]["path"].as_str().unwrap().ends_with(".xlsx"));
+        let bad = create
+            .execute(json!({"template": "nope", "title": "x"}))
+            .await
+            .unwrap_err();
+        assert!(bad.to_string().contains("not a template"));
     }
 
     #[tokio::test]
@@ -395,5 +457,27 @@ mod tests {
         assert!(status.success());
         let csv = std::fs::read_to_string(dir.path().join("AI stocks.csv")).unwrap();
         assert!(csv.contains("1205") && csv.contains("1805"), "{csv}");
+    }
+
+    #[tokio::test]
+    async fn a_dashboard_exports_as_a_pdf_and_a_png_with_its_numbers_and_tables() {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(vault.path().join("Notebooks")).unwrap();
+        let note = "---\ntitle: Shop dashboard\nsuite_kind: dashboard\n---\n# Shop dashboard\n\n```sheet name=Stock types=\"text,int\"\n| item | qty |\n|---|---|\n| Sugar | 40 |\n| Salt | 25 |\n```\n\n```tile from=\"B2:B3\" fn=sum label=\"Units\"\n```\n\n```plot type=bar from=\"A1:B3\" x=item y=qty title=\"Units by item\"\n```\n\n```comment on=0123456789ab by=Sam\nDo not share this.\n```\n";
+        std::fs::write(vault.path().join("Notebooks/shop.md"), note).unwrap();
+        for (format, magic) in [("pdf", &b"%PDF"[..]), ("png", &b"\x89PNG"[..])] {
+            let out = export_to_exports(vault.path(), "Notebooks/shop.md", format)
+                .await
+                .unwrap();
+            let rel = out["files"][0]["path"].as_str().unwrap();
+            assert!(rel.ends_with(&format!("/shop.{format}")), "{rel}");
+            let bytes = std::fs::read(vault.path().join(rel)).unwrap();
+            assert!(bytes.starts_with(magic), "{format} bytes");
+            let fidelity = out["fidelity"].as_str().unwrap();
+            assert!(
+                fidelity.contains("not drawn") && fidelity.contains("comments"),
+                "{fidelity}"
+            );
+        }
     }
 }
