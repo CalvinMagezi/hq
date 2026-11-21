@@ -54,17 +54,16 @@ fn session_json(conn: &Connection, row: &HarnessSessionRow) -> anyhow::Result<Va
 pub(crate) async fn list_thread_sessions_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(thread_id): AxumPath<String>,
-) -> Response {
-    let result = state.db.with_conn(|c| {
-        registry::list_for_thread(c, &thread_id)?
-            .iter()
-            .map(|row| session_json(c, row))
-            .collect::<anyhow::Result<Vec<_>>>()
-    });
-    match result {
-        Ok(sessions) => Json(json!({ "sessions": sessions })).into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+) -> Result<Json<Value>, ApiError> {
+    let sessions = state
+        .db_blocking(move |c| {
+            registry::list_for_thread(c, &thread_id)?
+                .iter()
+                .map(|row| session_json(c, row))
+                .collect::<anyhow::Result<Vec<_>>>()
+        })
+        .await?;
+    Ok(Json(json!({ "sessions": sessions })))
 }
 
 #[derive(Deserialize)]
@@ -76,8 +75,8 @@ pub(crate) async fn set_drive_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
     Json(body): Json<DriveBody>,
-) -> Response {
-    let result = state.db.with_conn(|c| {
+) -> Result<Json<Value>, ApiError> {
+    let result = state.db_blocking(move |c| {
         match registry::request_drive(c, &id, body.drive, registry::ACTOR_USER)? {
             registry::DriveChange::NotWatched => {
                 return Err(
@@ -97,15 +96,11 @@ pub(crate) async fn set_drive_handler(
             .ok_or_else(|| ApiError::NotFound(format!("no harness session '{id}'")))?;
         Ok((session_json(c, &row)?, row.owner_thread))
     });
-    match result {
-        Ok((session, owner)) => {
-            if let Some(thread) = owner {
-                broadcast_sync(&state, &thread);
-            }
-            Json(json!({ "session": session })).into_response()
-        }
-        Err(e) => ApiError::from(e).into_response(),
+    let (session, owner) = result.await?;
+    if let Some(thread) = owner {
+        broadcast_sync(&state, &thread);
     }
+    Ok(Json(json!({ "session": session })))
 }
 
 #[derive(Deserialize)]
@@ -120,8 +115,8 @@ pub(crate) async fn set_goal_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
     Json(body): Json<GoalBody>,
-) -> Response {
-    let result = state.db.with_conn(|c| {
+) -> Result<Json<Value>, ApiError> {
+    let result = state.db_blocking(move |c| {
         let update = registry::set_goal(
             c,
             &id,
@@ -138,22 +133,20 @@ pub(crate) async fn set_goal_handler(
             update.drive_stopped,
         ))
     });
-    match result {
-        Ok((session, owner, drive_stopped)) => {
-            if let Some(thread) = owner {
-                broadcast_sync(&state, &thread);
-            }
-            Json(json!({ "session": session, "drive_stopped": drive_stopped })).into_response()
-        }
-        Err(e) => ApiError::from(e).into_response(),
+    let (session, owner, drive_stopped) = result.await?;
+    if let Some(thread) = owner {
+        broadcast_sync(&state, &thread);
     }
+    Ok(Json(
+        json!({ "session": session, "drive_stopped": drive_stopped }),
+    ))
 }
 
 pub(crate) async fn unwatch_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
-) -> Response {
-    let result = state.db.with_conn(|c| {
+) -> Result<Json<Value>, ApiError> {
+    let result = state.db_blocking(move |c| {
         let row = registry::get(c, &id)?
             .ok_or_else(|| ApiError::NotFound(format!("no harness session '{id}'")))?;
         if row.drive {
@@ -162,16 +155,12 @@ pub(crate) async fn unwatch_handler(
         registry::set_owner(c, &id, None)?;
         Ok(row.owner_thread)
     });
-    match result {
-        Ok(owner) => {
-            // The row no longer names its old chat, so tell that chat directly.
-            if let Some(thread) = owner {
-                broadcast_sync(&state, &thread);
-            }
-            Json(json!({ "ok": true })).into_response()
-        }
-        Err(e) => ApiError::from(e).into_response(),
+    let owner = result.await?;
+    // The row no longer names its old chat, so tell that chat directly.
+    if let Some(thread) = owner {
+        broadcast_sync(&state, &thread);
     }
+    Ok(Json(json!({ "ok": true })))
 }
 
 /// Most trailing lines of pane text one request returns.
@@ -964,8 +953,8 @@ mod tests {
             .unwrap();
     }
 
-    async fn body(response: Response) -> Value {
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+    async fn body(response: impl IntoResponse) -> Value {
+        let bytes = axum::body::to_bytes(response.into_response().into_body(), usize::MAX)
             .await
             .unwrap();
         serde_json::from_slice(&bytes).unwrap()
@@ -1551,7 +1540,8 @@ mod tests {
             AxumPath("hs-mine".into()),
             Json(DriveBody { drive: true }),
         )
-        .await;
+        .await
+        .into_response();
         assert_eq!(refused.status(), StatusCode::CONFLICT, "no goal, no drive");
         assert!(
             body(refused).await["error"]
@@ -1566,14 +1556,15 @@ mod tests {
         };
         let set =
             set_goal_handler(State(state.clone()), AxumPath("hs-mine".into()), Json(goal)).await;
-        assert_eq!(set.status(), StatusCode::OK);
+        assert_eq!(set.into_response().status(), StatusCode::OK);
 
         let driven = set_drive_handler(
             State(state.clone()),
             AxumPath("hs-mine".into()),
             Json(DriveBody { drive: true }),
         )
-        .await;
+        .await
+        .into_response();
         assert_eq!(driven.status(), StatusCode::OK);
         assert_eq!(body(driven).await["session"]["drive"], true);
 
@@ -1584,13 +1575,13 @@ mod tests {
         )
         .await;
         assert_eq!(
-            refused.status(),
+            refused.into_response().status(),
             StatusCode::NOT_FOUND,
             "only a watched session can be driven"
         );
 
         let unwatched = unwatch_handler(State(state.clone()), AxumPath("hs-mine".into())).await;
-        assert_eq!(unwatched.status(), StatusCode::OK);
+        assert_eq!(unwatched.into_response().status(), StatusCode::OK);
         let listed =
             body(list_thread_sessions_handler(State(state.clone()), AxumPath("th-1".into())).await)
                 .await;
