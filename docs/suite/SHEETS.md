@@ -91,7 +91,7 @@ A `plot` block draws a chart from a range of a sheet in the same note (or anothe
 
 A plot that cannot be drawn says why instead of guessing: an unknown column, a value that is not a number, no rows, or more rows than a chart takes (50 for bar and line, 12 for pie and donut). One series per plot unless `group` is used (below).
 
-`area` and `stacked` (stacked bars) draw like `line` and `bar` over the labels, and take `group`. `scatter` places points by a numeric x: the `x` column must hold numbers, it takes no `group`, and the chart JSON carries the numbers as `xValues` (the same values, as text, are also in `labels`, so a reader that only knows categories still shows something). The chat's chart card does not draw `area`, `stacked` or `scatter` yet; see `docs/techdebt/chart-kinds-clients.md`.
+`area` and `stacked` (stacked bars) draw like `line` and `bar` over the labels, and take `group`. `scatter` places points by a numeric x: the `x` column must hold numbers, it takes no `group`, and the chart JSON carries the numbers as `xValues` (the same values, as text, are also in `labels`, so a reader that only knows categories still shows something). The web app and the Android app draw all three.
 
 ## The dashboard: `where` and `group`
 
