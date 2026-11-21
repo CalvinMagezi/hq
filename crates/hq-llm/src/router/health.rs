@@ -344,3 +344,34 @@ mod telemetry_label_tests {
         assert_eq!(label("something odd"), "other");
     }
 }
+
+#[cfg(test)]
+mod rate_limit_classification_tests {
+    use super::*;
+
+    fn is_rate_limit(message: &str) -> bool {
+        matches!(
+            classify_anyhow_error(&anyhow::anyhow!("{message}")),
+            LlmError::RateLimit { .. }
+        )
+    }
+
+    #[test]
+    fn real_rate_limits_are_recognised() {
+        assert!(is_rate_limit("HTTP 429"));
+        assert!(is_rate_limit("Too Many Requests"));
+        assert!(is_rate_limit("provider rate limit reached"));
+        let typed = anyhow::Error::new(LlmError::RateLimit { retry_after: None });
+        assert!(matches!(
+            classify_anyhow_error(&typed),
+            LlmError::RateLimit { .. }
+        ));
+    }
+
+    #[test]
+    fn words_that_merely_contain_rate_are_not_rate_limits() {
+        assert!(!is_rate_limit("failed to generate a response"));
+        assert!(!is_rate_limit("moderate the request"));
+        assert!(!is_rate_limit("could not integrate the chunk"));
+    }
+}

@@ -132,7 +132,7 @@ struct Resolution {
 pub(super) struct RunCtx {
     parent_run_id: String,
     sink: Option<EnvelopeSink>,
-    parent_messages: Option<Vec<hq_core::types::ChatMessage>>,
+    parent_messages: Option<Arc<[hq_core::types::ChatMessage]>>,
     seq: Arc<AtomicU64>,
     ledger: Arc<Ledger>,
 }
@@ -799,7 +799,7 @@ impl AgentService {
         }
 
         if let Some(parent_msgs) = &run_ctx.parent_messages {
-            session.inject_fork_context(parent_msgs.clone());
+            session.inject_fork_context(parent_msgs.to_vec());
         }
 
         session

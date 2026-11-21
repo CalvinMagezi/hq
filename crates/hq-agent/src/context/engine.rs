@@ -212,12 +212,8 @@ impl ContextEngine {
             .reduce(current_text.clone(), target, dict)
             .await
         {
-            if new_tokens < current_tokens {
-                current_text = Arc::from(new_text);
-                current_tokens = new_tokens;
-                applied.push(format!("DeduplicationReducer({})", id));
-            } else if current_text.len() > new_text.len() {
-                // Byte count decreased but tokens didn't (rare but possible with BPE)
+            // Fewer tokens, or fewer bytes with the same tokens (rare but possible with BPE).
+            if new_tokens < current_tokens || current_text.len() > new_text.len() {
                 current_text = Arc::from(new_text);
                 current_tokens = new_tokens;
                 applied.push(format!("DeduplicationReducer({})", id));

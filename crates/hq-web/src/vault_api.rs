@@ -970,13 +970,18 @@ fn collect_folders(vault: &Path, dir: &Path, out: &mut Vec<String>, lite: bool) 
 
 /// `GET /api/vault/folders`: every folder under Notebooks, Inbox first.
 pub(crate) async fn folders_handler(State(state): State<Arc<WsState>>) -> Response {
-    let mut folders = Vec::new();
-    collect_folders(
-        &state.vault_path,
-        &state.vault_path.join("Notebooks"),
-        &mut folders,
-        state.profile().is_lite(),
-    );
+    let (vault, lite) = (state.vault_path.clone(), state.profile().is_lite());
+    // A directory walk: keep it off the async runtime.
+    let walked = tokio::task::spawn_blocking(move || {
+        let mut folders = Vec::new();
+        collect_folders(&vault, &vault.join("Notebooks"), &mut folders, lite);
+        folders
+    })
+    .await;
+    let mut folders = match walked {
+        Ok(folders) => folders,
+        Err(e) => return ApiError::internal(e).into_response(),
+    };
     folders.retain(|f| f != DEFAULT_NOTE_FOLDER);
     folders.sort();
     folders.insert(0, DEFAULT_NOTE_FOLDER.to_string());

@@ -725,13 +725,21 @@ pub(crate) async fn list_notifications_handler(
     headers: axum::http::HeaderMap,
 ) -> Response {
     let limit = params.limit.unwrap_or(50);
-    match aggregate_notifications(
-        &state.db,
-        params.state.as_deref(),
-        params.category.as_deref(),
-        limit,
-        params.include_agent.as_deref() == Some("1"),
-    ) {
+    // Reads and enriches every open item, and the client polls: keep it off the async runtime.
+    let db = state.db.clone();
+    let include_agent = params.include_agent.as_deref() == Some("1");
+    let aggregated = tokio::task::spawn_blocking(move || {
+        aggregate_notifications(
+            &db,
+            params.state.as_deref(),
+            params.category.as_deref(),
+            limit,
+            include_agent,
+        )
+    })
+    .await
+    .unwrap_or_else(|e| Err(anyhow::anyhow!("notifications task failed: {e}")));
+    match aggregated {
         Ok(res) => with_etag(&res, &headers),
         Err(e) => {
             warn!(error = %e, "list_notifications_handler failed");

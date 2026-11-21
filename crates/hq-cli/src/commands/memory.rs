@@ -127,8 +127,9 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
                 .and_then(|l| l.parse::<usize>().ok())
                 .unwrap_or(10);
 
-            let db_path = config.vault_path.join("_embeddings/hq.db");
-            let db = hq_db::Database::open(&db_path)?;
+            // The entity graph lives in the shared vault database, like every other
+            // memory command and the `vault_graph` tool.
+            let db = hq_db::Database::open(&config.db_path())?;
             let results = hq_memory::entity_graph::spreading_activation(
                 &db,
                 std::slice::from_ref(seed),

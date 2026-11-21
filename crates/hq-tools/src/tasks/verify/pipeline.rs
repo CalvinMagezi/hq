@@ -957,11 +957,7 @@ pub async fn finish_as(
     // A pass completes the task only while measured trust in the verifier allows it; otherwise
     // the verdict is kept and the task is left for the owner, who is told why once.
     let held = if verdict == t::VERDICT_PASS && enforced {
-        let (cfg, tier) = (env.cfg.clone(), ev.tier);
-        env.db
-            .with_conn(move |c| t::autonomy_block(c, &cfg, tier))
-            // If calibration cannot be read, the pass is held: trust is not assumed.
-            .unwrap_or_else(|e| Some(format!("calibration could not be read ({e})")))
+        autonomy_hold(env, ev.tier)
     } else {
         None
     };

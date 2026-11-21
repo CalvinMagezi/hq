@@ -54,11 +54,21 @@ fn hours_since(stamp: &str) -> Option<i64> {
 
 pub fn queue_health(conn: &Connection, cfg: &VerificationConfig) -> Result<QueueHealth> {
     let items = waiting_items(conn)?;
+    queue_health_with(conn, cfg, &items)
+}
+
+/// [`queue_health`] over waiting items the caller already read, so a caller that also needs the
+/// items (the briefing) does not run the per-task lookups twice.
+pub fn queue_health_with(
+    conn: &Connection,
+    cfg: &VerificationConfig,
+    items: &[WaitingItem],
+) -> Result<QueueHealth> {
     let mut backlog: BTreeMap<String, i64> = BTreeMap::new();
     let mut owner_by_kind: BTreeMap<String, i64> = BTreeMap::new();
     let mut oldest_owner: Option<i64> = None;
     let mut oldest_queued: Option<i64> = None;
-    for item in &items {
+    for item in items {
         *backlog.entry(item.who.clone()).or_insert(0) += 1;
         if item.who == WAIT_VERIFIER
             && let Some(h) = hours_since(&item.since)
@@ -72,6 +82,7 @@ pub fn queue_health(conn: &Connection, cfg: &VerificationConfig) -> Result<Queue
             }
         }
     }
+    let spent_this_month = reviewer_spend_this_month(conn)?;
     let (verdicts_24h, completed_24h): (i64, i64) = conn.query_row(
         "SELECT COUNT(*), COALESCE(SUM(verdict = ?1 AND applied = 1 AND level <> ?2 \
                 AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = task_id AND t.status = 'complete')), 0) \
@@ -139,13 +150,13 @@ pub fn queue_health(conn: &Connection, cfg: &VerificationConfig) -> Result<Queue
                 backlog.get(WAIT_VERIFIER).copied().unwrap_or(0)
             ));
         }
-        if let Some(ceiling) = cfg.reviewer_monthly_ceiling_usd {
-            let spent = reviewer_spend_this_month(conn)?;
-            if spent >= ceiling && backlog.get(WAIT_BUDGET).copied().unwrap_or(0) > 0 {
-                alerts.push(format!(
-                    "the reviewer budget (${ceiling:.2} a month) is used up, so some tasks wait: machine checks continue, raise the ceiling for the rest"
-                ));
-            }
+        if let Some(ceiling) = cfg.reviewer_monthly_ceiling_usd
+            && spent_this_month >= ceiling
+            && backlog.get(WAIT_BUDGET).copied().unwrap_or(0) > 0
+        {
+            alerts.push(format!(
+                "the reviewer budget (${ceiling:.2} a month) is used up, so some tasks wait: machine checks continue, raise the ceiling for the rest"
+            ));
         }
     }
     Ok(QueueHealth {
@@ -157,7 +168,7 @@ pub fn queue_health(conn: &Connection, cfg: &VerificationConfig) -> Result<Queue
         completed_24h,
         est_clear_hours,
         deferrals,
-        spent_this_month_usd: reviewer_spend_this_month(conn)?,
+        spent_this_month_usd: spent_this_month,
         monthly_ceiling_usd: cfg.reviewer_monthly_ceiling_usd,
         alerts,
     })
@@ -222,8 +233,8 @@ pub struct Briefing {
 
 /// Builds the briefing for what happened since `since` (UTC `YYYY-MM-DD HH:MM:SS`).
 pub fn briefing(conn: &Connection, cfg: &VerificationConfig, since: &str) -> Result<Briefing> {
-    let health = queue_health(conn, cfg)?;
     let all = waiting_items(conn)?;
+    let health = queue_health_with(conn, cfg, &all)?;
     let owner_items: Vec<WaitingItem> = all.into_iter().filter(|i| i.who == WAIT_OWNER).collect();
     let needs_you_total = owner_items.len() as i64;
     let cap = (cfg.owner_queue_alert as usize).clamp(1, LISTED);

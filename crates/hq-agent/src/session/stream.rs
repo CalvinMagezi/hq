@@ -96,7 +96,11 @@ pub(super) async fn wait_for_cancel(flag: &AtomicBool) {
 /// polling shape as `wait_for_cancel`, for the same reason.
 async fn wait_for_steer(pending: &std::sync::Mutex<Option<String>>) -> String {
     loop {
-        if let Some(text) = pending.lock().unwrap().take() {
+        if let Some(text) = pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
             return text;
         }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;

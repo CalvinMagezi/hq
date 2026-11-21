@@ -717,6 +717,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn json_len_matches_to_string() {
+        for v in [
+            serde_json::json!(null),
+            serde_json::json!({"path": "a/b.rs", "n": [1, 2.5, "é\n"], "ok": true}),
+            serde_json::json!("plain"),
+        ] {
+            assert_eq!(json_len(&v), v.to_string().len() as u64);
+        }
+    }
+
+    #[test]
     fn session_config_default_has_no_turn_field_and_a_five_hour_wall_clock() {
         // FR-056: `SessionConfig` has no `max_turns` (or equivalent) member —
         // there is no application-level turn-count ceiling to set. The
@@ -726,6 +737,24 @@ mod tests {
         assert_eq!(cfg.max_duration_secs, Some(18_000));
         assert_eq!(cfg.max_budget_usd, None);
     }
+}
+
+/// Byte length of `value` serialized as compact JSON, without building the string. Equal to
+/// `value.to_string().len()`; a `write` or `edit` call can carry a very large body.
+pub(super) fn json_len(value: &serde_json::Value) -> u64 {
+    struct Count(u64);
+    impl std::io::Write for Count {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0 += buf.len() as u64;
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    let _ = serde_json::to_writer(&mut count, value);
+    count.0
 }
 
 /// Content plus tool-call names and arguments, which the model reads back each turn.

@@ -230,15 +230,23 @@ pub fn report_to_observers(
         ),
     };
     let mut told = Vec::new();
+    // The depth depends only on the sender, so it is read once, and only if someone is told.
+    let mut depth: Option<i64> = None;
     for observer in observers {
         let Some(task) = observer.mission_id.clone() else {
             continue;
         };
         let (from, to, body) = (observed.id.clone(), observer.id.clone(), body.clone());
-        db.with_conn(move |c| {
-            let depth = registry::relay_depth(c, &from)? + 1;
-            t::add_relay_message(c, &task, &from, &to, &body, depth)
+        let known = depth;
+        let used = db.with_conn(move |c| {
+            let depth = match known {
+                Some(d) => d,
+                None => registry::relay_depth(c, &from)? + 1,
+            };
+            t::add_relay_message(c, &task, &from, &to, &body, depth)?;
+            Ok(depth)
         })?;
+        depth = Some(used);
         told.push(observer.id);
     }
     Ok(told)

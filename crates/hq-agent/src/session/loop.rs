@@ -182,7 +182,11 @@ impl AgentSession {
             // the newest user turn before starting the next backend call.
             // Safe unconditionally here: no backend call has started yet this
             // iteration, so there's nothing to abort.
-            let steer_text = self.pending_steer.lock().unwrap().take();
+            let steer_text = self
+                .pending_steer
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
             if let Some(text) = steer_text {
                 self.steer(&text);
                 continue;
@@ -217,7 +221,7 @@ impl AgentSession {
                 + out
                     .tool_calls
                     .iter()
-                    .map(|t| t.arguments.to_string().len() as u64)
+                    .map(|t| super::json_len(&t.arguments))
                     .sum::<u64>();
             self.emit(SessionEvent::Timing(model_clock.finish(
                 hq_core::types::TimingKind::Model,
@@ -651,7 +655,7 @@ impl AgentSession {
                     call_id: Some(tc.id.clone()),
                     started_at_ms,
                     duration_ms,
-                    bytes_in: tc.arguments.to_string().len() as u64,
+                    bytes_in: super::json_len(&tc.arguments),
                     bytes_out: result_text.len() as u64,
                 }));
             }
