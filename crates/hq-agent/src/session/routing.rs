@@ -131,11 +131,18 @@ impl AgentSession {
                         .and_then(|d| d.for_removed_tool(&tc.name));
                     return match hint {
                         Some(text) => Ok(text_result(text)),
-                        None => Err(anyhow::anyhow!(
-                            "unknown tool: {}.{}",
-                            tc.name,
-                            tools.did_you_mean(&tc.name)
-                        )),
+                        None => {
+                            let suggestion = tools.did_you_mean(&tc.name);
+                            self.note_routing(
+                                if suggestion.is_empty() {
+                                    hq_db::tool_routing::UNKNOWN_TOOL
+                                } else {
+                                    hq_db::tool_routing::UNKNOWN_TOOL_HELPED
+                                },
+                                &tc.name,
+                            );
+                            Err(anyhow::anyhow!("unknown tool: {}.{suggestion}", tc.name))
+                        }
                     };
                 }
             }
@@ -183,6 +190,21 @@ impl AgentSession {
         }
 
         result
+    }
+
+    /// Count one tool-finding event (a search hit or miss, a tool loaded, a wrong tool name) in
+    /// the local `tool_routing_events` table. Fire and forget, like the usage log: it never
+    /// fails or slows a call, and it stores a kind and a tool name, never what was searched for.
+    pub(super) fn note_routing(&self, kind: &'static str, tool: &str) {
+        let Some(db) = self.telemetry_db.clone() else {
+            return;
+        };
+        let session_id = self.session_id.clone();
+        let tool = tool.to_string();
+        tokio::task::spawn_blocking(move || {
+            let _ =
+                db.with_conn(|conn| hq_db::tool_routing::record(conn, &session_id, kind, &tool));
+        });
     }
 
     /// The arguments a tool is called with: the model's, minus anything that claims to be the
@@ -263,6 +285,14 @@ impl AgentSession {
 
         let matches = rank_tool_matches(&catalog, query, max_results);
 
+        self.note_routing(
+            if matches.is_empty() {
+                hq_db::tool_routing::SEARCH_MISS
+            } else {
+                hq_db::tool_routing::SEARCH_HIT
+            },
+            "",
+        );
         if matches.is_empty() {
             let names: Vec<&str> = catalog.iter().map(|(n, _)| n.as_str()).collect();
             let near: Vec<&str> = hq_tool_api::tool_rank::nearest(&names, query, 5)
@@ -294,6 +324,7 @@ impl AgentSession {
         for name in &found {
             // Declared from the next request on, so the model can call it like any other tool.
             tools.activate(name);
+            self.note_routing(hq_db::tool_routing::ACTIVATION, name);
         }
         // The full schema reaches the model as a declared tool on the next request, so the
         // result only needs the call shape and what the tool is for.

@@ -4,6 +4,7 @@ use hq_core::config::HqConfig;
 use hq_core::types::{ValueItem, ValueKind};
 use hq_db::Database;
 use hq_db::tool_failures::{FailureDigest, MAX_SCANNED, weekly_digest};
+use hq_db::tool_routing::{RoutingSummary, summary_since};
 use tracing::info;
 
 /// Source name of the digest item, shown in the web inbox.
@@ -90,6 +91,34 @@ fn digest_body(d: &FailureDigest) -> String {
     body
 }
 
+/// Seconds in the window the routing counters cover: the same 7 days as the digest.
+const WEEK_SECS: i64 = 7 * 24 * 60 * 60;
+
+/// How well tools were found this week, or nothing when no search, load or wrong name was
+/// counted. Counts only: the table never held what anyone searched for.
+pub fn routing_section(r: &RoutingSummary) -> Option<String> {
+    if r.is_empty() {
+        return None;
+    }
+    let mut out = String::from("\n\nFinding tools: ");
+    out.push_str(&format!(
+        "{} searches ({} found nothing, {:.0}%), {} tools loaded on demand, {} wrong tool names",
+        r.searches(),
+        r.search_misses,
+        rate(r.search_misses, r.searches()),
+        r.activations,
+        r.wrong_names()
+    ));
+    if r.wrong_names() > 0 {
+        out.push_str(&format!(
+            " ({} had a close match offered)",
+            r.unknown_tools_helped
+        ));
+    }
+    out.push('.');
+    Some(out)
+}
+
 /// Weekly digest of recurring tool failures. Reports only, from local telemetry.
 pub async fn run_tool_failure_digest(db: &Database, config: &HqConfig) -> Result<()> {
     if !config.daemon.tool_failure_digest {
@@ -99,7 +128,12 @@ pub async fn run_tool_failure_digest(db: &Database, config: &HqConfig) -> Result
     let digest = db.with_conn(|c| weekly_digest(c, now.timestamp()))?;
     let iso = now.iso_week();
     let week = format!("{}-W{:02}", iso.year(), iso.week());
-    if let Some(item) = digest_item(&digest, &week) {
+    if let Some(mut item) = digest_item(&digest, &week) {
+        // Added only when the digest fires; a clean week still posts nothing.
+        let routing = db.with_conn(|c| summary_since(c, now.timestamp() - WEEK_SECS))?;
+        if let Some(section) = routing_section(&routing) {
+            item.body.push_str(&section);
+        }
         hq_db::value_items::emit(db, &item)?;
         info!(
             failures = digest.failures,
@@ -163,6 +197,25 @@ mod tests {
         assert!(item.body.contains("and 2 smaller groups"));
         assert!(item.body.contains("capped at"));
         assert_eq!(item.dedup_key.as_deref(), Some("tool-failures-2026-W45"));
+    }
+
+    #[test]
+    fn the_routing_section_reports_counts_and_is_absent_when_nothing_was_counted() {
+        assert!(routing_section(&RoutingSummary::default()).is_none());
+        let r = RoutingSummary {
+            search_hits: 6,
+            search_misses: 2,
+            activations: 5,
+            unknown_tools: 1,
+            unknown_tools_helped: 3,
+        };
+        let text = routing_section(&r).unwrap();
+        assert!(text.contains("8 searches (2 found nothing, 25%)"), "{text}");
+        assert!(text.contains("5 tools loaded on demand"), "{text}");
+        assert!(
+            text.contains("4 wrong tool names (3 had a close match offered)"),
+            "{text}"
+        );
     }
 
     #[tokio::test]

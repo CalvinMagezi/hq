@@ -59,6 +59,7 @@ pub mod thread_folds;
 pub mod thread_seen_urls;
 pub mod thread_taint;
 pub mod tool_failures;
+pub mod tool_routing;
 pub mod tool_usage;
 pub mod usage_ledger;
 pub mod value_items;

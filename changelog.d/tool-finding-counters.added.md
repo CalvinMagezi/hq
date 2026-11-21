@@ -1,0 +1,1 @@
+**HQ counts how well it finds tools.** HQ now keeps local counts of tool searches that found nothing, tools loaded on demand, and tool names that did not exist, and adds a "Finding tools" line to the weekly tool report. The counts hold no search words and never leave the device. They show whether finding tools is getting easier.

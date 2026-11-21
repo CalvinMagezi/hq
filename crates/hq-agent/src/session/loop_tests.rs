@@ -2123,6 +2123,24 @@ async fn an_auto_loaded_skill_is_logged_with_its_version_the_task_and_a_purpose(
     assert_eq!(trigger, "auto_load");
 }
 
+/// The routing counters, once the fire-and-forget writes have landed.
+async fn routing_counts(
+    db: &Arc<hq_db::Database>,
+    ready: impl Fn(&hq_db::tool_routing::RoutingSummary) -> bool,
+) -> hq_db::tool_routing::RoutingSummary {
+    let mut last = hq_db::tool_routing::RoutingSummary::default();
+    for _ in 0..100 {
+        last = db
+            .with_conn(|c| hq_db::tool_routing::summary_since(c, 0))
+            .unwrap();
+        if ready(&last) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    last
+}
+
 #[tokio::test]
 async fn a_deferred_tool_is_found_declared_and_called() {
     let provider = Arc::new(MockProvider::new(
@@ -2157,38 +2175,52 @@ async fn a_deferred_tool_is_found_declared_and_called() {
         ..SessionConfig::default()
     };
     let mut agent = AgentSession::new(provider.clone(), registry, config);
+    let db = Arc::new(hq_db::Database::open_memory().unwrap());
+    agent.set_telemetry_db(db.clone());
 
     let result = agent.prompt("use the contract tool").await.unwrap();
 
     assert_eq!(result.text(), "done");
-    let requests = provider.requests.lock().unwrap();
-    let declared =
-        |i: usize| -> Vec<String> { requests[i].tools.iter().map(|t| t.name.clone()).collect() };
-    assert!(
-        !declared(0).contains(&"contract_tool".to_string()),
-        "deferred at first"
-    );
-    assert!(declared(0).contains(&"tool_search".to_string()));
-    assert!(
-        declared(1).contains(&"contract_tool".to_string()),
-        "declared once found"
-    );
-    assert!(
-        requests[2]
+    {
+        let requests = provider.requests.lock().unwrap();
+        let declared = |i: usize| -> Vec<String> {
+            requests[i].tools.iter().map(|t| t.name.clone()).collect()
+        };
+        assert!(
+            !declared(0).contains(&"contract_tool".to_string()),
+            "deferred at first"
+        );
+        assert!(declared(0).contains(&"tool_search".to_string()));
+        assert!(
+            declared(1).contains(&"contract_tool".to_string()),
+            "declared once found"
+        );
+        assert!(
+            requests[2]
+                .messages
+                .iter()
+                .any(|m| m.role == MessageRole::Tool && m.content == "tool output"),
+            "and it ran"
+        );
+        // The search result is the compact call shape: the schema arrives as a declared tool.
+        let found = requests[1]
             .messages
             .iter()
-            .any(|m| m.role == MessageRole::Tool && m.content == "tool output"),
-        "and it ran"
+            .find(|m| m.role == MessageRole::Tool)
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+        assert!(found.contains("contract_tool("), "{found}");
+        assert!(!found.contains("Parameters:"), "{found}");
+    }
+
+    // The search and the load are counted, with no search words stored.
+    let counts = routing_counts(&db, |c| c.search_hits == 1 && c.activations == 1).await;
+    assert_eq!(
+        (counts.search_hits, counts.activations),
+        (1, 1),
+        "{counts:?}"
     );
-    // The search result is the compact call shape: the schema arrives as a declared tool.
-    let found = requests[1]
-        .messages
-        .iter()
-        .find(|m| m.role == MessageRole::Tool)
-        .map(|m| m.content.clone())
-        .unwrap_or_default();
-    assert!(found.contains("contract_tool("), "{found}");
-    assert!(!found.contains("Parameters:"), "{found}");
+    assert_eq!(counts.search_misses, 0);
 }
 
 #[tokio::test]
@@ -2219,18 +2251,28 @@ async fn a_misspelt_tool_name_gets_the_closest_real_names() {
         ..SessionConfig::default()
     };
     let mut agent = AgentSession::new(provider.clone(), registry, config);
+    let db = Arc::new(hq_db::Database::open_memory().unwrap());
+    agent.set_telemetry_db(db.clone());
 
     agent.prompt("use the contract tool").await.unwrap();
 
-    let requests = provider.requests.lock().unwrap();
-    let reply = requests[1]
-        .messages
-        .iter()
-        .find(|m| m.role == MessageRole::Tool)
-        .map(|m| m.content.clone())
-        .unwrap_or_default();
-    assert!(reply.contains("unknown tool: contract_tol"), "{reply}");
-    assert!(reply.contains("Did you mean: contract_tool("), "{reply}");
+    {
+        let requests = provider.requests.lock().unwrap();
+        let reply = requests[1]
+            .messages
+            .iter()
+            .find(|m| m.role == MessageRole::Tool)
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+        assert!(reply.contains("unknown tool: contract_tol"), "{reply}");
+        assert!(reply.contains("Did you mean: contract_tool("), "{reply}");
+    }
+    let counts = routing_counts(&db, |c| c.wrong_names() == 1).await;
+    assert_eq!(
+        (counts.unknown_tools_helped, counts.unknown_tools),
+        (1, 0),
+        "{counts:?}"
+    );
 }
 
 #[tokio::test]

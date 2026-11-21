@@ -248,12 +248,36 @@ pub fn create_gateway_tools_scoped(registry: &ToolRegistry, allowed: Option<&[&s
     ]
 }
 
-/// Handle the `hq_discover` tool call.
+/// Count one tool-finding event in the local routing table. Best effort, like the usage log: a
+/// failure here never fails a call. It stores a kind and a tool name, never the search words.
+fn note_routing(db: &hq_db::Database, kind: &str, tool: &str) {
+    let session_id = format!("mcp-{}", std::process::id());
+    let _ = db.with_conn(|conn| {
+        if let Err(e) = hq_db::tool_routing::record(conn, &session_id, kind, tool) {
+            debug!(error = %e, "gateway: failed to record a tool routing event");
+        }
+        Ok(())
+    });
+}
+
+/// Handle the `hq_discover` tool call, without counting it. The dispatcher uses [`run_discover`]
+/// so it can count; the tests call this one.
+#[cfg(test)]
 pub(crate) fn handle_discover(
     registry: &ToolRegistry,
     arguments: Option<&serde_json::Map<String, Value>>,
     allowed: Option<&[&str]>,
 ) -> Result<CallToolResult, ErrorData> {
+    run_discover(registry, arguments, allowed).map(|(result, _)| result)
+}
+
+/// [`handle_discover`], also saying how many tools matched a query (`None` for a call with no
+/// query), so the caller can count a search that found something and one that found nothing.
+fn run_discover(
+    registry: &ToolRegistry,
+    arguments: Option<&serde_json::Map<String, Value>>,
+    allowed: Option<&[&str]>,
+) -> Result<(CallToolResult, Option<usize>), ErrorData> {
     let args: DiscoverArgs = match arguments {
         Some(obj) => serde_json::from_value(Value::Object(obj.clone()))
             .map_err(|e| ErrorData::invalid_params(format!("invalid discover args: {e}"), None))?,
@@ -274,7 +298,11 @@ pub(crate) fn handle_discover(
     };
     let json_str = serde_json::to_string_pretty(&body).unwrap_or_else(|_| "[]".to_string());
 
-    Ok(CallToolResult::success(vec![ContentBlock::text(json_str)]))
+    let matched = args.query.is_some().then_some(results.len());
+    Ok((
+        CallToolResult::success(vec![ContentBlock::text(json_str)]),
+        matched,
+    ))
 }
 
 /// The matches for a category or query. Compact by default: the call shape and a one-line
@@ -441,7 +469,20 @@ pub async fn dispatch_as(
     connector: Option<&str>,
 ) -> Result<CallToolResult, ErrorData> {
     let result = match name {
-        "hq_discover" => handle_discover(registry, arguments, allowed),
+        "hq_discover" => run_discover(registry, arguments, allowed).map(|(result, matched)| {
+            if let Some(n) = matched {
+                note_routing(
+                    db,
+                    if n > 0 {
+                        hq_db::tool_routing::SEARCH_HIT
+                    } else {
+                        hq_db::tool_routing::SEARCH_MISS
+                    },
+                    "",
+                );
+            }
+            result
+        }),
         "hq_call" => {
             let caller = Caller {
                 session: caller_session,
@@ -507,14 +548,17 @@ async fn handle_call_as(
     }
 
     let tool = registry.get(&args.tool).ok_or_else(|| {
-        ErrorData::invalid_params(
-            format!(
-                "unknown tool: {}.{}",
-                args.tool,
-                registry.did_you_mean(&args.tool, allowed)
-            ),
-            None,
-        )
+        let suggestion = registry.did_you_mean(&args.tool, allowed);
+        note_routing(
+            db,
+            if suggestion.is_empty() {
+                hq_db::tool_routing::UNKNOWN_TOOL
+            } else {
+                hq_db::tool_routing::UNKNOWN_TOOL_HELPED
+            },
+            &args.tool,
+        );
+        ErrorData::invalid_params(format!("unknown tool: {}.{suggestion}", args.tool), None)
     })?;
 
     let mut call_args = args.args.unwrap_or(json!({}));
@@ -1732,6 +1776,53 @@ mod tests {
             .await
             .unwrap_err();
         assert!(!err.message.contains("Did you mean"), "{}", err.message);
+    }
+
+    #[tokio::test]
+    async fn searches_and_wrong_names_are_counted_without_the_search_words() {
+        let registry = registry_of(&["vault_search"]);
+        let db = hq_db::Database::open_memory().unwrap();
+        let ask = |tool: &str, args: Value| {
+            let map = json!({"name": tool, "arguments": args});
+            (
+                tool.to_string(),
+                map["arguments"].as_object().unwrap().clone(),
+            )
+        };
+        for query in ["vault", "vault", "zzzz qqqq"] {
+            let (name, args) = ask("hq_discover", json!({"query": query}));
+            dispatch(&registry, &name, Some(&args), &db, None)
+                .await
+                .unwrap();
+        }
+        // A bare listing is not a search.
+        dispatch(&registry, "hq_discover", None, &db, None)
+            .await
+            .unwrap();
+        let (name, args) = ask("hq_call", json!({"tool": "vault_serach", "args": {}}));
+        let _ = dispatch(&registry, &name, Some(&args), &db, None).await;
+
+        let counts = db
+            .with_conn(|c| hq_db::tool_routing::summary_since(c, 0))
+            .unwrap();
+        assert_eq!(
+            (
+                counts.search_hits,
+                counts.search_misses,
+                counts.unknown_tools_helped
+            ),
+            (2, 1, 1)
+        );
+        let stored: String = db
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT group_concat(kind || tool_name) FROM tool_routing_events",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert!(!stored.contains("qqqq"), "{stored}");
     }
 
     #[tokio::test]

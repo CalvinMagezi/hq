@@ -24,3 +24,5 @@ Notes for working under `crates/hq-cli/`, moved out of the root `CLAUDE.md` so a
   is a weekly daemon task that groups the week's failed tool calls (`tool_usage`) by a
   normalized error signature (`hq_db::tool_failures`), compares them with the week before
   and puts one item in the owner's inbox. No model is involved. Off with `daemon.tool_failure_digest: false`.
+  When it fires it also adds a "Finding tools" line from `hq_db::tool_routing` (searches that found
+  nothing, tools loaded on demand, wrong tool names): counts only, never the words searched for.
