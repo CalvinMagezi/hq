@@ -116,6 +116,10 @@ pub struct ToolRegistry {
     /// When set, only these tools send their schema every turn; the rest are deferred and
     /// listed by name in the catalog until `tool_search` activates them.
     eager: Option<std::collections::HashSet<String>>,
+    /// Tools `tool_search` activated, in the order it did. Their schemas go after the sorted
+    /// base block so a load adds to the end of the tools array instead of changing the middle,
+    /// and a provider that caches the tools as a prefix reuses everything before it.
+    activated: Vec<String>,
 }
 
 impl ToolRegistry {
@@ -123,6 +127,7 @@ impl ToolRegistry {
         Self {
             tools: HashMap::new(),
             eager: None,
+            activated: Vec::new(),
         }
     }
 
@@ -135,8 +140,10 @@ impl ToolRegistry {
     /// Send `name`'s full schema from now on, once `tool_search` has found it, so a provider
     /// that only accepts calls to declared functions can call it.
     pub fn activate(&mut self, name: &str) {
-        if let Some(eager) = self.eager.as_mut() {
-            eager.insert(name.to_string());
+        if let Some(eager) = self.eager.as_mut()
+            && eager.insert(name.to_string())
+        {
+            self.activated.push(name.to_string());
         }
     }
 
@@ -228,15 +235,21 @@ impl ToolRegistry {
 
     /// Return definitions for non-deferred tools only.
     /// Deferred tools should be loaded on demand via `definition_for()`.
-    /// Sorted by name for the same prompt-cache reason as `definitions()`.
+    /// The base block is sorted by name for the same prompt-cache reason as `definitions()`;
+    /// tools activated mid-session follow it in the order they were loaded, so a load only
+    /// appends and never reorders what a cached prefix already holds.
     pub fn active_definitions(&self) -> Vec<ToolDefinition> {
         let mut out: Vec<ToolDefinition> = self
             .tools
             .iter()
-            .filter(|(name, t)| !self.is_deferred(name, t))
+            .filter(|(name, t)| !self.is_deferred(name, t) && !self.activated.contains(name))
             .map(|(_, t)| definition_of(t))
             .collect();
         out.sort_by(|a, b| a.name.cmp(&b.name));
+        out.extend(self.activated.iter().filter_map(|name| {
+            let tool = self.tools.get(name)?;
+            (!self.is_deferred(name, tool)).then(|| definition_of(tool))
+        }));
         out
     }
 
@@ -305,5 +318,78 @@ fn definition_of(tool: &Arc<dyn AgentTool>) -> ToolDefinition {
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod activation_order_tests {
+    use super::*;
+
+    struct Stub(&'static str);
+
+    #[async_trait]
+    impl AgentTool for Stub {
+        fn name(&self) -> &str {
+            self.0
+        }
+        fn description(&self) -> &str {
+            "a stub"
+        }
+        fn parameters(&self) -> Value {
+            serde_json::json!({"type": "object", "properties": {}})
+        }
+        async fn execute(&self, _id: &str, _args: Value) -> Result<ToolResult> {
+            unreachable!("not called")
+        }
+    }
+
+    fn registry() -> ToolRegistry {
+        let mut r = ToolRegistry::new();
+        for name in ["delta", "alpha", "charlie", "bravo", "echo"] {
+            r.register(Box::new(Stub(name)));
+        }
+        r.keep_eager_only(["alpha".to_string(), "delta".to_string()]);
+        r
+    }
+
+    fn names(r: &ToolRegistry) -> Vec<String> {
+        r.active_definitions().into_iter().map(|d| d.name).collect()
+    }
+
+    #[test]
+    fn a_loaded_tool_is_appended_after_the_sorted_base_block() {
+        let mut r = registry();
+        assert_eq!(names(&r), ["alpha", "delta"]);
+
+        // `bravo` sorts before `delta`, but it must not move what a cached prefix already holds.
+        r.activate("echo");
+        r.activate("bravo");
+        assert_eq!(names(&r), ["alpha", "delta", "echo", "bravo"]);
+    }
+
+    #[test]
+    fn loading_a_tool_twice_or_an_already_eager_one_changes_nothing() {
+        let mut r = registry();
+        r.activate("charlie");
+        r.activate("charlie");
+        r.activate("alpha");
+        assert_eq!(names(&r), ["alpha", "delta", "charlie"]);
+    }
+
+    #[test]
+    fn a_loaded_tool_leaves_the_deferred_catalog() {
+        let mut r = registry();
+        r.activate("echo");
+        let deferred: Vec<String> = r.deferred_catalog().into_iter().map(|(n, _)| n).collect();
+        assert_eq!(deferred, ["bravo", "charlie"]);
+    }
+
+    #[test]
+    fn without_a_deferral_set_nothing_is_appended() {
+        let mut r = ToolRegistry::new();
+        r.register(Box::new(Stub("beta")));
+        r.register(Box::new(Stub("alpha")));
+        r.activate("beta");
+        assert_eq!(names(&r), ["alpha", "beta"]);
     }
 }
