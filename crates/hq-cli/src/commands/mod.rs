@@ -95,6 +95,7 @@ pub mod self_apply {
     }
 }
 pub mod agent_skill;
+pub mod finance;
 pub mod grants;
 pub mod quota;
 pub mod service;

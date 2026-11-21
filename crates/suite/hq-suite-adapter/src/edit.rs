@@ -241,9 +241,23 @@ fn preview_of(doc: &Document, args: &Value, planned: &Planned, gate: Gate) -> Va
 
 /// The first look at a call: a read answers at once, a change that must be shown first comes back
 /// as a preview, anything else is left for [`apply`].
+/// An agent never opens HQ's private folders (the finance ledger lives in `_data`), whatever the
+/// action: a listing of blocks would hand it the rows. The owner's apps pass `Gate::Owner`.
+fn gate_private(note: &str, gate: Gate) -> Result<()> {
+    if gate != Gate::Agent {
+        return Ok(());
+    }
+    let hit = hq_vault::rel_path::protected_folder(note, hq_vault::rel_path::PRIVATE_FOLDERS);
+    if hit.map_or(true, |h| h.is_some()) {
+        anyhow::bail!("that note is in a folder HQ keeps private, which no tool opens");
+    }
+    Ok(())
+}
+
 pub fn first_step(vault: &Path, args: &Value, gate: Gate) -> Result<Step> {
     let action = req_str(args, "action")?;
     let note = req_str(args, "note")?;
+    gate_private(note, gate)?;
     match action {
         "blocks" => Ok(Step::Done(with_focus(
             vault,
@@ -282,6 +296,7 @@ pub fn first_step(vault: &Path, args: &Value, gate: Gate) -> Result<Step> {
 /// through only with the token of a preview made from this very revision and request.
 pub fn apply(vault: &Path, args: &Value, gate: Gate) -> Result<Value> {
     let note = req_str(args, "note")?;
+    gate_private(note, gate)?;
     // The focus is checked against the note as it is before the change, so a change that removes
     // the focused block does not fail after it was written.
     let focus = match args.get("focus").filter(|f| !f.is_null()) {

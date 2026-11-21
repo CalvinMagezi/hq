@@ -382,6 +382,10 @@ fn skill_hint_tool_names() -> Vec<String> {
 /// register the tool in `hq_tool_catalog`.
 const NOT_IN_NATIVE_CATALOGUE: &[(&str, &str)] = &[
     (
+        "finance_import_messages",
+        "device action: the phone app answers it and posts the messages to HQ's ledger route",
+    ),
+    (
         "calendar_create_event",
         "device action: the phone app answers it, the host has no calendar",
     ),

@@ -1,0 +1,1 @@
+**Ask HQ for your mobile money from the phone.** `finance_import_messages` reads your MTN and Airtel Money messages on the phone, after you approve, and adds them to your private ledger as drafts. HQ is told only counts: it never sees a message, an amount or a name. A weekly reminder says how many rows wait for review.

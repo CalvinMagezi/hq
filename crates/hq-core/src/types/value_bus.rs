@@ -128,7 +128,11 @@ pub const LANE_QUOTA_SOURCE: &str = "lane-quota";
 
 /// Source of the daily brief: the next step of each focus lane. Shown on the owner's devices only.
 pub const DAILY_BRIEF_SOURCE: &str = "daily_brief";
+/// Source of the weekly finance reminder: how many ledger rows wait and how old the newest
+/// transaction is. Numbers only, and what a person spends is never sent through a push service.
+pub const FINANCE_NUDGE_SOURCE: &str = "finance_nudge";
 pub const DEVICE_ONLY_SOURCES: &[&str] = &[
+    FINANCE_NUDGE_SOURCE,
     DAILY_BRIEF_SOURCE,
     LANE_QUOTA_SOURCE,
     FLEET_DIGEST_SOURCE,

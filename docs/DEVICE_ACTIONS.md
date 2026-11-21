@@ -30,6 +30,7 @@ Domains today:
 |--------|-------|--------------|------|-------|------|
 | Calendar | `calendar_create_event`, `calendar_update_event`, `calendar_delete_event`, `calendar_list_events` | `calendar.create`, `.update`, `.delete`, `.list` | Create, Modify, Destructive, Read | `calendar-creation`, `calendar-editing`, `calendar-reading` | `CALENDAR_CREATION.md` |
 | Contacts | `contacts_search` | `contacts.search` | Read | `contacts-lookup` | `CONTACTS.md` |
+| Finance | `finance_import_messages` | `finance.import` | Modify | `finance-import` | `finance/README.md` |
 
 ## Risk classes
 
@@ -94,6 +95,14 @@ arguments.
   untrusted source. See `docs/security/PROMPT_INJECTION.md`.
 - A tool of a class that asks is never listed as safe to skip: add it to the table with the right
   class and it follows the rule.
+
+## Bulk data that must not reach the model
+
+A device action normally returns its data in the result. When the data is private records that must
+never be shown to the model (the finance import reads mobile-money messages), the phone sends it
+to a route of its own, `claim_upload` on the store gates that route, and the route settles the
+action with counts. The result a model sees is built by `finalize` from those counts, never from
+the records. `crates/hq-web/src/finance_api.rs` is the one example.
 
 ## Other apps
 

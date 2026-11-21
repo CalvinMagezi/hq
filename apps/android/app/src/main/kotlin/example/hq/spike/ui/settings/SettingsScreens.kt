@@ -132,6 +132,7 @@ internal fun icon(key: String): ImageVector = when (key) {
     "assistant" -> HqIcons.Mic
     "calendar" -> HqIcons.Clock
     "contacts" -> HqIcons.Phone
+    "finance" -> HqIcons.Gauge
     "chat" -> HqIcons.Chat
     "phone" -> HqIcons.Phone
     "shield" -> HqIcons.Shield
@@ -173,6 +174,7 @@ internal fun title(page: SettingsPage) = when (page) {
     SettingsPage.Assistant -> stringResource(R.string.assist_row_title)
     SettingsPage.Calendar -> stringResource(R.string.cal_row_title)
     SettingsPage.Contacts -> stringResource(R.string.contacts_row_title)
+    SettingsPage.Finance -> stringResource(R.string.finance_row_title)
     SettingsPage.Suggests -> stringResource(R.string.row_suggests)
 }
 
@@ -213,6 +215,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Assistant -> AssistantPage(ui, actions)
                 SettingsPage.Calendar -> CalendarPage()
                 SettingsPage.Contacts -> ContactsPage()
+                SettingsPage.Finance -> FinancePage()
                 SettingsPage.Suggests -> SuggestsPage()
                 SettingsPage.Noticed -> NoticedPage(Counters.get(androidx.compose.ui.platform.LocalContext.current))
                 SettingsPage.Origins -> ReadOnlyList(ui, stringResource(R.string.settings_none_origins)) { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }

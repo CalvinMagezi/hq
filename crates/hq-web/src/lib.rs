@@ -23,6 +23,7 @@ mod dialog_answer;
 mod edge_worker_api;
 mod error;
 mod fetch_sites_api;
+mod finance_api;
 pub mod github_connect_api;
 pub mod gmail_ingest;
 mod helper_runs_api;

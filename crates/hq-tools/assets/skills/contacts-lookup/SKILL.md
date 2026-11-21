@@ -1,6 +1,6 @@
 ---
 name: contacts-lookup
-description: Look people up in the owner's phone contacts with the contacts_search tool. Use when the owner asks for someone's phone number or email, whether they have a contact for someone, or who in their contacts matches a name, from the phone app.
+description: Look people up in the owner's phone contacts with contacts_search. Use when they ask for someone's number or email, or who matches a name.
 hints: [contacts_search, phone number for, email address for, do I have a contact, look up in my contacts, who is in my contacts]
 provenance:
   mintedBy: hq

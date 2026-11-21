@@ -41,7 +41,8 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         subagent_followup::spawn_subagent_followup(state.clone());
     }
 
-    let router = device_actions_api::routes(oauth::routes(Router::new(), &state))
+    let finance = finance_api::routes(Router::new());
+    let router = device_actions_api::routes(oauth::routes(finance, &state))
         .route("/ws", get(ws::ws_handler))
         .route("/health", get(api::health_handler))
         .route(hello::HELLO_PATH, get(hello::hello_handler))
