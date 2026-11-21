@@ -33,6 +33,11 @@ fn not_found(msg: impl Into<String>) -> anyhow::Error {
     ApiError::NotFound(msg.into()).into()
 }
 
+/// The task `id` names (an id or a display id), or a typed 404.
+fn require_task(c: &rusqlite::Connection, id: &str) -> anyhow::Result<t::Task> {
+    t::get_task(c, id)?.ok_or_else(|| not_found("no task found for that id"))
+}
+
 fn vanished(id: &str) -> anyhow::Error {
     ApiError::Internal(format!("task {id} vanished after write")).into()
 }
@@ -76,16 +81,19 @@ pub(crate) fn broadcast_related(state: &Arc<WsState>, ids: Vec<String>) {
     }
 }
 
-pub(crate) async fn list_spaces_handler(State(state): State<Arc<WsState>>) -> Response {
-    match state.db_blocking(t::list_spaces).await {
-        Ok(spaces) => Json(json!({
-            "spaces": spaces.iter().map(|s| json!({
-                "id": s.id, "name": s.name, "slug": s.slug, "created_at": s.created_at,
-            })).collect::<Vec<_>>()
-        }))
-        .into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+pub(crate) async fn list_spaces_handler(
+    State(state): State<Arc<WsState>>,
+) -> Result<Response, ApiError> {
+    let spaces = state
+        .db_blocking(t::list_spaces)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({
+        "spaces": spaces.iter().map(|s| json!({
+            "id": s.id, "name": s.name, "slug": s.slug, "created_at": s.created_at,
+        })).collect::<Vec<_>>()
+    }))
+    .into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,19 +129,17 @@ pub(crate) struct ListFoldersParams {
 pub(crate) async fn list_folders_handler(
     State(state): State<Arc<WsState>>,
     Query(params): Query<ListFoldersParams>,
-) -> Response {
-    match state
+) -> Result<Response, ApiError> {
+    let folders = state
         .db_blocking(move |c| t::list_folders(c, params.space_id.as_deref()))
         .await
-    {
-        Ok(folders) => Json(json!({
-            "folders": folders.iter().map(|f| json!({
-                "id": f.id, "space_id": f.space_id, "name": f.name, "slug": f.slug,
-            })).collect::<Vec<_>>()
-        }))
-        .into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({
+        "folders": folders.iter().map(|f| json!({
+            "id": f.id, "space_id": f.space_id, "name": f.name, "slug": f.slug,
+        })).collect::<Vec<_>>()
+    }))
+    .into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,12 +178,12 @@ pub(crate) struct ListInitiativesParams {
 pub(crate) async fn list_initiatives_handler(
     State(state): State<Arc<WsState>>,
     Query(params): Query<ListInitiativesParams>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let shelf = match t::Shelf::parse(params.shelf.as_deref().unwrap_or("")) {
         Ok(shelf) => shelf,
-        Err(e) => return ApiError::from(e).into_response(),
+        Err(e) => return Err(ApiError::from(e)),
     };
-    match state
+    let initiatives = state
         .db_blocking(move |c| {
             t::list_initiatives_on_shelf(
                 c,
@@ -187,16 +193,14 @@ pub(crate) async fn list_initiatives_handler(
             )
         })
         .await
-    {
-        Ok(initiatives) => Json(json!({
-            "initiatives": initiatives.iter().map(|i| json!({
-                "id": i.id, "space_id": i.space_id, "folder_id": i.folder_id, "name": i.name,
-                "slug": i.slug, "id_prefix": i.id_prefix, "shelved_at": i.shelved_at,
-            })).collect::<Vec<_>>()
-        }))
-        .into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({
+        "initiatives": initiatives.iter().map(|i| json!({
+            "id": i.id, "space_id": i.space_id, "folder_id": i.folder_id, "name": i.name,
+            "slug": i.slug, "id_prefix": i.id_prefix, "shelved_at": i.shelved_at,
+        })).collect::<Vec<_>>()
+    }))
+    .into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -210,9 +214,9 @@ pub(crate) struct CreateInitiativeBody {
 pub(crate) async fn create_initiative_handler(
     State(state): State<Arc<WsState>>,
     Json(body): Json<CreateInitiativeBody>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if body.space_id.trim().is_empty() || body.name.trim().is_empty() {
-        return ApiError::bad_request("space_id and name are required").into_response();
+        return Err(ApiError::bad_request("space_id and name are required"));
     }
     let id = hq_tool_api::util::generate_id("in");
     let initiative_slug = slug(&body.name);
@@ -242,14 +246,12 @@ pub(crate) async fn create_initiative_handler(
             )
         })
         .await;
-    match result {
-        Ok(initiative) => Json(json!({
-            "id": initiative.id, "space_id": initiative.space_id, "folder_id": initiative.folder_id,
-            "name": initiative.name, "id_prefix": initiative.id_prefix,
-        }))
-        .into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+    let initiative = result.map_err(ApiError::from)?;
+    Ok(Json(json!({
+        "id": initiative.id, "space_id": initiative.space_id, "folder_id": initiative.folder_id,
+        "name": initiative.name, "id_prefix": initiative.id_prefix,
+    }))
+    .into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -529,8 +531,7 @@ pub(crate) async fn update_task_handler(
     let result = state
         .db_blocking(move |c| {
             t::in_write_tx(c, |c| {
-                let previous =
-                    t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+                let previous = require_task(c, &id)?;
                 if let Some(expected) = expected_status.as_deref().filter(|e| *e != previous.status)
                 {
                     return Err(ApiError::Conflict(format!(
@@ -591,37 +592,31 @@ pub(crate) async fn update_task_handler(
 pub(crate) async fn list_task_events_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let result = state
         .db_blocking(move |c| {
-            let task =
-                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            let task = require_task(c, &id)?;
             t::list_task_events(c, &task.id)
         })
         .await;
-    match result {
-        Ok(events) => Json(json!({ "events": events })).into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+    let events = result.map_err(ApiError::from)?;
+    Ok(Json(json!({ "events": events })).into_response())
 }
 
 /// Time on one task: leased time, status durations, cycle time, estimate variance.
 pub(crate) async fn task_time_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let ttl = hq_tools::tasks::lease_ttl_secs();
     let result = state
         .db_blocking(move |c| {
-            let task =
-                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            let task = require_task(c, &id)?;
             t::time_summary(c, &task.id, ttl)
         })
         .await;
-    match result {
-        Ok(summary) => Json(json!(summary)).into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+    let summary = result.map_err(ApiError::from)?;
+    Ok(Json(json!(summary)).into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -646,16 +641,14 @@ fn window_days(params: &DaysParams) -> i64 {
 pub(crate) async fn time_report_handler(
     State(state): State<Arc<WsState>>,
     Query(params): Query<DaysParams>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let days = window_days(&params);
     let ttl = hq_tools::tasks::lease_ttl_secs();
-    match state
+    let report = state
         .db_blocking(move |c| t::time_report(c, days, ttl))
         .await
-    {
-        Ok(report) => Json(json!({ "days": days, "report": report })).into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "days": days, "report": report })).into_response())
 }
 
 /// Recent leases across tasks, for drawing actual work beside the plan.
@@ -686,18 +679,15 @@ pub(crate) async fn recent_work_sessions_handler(
 pub(crate) async fn list_task_links_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let result = state
         .db_blocking(move |c| {
-            let task =
-                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            let task = require_task(c, &id)?;
             t::list_task_links(c, &task.id)
         })
         .await;
-    match result {
-        Ok(links) => Json(json!({ "links": links })).into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+    let links = result.map_err(ApiError::from)?;
+    Ok(Json(json!({ "links": links })).into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -711,18 +701,16 @@ pub(crate) struct LinkedParams {
 pub(crate) async fn tasks_linked_to_handler(
     State(state): State<Arc<WsState>>,
     Query(params): Query<LinkedParams>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let result = state
         .db_blocking(move |c| t::tasks_linked_to(c, &params.kind, &params.reference))
         .await;
-    match result {
-        Ok(tasks) => Json(json!({
-            "count": tasks.len(),
-            "tasks": tasks.iter().map(task_json).collect::<Vec<_>>(),
-        }))
-        .into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+    let tasks = result.map_err(ApiError::from)?;
+    Ok(Json(json!({
+        "count": tasks.len(),
+        "tasks": tasks.iter().map(task_json).collect::<Vec<_>>(),
+    }))
+    .into_response())
 }
 
 /// Where the work last stood, left by the session that worked on it, or null. Notes from
@@ -730,18 +718,15 @@ pub(crate) async fn tasks_linked_to_handler(
 pub(crate) async fn task_checkpoint_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let result = state
         .db_blocking(move |c| {
-            let task =
-                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            let task = require_task(c, &id)?;
             t::latest_checkpoint(c, &task.id)
         })
         .await;
-    match result {
-        Ok(checkpoint) => Json(json!({ "checkpoint": checkpoint })).into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+    let checkpoint = result.map_err(ApiError::from)?;
+    Ok(Json(json!({ "checkpoint": checkpoint })).into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -757,7 +742,7 @@ pub(crate) async fn task_activity_handler(
 ) -> Response {
     activity_response(&state, params, move |db, vault, opts| {
         db.with_conn(|c| {
-            t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            require_task(c, &id)?;
             Ok(())
         })?;
         activity::task_activity(db, vault, &id, opts)
@@ -872,17 +857,15 @@ const STALE_LIST_CAP: usize = 500;
 pub(crate) async fn initiative_progress_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let settings = hq_tools::tasks::task_settings();
     let hours = i64::try_from(settings.stale_hours()).unwrap_or(i64::MAX);
     let ttl = hq_tools::tasks::lease_ttl_secs();
-    match state
+    let rollup = state
         .db_blocking(move |c| t::initiative_rollup(c, &id, hours, ttl))
         .await
-    {
-        Ok(rollup) => Json(json!(rollup)).into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+        .map_err(ApiError::from)?;
+    Ok(Json(json!(rollup)).into_response())
 }
 
 /// Most recent work leases the endpoint returns.
@@ -893,20 +876,17 @@ const WORK_SESSIONS_SHOWN: usize = 50;
 pub(crate) async fn list_work_sessions_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let ttl = hq_tools::tasks::lease_ttl_secs();
     let result = state
         .db_blocking(move |c| {
-            let task =
-                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            let task = require_task(c, &id)?;
             t::expire_stale_leases(c, ttl)?;
             t::list_work_sessions(c, &task.id, WORK_SESSIONS_SHOWN)
         })
         .await;
-    match result {
-        Ok(sessions) => Json(json!({ "work_sessions": sessions })).into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+    let sessions = result.map_err(ApiError::from)?;
+    Ok(Json(json!({ "work_sessions": sessions })).into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -926,8 +906,7 @@ pub(crate) async fn delete_task_handler(
     let target = id.clone();
     let result = state
         .db_blocking(move |c| {
-            let task =
-                t::get_task(c, &target)?.ok_or_else(|| not_found("no task found for that id"))?;
+            let task = require_task(c, &target)?;
             let dependents: Vec<String> = t::list_dependents(c, &task.id)?
                 .into_iter()
                 .map(|d| d.id)
@@ -989,16 +968,12 @@ pub(crate) async fn restore_task_handler(
 pub(crate) async fn get_task_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
-) -> Response {
-    match state
-        .db_blocking(move |c| {
-            t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))
-        })
+) -> Result<Response, ApiError> {
+    let task = state
+        .db_blocking(move |c| require_task(c, &id))
         .await
-    {
-        Ok(task) => Json(task_json(&task)).into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+        .map_err(ApiError::from)?;
+    Ok(Json(task_json(&task)).into_response())
 }
 
 /// The tasks a task points at or is pointed at by (parent, sub-tasks, what it waits on, what
@@ -1007,11 +982,10 @@ pub(crate) async fn get_task_handler(
 pub(crate) async fn related_tasks_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let result = state
         .db_blocking(move |c| {
-            let task =
-                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            let task = require_task(c, &id)?;
             let mut related: Vec<t::Task> = Vec::new();
             if let Some(parent) = &task.parent_task_id {
                 related.extend(t::get_task(c, parent)?);
@@ -1028,11 +1002,8 @@ pub(crate) async fn related_tasks_handler(
             Ok::<_, anyhow::Error>(related)
         })
         .await;
-    match result {
-        Ok(related) => Json(json!({ "tasks": related.iter().map(task_json).collect::<Vec<_>>() }))
-            .into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+    let related = result.map_err(ApiError::from)?;
+    Ok(Json(json!({ "tasks": related.iter().map(task_json).collect::<Vec<_>>() })).into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1044,27 +1015,23 @@ pub(crate) struct ShelveBody {
 pub(crate) async fn shelve_tasks_handler(
     State(state): State<Arc<WsState>>,
     Json(body): Json<ShelveBody>,
-) -> Response {
-    match state
+) -> Result<Response, ApiError> {
+    let out = state
         .db_blocking(move |c| t::shelve_tasks(c, &body.ids))
         .await
-    {
-        Ok(out) => Json(json!({ "changed": out.changed, "skipped": out.skipped })).into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "changed": out.changed, "skipped": out.skipped })).into_response())
 }
 
 pub(crate) async fn unshelve_tasks_handler(
     State(state): State<Arc<WsState>>,
     Json(body): Json<ShelveBody>,
-) -> Response {
-    match state
+) -> Result<Response, ApiError> {
+    let out = state
         .db_blocking(move |c| t::unshelve_tasks(c, &body.ids))
         .await
-    {
-        Ok(out) => Json(json!({ "changed": out.changed, "skipped": out.skipped })).into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({ "changed": out.changed, "skipped": out.skipped })).into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1085,21 +1052,19 @@ fn default_true() -> bool {
 pub(crate) async fn shelve_completed_handler(
     State(state): State<Arc<WsState>>,
     Json(body): Json<ShelveCompletedBody>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let scope = t::ShelfSweepScope {
         space_id: body.space_id.filter(|s| !s.is_empty()),
         initiative_id: body.initiative_id.filter(|s| !s.is_empty()),
     };
-    match state
+    let out = state
         .db_blocking(move |c| t::shelve_completed(c, body.older_than_days, &scope, body.dry_run))
         .await
-    {
-        Ok(out) => Json(json!({
-            "matched": out.matched, "changed": out.changed, "dry_run": out.dry_run,
-        }))
-        .into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+        .map_err(ApiError::from)?;
+    Ok(Json(json!({
+        "matched": out.matched, "changed": out.changed, "dry_run": out.dry_run,
+    }))
+    .into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1131,23 +1096,20 @@ pub(crate) async fn shelve_initiative_handler(
 pub(crate) async fn list_comments_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let result = state
         .db_blocking(move |c| {
-            let task =
-                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            let task = require_task(c, &id)?;
             t::list_comments(c, &task.id)
         })
         .await;
-    match result {
-        Ok(comments) => Json(json!({
-            "comments": comments.iter().map(|c| json!({
-                "id": c.id, "author": c.author, "body": c.body, "created_at": c.created_at,
-            })).collect::<Vec<_>>()
-        }))
-        .into_response(),
-        Err(e) => ApiError::from(e).into_response(),
-    }
+    let comments = result.map_err(ApiError::from)?;
+    Ok(Json(json!({
+        "comments": comments.iter().map(|c| json!({
+            "id": c.id, "author": c.author, "body": c.body, "created_at": c.created_at,
+        })).collect::<Vec<_>>()
+    }))
+    .into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1167,8 +1129,7 @@ pub(crate) async fn add_comment_handler(
     }
     let result = state
         .db_blocking(move |c| {
-            let task =
-                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            let task = require_task(c, &id)?;
             let comment = t::add_comment(c, &task.id, &payload.author, &payload.body, None)?;
             Ok((task, comment))
         })
@@ -1366,7 +1327,7 @@ mod tests {
             "a token never leaves the server"
         );
         let missing = list_work_sessions_handler(State(state), AxumPath("NOPE-1".into())).await;
-        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+        assert_eq!(missing.into_response().status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -1410,7 +1371,7 @@ mod tests {
             body_json(task_time_handler(State(state.clone()), AxumPath(id.clone())).await).await;
         assert_eq!(time["leased_seconds"], 0);
         let missing = task_time_handler(State(state.clone()), AxumPath("NOPE-1".into())).await;
-        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+        assert_eq!(missing.into_response().status(), StatusCode::NOT_FOUND);
 
         let report = body_json(
             time_report_handler(State(state.clone()), Query(DaysParams { days: Some(7) })).await,
@@ -1472,9 +1433,9 @@ mod tests {
             }),
         )
         .await;
-        assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(bad.into_response().status(), StatusCode::BAD_REQUEST);
         let missing = list_task_links_handler(State(state), AxumPath("NOPE-1".into())).await;
-        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+        assert_eq!(missing.into_response().status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -1564,6 +1525,7 @@ mod tests {
         assert_eq!(
             initiative_progress_handler(State(state), AxumPath("nope".into()))
                 .await
+                .into_response()
                 .status(),
             StatusCode::BAD_REQUEST
         );
@@ -1791,6 +1753,7 @@ mod tests {
                 }),
             )
             .await
+            .into_response()
             .status(),
             StatusCode::BAD_REQUEST
         );
@@ -1872,13 +1835,14 @@ mod tests {
         assert_eq!(
             related_tasks_handler(State(state.clone()), AxumPath("nope".into()))
                 .await
+                .into_response()
                 .status(),
             StatusCode::NOT_FOUND
         );
     }
 
-    async fn body_json(response: Response) -> serde_json::Value {
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+    async fn body_json(response: impl IntoResponse) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(response.into_response().into_body(), usize::MAX)
             .await
             .unwrap();
         serde_json::from_slice(&bytes).unwrap()
@@ -2128,12 +2092,14 @@ mod tests {
         assert_eq!(
             list_comments_handler(State(state.clone()), missing())
                 .await
+                .into_response()
                 .status(),
             StatusCode::NOT_FOUND
         );
         assert_eq!(
             list_task_events_handler(State(state.clone()), missing())
                 .await
+                .into_response()
                 .status(),
             StatusCode::NOT_FOUND
         );
@@ -2155,7 +2121,10 @@ mod tests {
             .await
             .unwrap();
         let faulted = list_comments_handler(State(state.clone()), AxumPath(id)).await;
-        assert_eq!(faulted.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            faulted.into_response().status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     async fn json_of(r: Response) -> (StatusCode, serde_json::Value) {
