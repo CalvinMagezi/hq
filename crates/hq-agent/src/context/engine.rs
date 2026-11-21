@@ -98,11 +98,12 @@ impl ContextEngine {
             });
         }
 
-        // Thread (Recent messages)
+        // Thread (Recent messages). Only System-role blocks reach the prompt
+        // (`blocks_to_system_prompt`); the conversation itself is replayed from the thread
+        // history. A user or assistant line here would only spend budget that memory needs.
         for (i, msg) in input.thread.iter().enumerate() {
             let role = match msg.role.as_str() {
-                "user" => MessageRole::User,
-                "assistant" => MessageRole::Assistant,
+                "user" | "assistant" => continue,
                 _ => MessageRole::System,
             };
             candidates.push(ContextCandidate {
@@ -338,5 +339,55 @@ mod tests {
                 .iter()
                 .any(|r| r.contains("DeduplicationReducer"))
         );
+    }
+
+    /// The thread's user and assistant lines never reach the system prompt (only System-role
+    /// blocks do), so they must not spend budget that memory needs.
+    #[tokio::test]
+    async fn a_long_thread_does_not_push_memory_out_of_the_budget() {
+        use crate::context::layers::ConversationMessage;
+        let engine = ContextEngine::new();
+        let mut input = minimal_input();
+        input.memory = "the owner prefers short answers".to_string();
+        input.thread = (0..40)
+            .map(|i| ConversationMessage {
+                role: if i % 2 == 0 { "user" } else { "assistant" }.to_string(),
+                content: format!(
+                    "earlier message number {i} with some filler words to cost tokens"
+                ),
+            })
+            .collect();
+        let caps = LlmCapabilities {
+            exact_context_window: 400,
+            ..Default::default()
+        };
+
+        let (blocks, _manifest) = engine.build_context(input, caps).await.unwrap();
+
+        assert!(
+            blocks.iter().any(|b| b.metadata.id == "long_term_memory"),
+            "memory was dropped to make room for thread lines that never reach the prompt"
+        );
+        assert!(
+            blocks.iter().all(|b| !b.metadata.id.starts_with("thread_")),
+            "user and assistant thread lines are not context blocks"
+        );
+    }
+
+    /// A thread line with any other role still maps to a System block and reaches the prompt.
+    #[tokio::test]
+    async fn a_system_role_thread_line_is_still_a_block() {
+        use crate::context::layers::ConversationMessage;
+        let engine = ContextEngine::new();
+        let mut input = minimal_input();
+        input.thread = vec![ConversationMessage {
+            role: "system".to_string(),
+            content: "a standing note".to_string(),
+        }];
+        let (blocks, _) = engine
+            .build_context(input, LlmCapabilities::default())
+            .await
+            .unwrap();
+        assert!(blocks.iter().any(|b| b.metadata.id == "thread_0"));
     }
 }

@@ -180,9 +180,16 @@ impl SessionBuilder {
                 .find(|m| m.role == "user")
                 .map(|m| m.content.clone())
                 .unwrap_or_default();
-            let concept_results = hq_vault::VaultClient::new(vault_path.to_path_buf())
-                .map(|v| concept_search_results(&v, &last_user_message))
-                .unwrap_or_default();
+            // Lists and reads every concept page, which is blocking file IO on a path every
+            // new session takes: keep it off the async workers.
+            let concept_vault = vault_path.to_path_buf();
+            let concept_results = tokio::task::spawn_blocking(move || {
+                hq_vault::VaultClient::new(concept_vault)
+                    .map(|v| concept_search_results(&v, &last_user_message))
+                    .unwrap_or_default()
+            })
+            .await
+            .unwrap_or_default();
 
             // Call the ContextEngine.
             // Clone soul_with_user before moving into FrameInput (needed for fallback).
