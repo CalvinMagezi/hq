@@ -849,3 +849,87 @@ fn moving_a_note_over_one_it_was_linked_to_drops_the_self_link_and_keeps_the_res
         0
     );
 }
+
+/// `notes_fts_rows` is what makes a path lookup a key lookup instead of a scan of every note body.
+/// Every write to the keyword index has to keep it in step, or a later edit would add a second row
+/// for a note, or a delete would leave one behind.
+mod path_map {
+    use super::*;
+
+    fn fts_rows(conn: &Connection, path: &str) -> i64 {
+        count(conn, "SELECT COUNT(*) FROM notes_fts WHERE path = ?1", path)
+    }
+
+    fn mapped(conn: &Connection, path: &str) -> i64 {
+        count(
+            conn,
+            "SELECT COUNT(*) FROM notes_fts_rows WHERE path = ?1",
+            path,
+        )
+    }
+
+    #[test]
+    fn reindexing_replaces_the_row_and_keeps_one_mapping() {
+        let c = db();
+        index_note(&c, "Notebooks/a.md", "A", "first body", "").unwrap();
+        index_note(&c, "Notebooks/a.md", "A", "second body", "").unwrap();
+        index_note(&c, "Notebooks/b.md", "B", "other", "").unwrap();
+        assert_eq!(fts_rows(&c, "Notebooks/a.md"), 1);
+        assert_eq!(mapped(&c, "Notebooks/a.md"), 1);
+        assert_eq!(keyword_search(&c, "second", 5).unwrap().len(), 1);
+        assert!(keyword_search(&c, "first", 5).unwrap().is_empty());
+    }
+
+    #[test]
+    fn deleting_a_note_removes_its_row_and_mapping() {
+        let c = db();
+        index_note(&c, "Notebooks/a.md", "A", "body", "").unwrap();
+        index_note(&c, "Notebooks/b.md", "B", "body", "").unwrap();
+        remove_note(&c, "Notebooks/a.md").unwrap();
+        assert_eq!(fts_rows(&c, "Notebooks/a.md"), 0);
+        assert_eq!(mapped(&c, "Notebooks/a.md"), 0);
+        assert_eq!(fts_rows(&c, "Notebooks/b.md"), 1);
+        // Removing what is not there is not an error.
+        remove_note(&c, "Notebooks/a.md").unwrap();
+    }
+
+    #[test]
+    fn a_rebuild_clears_the_mapping_too() {
+        let c = db();
+        let vault = Vault::new();
+        vault.write("Notebooks/kept.md", "# Kept\nhello");
+        index_note(&c, "Notebooks/gone.md", "Gone", "body", "").unwrap();
+        rebuild_index(&c, &vault.notebooks()).unwrap();
+        assert_eq!(mapped(&c, "Notebooks/gone.md"), 0);
+        let total: i64 = c
+            .query_row("SELECT COUNT(*) FROM notes_fts", [], |r| r.get(0))
+            .unwrap();
+        let rows: i64 = c
+            .query_row("SELECT COUNT(*) FROM notes_fts_rows", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(total, rows, "one mapping per indexed note");
+    }
+
+    #[test]
+    fn the_migration_maps_rows_already_in_the_index() {
+        let c = db();
+        // An index written before the mapping existed: rows, no mappings, one path twice.
+        c.execute_batch(
+            "DROP TABLE notes_fts_rows;
+             INSERT INTO notes_fts (path, title, content, tags) VALUES ('p.md','old','x','');
+             INSERT INTO notes_fts (path, title, content, tags) VALUES ('p.md','new','y','');
+             INSERT INTO notes_fts (path, title, content, tags) VALUES ('q.md','q','z','');",
+        )
+        .unwrap();
+        c.execute_batch(include_str!("../../sql/150_notes_fts_rows.sql"))
+            .unwrap();
+        assert_eq!(mapped(&c, "p.md"), 1);
+        assert_eq!(fts_rows(&c, "p.md"), 1);
+        let title: String = c
+            .query_row("SELECT title FROM notes_fts WHERE path = 'p.md'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(title, "new", "the newest row wins");
+    }
+}

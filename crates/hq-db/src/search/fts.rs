@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use hq_core::types::{MatchType, SearchResult};
 
@@ -43,12 +43,35 @@ pub fn index_note(
     content: &str,
     tags: &str,
 ) -> Result<()> {
-    conn.execute("DELETE FROM notes_fts WHERE path = ?1", [path])?;
+    delete_fts_row(conn, path)?;
     conn.execute(
         "INSERT INTO notes_fts (path, title, content, tags) VALUES (?1, ?2, ?3, ?4)",
         rusqlite::params![path, title, content, tags],
     )?;
+    conn.execute(
+        "INSERT INTO notes_fts_rows (path, fts_rowid) VALUES (?1, ?2)
+         ON CONFLICT(path) DO UPDATE SET fts_rowid = excluded.fts_rowid",
+        rusqlite::params![path, conn.last_insert_rowid()],
+    )?;
     Ok(())
+}
+
+/// Delete a note's FTS row through its row id (`notes_fts_rows`), not a scan on the `path`
+/// column. Returns how many rows went (0 or 1).
+pub(super) fn delete_fts_row(conn: &Connection, path: &str) -> Result<usize> {
+    let rowid: Option<i64> = conn
+        .query_row(
+            "SELECT fts_rowid FROM notes_fts_rows WHERE path = ?1",
+            [path],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(rowid) = rowid else {
+        return Ok(0);
+    };
+    let removed = conn.execute("DELETE FROM notes_fts WHERE rowid = ?1", [rowid])?;
+    conn.execute("DELETE FROM notes_fts_rows WHERE path = ?1", [path])?;
+    Ok(removed)
 }
 
 /// Remove everything derived from a note's text: its FTS row, embedding, sync state and cached
@@ -220,7 +243,8 @@ pub fn recent_notes(conn: &Connection, limit: usize) -> Result<Vec<SearchResult>
     let mut stmt = conn.prepare(
         "SELECT vc.path, vc.title, vc.content_preview, COALESCE(f.tags, '')
          FROM (SELECT path, title, content_preview FROM vault_cache ORDER BY mtime DESC LIMIT ?1) vc
-         LEFT JOIN notes_fts f ON f.path = vc.path",
+         LEFT JOIN notes_fts_rows r ON r.path = vc.path
+         LEFT JOIN notes_fts f ON f.rowid = r.fts_rowid",
     )?;
     let rows = stmt.query_map([limit as i64], |row| {
         Ok((
@@ -260,7 +284,7 @@ pub fn recent_notes(conn: &Connection, limit: usize) -> Result<Vec<SearchResult>
 /// Walks the same way `sync_index` does: hidden folders, the trash and symlinks are skipped.
 pub fn rebuild_index(conn: &Connection, notebooks_dir: &std::path::Path) -> Result<(usize, usize)> {
     // Clear existing FTS data
-    conn.execute_batch("DELETE FROM notes_fts")?;
+    conn.execute_batch("DELETE FROM notes_fts; DELETE FROM notes_fts_rows;")?;
 
     if !notebooks_dir.exists() {
         return Ok((0, 0));

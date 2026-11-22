@@ -100,7 +100,7 @@ pub struct PendingEmbedding {
 /// Restricts an `embeddings` query to notes that are still in the keyword index. The subquery does
 /// not depend on the outer row, so SQLite builds it once; a per-row lookup would scan the index
 /// for every embedding.
-const LIVE_NOTE: &str = "note_path IN (SELECT path FROM notes_fts)";
+const LIVE_NOTE: &str = "note_path IN (SELECT path FROM notes_fts_rows)";
 
 /// SQL condition for an embedding made from an older version of its note. `e` is the embedding,
 /// `s` the note's `sync_state` row. With a recorded hash it is a comparison. Without one (made
@@ -123,7 +123,7 @@ pub fn pending_embeddings(
                 CASE WHEN e.note_path IS NULL THEN 0
                      WHEN e.model != ?1 THEN 2
                      ELSE 1 END AS reason
-           FROM notes_fts f
+           FROM notes_fts_rows f
            LEFT JOIN embeddings e ON e.note_path = f.path
            LEFT JOIN sync_state s ON s.path = f.path
           WHERE e.note_path IS NULL OR e.model != ?1 OR {STALE_EMBEDDING}
@@ -226,7 +226,10 @@ pub fn semantic_search(
 
         // Look up title and tags from FTS table
         let fts_info: Option<(String, String)> = conn
-            .prepare("SELECT title, tags FROM notes_fts WHERE path = ?1")?
+            .prepare(
+                "SELECT title, tags FROM notes_fts
+                  WHERE rowid = (SELECT fts_rowid FROM notes_fts_rows WHERE path = ?1)",
+            )?
             .query_row([path.as_str()], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })
@@ -317,7 +320,10 @@ pub fn find_similar_notes(
         let note_path = &rows[idx].0;
 
         let fts_info: Option<(String, String)> = conn
-            .prepare("SELECT title, tags FROM notes_fts WHERE path = ?1")?
+            .prepare(
+                "SELECT title, tags FROM notes_fts
+                  WHERE rowid = (SELECT fts_rowid FROM notes_fts_rows WHERE path = ?1)",
+            )?
             .query_row([note_path.as_str()], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })
