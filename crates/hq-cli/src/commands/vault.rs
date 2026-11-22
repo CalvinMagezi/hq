@@ -2,6 +2,43 @@ use anyhow::Result;
 use hq_core::config::HqConfig;
 use hq_vault::VaultClient;
 
+/// What the subcommands share: the config, the vault, whether this is HQ Lite and whether the caller
+/// asked for `--json`.
+struct Cx<'a> {
+    config: &'a HqConfig,
+    vault: &'a VaultClient,
+    lite: bool,
+    json: bool,
+}
+
+impl Cx<'_> {
+    /// Under Lite the terminal sees what the web app sees: HQ's own folders (`_system`, `_data`,
+    /// `.git`) are not notes, and a symlink cannot lead into them.
+    fn deny(&self, rel: &str) -> Result<()> {
+        if self.lite
+            && (hq_web::lite_hides(rel)
+                || hq_web::lite_hides_resolved(
+                    &self.config.vault_path,
+                    &self.config.vault_path.join(rel.trim()),
+                ))
+        {
+            anyhow::bail!("`{rel}` is not part of the notes in HQ Lite (profile: lite)");
+        }
+        Ok(())
+    }
+
+    /// A note listed by name may sit behind a symlink into a hidden folder, so Lite also checks
+    /// where each one really is.
+    fn visible(&self, n: &String) -> bool {
+        !self.lite
+            || !(hq_web::lite_hides(n)
+                || hq_web::lite_hides_resolved(
+                    &self.config.vault_path,
+                    &self.config.vault_path.join(n),
+                ))
+    }
+}
+
 /// Vault operations: list, read, write, search.
 pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
     let vault = VaultClient::new(config.vault_path.clone())?;
@@ -17,330 +54,28 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
         .collect();
     let args = &args[..];
 
-    // Under Lite the terminal sees what the web app sees: HQ's own folders (`_system`, `_data`,
-    // `.git`) are not notes, and a symlink cannot lead into them.
-    let deny = |rel: &str| -> Result<()> {
-        if lite
-            && (hq_web::lite_hides(rel)
-                || hq_web::lite_hides_resolved(
-                    &config.vault_path,
-                    &config.vault_path.join(rel.trim()),
-                ))
-        {
-            anyhow::bail!("`{rel}` is not part of the notes in HQ Lite (profile: lite)");
-        }
-        Ok(())
-    };
-    // A note listed by name may sit behind a symlink into a hidden folder, so Lite also checks
-    // where each one really is.
-    let visible = |n: &String| {
-        !lite
-            || !(hq_web::lite_hides(n)
-                || hq_web::lite_hides_resolved(&config.vault_path, &config.vault_path.join(n)))
+    let cx = Cx {
+        config,
+        vault: &vault,
+        lite,
+        json,
     };
 
     match sub {
-        "list" | "ls" => {
-            let dir = args.first().map(|s| s.as_str()).unwrap_or("Notebooks");
-            deny(dir)?;
-            let notes: Vec<String> = vault.list_notes(dir)?.into_iter().filter(visible).collect();
-            if json {
-                println!("{}", serde_json::json!({ "dir": dir, "notes": notes }));
-            } else if notes.is_empty() {
-                println!("No notes in {}/", dir);
-            } else {
-                println!("Notes in {}/ ({}):", dir, notes.len());
-                for note in &notes {
-                    println!("  {}", note);
-                }
-            }
+        "list" | "ls" => list(&cx, args)?,
+        "tree" => tree(&cx, args)?,
+        "read" | "cat" => read(&cx, args)?,
+        "write" => write(&cx, args)?,
+        "export" | "export-pdf" | "pdf" => export(&cx, sub, args).await?,
+        "stats" => stats(&cx)?,
+        "context" => context(&cx)?,
+        "moved" => moved(&cx, args)?,
+        "inventory" => {
+            super::vault_import::inventory(cx.config, args, &|r: &str| cx.deny(r)).await?
         }
-        "tree" => {
-            let dir = args.first().map(|s| s.as_str()).unwrap_or("");
-            if !dir.trim().is_empty() {
-                deny(dir)?;
-            }
-            let notes: Vec<String> = vault
-                .list_notes_recursive(dir)?
-                .into_iter()
-                .filter(visible)
-                .collect();
-            if json {
-                println!("{}", serde_json::json!({ "dir": dir, "notes": notes }));
-            } else {
-                println!("Vault notes ({} total):", notes.len());
-                for note in &notes {
-                    println!("  {}", note);
-                }
-            }
-        }
-        "read" | "cat" => {
-            let path = args
-                .first()
-                .ok_or_else(|| anyhow::anyhow!("Usage: hq vault read <path>"))?;
-            deny(path)?;
-            let note = vault.read_note(path)?;
-            if json {
-                println!(
-                    "{}",
-                    serde_json::json!({
-                        "path": path,
-                        "title": note.title,
-                        "tags": note.tags,
-                        "pinned": note.pinned,
-                        "content": note.content,
-                    })
-                );
-                return Ok(());
-            }
-            println!("# {}\n", note.title);
-            if !note.tags.is_empty() {
-                println!("Tags: {}", note.tags.join(", "));
-            }
-            if note.pinned {
-                println!("Pinned: true");
-            }
-            println!();
-            println!("{}", note.content);
-        }
-        "write" => {
-            if args.len() < 2 {
-                anyhow::bail!("Usage: hq vault write <path> <content>");
-            }
-            let path = &args[0];
-            deny(path)?;
-            // A lone `-` reads the note text from standard input.
-            let content = if args.len() == 2 && args[1] == "-" {
-                use std::io::Read;
-                let mut s = String::new();
-                const MAX: u64 = 8 * 1024 * 1024;
-                std::io::stdin().take(MAX + 1).read_to_string(&mut s)?;
-                if s.len() as u64 > MAX {
-                    anyhow::bail!("the note text on standard input is over 8 MiB");
-                }
-                s
-            } else {
-                args[1..].join(" ")
-            };
-
-            let note = hq_core::types::Note {
-                title: std::path::PathBuf::from(path)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| path.clone()),
-                content,
-                path: path.clone(),
-                frontmatter: std::collections::HashMap::new(),
-                note_type: None,
-                tags: Vec::new(),
-                pinned: false,
-                source: None,
-                embedding_status: None,
-                created_at: None,
-                updated_at: None,
-                modified_at: chrono::Utc::now(),
-            };
-
-            vault.write_note(path, &note)?;
-            record_owner_write(config, path);
-            println!("Wrote: {}", path);
-        }
-        "export" | "export-pdf" | "pdf" => {
-            let pdf_only = sub != "export";
-            let usage = if pdf_only {
-                "Usage: hq vault export-pdf <note> [-o <file.pdf>] [--brand <slug>]"
-            } else {
-                "Usage: hq vault export <note> --format <fmt> [-o <file>] [--brand <slug>] [--lang <language>]..."
-            };
-            let mut note_ref: Option<&str> = None;
-            let mut output: Option<&str> = None;
-            let mut brand: Option<&str> = None;
-            let mut format: Option<&str> = None;
-            let mut languages: Vec<String> = Vec::new();
-            let mut it = args.iter();
-            while let Some(a) = it.next() {
-                match a.as_str() {
-                    "-o" | "--output" => {
-                        output = Some(it.next().ok_or_else(|| anyhow::anyhow!(usage))?)
-                    }
-                    "--brand" => brand = Some(it.next().ok_or_else(|| anyhow::anyhow!(usage))?),
-                    "-f" | "--format" if !pdf_only => {
-                        format = Some(it.next().ok_or_else(|| anyhow::anyhow!(usage))?)
-                    }
-                    "--lang" | "--language" if !pdf_only => {
-                        languages.push(it.next().ok_or_else(|| anyhow::anyhow!(usage))?.clone())
-                    }
-                    other if other.starts_with('-') => {
-                        anyhow::bail!("unknown option {other}\n{usage}")
-                    }
-                    other if note_ref.is_none() => note_ref = Some(other),
-                    _ => anyhow::bail!(usage),
-                }
-            }
-            let note_ref = note_ref.ok_or_else(|| anyhow::anyhow!(usage))?;
-            deny(note_ref)?;
-            let format = if pdf_only {
-                hq_export::Format::Pdf
-            } else {
-                let raw = format.ok_or_else(|| anyhow::anyhow!("--format is required\n{usage}"))?;
-                raw.parse::<hq_export::Format>()
-                    .map_err(|e| anyhow::anyhow!("{e}"))?
-            };
-            let note = hq_convert::note_pdf::resolve_note(&config.vault_path, note_ref)
-                .ok_or_else(|| anyhow::anyhow!("note not found in the vault: {note_ref}"))?;
-            if lite && hq_web::lite_hides_resolved(&config.vault_path, &note) {
-                anyhow::bail!("`{note_ref}` is not part of the notes in HQ Lite (profile: lite)");
-            }
-            let kit = brand
-                .map(|slug| hq_convert::brand::load_brand_kit(&config.vault_path, slug))
-                .transpose()
-                .map_err(|e| anyhow::anyhow!("brand resolution failed: {e}"))?;
-            let done =
-                hq_export::export_note(&config.vault_path, &note, format, kit.as_ref(), &languages)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
-            // The extension comes from the result: several tables export as a zip.
-            let dest = match output {
-                Some(o) => std::path::PathBuf::from(o),
-                None => {
-                    let stem = note.file_stem().map(|s| s.to_string_lossy().into_owned());
-                    std::path::PathBuf::from(format!(
-                        "{}.{}",
-                        stem.as_deref().unwrap_or("note"),
-                        done.output.extension
-                    ))
-                }
-            };
-            if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&dest, &done.output.bytes)?;
-            println!(
-                "Wrote {} ({:.1} KB, {})",
-                dest.display(),
-                done.output.bytes.len() as f64 / 1024.0,
-                format
-            );
-        }
-        "stats" => {
-            let (note_count, db_size) = vault.get_stats()?;
-            println!("Vault Statistics");
-            println!("================");
-            println!("Path:     {}", config.vault_path.display());
-            println!("Notes:    {}", note_count);
-            println!("DB size:  {:.1} MB", db_size as f64 / 1_048_576.0);
-        }
-        "context" => {
-            if lite {
-                anyhow::bail!(
-                    "`vault context` reads HQ's own notes, which are not part of HQ Lite"
-                );
-            }
-            let ctx = vault.get_system_context()?;
-            println!("System Context");
-            println!("==============");
-            println!();
-            if !ctx.soul.is_empty() {
-                println!("SOUL ({} chars)", ctx.soul.len());
-            } else {
-                println!("SOUL: (not set)");
-            }
-            if !ctx.memory.is_empty() {
-                println!("MEMORY ({} chars)", ctx.memory.len());
-            } else {
-                println!("MEMORY: (not set)");
-            }
-            if !ctx.preferences.is_empty() {
-                println!("PREFERENCES ({} chars)", ctx.preferences.len());
-            } else {
-                println!("PREFERENCES: (not set)");
-            }
-            if !ctx.config.is_empty() {
-                println!("\nConfig:");
-                for (k, v) in &ctx.config {
-                    println!("  {}: {}", k, v);
-                }
-            }
-            println!("\nPinned notes: {}", ctx.pinned_notes.len());
-            for note in &ctx.pinned_notes {
-                println!("  - {} ({})", note.title, note.path);
-            }
-        }
-        "moved" => {
-            // The phone app runs this once, before HQ first starts on a phone the vault moved to.
-            let db = hq_db::Database::open_existing(&config.db_path())?;
-            let gone = hq_db::moved::forget_old_phone(&db, chrono::Utc::now().timestamp())?;
-            if args.iter().any(|a| a == "--json") {
-                println!("{}", serde_json::to_string(&gone)?);
-            } else {
-                println!(
-                    "Forgot the old phone's {} device sign-ins, {} paired devices, {} claude.ai grants and {} push subscriptions{}.",
-                    gone.device_sign_ins,
-                    gone.paired_devices,
-                    gone.connector_grants,
-                    gone.push_subscriptions,
-                    if gone.edge { " and its edge" } else { "" }
-                );
-            }
-        }
-        "inventory" => super::vault_import::inventory(config, args, &deny).await?,
-        "import" => super::vault_import::import(config, args, &deny).await?,
-        "repair" => {
-            let apply = args.iter().any(|a| a == "--apply");
-            let db = hq_db::Database::open_existing(&config.db_path())?;
-            let vault_path = config.vault_path.clone();
-            let report =
-                db.with_conn(move |conn| hq_db::search::repair_orphans(conn, &vault_path, apply))?;
-            print!("{}", repair_summary(&report, apply));
-            let backup = config
-                .vault_path
-                .join("_trash")
-                .join(chrono::Utc::now().format("%Y-%m-%d").to_string())
-                .join("nested-frontmatter");
-            let nested = hq_vault::remediation::repair_nested_frontmatter(
-                &config.vault_path,
-                &backup,
-                apply,
-            )?;
-            let mode = if apply { "" } else { " (dry run)" };
-            println!(
-                "Notes with frontmatter inside the body{mode}: {} of {}",
-                nested.nested.len(),
-                nested.scanned
-            );
-            for path in nested.nested.iter().take(5) {
-                println!("  {path}");
-            }
-        }
-        _ => {
-            println!("Usage: hq vault <subcommand>");
-            println!();
-            println!("Subcommands:");
-            println!("  list [dir]           List notes in a directory");
-            println!("  tree [dir]           List all notes recursively");
-            println!("  read <path>          Read a note");
-            println!("  write <path> <text>  Write a note");
-            println!(
-                "  export <note>        Export a note: --format pdf|docx|png|svg|html|md|xlsx|csv|json|jsonl|xml|latex|ipynb|jira|code (-o file, --brand slug)"
-            );
-            println!(
-                "  export-pdf <note>    Export a note as a shareable PDF (-o file, --brand slug)"
-            );
-            println!(
-                "  inventory [folder]   List files that are not notes (PDF, Word, Excel, ...) and whether each is imported"
-            );
-            println!(
-                "  import <file|folder> Convert them to Markdown notes (a folder is a dry run until --apply; --archive, --destination, --on-conflict)"
-            );
-            println!(
-                "  repair [--apply]     Find (and with --apply remove) search rows left behind by deleted notes, and merge frontmatter left inside note bodies"
-            );
-            println!(
-                "  moved [--json]       On a phone the vault moved to: forget the old phone's sign-ins, pairings, grants and push"
-            );
-            println!("  stats                Show vault statistics");
-            println!("  context              Show system context");
-        }
+        "import" => super::vault_import::import(cx.config, args, &|r: &str| cx.deny(r)).await?,
+        "repair" => repair(&cx, args)?,
+        _ => usage()?,
     }
 
     Ok(())
@@ -549,4 +284,336 @@ mod lite_tests {
         cfg.profile = Profile::Full;
         assert!(run(&cfg, "read", &args(&["_system/SOUL.md"])).await.is_ok());
     }
+}
+
+/// Lists the notes in one folder.
+fn list(cx: &Cx<'_>, args: &[String]) -> Result<()> {
+    let dir = args.first().map(|s| s.as_str()).unwrap_or("Notebooks");
+    cx.deny(dir)?;
+    let notes: Vec<String> = cx
+        .vault
+        .list_notes(dir)?
+        .into_iter()
+        .filter(|n| cx.visible(n))
+        .collect();
+    if cx.json {
+        println!("{}", serde_json::json!({ "dir": dir, "notes": notes }));
+    } else if notes.is_empty() {
+        println!("No notes in {}/", dir);
+    } else {
+        println!("Notes in {}/ ({}):", dir, notes.len());
+        for note in &notes {
+            println!("  {}", note);
+        }
+    }
+    Ok(())
+}
+
+/// Lists every note under a folder.
+fn tree(cx: &Cx<'_>, args: &[String]) -> Result<()> {
+    let dir = args.first().map(|s| s.as_str()).unwrap_or("");
+    if !dir.trim().is_empty() {
+        cx.deny(dir)?;
+    }
+    let notes: Vec<String> = cx
+        .vault
+        .list_notes_recursive(dir)?
+        .into_iter()
+        .filter(|n| cx.visible(n))
+        .collect();
+    if cx.json {
+        println!("{}", serde_json::json!({ "dir": dir, "notes": notes }));
+    } else {
+        println!("Vault notes ({} total):", notes.len());
+        for note in &notes {
+            println!("  {}", note);
+        }
+    }
+    Ok(())
+}
+
+/// Prints one note.
+fn read(cx: &Cx<'_>, args: &[String]) -> Result<()> {
+    let path = args
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("Usage: hq vault read <path>"))?;
+    cx.deny(path)?;
+    let note = cx.vault.read_note(path)?;
+    if cx.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "path": path,
+                "title": note.title,
+                "tags": note.tags,
+                "pinned": note.pinned,
+                "content": note.content,
+            })
+        );
+        return Ok(());
+    }
+    println!("# {}\n", note.title);
+    if !note.tags.is_empty() {
+        println!("Tags: {}", note.tags.join(", "));
+    }
+    if note.pinned {
+        println!("Pinned: true");
+    }
+    println!();
+    println!("{}", note.content);
+    Ok(())
+}
+
+/// Writes a note from the arguments or standard input.
+fn write(cx: &Cx<'_>, args: &[String]) -> Result<()> {
+    if args.len() < 2 {
+        anyhow::bail!("Usage: hq vault write <path> <content>");
+    }
+    let path = &args[0];
+    cx.deny(path)?;
+    // A lone `-` reads the note text from standard input.
+    let content = if args.len() == 2 && args[1] == "-" {
+        use std::io::Read;
+        let mut s = String::new();
+        const MAX: u64 = 8 * 1024 * 1024;
+        std::io::stdin().take(MAX + 1).read_to_string(&mut s)?;
+        if s.len() as u64 > MAX {
+            anyhow::bail!("the note text on standard input is over 8 MiB");
+        }
+        s
+    } else {
+        args[1..].join(" ")
+    };
+
+    let note = hq_core::types::Note {
+        title: std::path::PathBuf::from(path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone()),
+        content,
+        path: path.clone(),
+        frontmatter: std::collections::HashMap::new(),
+        note_type: None,
+        tags: Vec::new(),
+        pinned: false,
+        source: None,
+        embedding_status: None,
+        created_at: None,
+        updated_at: None,
+        modified_at: chrono::Utc::now(),
+    };
+
+    cx.vault.write_note(path, &note)?;
+    record_owner_write(cx.config, path);
+    println!("Wrote: {}", path);
+    Ok(())
+}
+
+/// Exports a note to a file (`export`, or PDF only for `export-pdf` and `pdf`).
+async fn export(cx: &Cx<'_>, sub: &str, args: &[String]) -> Result<()> {
+    let pdf_only = sub != "export";
+    let usage = if pdf_only {
+        "Usage: hq vault export-pdf <note> [-o <file.pdf>] [--brand <slug>]"
+    } else {
+        "Usage: hq vault export <note> --format <fmt> [-o <file>] [--brand <slug>] [--lang <language>]..."
+    };
+    let mut note_ref: Option<&str> = None;
+    let mut output: Option<&str> = None;
+    let mut brand: Option<&str> = None;
+    let mut format: Option<&str> = None;
+    let mut languages: Vec<String> = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "-o" | "--output" => output = Some(it.next().ok_or_else(|| anyhow::anyhow!(usage))?),
+            "--brand" => brand = Some(it.next().ok_or_else(|| anyhow::anyhow!(usage))?),
+            "-f" | "--format" if !pdf_only => {
+                format = Some(it.next().ok_or_else(|| anyhow::anyhow!(usage))?)
+            }
+            "--lang" | "--language" if !pdf_only => {
+                languages.push(it.next().ok_or_else(|| anyhow::anyhow!(usage))?.clone())
+            }
+            other if other.starts_with('-') => {
+                anyhow::bail!("unknown option {other}\n{usage}")
+            }
+            other if note_ref.is_none() => note_ref = Some(other),
+            _ => anyhow::bail!(usage),
+        }
+    }
+    let note_ref = note_ref.ok_or_else(|| anyhow::anyhow!(usage))?;
+    cx.deny(note_ref)?;
+    let format = if pdf_only {
+        hq_export::Format::Pdf
+    } else {
+        let raw = format.ok_or_else(|| anyhow::anyhow!("--format is required\n{usage}"))?;
+        raw.parse::<hq_export::Format>()
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+    };
+    let note = hq_convert::note_pdf::resolve_note(&cx.config.vault_path, note_ref)
+        .ok_or_else(|| anyhow::anyhow!("note not found in the vault: {note_ref}"))?;
+    if cx.lite && hq_web::lite_hides_resolved(&cx.config.vault_path, &note) {
+        anyhow::bail!("`{note_ref}` is not part of the notes in HQ Lite (profile: lite)");
+    }
+    let kit = brand
+        .map(|slug| hq_convert::brand::load_brand_kit(&cx.config.vault_path, slug))
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("brand resolution failed: {e}"))?;
+    let done = hq_export::export_note(
+        &cx.config.vault_path,
+        &note,
+        format,
+        kit.as_ref(),
+        &languages,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    // The extension comes from the result: several tables export as a zip.
+    let dest = match output {
+        Some(o) => std::path::PathBuf::from(o),
+        None => {
+            let stem = note.file_stem().map(|s| s.to_string_lossy().into_owned());
+            std::path::PathBuf::from(format!(
+                "{}.{}",
+                stem.as_deref().unwrap_or("note"),
+                done.output.extension
+            ))
+        }
+    };
+    if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&dest, &done.output.bytes)?;
+    println!(
+        "Wrote {} ({:.1} KB, {})",
+        dest.display(),
+        done.output.bytes.len() as f64 / 1024.0,
+        format
+    );
+    Ok(())
+}
+
+/// Vault size and note count.
+fn stats(cx: &Cx<'_>) -> Result<()> {
+    let (note_count, db_size) = cx.vault.get_stats()?;
+    println!("Vault Statistics");
+    println!("================");
+    println!("Path:     {}", cx.config.vault_path.display());
+    println!("Notes:    {}", note_count);
+    println!("DB size:  {:.1} MB", db_size as f64 / 1_048_576.0);
+    Ok(())
+}
+
+/// Summarises HQ's own system notes.
+fn context(cx: &Cx<'_>) -> Result<()> {
+    if cx.lite {
+        anyhow::bail!("`vault context` reads HQ's own notes, which are not part of HQ Lite");
+    }
+    let ctx = cx.vault.get_system_context()?;
+    println!("System Context");
+    println!("==============");
+    println!();
+    if !ctx.soul.is_empty() {
+        println!("SOUL ({} chars)", ctx.soul.len());
+    } else {
+        println!("SOUL: (not set)");
+    }
+    if !ctx.memory.is_empty() {
+        println!("MEMORY ({} chars)", ctx.memory.len());
+    } else {
+        println!("MEMORY: (not set)");
+    }
+    if !ctx.preferences.is_empty() {
+        println!("PREFERENCES ({} chars)", ctx.preferences.len());
+    } else {
+        println!("PREFERENCES: (not set)");
+    }
+    if !ctx.config.is_empty() {
+        println!("\nConfig:");
+        for (k, v) in &ctx.config {
+            println!("  {}: {}", k, v);
+        }
+    }
+    println!("\nPinned notes: {}", ctx.pinned_notes.len());
+    for note in &ctx.pinned_notes {
+        println!("  - {} ({})", note.title, note.path);
+    }
+    Ok(())
+}
+
+/// Forgets the old phone after the vault moved to a new one.
+fn moved(cx: &Cx<'_>, args: &[String]) -> Result<()> {
+    // The phone app runs this once, before HQ first starts on a phone the vault moved to.
+    let db = hq_db::Database::open_existing(&cx.config.db_path())?;
+    let gone = hq_db::moved::forget_old_phone(&db, chrono::Utc::now().timestamp())?;
+    if args.iter().any(|a| a == "--json") {
+        println!("{}", serde_json::to_string(&gone)?);
+    } else {
+        println!(
+            "Forgot the old phone's {} device sign-ins, {} paired devices, {} claude.ai grants and {} push subscriptions{}.",
+            gone.device_sign_ins,
+            gone.paired_devices,
+            gone.connector_grants,
+            gone.push_subscriptions,
+            if gone.edge { " and its edge" } else { "" }
+        );
+    }
+    Ok(())
+}
+
+/// Finds search rows left by deleted notes and notes with frontmatter inside the body.
+fn repair(cx: &Cx<'_>, args: &[String]) -> Result<()> {
+    let apply = args.iter().any(|a| a == "--apply");
+    let db = hq_db::Database::open_existing(&cx.config.db_path())?;
+    let vault_path = cx.config.vault_path.clone();
+    let report =
+        db.with_conn(move |conn| hq_db::search::repair_orphans(conn, &vault_path, apply))?;
+    print!("{}", repair_summary(&report, apply));
+    let backup = cx
+        .config
+        .vault_path
+        .join("_trash")
+        .join(chrono::Utc::now().format("%Y-%m-%d").to_string())
+        .join("nested-frontmatter");
+    let nested =
+        hq_vault::remediation::repair_nested_frontmatter(&cx.config.vault_path, &backup, apply)?;
+    let mode = if apply { "" } else { " (dry run)" };
+    println!(
+        "Notes with frontmatter inside the body{mode}: {} of {}",
+        nested.nested.len(),
+        nested.scanned
+    );
+    for path in nested.nested.iter().take(5) {
+        println!("  {path}");
+    }
+    Ok(())
+}
+
+/// Lists the subcommands.
+fn usage() -> Result<()> {
+    println!("Usage: hq vault <subcommand>");
+    println!();
+    println!("Subcommands:");
+    println!("  list [dir]           List notes in a directory");
+    println!("  tree [dir]           List all notes recursively");
+    println!("  read <path>          Read a note");
+    println!("  write <path> <text>  Write a note");
+    println!(
+        "  export <note>        Export a note: --format pdf|docx|png|svg|html|md|xlsx|csv|json|jsonl|xml|latex|ipynb|jira|code (-o file, --brand slug)"
+    );
+    println!("  export-pdf <note>    Export a note as a shareable PDF (-o file, --brand slug)");
+    println!(
+        "  inventory [folder]   List files that are not notes (PDF, Word, Excel, ...) and whether each is imported"
+    );
+    println!(
+        "  import <file|folder> Convert them to Markdown notes (a folder is a dry run until --apply; --archive, --destination, --on-conflict)"
+    );
+    println!(
+        "  repair [--apply]     Find (and with --apply remove) search rows left behind by deleted notes, and merge frontmatter left inside note bodies"
+    );
+    println!(
+        "  moved [--json]       On a phone the vault moved to: forget the old phone's sign-ins, pairings, grants and push"
+    );
+    println!("  stats                Show vault statistics");
+    println!("  context              Show system context");
+    Ok(())
 }
