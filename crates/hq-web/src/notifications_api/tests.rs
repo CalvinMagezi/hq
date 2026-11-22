@@ -583,6 +583,32 @@ fn answer(db: &hq_db::Database, id: &str, engagement: &str, whole_site: bool) {
     note_site_answer(db, id, engagement, whole_site).unwrap();
 }
 
+/// The list cuts to `limit` before it looks up each card's extras, so the cards it returns must
+/// still carry them, and the counts must not depend on the cut.
+#[test]
+fn the_list_enriches_only_the_cards_it_returns() {
+    let db = hq_db::Database::open_memory().unwrap();
+    for n in 0..3 {
+        let url = format!("https://a.example/{n}");
+        let id = fetch_request(&db, "web:t1", &url, &format!("d{n}"));
+        if n < 2 {
+            answer(&db, &id, ENGAGEMENT_APPROVED, false);
+        }
+    }
+    let all = aggregate_notifications(&db, Some("pending"), None, 50, false).unwrap();
+    let cut = aggregate_notifications(&db, Some("pending"), None, 1, false).unwrap();
+
+    assert_eq!(cut.notifications.len(), 1);
+    let card = &cut.notifications[0];
+    assert!(
+        card.metadata.approval.as_ref().unwrap()["site_approvals"].is_number(),
+        "a returned card still has its site count"
+    );
+    assert_eq!(all.unread_count, cut.unread_count, "counts ignore the cut");
+    assert_eq!(all.needs_you_owner_only, cut.needs_you_owner_only);
+    assert_eq!(all.needs_you_helpers, cut.needs_you_helpers);
+}
+
 #[test]
 fn a_fetch_card_carries_how_often_its_site_was_allowed_once() {
     let db = hq_db::Database::open_memory().unwrap();
