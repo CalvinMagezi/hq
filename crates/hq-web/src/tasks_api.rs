@@ -309,6 +309,7 @@ pub(crate) async fn list_tasks_handler(
             Ok(since) => since,
             Err(e) => return ApiError::from(e).into_response(),
         },
+        ids: None,
         sort: match t::TaskSort::parse(params.sort.as_deref().unwrap_or("")) {
             Ok(sort) => sort,
             Err(e) => return ApiError::from(e).into_response(),
