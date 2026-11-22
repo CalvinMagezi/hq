@@ -192,6 +192,20 @@ impl AgentSession {
         result
     }
 
+    /// The "tools that may fit" line for this message, worked out on the device from the message
+    /// and the tools not loaded yet (see `crate::tool_hint`). `None` for most turns. The tools it
+    /// names are remembered so a later load of one can be counted as the hint being followed.
+    pub(super) async fn tool_hint_line(&mut self, message: &str) -> Option<String> {
+        let deferred = self.tools.lock().await.deferred_catalog();
+        let names = crate::tool_hint::likely_tools(message, &deferred);
+        self.last_hinted = names.clone();
+        if names.is_empty() {
+            return None;
+        }
+        self.note_routing(hq_db::tool_routing::HINT_SHOWN, &names.join(","));
+        crate::tool_hint::hint_line(message, &deferred)
+    }
+
     /// Count one tool-finding event (a search hit or miss, a tool loaded, a wrong tool name) in
     /// the local `tool_routing_events` table. Fire and forget, like the usage log: it never
     /// fails or slows a call, and it stores a kind and a tool name, never what was searched for.
@@ -325,6 +339,9 @@ impl AgentSession {
             // Declared from the next request on, so the model can call it like any other tool.
             tools.activate(name);
             self.note_routing(hq_db::tool_routing::ACTIVATION, name);
+            if self.last_hinted.contains(name) {
+                self.note_routing(hq_db::tool_routing::HINT_FOLLOWED, name);
+            }
         }
         // The full schema reaches the model as a declared tool on the next request, so the
         // result only needs the call shape and what the tool is for.

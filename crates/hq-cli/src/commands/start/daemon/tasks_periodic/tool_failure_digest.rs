@@ -115,6 +115,12 @@ pub fn routing_section(r: &RoutingSummary) -> Option<String> {
             r.unknown_tools_helped
         ));
     }
+    if r.hints_shown > 0 {
+        out.push_str(&format!(
+            "; {} \"tools that may fit\" hints, {} followed by loading the tool",
+            r.hints_shown, r.hints_followed
+        ));
+    }
     out.push('.');
     Some(out)
 }
@@ -208,6 +214,8 @@ mod tests {
             activations: 5,
             unknown_tools: 1,
             unknown_tools_helped: 3,
+            hints_shown: 4,
+            hints_followed: 3,
         };
         let text = routing_section(&r).unwrap();
         assert!(text.contains("8 searches (2 found nothing, 25%)"), "{text}");

@@ -19,6 +19,11 @@ pub const UNKNOWN_TOOL: &str = "unknown_tool";
 /// A tool name that does not exist was called, and a close real name was offered.
 pub const UNKNOWN_TOOL_HELPED: &str = "unknown_tool_helped";
 
+/// A "tools that may fit" line was added to a turn. The tool name column holds the names it listed.
+pub const HINT_SHOWN: &str = "hint_shown";
+/// A tool a hint named was loaded afterwards.
+pub const HINT_FOLLOWED: &str = "hint_followed";
+
 /// Longest tool name stored. A model can send anything as a tool name.
 const MAX_NAME_CHARS: usize = 80;
 
@@ -45,6 +50,8 @@ pub struct RoutingSummary {
     pub activations: u64,
     pub unknown_tools: u64,
     pub unknown_tools_helped: u64,
+    pub hints_shown: u64,
+    pub hints_followed: u64,
 }
 
 impl RoutingSummary {
@@ -60,7 +67,10 @@ impl RoutingSummary {
 
     /// Whether anything was recorded.
     pub fn is_empty(&self) -> bool {
-        self.searches() == 0 && self.activations == 0 && self.wrong_names() == 0
+        self.searches() == 0
+            && self.activations == 0
+            && self.wrong_names() == 0
+            && self.hints_shown == 0
     }
 }
 
@@ -81,6 +91,8 @@ pub fn summary_since(conn: &Connection, since: i64) -> Result<RoutingSummary> {
             ACTIVATION => out.activations = n,
             UNKNOWN_TOOL => out.unknown_tools = n,
             UNKNOWN_TOOL_HELPED => out.unknown_tools_helped = n,
+            HINT_SHOWN => out.hints_shown = n,
+            HINT_FOLLOWED => out.hints_followed = n,
             _ => {}
         }
     }
@@ -102,6 +114,8 @@ mod tests {
             record(conn, "s1", ACTIVATION, "office_create")?;
             record(conn, "s2", UNKNOWN_TOOL, "no_such_tool")?;
             record(conn, "s2", UNKNOWN_TOOL_HELPED, "vault_serach")?;
+            record(conn, "s2", HINT_SHOWN, "task_create")?;
+            record(conn, "s2", HINT_FOLLOWED, "task_create")?;
             conn.execute(
                 "INSERT INTO tool_routing_events (timestamp, kind) VALUES (1, 'search_miss')",
                 [],
@@ -115,6 +129,8 @@ mod tests {
                     activations: 1,
                     unknown_tools: 1,
                     unknown_tools_helped: 1,
+                    hints_shown: 1,
+                    hints_followed: 1,
                 }
             );
             assert_eq!(all.searches(), 3);

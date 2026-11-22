@@ -227,6 +227,9 @@ pub struct AgentSession {
     /// a note just before the next user message instead of inside the system prompt, so the
     /// system prompt and history stay byte-identical from turn to turn and stay cached.
     pub(super) turn_context: Option<String>,
+    /// The tools the last "tools that may fit" line named, so a later load of one of them can be
+    /// counted as the hint being followed. Never sent anywhere.
+    pub(super) last_hinted: Vec<String>,
     pub last_resolved_model: Option<String>,
     pub session_id: String,
     pub(super) telemetry_db: Option<Arc<hq_db::Database>>,
@@ -313,6 +316,7 @@ impl AgentSession {
             preemptive_handle: None,
             post_turn_callback: None,
             turn_context: None,
+            last_hinted: Vec::new(),
             last_resolved_model: None,
             session_id: uuid::Uuid::new_v4().to_string(),
             telemetry_db: None,
