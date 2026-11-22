@@ -14,6 +14,7 @@
 //! - [`pipeline`]: gather, decide, review and apply, for one task.
 //! - [`dispatch`]: the queue loop behind the `verify-dispatch` daemon task.
 
+mod apply;
 pub mod artifact;
 pub mod canary;
 pub mod collect;
