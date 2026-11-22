@@ -328,6 +328,9 @@ pub struct TaskFilter {
     pub search: Option<String>,
     /// Only tasks changed after this UTC `YYYY-MM-DD HH:MM:SS` (see `normalize_since`).
     pub updated_since: Option<String>,
+    /// Only these tasks (by internal id). `Some(vec![])` matches nothing. Applied in the query,
+    /// so paging and the total count the same set, instead of listing everything and keeping a few.
+    pub ids: Option<Vec<String>>,
     pub sort: TaskSort,
 }
 

@@ -424,20 +424,18 @@ impl HqTool for TaskListTool {
             } else {
                 None
             };
-            if scope.is_none() && stale_ids.is_none() {
-                filter.limit = Some(limit);
-                filter.offset = offset;
-                return Ok((t::list_tasks(c, &filter)?, t::count_tasks(c, &filter)?));
-            }
-            let visible = matching_tasks(c, &mut filter, |task| {
-                scope.as_ref().is_none_or(|s| s.contains(&task.id))
-                    && stale_ids.as_ref().is_none_or(|s| s.contains(&task.id))
-            })?;
-            let total = visible.len() as i64;
-            Ok((
-                visible.into_iter().skip(offset).take(limit).collect(),
-                total,
-            ))
+            // A scope and a stale set are both "only these ids": ask the database for exactly
+            // them (the intersection when both apply), so paging and the total stay in SQL.
+            filter.ids = match (scope, stale_ids) {
+                (Some(scope), Some(stale)) => {
+                    Some(scope.into_iter().filter(|id| stale.contains(id)).collect())
+                }
+                (Some(only), None) | (None, Some(only)) => Some(only.into_iter().collect()),
+                (None, None) => None,
+            };
+            filter.limit = Some(limit);
+            filter.offset = offset;
+            Ok((t::list_tasks(c, &filter)?, t::count_tasks(c, &filter)?))
         })?;
         // Full descriptions push a list past the MCP gateway's size cap, which cuts
         // the middle out of the JSON and silently drops tasks.
@@ -535,27 +533,6 @@ const DEFAULT_LIST_PAGE: usize = 100;
 
 fn arg_usize(args: &Value, key: &str) -> Option<usize> {
     args.get(key).and_then(Value::as_u64).map(|n| n as usize)
-}
-
-/// Every task matching `filter` and `keep`, read a page at a time so a scoped or
-/// stale-only list is never cut off by the page cap.
-fn matching_tasks(
-    c: &rusqlite::Connection,
-    filter: &mut t::TaskFilter,
-    keep: impl Fn(&t::Task) -> bool,
-) -> Result<Vec<t::Task>> {
-    let mut visible = Vec::new();
-    filter.limit = Some(t::MAX_LIST_LIMIT);
-    filter.offset = 0;
-    loop {
-        let page = t::list_tasks(c, filter)?;
-        let full = page.len() == t::MAX_LIST_LIMIT;
-        visible.extend(page.into_iter().filter(|task| keep(task)));
-        if !full {
-            return Ok(visible);
-        }
-        filter.offset += t::MAX_LIST_LIMIT;
-    }
 }
 
 // ─── task_get ───────────────────────────────────────────────────────────

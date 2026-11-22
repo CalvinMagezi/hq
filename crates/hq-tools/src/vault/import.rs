@@ -734,6 +734,17 @@ impl Importer {
 
     /// The files under `start` that are not notes, and what could be done with each.
     pub fn inventory(&self, start: &str, filter: InventoryFilter) -> Result<Value> {
+        self.inventory_with(start, filter, &self.imported_index())
+    }
+
+    /// [`Self::inventory`] over an index of earlier imports the caller already built, so a batch
+    /// that lists and then imports walks the vault for it once.
+    fn inventory_with(
+        &self,
+        start: &str,
+        filter: InventoryFilter,
+        index: &ImportedIndex,
+    ) -> Result<Value> {
         if !start.is_empty() {
             validate_path_in_vault(self.root(), &format!("{}/x", start.trim_matches('/')))?;
             if names_private_folder(start) {
@@ -741,14 +752,13 @@ impl Importer {
             }
         }
         let caps = ingest::capabilities();
-        let index = self.imported_index();
         let (files, other, cut) = find_candidates(self.root(), start);
         let mut entries: Vec<Value> = Vec::new();
         let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
         let mut kinds: BTreeMap<&'static str, usize> = BTreeMap::new();
         let mut total_bytes = 0u64;
         for f in &files {
-            let status = self.status_of(f, &caps, &index);
+            let status = self.status_of(f, &caps, index);
             *counts.entry(status.0).or_default() += 1;
             *kinds.entry(f.kind.label()).or_default() += 1;
             total_bytes += f.bytes;
@@ -860,6 +870,8 @@ impl Importer {
         let limit = limit.clamp(1, MAX_BATCH);
         let mut more_pending = 0usize;
         let mut images_left_out = 0usize;
+        // Read once: listing a directory and importing from it both need it.
+        let mut index = self.imported_index();
         let sources: Vec<String> = match source {
             Source::Path(p) => vec![p],
             Source::Paths(paths) => {
@@ -873,13 +885,14 @@ impl Importer {
                     .formats
                     .as_ref()
                     .map(|f| f.iter().map(|k| k.trim().to_ascii_lowercase()).collect());
-                let inv = self.inventory(
+                let inv = self.inventory_with(
                     &dir,
                     InventoryFilter {
                         statuses: Some(vec!["pending".into(), "changed".into()]),
                         kinds: formats.clone(),
                         limit: 5000,
                     },
+                    &index,
                 )?;
                 let wants_images = settings.include_images
                     || formats
@@ -900,7 +913,6 @@ impl Importer {
             }
         };
 
-        let mut index = self.imported_index();
         let mut results = Vec::with_capacity(sources.len());
         for rel in &sources {
             results.push(self.import_with(rel, settings, caller, &mut index).await);

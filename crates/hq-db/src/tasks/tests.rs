@@ -691,6 +691,58 @@ fn the_count_follows_the_same_filter_as_the_list() {
 }
 
 #[test]
+fn an_id_filter_lists_and_counts_only_those_tasks() {
+    let (db, initiative) = setup();
+    for id in ["tk-1", "tk-2", "tk-3", "tk-4"] {
+        make(&db, id, &initiative, None).unwrap();
+    }
+    move_to(&db, "tk-2", STATUS_BLOCKED).unwrap();
+    let ids = |list: &[&str]| Some(list.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+
+    let some = TaskFilter {
+        ids: ids(&["tk-2", "tk-3", "no-such-task"]),
+        ..Default::default()
+    };
+    let mut listed: Vec<String> = db
+        .with_conn(|c| list_tasks(c, &some))
+        .unwrap()
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    listed.sort();
+    assert_eq!(listed, ["tk-2", "tk-3"]);
+    assert_eq!(db.with_conn(|c| count_tasks(c, &some)).unwrap(), 2);
+
+    // Other filters still apply on top, and paging counts the narrowed set.
+    let blocked_only = TaskFilter {
+        ids: ids(&["tk-2", "tk-3"]),
+        status: Some(STATUS_BLOCKED.into()),
+        ..Default::default()
+    };
+    assert_eq!(db.with_conn(|c| count_tasks(c, &blocked_only)).unwrap(), 1);
+    let one_per_page = TaskFilter {
+        ids: ids(&["tk-1", "tk-2", "tk-3"]),
+        limit: Some(1),
+        ..Default::default()
+    };
+    assert_eq!(
+        db.with_conn(|c| list_tasks(c, &one_per_page))
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(db.with_conn(|c| count_tasks(c, &one_per_page)).unwrap(), 3);
+
+    // An empty list is "nothing", not "no filter".
+    let none = TaskFilter {
+        ids: Some(Vec::new()),
+        ..Default::default()
+    };
+    assert!(db.with_conn(|c| list_tasks(c, &none)).unwrap().is_empty());
+    assert_eq!(db.with_conn(|c| count_tasks(c, &none)).unwrap(), 0);
+}
+
+#[test]
 fn an_unknown_status_or_priority_is_refused_with_the_allowed_values() {
     let (db, initiative) = setup();
     make(&db, "tk-1", &initiative, None).unwrap();

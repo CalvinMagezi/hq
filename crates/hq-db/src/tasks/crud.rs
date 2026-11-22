@@ -185,6 +185,13 @@ fn filter_sql(filter: &TaskFilter) -> (String, SqlParams) {
         conditions.push("t.updated_at > ?");
         vals.push(Box::new(since.clone()));
     }
+    if let Some(ids) = &filter.ids {
+        // One JSON parameter, not one placeholder per id, so a long list cannot hit SQLite's limit.
+        conditions.push("t.id IN (SELECT value FROM json_each(?))");
+        vals.push(Box::new(
+            serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string()),
+        ));
+    }
     for word in filter
         .search
         .iter()
