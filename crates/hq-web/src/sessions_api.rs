@@ -794,7 +794,11 @@ pub(crate) async fn adopt_handler(
     body: Option<Json<AdoptBody>>,
 ) -> Response {
     let wanted = non_empty(body.and_then(|Json(b)| b.thread_id));
-    match state.db.with_conn(|c| adopt(c, &id, wanted.as_deref())) {
+    let target = id.clone();
+    match state
+        .db_blocking(move |c| adopt(c, &target, wanted.as_deref()))
+        .await
+    {
         Ok(done) => {
             broadcast_sync(&state, &done.thread_id);
             Json(json!({

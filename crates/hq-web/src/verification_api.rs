@@ -35,26 +35,34 @@ fn tell(state: &Arc<WsState>, ids: Vec<String>) {
 
 /// Mode, calibration, queue health and what waits on the owner, for the tasks page's bar.
 pub(crate) async fn status_handler(State(state): State<Arc<WsState>>) -> Response {
-    respond(state.db.with_conn(|c| {
-        let cfg = t::verification_policy(c)?;
-        Ok(json!({
-            "mode": cfg.mode,
-            "autonomy_gate": cfg.autonomy_gate,
-            "confirm_over": cfg.sweep_confirm_over,
-            "calibration": t::calibration(c, &cfg)?,
-            "queue": t::queue_health(c, &cfg)?,
-            "rollout": t::rollout(c, &cfg)?,
-            "holds": t::list_holds(c)?.len(),
-            "active_sweeps": t::active_sweeps(c)?.len(),
-        }))
-    }))
+    respond(
+        state
+            .db_blocking(move |c| {
+                let cfg = t::verification_policy(c)?;
+                Ok(json!({
+                    "mode": cfg.mode,
+                    "autonomy_gate": cfg.autonomy_gate,
+                    "confirm_over": cfg.sweep_confirm_over,
+                    "calibration": t::calibration(c, &cfg)?,
+                    "queue": t::queue_health(c, &cfg)?,
+                    "rollout": t::rollout(c, &cfg)?,
+                    "holds": t::list_holds(c)?.len(),
+                    "active_sweeps": t::active_sweeps(c)?.len(),
+                }))
+            })
+            .await,
+    )
 }
 
 pub(crate) async fn queue_handler(State(state): State<Arc<WsState>>) -> Response {
-    respond(state.db.with_conn(|c| {
-        let cfg = t::verification_policy(c)?;
-        Ok(serde_json::to_value(t::queue_health(c, &cfg)?)?)
-    }))
+    respond(
+        state
+            .db_blocking(move |c| {
+                let cfg = t::verification_policy(c)?;
+                Ok(serde_json::to_value(t::queue_health(c, &cfg)?)?)
+            })
+            .await,
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,10 +87,14 @@ pub(crate) async fn briefing_handler(
         .format("%Y-%m-%d %H:%M:%S")
         .to_string(),
     };
-    respond(state.db.with_conn(move |c| {
-        let cfg = t::verification_policy(c)?;
-        Ok(serde_json::to_value(t::briefing(c, &cfg, &since)?)?)
-    }))
+    respond(
+        state
+            .db_blocking(move |c| {
+                let cfg = t::verification_policy(c)?;
+                Ok(serde_json::to_value(t::briefing(c, &cfg, &since)?)?)
+            })
+            .await,
+    )
 }
 
 // ---- sweeps ----
@@ -96,18 +108,22 @@ pub(crate) async fn create_sweep_handler(
     State(state): State<Arc<WsState>>,
     Json(body): Json<NewSweepBody>,
 ) -> Response {
-    respond(state.db.with_conn(move |c| {
-        let cfg = t::verification_policy(c)?;
-        let sweep = hq_tools::tasks::verify::start_sweep(c, &cfg, &body.scope)?;
-        Ok(serde_json::to_value(sweep)?)
-    }))
+    respond(
+        state
+            .db_blocking(move |c| {
+                let cfg = t::verification_policy(c)?;
+                let sweep = hq_tools::tasks::verify::start_sweep(c, &cfg, &body.scope)?;
+                Ok(serde_json::to_value(sweep)?)
+            })
+            .await,
+    )
 }
 
 pub(crate) async fn list_sweeps_handler(State(state): State<Arc<WsState>>) -> Response {
     respond(
         state
-            .db
-            .with_conn(|c| Ok(json!({ "sweeps": t::list_sweeps(c, 20)? }))),
+            .db_blocking(move |c| Ok(json!({ "sweeps": t::list_sweeps(c, 20)? })))
+            .await,
     )
 }
 
@@ -115,20 +131,25 @@ pub(crate) async fn get_sweep_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
 ) -> Response {
-    respond(state.db.with_conn(move |c| {
-        let sweep = t::get_sweep(c, &id)?
-            .ok_or_else(|| anyhow::Error::from(ApiError::NotFound("no such sweep".into())))?;
-        let cfg = t::verification_policy(c)?;
-        let preview = (sweep.status == t::SWEEP_READY)
-            .then(|| t::apply_preview(c, &cfg, &id))
-            .transpose()?;
-        Ok(json!({
-            "sweep": sweep,
-            "progress": t::sweep_summary(c, &id)?,
-            "items": t::sweep_items(c, &id)?,
-            "apply_preview": preview,
-        }))
-    }))
+    respond(
+        state
+            .db_blocking(move |c| {
+                let sweep = t::get_sweep(c, &id)?.ok_or_else(|| {
+                    anyhow::Error::from(ApiError::NotFound("no such sweep".into()))
+                })?;
+                let cfg = t::verification_policy(c)?;
+                let preview = (sweep.status == t::SWEEP_READY)
+                    .then(|| t::apply_preview(c, &cfg, &id))
+                    .transpose()?;
+                Ok(json!({
+                    "sweep": sweep,
+                    "progress": t::sweep_summary(c, &id)?,
+                    "items": t::sweep_items(c, &id)?,
+                    "apply_preview": preview,
+                }))
+            })
+            .await,
+    )
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -144,11 +165,15 @@ async fn sweep_action(
     action: &'static str,
     confirm: bool,
 ) -> Response {
-    respond(state.db.with_conn(move |c| {
-        let cfg = t::verification_policy(c)?;
-        let sweep = hq_tools::tasks::verify::sweep_action(c, &cfg, &id, action, confirm)?;
-        Ok(serde_json::to_value(sweep)?)
-    }))
+    respond(
+        state
+            .db_blocking(move |c| {
+                let cfg = t::verification_policy(c)?;
+                let sweep = hq_tools::tasks::verify::sweep_action(c, &cfg, &id, action, confirm)?;
+                Ok(serde_json::to_value(sweep)?)
+            })
+            .await,
+    )
 }
 
 pub(crate) async fn run_sweep_handler(
@@ -186,8 +211,8 @@ pub(crate) async fn undo_sweep_handler(
     AxumPath(id): AxumPath<String>,
 ) -> Response {
     let result = state
-        .db
-        .with_conn(move |c| hq_tools::tasks::verify::undo_sweep(c, &id));
+        .db_blocking(move |c| hq_tools::tasks::verify::undo_sweep(c, &id))
+        .await;
     match result {
         Ok(report) => {
             // The task watcher tells open boards that the tasks changed.
@@ -246,26 +271,30 @@ pub(crate) async fn audits_handler(
     State(state): State<Arc<WsState>>,
     Query(p): Query<AuditParams>,
 ) -> Response {
-    respond(state.db.with_conn(move |c| {
-        let cfg = t::verification_policy(c)?;
-        let drawn = match p.n {
-            Some(n) if n > 0 => {
-                let seed = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(1) as u64;
-                t::select_audits(c, n.min(100), t::AUDIT_PULL, seed)?.len()
-            }
-            _ => 0,
-        };
-        let open = t::open_audits(c, 100)?;
-        let cards = open
-            .iter()
-            .map(|a| audit_card(c, a))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(json!({
-            "drawn": drawn,
-            "cards": cards,
-            "calibration": t::calibration(c, &cfg)?,
-        }))
-    }))
+    respond(
+        state
+            .db_blocking(move |c| {
+                let cfg = t::verification_policy(c)?;
+                let drawn = match p.n {
+                    Some(n) if n > 0 => {
+                        let seed = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(1) as u64;
+                        t::select_audits(c, n.min(100), t::AUDIT_PULL, seed)?.len()
+                    }
+                    _ => 0,
+                };
+                let open = t::open_audits(c, 100)?;
+                let cards = open
+                    .iter()
+                    .map(|a| audit_card(c, a))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(json!({
+                    "drawn": drawn,
+                    "cards": cards,
+                    "calibration": t::calibration(c, &cfg)?,
+                }))
+            })
+            .await,
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -287,8 +316,8 @@ pub(crate) async fn answer_audit_handler(
         _ => return ApiError::bad_request("answer is agree or disagree").into_response(),
     };
     let result = state
-        .db
-        .with_conn(move |c| t::answer_audit(c, &id, agrees, &body.note, t::WEB_ACTOR));
+        .db_blocking(move |c| t::answer_audit(c, &id, agrees, &body.note, t::WEB_ACTOR))
+        .await;
     match result {
         Ok(audit) => {
             tell(&state, vec![audit.task_id.clone()]);
@@ -301,18 +330,22 @@ pub(crate) async fn answer_audit_handler(
 // ---- veto windows, second opinions, one task ----
 
 pub(crate) async fn holds_handler(State(state): State<Arc<WsState>>) -> Response {
-    respond(state.db.with_conn(|c| {
-        let mut out = Vec::new();
-        for h in t::list_holds(c)? {
-            if let Some(task) = t::get_task(c, &h.task_id)? {
-                out.push(json!({
-                    "task_id": task.id, "display_id": task.display_id, "title": task.title,
-                    "release_at": h.release_at,
-                }));
-            }
-        }
-        Ok(json!({ "holds": out }))
-    }))
+    respond(
+        state
+            .db_blocking(move |c| {
+                let mut out = Vec::new();
+                for h in t::list_holds(c)? {
+                    if let Some(task) = t::get_task(c, &h.task_id)? {
+                        out.push(json!({
+                            "task_id": task.id, "display_id": task.display_id, "title": task.title,
+                            "release_at": h.release_at,
+                        }));
+                    }
+                }
+                Ok(json!({ "holds": out }))
+            })
+            .await,
+    )
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -327,10 +360,12 @@ pub(crate) async fn veto_handler(
     body: Option<Json<NoteBody>>,
 ) -> Response {
     let note = body.map(|b| b.0.note).unwrap_or_default();
-    let result = state.db.with_conn(move |c| {
-        t::veto_hold(c, &id, &note, t::WEB_ACTOR)?;
-        Ok(t::get_task(c, &id)?.map(|task| task.id))
-    });
+    let result = state
+        .db_blocking(move |c| {
+            t::veto_hold(c, &id, &note, t::WEB_ACTOR)?;
+            Ok(t::get_task(c, &id)?.map(|task| task.id))
+        })
+        .await;
     match result {
         Ok(task_id) => {
             tell(&state, task_id.into_iter().collect());
@@ -346,8 +381,8 @@ pub(crate) async fn reverify_handler(
 ) -> Response {
     respond(
         state
-            .db
-            .with_conn(move |c| Ok(serde_json::to_value(t::request_reverify(c, &id)?)?)),
+            .db_blocking(move |c| Ok(serde_json::to_value(t::request_reverify(c, &id)?)?))
+            .await,
     )
 }
 
@@ -357,7 +392,7 @@ pub(crate) async fn task_verification_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
 ) -> Response {
-    respond(state.db.with_conn(move |c| {
+    respond(state.db_blocking(move |c| {
         let task = t::get_task(c, &id)?
             .ok_or_else(|| anyhow::Error::from(ApiError::NotFound("no task found for that id".into())))?;
         let verdicts: Vec<Value> = t::list_verdicts(c, &task.id, 10)?
@@ -382,7 +417,7 @@ pub(crate) async fn task_verification_handler(
             "hold": hold.map(|h| json!({ "release_at": h.release_at })),
             "second_opinion": t::get_reverify(c, &task.id)?,
         }))
-    }))
+    }).await)
 }
 
 #[cfg(test)]
