@@ -6,6 +6,7 @@
 //! `hq-tools` re-exports every module, so `hq_tools::registry::HqTool` and `crate::registry::...`
 //! inside `hq-tools` keep working.
 
+pub mod arg_check;
 pub mod family_confirm;
 pub mod family_guest;
 pub mod files;
