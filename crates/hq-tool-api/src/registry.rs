@@ -123,6 +123,18 @@ pub trait HqTool: Send + Sync {
         ToolPolicy::Standard
     }
 
+    /// Whether a call's arguments are checked against `parameters()` before `execute` runs.
+    ///
+    /// Many tools read their arguments with helpers that quietly fall back to a default, so a
+    /// wrong argument name does nothing and the model never learns why. A tool that returns
+    /// `true` gets a specific error instead (what is missing, which name does not exist and
+    /// which one was probably meant, the call shape), and harmless slips such as `"5"` for 5
+    /// are fixed. Opt in only when the schema lists every argument `execute` reads, since an
+    /// argument missing from the schema would be refused. Default `false`.
+    fn checks_arguments(&self) -> bool {
+        false
+    }
+
     /// Per-call deadline in milliseconds, forwarded to agent sessions whose
     /// `GovernedTool` enforces it. Default `None`, no deadline. Declare one
     /// only when `execute` stops its work on cancellation.
@@ -153,10 +165,31 @@ pub trait HqTool: Send + Sync {
 /// Run `validate`, then `execute` only when it passes. Every caller of an
 /// `HqTool` goes through here, so a tool's validation is never skipped.
 pub async fn validate_and_execute(tool: &dyn HqTool, args: Value) -> Result<Value> {
+    let args = if tool.checks_arguments() {
+        checked_arguments(tool, args)?
+    } else {
+        args
+    };
     if let ValidationResult::Err { message, .. } = tool.validate(&args).await {
         anyhow::bail!("{message}");
     }
     tool.execute(args).await
+}
+
+/// The arguments with harmless slips fixed, or an error naming everything still wrong and the
+/// call shape, for a tool that opted in with `checks_arguments`.
+fn checked_arguments(tool: &dyn HqTool, args: Value) -> Result<Value> {
+    let parameters = tool.parameters();
+    let checked = crate::arg_check::check(&parameters, args);
+    if checked.problems.is_empty() {
+        return Ok(checked.args);
+    }
+    anyhow::bail!(
+        "invalid arguments for {}: {}. Call shape: {}",
+        tool.name(),
+        checked.problems.join("; "),
+        signature_of(tool.name(), &parameters)
+    )
 }
 
 const HINT_MAX_WORDS: usize = 9;
@@ -1027,5 +1060,73 @@ mod tests {
         let hint = did_you_mean("vault_serach", &tools);
         assert_eq!(hint, " Did you mean: vault_search(query*: string)?");
         assert_eq!(did_you_mean("zzzzzzzz_qqqq", &tools), "");
+    }
+
+    struct Strict {
+        strict: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl HqTool for Strict {
+        fn name(&self) -> &str {
+            "note_read"
+        }
+        fn description(&self) -> &str {
+            "Read a note"
+        }
+        fn parameters(&self) -> Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "required": ["path"],
+            })
+        }
+        fn checks_arguments(&self) -> bool {
+            self.strict
+        }
+        async fn execute(&self, args: Value) -> Result<Value> {
+            Ok(args)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_tool_that_opts_in_gets_a_specific_error_and_slips_fixed() {
+        let tool = Strict { strict: true };
+
+        let err = validate_and_execute(&tool, serde_json::json!({"file": "a.md"}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.starts_with("invalid arguments for note_read:"), "{err}");
+        assert!(
+            err.contains("`file` is not an argument (did you mean `path`?)"),
+            "{err}"
+        );
+        assert!(err.contains("`path` is required"), "{err}");
+        assert!(
+            err.contains("Call shape: note_read(path*: string, limit?: integer)"),
+            "{err}"
+        );
+
+        // A slip that cannot change the meaning is fixed, and runtime keys pass through.
+        let out = validate_and_execute(
+            &tool,
+            serde_json::json!({"path": "a.md", "limit": "5", "_hq_connector": "c"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["limit"], 5);
+        assert_eq!(out["_hq_connector"], "c");
+    }
+
+    #[tokio::test]
+    async fn a_tool_that_does_not_opt_in_is_left_exactly_as_it_was() {
+        let tool = Strict { strict: false };
+        let args = serde_json::json!({"file": "a.md", "limit": "5"});
+        let out = validate_and_execute(&tool, args.clone()).await.unwrap();
+        assert_eq!(out, args, "no check, no fix");
     }
 }

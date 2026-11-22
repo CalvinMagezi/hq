@@ -48,34 +48,43 @@ pub fn check(parameters: &Value, args: Value) -> Checked {
         .get("additionalProperties")
         .is_some_and(|v| v != &Value::Bool(false));
     let prop_names: Vec<&str> = props.keys().map(String::as_str).collect();
-    let supplied: Vec<String> = map.keys().cloned().collect();
+    let required: Vec<&str> = parameters
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|r| r.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let missing: Vec<&str> = required
+        .iter()
+        .copied()
+        .filter(|name| map.get(*name).is_none_or(Value::is_null))
+        .collect();
+    let unknown: Vec<String> = map
+        .keys()
+        .filter(|k| !k.starts_with(RESERVED_PREFIX) && !props.contains_key(*k) && !open)
+        .cloned()
+        .collect();
 
-    for key in &supplied {
-        if key.starts_with(RESERVED_PREFIX) || props.contains_key(key) || open {
-            continue;
-        }
-        // Offer the closest name the caller has not already used.
+    for key in &unknown {
+        // Offer the closest name the caller has not already used. When the spelling is nowhere
+        // near but exactly one argument was sent that does not exist and exactly one required
+        // argument is missing, the two are almost certainly the same thing (`file` for `path`).
         let free: Vec<&str> = prop_names
             .iter()
             .copied()
             .filter(|n| !map.contains_key(*n))
             .collect();
-        let guess = nearest(&free, key, 1).first().map(|&i| free[i]);
+        let guess = nearest(&free, key, 1)
+            .first()
+            .map(|&i| free[i])
+            .or_else(|| (unknown.len() == 1 && missing.len() == 1).then(|| missing[0]));
         problems.push(match guess {
             Some(g) => format!("`{key}` is not an argument (did you mean `{g}`?)"),
             None => format!("`{key}` is not an argument"),
         });
     }
 
-    let required: Vec<&str> = parameters
-        .get("required")
-        .and_then(Value::as_array)
-        .map(|r| r.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default();
-    for name in required {
-        if map.get(name).is_none_or(Value::is_null) {
-            problems.push(format!("`{name}` is required"));
-        }
+    for name in &missing {
+        problems.push(format!("`{name}` is required"));
     }
 
     for (name, schema) in props {
@@ -259,12 +268,19 @@ mod tests {
     fn an_unknown_argument_points_at_the_closest_real_one() {
         let p = problems(json!({"path": "a", "limt": 3}));
         assert_eq!(p, ["`limt` is not an argument (did you mean `limit`?)"]);
+        // Nothing like it by spelling, but it is the only unknown name and `path` is the only
+        // missing required one, so it is offered.
         let p = problems(json!({"file": "a.md"}));
-        assert!(
-            p.iter().any(|m| m.contains("`file` is not an argument")),
-            "{p:?}"
+        assert_eq!(
+            p,
+            [
+                "`file` is not an argument (did you mean `path`?)",
+                "`path` is required"
+            ]
         );
-        assert!(p.iter().any(|m| m == "`path` is required"), "{p:?}");
+        // With two unknown names the pairing would be a guess, so none is made.
+        let p = problems(json!({"file": "a.md", "bogus": 1}));
+        assert!(p.iter().all(|m| !m.contains("did you mean")), "{p:?}");
     }
 
     #[test]

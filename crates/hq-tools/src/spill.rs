@@ -156,6 +156,11 @@ impl HqTool for ToolOutputReadTool {
         })
     }
 
+    fn checks_arguments(&self) -> bool {
+        // The schema lists every argument `execute` reads.
+        true
+    }
+
     fn category(&self) -> &str {
         "memory"
     }
@@ -249,5 +254,26 @@ mod tests {
             .await
             .unwrap();
         assert!(out.get("error").is_some());
+    }
+
+    #[tokio::test]
+    async fn a_wrong_argument_name_is_answered_through_the_real_entry_point() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = write(dir.path(), "s", "out", &"a".repeat(30)).unwrap();
+        let tool = ToolOutputReadTool::new(dir.path().to_path_buf());
+
+        // `reference` is not an argument, and `ref` is the only one missing.
+        let err = crate::registry::validate_and_execute(&tool, json!({"reference": r}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("did you mean `ref`"), "{err}");
+        assert!(err.contains("tool_output_read(ref*: string"), "{err}");
+
+        // The right call, with the number sent as text, still works.
+        let out = crate::registry::validate_and_execute(&tool, json!({"ref": r, "limit": "20"}))
+            .await
+            .unwrap();
+        assert_eq!(out["next_offset"], 20);
     }
 }

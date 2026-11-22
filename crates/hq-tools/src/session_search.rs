@@ -227,6 +227,11 @@ impl HqTool for SessionSearchTool {
         })
     }
 
+    fn checks_arguments(&self) -> bool {
+        // The schema lists every argument `execute` reads.
+        true
+    }
+
     fn category(&self) -> &str {
         "memory"
     }
