@@ -51,52 +51,9 @@ impl SessionBuilder {
             let sys_ctx = hq_vault::system::get_system_context_keeping(vault_path, &owner_pin)
                 .unwrap_or_default();
 
-            // Same soul as the relays: frontmatter stripped, with a fallback identity.
-            let soul = hq_vault::system::load_soul(vault_path);
-            let user_model = hq_vault::system::get_user_model(vault_path);
-            let mut soul_with_user = if user_model.trim().is_empty() {
-                soul
-            } else {
-                format!("{soul}\n\n---\n{user_model}")
-            };
-            soul_with_user.push_str(&format!("\n\n{}", inputs.identity));
-            if let Some(ref identity) = self.identity
-                && self.enable_thread_continuity
-            {
-                soul_with_user.push_str(&format!(
-                    "\n\nThis conversation is happening via {}. Thread lines marked \
-                     [via <interface>, HH:MM] happened on other interfaces; they are \
-                     part of the same ongoing conversation with the same person.",
-                    identity.source.label()
-                ));
-            }
-
-            if let Some(ref identity) = self.identity
-                && matches!(
-                    identity.source,
-                    hq_core::identity::RequestSource::Web { .. }
-                )
-            {
-                soul_with_user.push_str(WEB_CHART_GUIDANCE);
-            }
-
-            // Opt-in: tell the model when a budget is nearly used up.
-            if let Some(db) = &inputs.shared_db
-                && let Some(note) = hq_tools::usage_forecast::budget_note(
-                    db,
-                    &self.config.budgets,
-                    chrono::Utc::now().timestamp(),
-                )
-            {
-                soul_with_user.push_str(&note);
-            }
-
             // A coding worker needs neither: it works from its task, and a smaller prompt caches better.
             let is_worker = self.worker_checkouts.is_some();
-            if let Some(block) = inputs.capability_block.as_ref().filter(|_| !is_worker) {
-                soul_with_user.push_str("\n\n");
-                soul_with_user.push_str(block);
-            }
+            let soul_with_user = self.compose_soul(&inputs, is_worker);
 
             // Dynamic memory from MemoryQuerier (merged with static MEMORY.md)
             let memory_text = if is_worker {
@@ -106,54 +63,9 @@ impl SessionBuilder {
             };
 
             // Cross-session thread continuity
-            let thread = if self.enable_thread_continuity {
-                let source = self
-                    .identity
-                    .as_ref()
-                    .map(|i| i.source.label())
-                    .unwrap_or("cli");
-                let merged = crate::threads::load_merged_thread(
-                    vault_path,
-                    source,
-                    crate::threads::MAX_MERGED_MESSAGES,
-                    !self.exclude_own_interface_thread,
-                );
-                if merged.is_empty() {
-                    // Transition path: no JSONL threads written yet, fall back
-                    // to the legacy per-session *.json files.
-                    load_recent_thread(vault_path)
-                } else {
-                    merged
-                }
-            } else {
-                vec![]
-            };
+            let thread = self.load_thread(vault_path);
 
-            // Build harness instructions block
-            // Read from the daemon's cache, never probed inline: a prompt
-            // build must not block on a subprocess fan-out, and a per-build
-            // probe would also make the cached prefix shift mid-session.
-            let (machine_block, can_build_self) =
-                match hq_core::machine::load_cached(vault_path, MACHINE_PROFILE_MAX_AGE) {
-                    Some(block) => {
-                        let can_build_self = hq_core::machine::load_cached_profile(vault_path)
-                            .map(|p| p.can_build_self)
-                            .unwrap_or(false);
-                        (Some(block), can_build_self)
-                    }
-                    None => {
-                        // No daemon has written a profile yet (fresh install, daemon
-                        // down). A 6-binary existence-only probe keeps the first
-                        // session from being blind.
-                        tracing::debug!("no cached machine profile; running fast probe");
-                        let profile = hq_core::machine::probe_machine_fast(Some(vault_path));
-                        let can_build_self = profile.can_build_self;
-                        (
-                            Some(hq_core::machine::render_markdown(&profile)),
-                            can_build_self,
-                        )
-                    }
-                };
+            let (machine_block, can_build_self) = machine_block(vault_path);
 
             let harness_instructions = build_harness_block(
                 self.harness_instructions.as_deref(),
@@ -253,6 +165,113 @@ impl SessionBuilder {
             );
             session.set_system_prompt(enriched);
             session.set_skill_index(std::sync::Arc::new(skill_index), MAX_SKILL_TOKENS);
+        }
+    }
+    /// The soul text a session starts from: the soul file with the owner's user model, who and where
+    /// HQ is, and the notes for this interface, budget and capabilities.
+    fn compose_soul(&self, inputs: &PromptInputs<'_>, is_worker: bool) -> String {
+        // Same soul as the relays: frontmatter stripped, with a fallback identity.
+        let vault_path = inputs.vault_path;
+        let soul = hq_vault::system::load_soul(vault_path);
+        let user_model = hq_vault::system::get_user_model(vault_path);
+        let mut soul_with_user = if user_model.trim().is_empty() {
+            soul
+        } else {
+            format!("{soul}\n\n---\n{user_model}")
+        };
+        soul_with_user.push_str(&format!("\n\n{}", inputs.identity));
+        if let Some(ref identity) = self.identity
+            && self.enable_thread_continuity
+        {
+            soul_with_user.push_str(&format!(
+                "\n\nThis conversation is happening via {}. Thread lines marked \
+                     [via <interface>, HH:MM] happened on other interfaces; they are \
+                     part of the same ongoing conversation with the same person.",
+                identity.source.label()
+            ));
+        }
+
+        if let Some(ref identity) = self.identity
+            && matches!(
+                identity.source,
+                hq_core::identity::RequestSource::Web { .. }
+            )
+        {
+            soul_with_user.push_str(WEB_CHART_GUIDANCE);
+        }
+
+        // Opt-in: tell the model when a budget is nearly used up.
+        if let Some(db) = &inputs.shared_db
+            && let Some(note) = hq_tools::usage_forecast::budget_note(
+                db,
+                &self.config.budgets,
+                chrono::Utc::now().timestamp(),
+            )
+        {
+            soul_with_user.push_str(&note);
+        }
+
+        // A coding worker needs neither: it works from its task, and a smaller prompt caches better.
+        if let Some(block) = inputs.capability_block.as_ref().filter(|_| !is_worker) {
+            soul_with_user.push_str("\n\n");
+            soul_with_user.push_str(block);
+        }
+
+        soul_with_user
+    }
+
+    /// The recent conversation this session continues, merged across interfaces, or nothing when
+    /// continuity is off.
+    fn load_thread(&self, vault_path: &Path) -> Vec<crate::context::layers::ConversationMessage> {
+        if self.enable_thread_continuity {
+            let source = self
+                .identity
+                .as_ref()
+                .map(|i| i.source.label())
+                .unwrap_or("cli");
+            let merged = crate::threads::load_merged_thread(
+                vault_path,
+                source,
+                crate::threads::MAX_MERGED_MESSAGES,
+                !self.exclude_own_interface_thread,
+            );
+            if merged.is_empty() {
+                // Transition path: no JSONL threads written yet, fall back
+                // to the legacy per-session *.json files.
+                load_recent_thread(vault_path)
+            } else {
+                merged
+            }
+        } else {
+            vec![]
+        }
+    }
+}
+
+/// The machine block for the harness instructions, and whether this machine can build HQ itself.
+fn machine_block(vault_path: &Path) -> (Option<String>, bool) {
+    // Build harness instructions block
+    // Read from the daemon's cache, never probed inline: a prompt
+    // build must not block on a subprocess fan-out, and a per-build
+    // probe would also make the cached prefix shift mid-session.
+    match hq_core::machine::load_cached(vault_path, MACHINE_PROFILE_MAX_AGE) {
+        Some(block) => {
+            let can_build_self = hq_core::machine::load_cached_profile(vault_path)
+                .map(|p| p.can_build_self)
+                .unwrap_or(false);
+            (Some(block), can_build_self)
+        }
+        None => {
+            // No daemon has written a profile yet (fresh install, daemon
+            // down). A 6-binary existence-only probe keeps the first
+            // session from being blind.
+            tracing::debug!("no cached machine profile; running fast probe");
+            let profile = hq_core::machine::probe_machine_fast(Some(vault_path));
+            let can_build_self = profile.can_build_self;
+            (
+                Some(hq_core::machine::render_markdown(&profile)),
+                can_build_self,
+            )
         }
     }
 }
