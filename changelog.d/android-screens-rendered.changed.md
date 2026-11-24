@@ -1,0 +1,1 @@
+**The phone's new suite screens are now drawn and checked in tests.** The area, stacked and scatter charts, the deck card list and the comments list are rendered with Compose on a simulated phone and checked, so a layout or colour mistake in them shows up before a release.

@@ -1,0 +1,1 @@
+**Two permission tests no longer fail when run as root.** The file-rollback and file-ownership tests check that a write or an ownership is refused, which root is never subject to. They now skip themselves as root, so the test suite passes in a container that runs everything as root.

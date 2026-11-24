@@ -6,7 +6,7 @@ function badgeColor(kind: string) {
   switch (kind) {
     case 'review': return 'var(--warn)'
     case 'work': return 'var(--brand-blue)'
-    case 'activity': return 'var(--text-dim)'
+    case 'activity': return 'var(--ink-muted)'
     default: return 'var(--ink-muted)'
   }
 }
@@ -28,20 +28,20 @@ export function SignalCard({ note, lane = 'note' }: { note: RecentFile; lane?: '
     >
       <div className="flex items-start justify-between gap-2 mb-1.5">
         <div className="min-w-0">
-          <div className="text-[12px] font-mono font-bold truncate" style={{ color: 'var(--text-primary)' }}>
+          <div className="text-[12px] font-mono font-bold truncate" style={{ color: 'var(--ink)' }}>
             {note.title}
           </div>
-          <div className="text-xs font-mono mt-1 truncate" style={{ color: 'var(--text-dim)' }}>
+          <div className="text-xs font-mono mt-1 truncate" style={{ color: 'var(--ink-muted)' }}>
             {folder}
           </div>
         </div>
-        <span className="text-xs font-mono flex-shrink-0 mt-0.5" style={{ color: 'var(--text-dim)' }}>
+        <span className="text-xs font-mono flex-shrink-0 mt-0.5" style={{ color: 'var(--ink-muted)' }}>
           {relTime(note.mtime)}
         </span>
       </div>
 
       {note.preview && (
-        <p className="text-xs font-mono line-clamp-2 leading-relaxed" style={{ color: 'var(--text-dim)' }}>
+        <p className="text-xs font-mono line-clamp-2 leading-relaxed" style={{ color: 'var(--ink-muted)' }}>
           {note.preview}
         </p>
       )}
@@ -58,7 +58,7 @@ export function SignalCard({ note, lane = 'note' }: { note: RecentFile; lane?: '
             </span>
           ))}
           {note.tags.slice(0, Math.max(0, 4 - badges.length)).map((tag) => (
-            <span key={tag} className="text-xs px-1.5 py-0.5 rounded-md font-mono glass-tag" style={{ color: 'var(--text-dim)' }}>
+            <span key={tag} className="text-xs px-1.5 py-0.5 rounded-md font-mono glass-tag" style={{ color: 'var(--ink-muted)' }}>
               #{tag}
             </span>
           ))}

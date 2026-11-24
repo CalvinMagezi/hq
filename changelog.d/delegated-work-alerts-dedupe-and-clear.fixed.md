@@ -1,0 +1,1 @@
+**Background task alerts clear when the task finishes and no longer repeat.** Inbox alerts for background tasks that have already finished are now dismissed instead of lingering in Needs you, duplicate open alerts collapse to the newest one, and finishing or cancelling a background task dismisses its open alert automatically.

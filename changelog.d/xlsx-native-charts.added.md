@@ -1,0 +1,1 @@
+**Charts in a sheet export as real charts.** A `plot` in your sheet note now becomes a native Excel chart (bar, line, pie or donut) when you export the workbook, so it opens and edits in Excel and Google Sheets. A chart that filters or groups rows has no single range behind it, so it is left out and the export says how many.

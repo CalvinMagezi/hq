@@ -1,7 +1,7 @@
 // Edits to an hqmd note, made the way the format asks: small, by block, and refused when stale. Each function
 // takes the whole note and returns the whole note with one place changed, or null when it would not be safe
 // (the thing it names is not what the caller saw). Every other line comes back as it was, line endings included.
-import { splitFrontmatter, typedBlocks } from './hqmd'
+import { cardComments, splitFrontmatter, typedBlocks } from './hqmd'
 import { readSheet } from './sheetCalc'
 
 /** The text split into lines, and the line ending to join them with again. */
@@ -113,10 +113,13 @@ export function setSlideBody(text: string, n: number, was: string, body: string)
       break
     }
   }
-  const layout = rows.slice(at + 1, end).findIndex((l) => /^<!--\s*layout:\s*[a-z0-9-]+\s*-->$/.test(l.trim()))
-  const current = rows.slice(at + 1, end).filter((_, i) => i !== layout).join('\n').trim()
+  const inner = rows.slice(at + 1, end)
+  const { spans } = cardComments(inner)
+  const meta = new Set<number>()
+  for (const sp of spans) for (let i = sp.start; i <= sp.end; i += 1) meta.add(i)
+  const current = inner.filter((_, i) => !meta.has(i)).join('\n').trim()
   if (current !== was.trim()) return null
-  const keep = layout >= 0 ? [rows[at + 1 + layout]] : []
+  const keep = inner.filter((_, i) => meta.has(i))
   const fresh = body.replace(/\r?\n/g, '\n').trim()
   const trailing = end < rows.length ? [''] : []
   rows.splice(at + 1, end - at - 1, ...keep, '', ...(fresh ? fresh.split('\n') : []), ...trailing)

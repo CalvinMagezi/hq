@@ -252,4 +252,32 @@ mod tests {
         assert_eq!(class_of(Kind::Pdf, Some(FailureKind::NeedsOcr)), "pdf-scan");
         assert_eq!(class_of(Kind::Xlsx, None), "xlsx");
     }
+
+    #[tokio::test]
+    async fn word_comments_come_through_only_when_the_options_ask() {
+        let w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        let comments = format!(
+            r#"<?xml version="1.0"?><w:comments xmlns:w="{w}"><w:comment w:id="0" w:author="Sam"><w:p><w:r><w:t>Check this.</w:t></w:r></w:p></w:comment></w:comments>"#
+        );
+        let doc = format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="{w}"><w:body><w:p><w:commentRangeStart w:id="0"/><w:r><w:t>Order for March</w:t></w:r><w:commentRangeEnd w:id="0"/></w:p></w:body></w:document>"#
+        );
+        let bytes = zip_of(&[
+            ("[Content_Types].xml", DOCX_TYPES),
+            ("word/document.xml", doc.as_bytes()),
+            ("word/comments.xml", comments.as_bytes()),
+        ]);
+        let off = read_document(bytes.clone(), "docx", &opts()).await.unwrap();
+        assert_eq!(off.markdown, "Order for March\n");
+        let on = ConvertOptions {
+            word_comments: Some(crate::word_comment_codec()),
+            ..opts()
+        };
+        let got = read_document(bytes, "docx", &on).await.unwrap();
+        assert_eq!(hq_suite_md::strip_comments(&got.markdown), off.markdown);
+        assert_eq!(
+            hq_suite_md::comments(&hq_suite_md::Document::parse(&got.markdown)).len(),
+            1
+        );
+    }
 }

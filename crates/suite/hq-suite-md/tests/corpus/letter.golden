@@ -1,5 +1,5 @@
 frontmatter: 75 bytes
-meta: SuiteMeta { kind: Some(Doc), fidelity: Some(Native), original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None }
+meta: SuiteMeta { kind: Some(Doc), fidelity: Some(Native), original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None, toc: None, header: None }
  0 Heading { level: 1 } | # Order for the March delivery
  1 Paragraph | Dear Mr Example,
  2 Paragraph | Please send the following by **Friday**. Payment is by mobil

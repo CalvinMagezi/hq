@@ -64,7 +64,7 @@ describe('badge and strip', () => {
 describe('colours and sizes', () => {
   test('dim text and no font under 12px in app.css', () => {
     const css = read('app.css')
-    expect(css).toMatch(/--text-dim:\s*var\(--ink-muted\)/)
+    expect(css).not.toMatch(/--text-dim|--text-primary|--accent-/)
     expect(read('src/styles/aligned-ui.css')).toMatch(/--ink-muted:#D0D2D3/i)
     expect(css).not.toMatch(/font-size:\s*(?:[0-9]|10|11)px/)
   })

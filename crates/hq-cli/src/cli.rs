@@ -333,6 +333,12 @@ pub(crate) enum Commands {
     /// Restore an encrypted backup into a new or empty folder (the same as `hq backup restore`)
     Restore(RestoreArgs),
 
+    /// Personal finance from mobile-money messages, on this machine only (`hq finance --help`)
+    Finance {
+        #[command(subcommand)]
+        command: commands::finance::FinanceCommand,
+    },
+
     /// The HQ Suite (documents, storage): measure, shrink, undo (`hq suite --help`)
     Suite {
         #[command(subcommand)]

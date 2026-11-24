@@ -1,0 +1,1 @@
+**A dashboard tile no longer shows a "change since the row before" it did not ask for.** A total or an average has no previous row, so the small trend line and the plus or minus figure now only appear on a tile that says `trend=yes`. The slide strip on a phone also lost stray list numbers beside its thumbnails.

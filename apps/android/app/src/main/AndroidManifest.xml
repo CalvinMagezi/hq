@@ -12,6 +12,8 @@
   <uses-permission android:name="android.permission.WRITE_CALENDAR"/>
   <!-- HQ looks a contact up by name when the owner asks for a number or an address. It reads only; it never changes a contact. -->
   <uses-permission android:name="android.permission.READ_CONTACTS"/>
+  <!-- HQ reads only the owner's MTN and Airtel Money transaction SMS on request. READ_SMS is a restricted permission on Google Play and requires its own Play Store review. -->
+  <uses-permission android:name="android.permission.READ_SMS"/>
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
   <!-- Lets the in-app updater hand a verified APK to Android's installer; the owner still confirms each install. -->
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>

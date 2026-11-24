@@ -31,6 +31,9 @@ pub enum LossKind {
     MergedRangesUnmerged,
     ConditionalFormatsDropped,
     ValidationRulesDropped,
+    TrackedChanges,
+    CommentsCarried,
+    CommentsUnanchored,
     Other,
 }
 
@@ -48,6 +51,8 @@ impl LossKind {
                 | LossKind::LegacyConverted
                 | LossKind::ExtensionMismatch
                 | LossKind::NumberFormatsNotApplied
+                | LossKind::TrackedChanges
+                | LossKind::CommentsCarried
         )
     }
 
@@ -74,6 +79,16 @@ impl LossKind {
             LossKind::ConditionalFormatsDropped => {
                 format!("{n} conditional format rule{s} not carried over")
             }
+            LossKind::TrackedChanges => format!(
+                "{n} tracked change{s}: inserted text is kept as plain text, deleted text is dropped"
+            ),
+            LossKind::CommentsCarried => {
+                format!("{n} Word comment{s} carried as comment block{s}")
+            }
+            LossKind::CommentsUnanchored => format!(
+                "{n} Word comment{s} not carried: no block of the body to anchor {}",
+                if n == 1 { "it to" } else { "them to" }
+            ),
             LossKind::ValidationRulesDropped => {
                 format!("{n} data validation rule{s} not carried over")
             }

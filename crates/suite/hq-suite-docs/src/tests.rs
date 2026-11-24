@@ -63,3 +63,38 @@ fn picture_links_are_rewritten_from_the_vaults_root_and_never_out_of_it() {
     assert_eq!(rebase_pictures("no pictures", "a"), "no pictures");
     assert_eq!(rebase_pictures("broken ![x](", "a"), "broken ![x](");
 }
+
+#[test]
+fn frontmatter_asks_for_a_toc_and_a_header_and_a_bad_value_asks_for_nothing() {
+    let on = DocxOptions::from_frontmatter("---\nsuite_toc: true\nsuite_header: \"Draft\"\n---\n");
+    assert_eq!(
+        on,
+        DocxOptions {
+            toc: true,
+            header: "Draft".into()
+        }
+    );
+    assert_eq!(
+        DocxOptions::from_frontmatter("---\nsuite_toc: maybe\n---\n"),
+        DocxOptions::default()
+    );
+    assert_eq!(DocxOptions::from_frontmatter(""), DocxOptions::default());
+}
+
+#[tokio::test]
+async fn comments_are_cut_from_the_word_file_and_a_contents_page_still_reads_back() {
+    let note = "# Plan\n\nBody text.\n\n```comment on=0123456789ab\nsecret review note\n```\n\n## Costs\n\nMore.\n";
+    let opts = DocxOptions {
+        toc: true,
+        header: String::new(),
+    };
+    let docx = render_docx_with("Plan", note, None, &opts).unwrap();
+    let read = hq_suite_ingest::read_document(docx.clone(), "docx", &ConvertOptions::default())
+        .await
+        .unwrap();
+    assert!(!read.markdown.contains("secret review note"));
+    assert!(read.markdown.contains("Body text.") && read.markdown.contains("Costs"));
+    // And the regenerate check still holds for a file that carries a contents field.
+    let r = regenerate_check(&docx).await.unwrap();
+    assert!(r.equal, "{:?}", r.differences);
+}

@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import example.hq.spike.R
+import example.hq.spike.data.suiteKindOf
 import example.hq.spike.ui.shell.ConfirmCopy
 import example.hq.spike.ui.shell.ConfirmDialog
 import example.hq.spike.ui.chat.blocks.Block
@@ -196,10 +197,15 @@ private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions, onAsk: 
     val blocks = remember(note.body) { parseBlocks(NoteText.withoutFrontmatter(note.body)) }
     val copied = stringResource(R.string.chat_copied)
     val handlers = remember(actions, copied) { BlockActions(onOpenNote = actions.onOpenNote, onCopied = { actions.onNotice(copied) }) }
+    val revision = remember(note.path) { androidx.compose.runtime.mutableIntStateOf(0) }
+    // Another writer changed the note (the reader was reloaded quietly): sheets, tiles and plots ask hq again.
+    var seen by remember(note.path) { mutableStateOf(note.hash) }
+    LaunchedEffect(note.hash) { if (note.hash != seen) { seen = note.hash; revision.intValue++ } }
+    val kind = remember(note.body) { suiteKindOf(note.body) }
     androidx.compose.runtime.CompositionLocalProvider(
         example.hq.spike.ui.chat.blocks.LocalNoteFolder provides note.path.substringBeforeLast('/', ""),
         example.hq.spike.ui.chat.blocks.LocalNotePath provides note.path,
-        example.hq.spike.ui.chat.blocks.LocalBlocksRevision provides androidx.compose.runtime.remember(note.path) { androidx.compose.runtime.mutableIntStateOf(0) },
+        example.hq.spike.ui.chat.blocks.LocalBlocksRevision provides revision,
     ) {
     Column(Modifier.fillMaxSize()) {
         TopBar(note.title, listOf(note.trail, phase.edited).filter { it.isNotBlank() }.joinToString(" · "), actions.onBack) {
@@ -209,13 +215,30 @@ private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions, onAsk: 
         if (VaultRules.markOf(note.review) == ReviewMark.Changed) ChangedBar(actions.onKeep)
         suiteSourceOf(note.body)?.let { SuiteBar(it, actions.onNotice, actions.onReload) }
         var blocksOpen by remember(note.path) { mutableStateOf(false) }
-        androidx.compose.material3.TextButton({ blocksOpen = true }, Modifier.padding(horizontal = 8.dp).heightIn(min = 40.dp)) {
-            Text(stringResource(R.string.docblocks_open), style = HqType.BodySm, color = Mts.BrandBlue)
+        var commentsOpen by remember(note.path) { mutableStateOf(false) }
+        Row(Modifier.padding(horizontal = 8.dp)) {
+            androidx.compose.material3.TextButton({ blocksOpen = true }, Modifier.heightIn(min = 40.dp)) {
+                Text(stringResource(R.string.docblocks_open), style = HqType.BodySm, color = Mts.BrandBlue)
+            }
+            if (kind != null) androidx.compose.material3.TextButton({ commentsOpen = true }, Modifier.heightIn(min = 40.dp)) {
+                Text(stringResource(R.string.comments_open), style = HqType.BodySm, color = Mts.BrandBlue)
+            }
         }
-        if (blocksOpen) DocBlocksEditor(note.path) { changed -> blocksOpen = false; if (changed) actions.onReload() }
+        if (blocksOpen) {
+            HoldReload(actions.onHoldReload)
+            DocBlocksEditor(note.path) { changed -> blocksOpen = false; if (changed) actions.onReload() }
+        }
+        if (commentsOpen) {
+            HoldReload(actions.onHoldReload)
+            CommentsDialog(note.path) { commentsOpen = false }
+        }
         ReaderHeader(note, onAsk)
-        // Lazy, so a long note opens by drawing the screenful in view, not every block of it.
-        SelectionContainer(Modifier.weight(1f)) { NoteBody(note.path, blocks, handlers, note.truncated, actions) }
+        if (kind == "slides") {
+            SlidesView(note.path, note.hash, actions.onNotice, actions.onHoldReload, Modifier.weight(1f))
+        } else {
+            // Lazy, so a long note opens by drawing the screenful in view, not every block of it.
+            SelectionContainer(Modifier.weight(1f)) { NoteBody(note.path, blocks, handlers, note.truncated, actions) }
+        }
     }
     }
 }

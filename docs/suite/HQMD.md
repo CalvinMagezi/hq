@@ -130,6 +130,7 @@ One number computed from a range. The body is empty.
 | `format` | A column type used to display the result. |
 | `where` | Optional. Row filter such as `qty>30 and item=Sugar`; with it the range's first row names the columns and the number comes from the last column. |
 | `group` | Not allowed on a tile. |
+| `size` | Optional view hint: `small`, `wide` or `full`, see "Dashboard layout". |
 
 #### `plot`
 
@@ -137,12 +138,28 @@ A chart drawn from a range. The body is empty.
 
 | Attribute | Meaning |
 |-----------|---------|
-| `type` | Required: `bar`, `line`, `pie` or `donut`. |
+| `type` | Required: `bar`, `line`, `pie`, `donut`, `area`, `stacked` or `scatter` (x numeric). |
 | `from` | Required. A range, header row first. |
 | `x`, `y` | Required. Column names from the header row (the label and the value). |
 | `title` | Optional. |
 | `where` | Optional. Row filter, as on a tile. |
 | `group` | Optional. Column to split into one series per value (bar and line only, up to six). |
+| `size` | Optional view hint: `small`, `wide` or `full`, see "Dashboard layout". |
+
+#### Dashboard layout
+
+The tiles and plots of a dashboard note are shown in the order the note writes them. A block can also
+carry `size=small`, `size=wide` or `size=full`, a hint for how much room a viewer gives it: one column,
+two columns, or the full width of the grid. With no `size` a tile is `small` and a plot is `wide`; a value
+a viewer does not know counts as no `size`.
+
+The web app writes both when a person arranges a dashboard: moving a block rewrites the note so the two
+blocks swap places (every other line stays as written), and a size is added to, changed on or removed
+from the block's opening fence. A size equal to the block's default is written as no attribute. `size` is
+only a hint for viewers: exports and the evaluator ignore it, and a block that carries an attribute a
+version does not know keeps it as written.
+
+A `tile` over one column of three or more numbers can add `trend=yes` to show a small line of the values and how the last one moved against the one before; without it a tile is just its number. The checker knows `size` and `trend`, and warns (`block.bad_size`) for a value other than those three.
 
 #### `chart`
 
@@ -152,6 +169,24 @@ chart from a chat answer is valid hqmd as it stands.
 
 The dashboard's chart over a sheet is `plot`, not `chart`, because `chart` already means "JSON
 body" in the chat renderer and the two must not be told apart by guessing.
+
+#### `comment`
+
+A review note on another block. The body is the comment text.
+
+| Attribute | Meaning |
+|-----------|---------|
+| `on` | Required. The 12-character hash of the block it is about (the hash an edit quotes). |
+| `by` | Optional. Free text the writer typed. It is a label, never an identity. |
+| `at` | Optional. ISO 8601 date or timestamp. |
+| `state` | `open` (the default) or `resolved`. |
+
+When the block it is about is edited, its hash changes and the comment becomes **orphaned**. The
+checker reports that as `comment.orphaned` (information, not an error); the comment stays in the
+note until someone resolves or deletes it. Attributes the version does not know are kept as
+written. A shrunk Word file brings its comments in as `comment` blocks (`DOCS.md`, "Comments from a Word
+file"). Comments never leave the note: the Word, PDF, PowerPoint and Excel exports omit them, so
+a shared file carries no review notes.
 
 ## References
 
@@ -183,6 +218,8 @@ only strings, numbers, booleans and lists. Keys HQ's importer already writes (`s
 | `suite_original_bytes` | whole number | Size of the original |
 | `suite_shrunk_at` | ISO 8601 date or timestamp | When it was shrunk |
 | `suite_saved_bytes` | whole number | Net bytes saved (may be negative) |
+| `suite_toc` | `true`, `false` | Word export only: put a table of contents (heading levels 1 to 3) after the title. It is a real Word field; Word offers to refresh it with page numbers on open |
+| `suite_header` | plain text | Word export only: text for the page header. Markup is not interpreted; it is cut at 200 characters |
 
 A `view` note must keep its original. Changing one key changes one line: every other line of
 the frontmatter is returned as it was, and a key that holds a list or a multi-line value is

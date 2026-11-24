@@ -87,6 +87,8 @@ struct Record {
     outcome: Option<Value>,
     /// The tool gave up waiting; a result that still arrives is stored, not discarded.
     given_up: bool,
+    /// A bulk upload was taken for this action; one per action, whatever happens next.
+    uploaded: bool,
     tx: watch::Sender<Phase>,
 }
 
@@ -208,6 +210,7 @@ impl DeviceActionStore {
                 accept_until,
                 outcome: None,
                 given_up: false,
+                uploaded: false,
                 tx,
             },
         );
@@ -221,6 +224,29 @@ impl DeviceActionStore {
     /// What kind of action `action_id` is, so a result is judged against the right contract.
     pub fn action_name(&self, action_id: &str) -> Option<&'static str> {
         self.lock().actions.get(action_id).map(|r| r.name)
+    }
+
+    /// The gate for an action whose data goes to HQ by its own route rather than in the result: the
+    /// action must be a `name` action the phone has acknowledged, still inside its window, and not
+    /// taken before. Returns the payload HQ sent, so the route can hold the phone to it. The id is
+    /// random and single use, so it is the only credential the route needs.
+    pub fn claim_upload(&self, action_id: &str, name: &str) -> Result<Value, Reject> {
+        let mut inner = self.lock();
+        let now = self.clock.now();
+        let record = inner.actions.get_mut(action_id).ok_or(Reject::Unknown)?;
+        if record.name != name {
+            return Err(Reject::Unknown);
+        }
+        match record.phase {
+            Phase::Acked if now <= record.accept_until => {}
+            Phase::Acked | Phase::Abandoned => return Err(Reject::Expired),
+            Phase::Open => return Err(Reject::Unknown),
+            Phase::Settled => return Err(Reject::Resolved),
+        }
+        if std::mem::replace(&mut record.uploaded, true) {
+            return Err(Reject::Resolved);
+        }
+        Ok(record.payload.clone().unwrap_or(Value::Null))
     }
 
     /// The phone has the action and will act on it.

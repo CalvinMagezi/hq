@@ -1,0 +1,1 @@
+**Dashboards you can filter.** A dashboard note shows a dropdown for each short text column. A choice narrows the tiles and charts on your screen only; the note is not changed. Charts have axes, value labels and a tap to read a value, several series from `group`, and tiles over a column show the last step and a small line.

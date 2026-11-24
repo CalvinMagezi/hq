@@ -64,7 +64,7 @@ export function HtmlViewer({ content, path: filePath }: { content: string; path:
                 <div className="flex items-center gap-2">
                     <span
                         className="text-[10px] font-mono px-2 py-1 rounded-lg font-bold tracking-wider"
-                        style={{ background: 'rgba(255,68,68,0.1)', color: 'var(--accent-red)' }}
+                        style={{ background: 'rgba(255,68,68,0.1)', color: 'var(--danger)' }}
                     >
                         HTML
                     </span>
@@ -78,7 +78,7 @@ export function HtmlViewer({ content, path: filePath }: { content: string; path:
                             onClick={() => setViewMode('render')}
                             className="px-2.5 py-1 text-[9px] tracking-wider uppercase font-mono font-bold transition-all rounded-lg"
                             style={{
-                                color: viewMode === 'render' ? 'var(--accent-green)' : 'var(--text-dim)',
+                                color: viewMode === 'render' ? 'var(--text-green)' : 'var(--ink-muted)',
                                 background: viewMode === 'render' ? 'rgba(0,255,163,0.08)' : 'transparent',
                             }}
                         >
@@ -88,7 +88,7 @@ export function HtmlViewer({ content, path: filePath }: { content: string; path:
                             onClick={() => setViewMode('source')}
                             className="px-2.5 py-1 text-[9px] tracking-wider uppercase font-mono font-bold transition-all rounded-lg"
                             style={{
-                                color: viewMode === 'source' ? 'var(--accent-green)' : 'var(--text-dim)',
+                                color: viewMode === 'source' ? 'var(--text-green)' : 'var(--ink-muted)',
                                 background: viewMode === 'source' ? 'rgba(0,255,163,0.08)' : 'transparent',
                             }}
                         >
@@ -101,7 +101,7 @@ export function HtmlViewer({ content, path: filePath }: { content: string; path:
                     href={fileUrl ?? undefined}
                     download
                     className="px-3 py-1.5 rounded-xl text-xs font-mono transition-all"
-                    style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-dim)', border: '1px solid rgba(255,255,255,0.08)' }}
+                    style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--ink-muted)', border: '1px solid rgba(255,255,255,0.08)' }}
                 >
                     Download
                 </a>
@@ -132,7 +132,7 @@ export function HtmlViewer({ content, path: filePath }: { content: string; path:
                     style={{
                         background: 'rgba(22,22,38,0.6)',
                         border: '1px solid rgba(0,255,163,0.15)',
-                        color: 'var(--text-primary)',
+                        color: 'var(--ink)',
                         maxHeight: '80vh',
                         whiteSpace: 'pre-wrap',
                         wordBreak: 'break-word',

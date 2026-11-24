@@ -316,6 +316,20 @@ impl HqTool for BatchEditTool {
 mod tests {
     use super::*;
 
+    /// Whether file permissions stop this user. Root writes through a read-only file, so a test that needs a write
+    /// to be refused cannot see one and skips itself.
+    fn permissions_are_enforced() -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let probe = dir.path().join("probe");
+        std::fs::write(&probe, "x").unwrap();
+        std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o444)).unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&probe)
+            .is_err()
+    }
+
     fn tool() -> BatchEditTool {
         BatchEditTool::new(FileStateCache::new(), FileHistory::new(10, 1024 * 1024))
     }
@@ -323,6 +337,10 @@ mod tests {
     #[tokio::test]
     async fn a_failed_edit_rolls_back_edits_already_applied_in_the_batch() {
         use std::os::unix::fs::PermissionsExt;
+
+        if !permissions_are_enforced() {
+            return;
+        }
 
         let dir = tempfile::tempdir().unwrap();
         let a = dir.path().join("a.txt");
@@ -357,6 +375,10 @@ mod tests {
     #[tokio::test]
     async fn evicted_snapshot_reports_rollback_failed_instead_of_silently_staying_applied() {
         use std::os::unix::fs::PermissionsExt;
+
+        if !permissions_are_enforced() {
+            return;
+        }
 
         // FileHistory holds only 1 snapshot at a time — a batch touching 3
         // files evicts the earliest snapshots before the apply loop even

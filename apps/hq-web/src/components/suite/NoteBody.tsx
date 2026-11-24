@@ -7,6 +7,7 @@ import { MarkdownViewer } from '../MarkdownViewer'
 
 // Each viewer is its own chunk, fetched only when a note of that kind opens, so Chat's first load does not grow.
 const SuiteViewer = lazy(() => import('./SuiteViewer').then((m) => ({ default: m.SuiteViewer })))
+const DocBody = lazy(() => import('./DocTools').then((m) => ({ default: m.DocBody })))
 
 interface Props {
   /** The whole note, frontmatter included. */
@@ -29,6 +30,14 @@ export function NoteBody({ content, activePath, zoom, hash, onSaved }: Props) {
   const htmlDoc = useMemo(() => (suite ? null : extractHtmlDocument(content, activePath)), [content, activePath, suite])
   if (htmlDoc) {
     return <HtmlDashboardView html={htmlDoc} path={activePath} />
+  }
+  // A doc the suite made (suite_kind: doc) gets the outline, find and replace and block tools.
+  if (!suite && activePath && readHqmd(content).kind === 'doc') {
+    return (
+      <Suspense fallback={<p className="a-body-sm a-muted">{t('chat_pane_loading')}</p>}>
+        <DocBody content={content} path={activePath} hash={hash} zoom={zoom} onSaved={onSaved} />
+      </Suspense>
+    )
   }
   if (!suite) {
     return <MarkdownViewer content={content} activePath={activePath} zoom={zoom} />

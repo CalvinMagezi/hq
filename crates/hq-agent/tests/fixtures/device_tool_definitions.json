@@ -163,5 +163,24 @@
       "type": "object"
     },
     "read_only": true
+  },
+  {
+    "category": "device",
+    "description": "Read the owner's MTN and Airtel Money transaction messages on their phone and add them to their private finance ledger as drafts to review. Load the finance-import skill first. The owner is asked to approve every import. The messages are never shown to you: the result is only counts (messages seen, ignored, transactions found, rows added, rows waiting for review) and a link to the ledger. Optional since_days limits how far back the phone reads, 1 to 365; without it the phone reads since its last import. The owner's phone is in Europe/London and it is Saturday 2026-01-10 12:00 there.",
+    "live_user_turn": true,
+    "name": "finance_import_messages",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "since_days": {
+          "description": "How many days back to read. Leave out to read since the last import.",
+          "maximum": 365,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "read_only": false
   }
 ]

@@ -37,6 +37,7 @@ describe('foundations (AlignedFoundations)', () => {
   test('Clear Sans, no glass: no other web fonts and no blur', () => {
     expect(app).not.toContain('@fontsource')
     expect(app).not.toMatch(/backdrop-filter/)
-    expect(app).toMatch(/--font-body:\s*var\(--font-sans\)/)
+    expect(app).toMatch(/font-family:\s*var\(--font-sans\)/)
+    expect(app).not.toContain('--font-body')
   })
 })

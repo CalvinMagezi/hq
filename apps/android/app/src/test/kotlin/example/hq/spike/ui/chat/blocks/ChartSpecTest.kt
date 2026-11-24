@@ -148,4 +148,27 @@ class ChartSpecTest {
         assertEquals(2, Charts.labelEvery(16))
         assertEquals(42, Charts.percent(16.0, 38.0))
     }
+
+    @Test fun areaStackedAndScatterAreAcceptedLikeTheWebChart() {
+        for (kind in listOf("area", "stacked")) assertTrue(kind, Charts.parse(payload("type" to kind)) is ChartParse.Ok)
+        val xs = JSONArray(listOf("1", "2.5", "4"))
+        assertTrue(Charts.parse(payload("type" to "scatter", "labels" to xs)) is ChartParse.Ok)
+        // A scatter point needs a number for its x, which the label carries.
+        assertEquals("scatter charts need a number for every label, the x position of each point", reason(payload("type" to "scatter")))
+        assertEquals("type must be one of line, bar, area, stacked, scatter, pie, donut", reason(payload("type" to "radar")))
+    }
+
+    @Test fun stackedColumnsStackFromZeroAndTheScaleHoldsTheTops() {
+        val spec = (Charts.parse(payload("type" to "stacked")) as ChartParse.Ok).spec
+        // Series are 1,4,2 and 3,2,5, so the stacks are 4, 6 and 7 high.
+        val bands = Charts.stackBands(spec.series)
+        assertEquals(listOf(0.0 to 1.0, 0.0 to 4.0, 0.0 to 2.0), bands[0])
+        assertEquals(listOf(1.0 to 4.0, 4.0 to 6.0, 2.0 to 7.0), bands[1])
+        assertEquals(7.0, Charts.yValuesOf(spec).max(), 0.0)
+    }
+
+    @Test fun aScatterXAxisIsRoundAndNeverForcedToZero() {
+        assertEquals(10.0 to 40.0, Charts.xScale(listOf(12.0, 25.0, 38.0)))
+        assertEquals(4.0 to 6.0, Charts.xScale(listOf(5.0)))
+    }
 }

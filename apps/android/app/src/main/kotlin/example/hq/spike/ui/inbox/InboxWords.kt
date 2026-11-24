@@ -117,6 +117,7 @@ object InboxWords {
         "calendar_update_event" -> "HQ wants to change a calendar event"
         "calendar_list_events" -> "HQ wants to look at your calendar"
         "contacts_search" -> "HQ wants to look up a contact"
+        "finance_import_messages" -> "HQ wants to read your mobile-money messages"
         "bash" -> "HQ wants to run a command"
         "web_fetch" -> "HQ wants to open a web page"
         "task_delete" -> "HQ wants to delete a task"

@@ -52,7 +52,7 @@ export function SlashCommandPalette({ input, onSelect }: Props) {
         boxShadow: '0 -10px 40px rgba(0,0,0,0.6)',
       }}
     >
-      <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider border-b border-white/5 opacity-60" style={{ color: 'var(--accent-green)' }}>
+      <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider border-b border-white/5 opacity-60" style={{ color: 'var(--text-green)' }}>
         {t('chat_slash_heading')}
       </div>
       <div className="max-h-48 overflow-y-auto p-1.5 space-y-1">
@@ -69,7 +69,7 @@ export function SlashCommandPalette({ input, onSelect }: Props) {
               <span className="font-bold text-emerald-400">{cmd.name}</span>
               {cmd.args && <span className="opacity-40 text-[11px]">{cmd.args}</span>}
             </div>
-            <span className="text-[11px] opacity-60 truncate max-w-[200px]" style={{ color: 'var(--text-dim)' }}>
+            <span className="text-[11px] opacity-60 truncate max-w-[200px]" style={{ color: 'var(--ink-muted)' }}>
               {t(cmd.description)}
             </span>
           </button>

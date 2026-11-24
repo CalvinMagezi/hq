@@ -1,5 +1,5 @@
 frontmatter: 62 bytes
-meta: SuiteMeta { kind: Some(Sheet), fidelity: Some(Native), original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None }
+meta: SuiteMeta { kind: Some(Sheet), fidelity: Some(Native), original_state: None, original_sink: None, original_bytes: None, shrunk_at: None, saved_bytes: None, toc: None, header: None }
  0 Heading { level: 1 } | # Stock
  1 Paragraph | Counted on the first of the month.
  2 Typed(Sheet) | ```sheet name=Stock types="text,int,ugx,ugx" id=stock

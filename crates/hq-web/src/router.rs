@@ -27,6 +27,11 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .unwrap_or(std::path::Path::new("web/dist"))
         .to_path_buf();
 
+    // An agent's `office_edit` write reaches open pages as a `note_changed` event.
+    let announcer = state.clone();
+    hq_tool_api::office::set_note_listener(Some(Box::new(move |note, revision| {
+        announcer.announce_note(note, revision);
+    })));
     notifications_watch::spawn_notifications_watcher(state.clone());
     web_push::spawn_dispatcher(state.clone());
     tasks_watch::spawn_tasks_watcher(state.clone());
@@ -36,7 +41,8 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         subagent_followup::spawn_subagent_followup(state.clone());
     }
 
-    let router = device_actions_api::routes(oauth::routes(Router::new(), &state))
+    let finance = finance_api::routes(Router::new());
+    let router = device_actions_api::routes(oauth::routes(finance, &state))
         .route("/ws", get(ws::ws_handler))
         .route("/health", get(api::health_handler))
         .route(hello::HELLO_PATH, get(hello::hello_handler))

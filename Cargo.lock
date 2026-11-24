@@ -1875,7 +1875,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c54e03a951783e8b327515db3f2a2fd0e3bed362a96b066f341ce66ed49b4ead"
 dependencies = [
  "data-encoding",
- "syn 3.0.6",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -2717,9 +2717,9 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -3470,6 +3470,7 @@ dependencies = [
  "hq-db",
  "hq-edge",
  "hq-export",
+ "hq-finance",
  "hq-gate",
  "hq-host",
  "hq-llm",
@@ -3682,6 +3683,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hq-finance"
+version = "0.9.1"
+dependencies = [
+ "chrono",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "hq-gate"
 version = "0.9.1"
 dependencies = [
@@ -3846,6 +3858,7 @@ dependencies = [
  "hex",
  "hq-backup",
  "hq-convert",
+ "hq-finance",
  "hq-suite-calc",
  "hq-suite-docs",
  "hq-suite-governor",
@@ -3863,6 +3876,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml 0.8.2",
+ "zip 9.0.5",
 ]
 
 [[package]]
@@ -4026,6 +4040,7 @@ dependencies = [
  "hq-core",
  "hq-db",
  "hq-export",
+ "hq-finance",
  "hq-gate",
  "hq-host",
  "hq-llm",
@@ -4086,6 +4101,7 @@ dependencies = [
  "hq-export",
  "hq-suite-adapter",
  "hq-tool-api",
+ "hq-vault",
  "serde_json",
  "tempfile",
  "tokio",
@@ -4206,6 +4222,7 @@ dependencies = [
  "hq-db",
  "hq-edge",
  "hq-export",
+ "hq-finance",
  "hq-llm",
  "hq-mcp",
  "hq-suite-adapter",
@@ -11046,9 +11063,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",

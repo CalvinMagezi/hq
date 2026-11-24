@@ -25,7 +25,8 @@ describe('reading hqmd', () => {
   })
   test('slides are the level 2 headings, with an optional layout', () => {
     const slides = slidesOf('# Deck\n\n## One\n\nHello\n\n## Two\n<!-- layout: two-column -->\nWorld\n')
-    expect(slides).toEqual([{ title: 'One', body: 'Hello', layout: null }, { title: 'Two', body: 'World', layout: 'two-column' }])
+    const none = { transition: null, background: null, color: null, notes: null }
+    expect(slides).toEqual([{ title: 'One', body: 'Hello', layout: null, ...none }, { title: 'Two', body: 'World', layout: 'two-column', ...none }])
   })
   test('only sheets, slides and dashboards get a viewer', () => {
     expect(hasViewer(readHqmd(NOTE))).toBe(true)

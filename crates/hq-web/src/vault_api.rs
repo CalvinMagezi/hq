@@ -711,6 +711,12 @@ pub(crate) fn update_preserving_frontmatter(
     now_iso: &str,
 ) -> String {
     let (fm, _) = split_frontmatter(existing);
+    // A client that holds the whole note (the suite editors do) sends its frontmatter back with the
+    // body. The note's own frontmatter is the one that stays, so the copy that came with the text is
+    // dropped instead of being written as a second block.
+    let new_body = split_frontmatter(new_body)
+        .0
+        .map_or(new_body, |_| split_frontmatter(new_body).1);
     let mut lines: Vec<String> = fm
         .unwrap_or("")
         .lines()

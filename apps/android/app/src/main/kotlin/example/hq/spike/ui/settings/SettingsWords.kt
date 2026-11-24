@@ -33,7 +33,7 @@ data class SettingsSnapshot(
 )
 
 /** Keys on this phone, Speech model and Connected tools are sections inside Keys, Assistant and Computers; their old names live on in [SettingsRoutes]. */
-enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, Computers, CaptureWidgets, SetupApp, PairApp, Technical, Noticed, Update, Assistant, Calendar, Contacts, Suggests }
+enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, Computers, CaptureWidgets, SetupApp, PairApp, Technical, Noticed, Update, Assistant, Calendar, Contacts, Finance, Suggests }
 
 /** The Settings row that opens the GitHub connection. */
 const val HQ_CODER_ROW = "github"
@@ -171,6 +171,7 @@ object SettingsWords {
         HomeRowSpec(SettingsPage.Assistant, "assistant", R.string.assist_row_title),
         HomeRowSpec(SettingsPage.Calendar, "calendar", R.string.cal_row_title),
         HomeRowSpec(SettingsPage.Contacts, "contacts", R.string.contacts_row_title),
+        HomeRowSpec(SettingsPage.Finance, "finance", R.string.finance_row_title),
         HomeRowSpec(SettingsPage.CaptureWidgets, "capture", R.string.settings_page_capture),
     )
 

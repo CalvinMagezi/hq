@@ -12,7 +12,7 @@ use hq_suite_md::{
     BlockType, ColType, Document, Grid, Severity, TypedBlock, frontmatter, has_errors, validate,
 };
 use hq_suite_store::{SuitePaths, fsx};
-use hq_suite_xlsx::{SheetSpec, write_xlsx};
+use hq_suite_xlsx::{SheetSpec, write_xlsx_with_charts};
 use serde::Deserialize;
 
 use crate::docs;
@@ -187,10 +187,21 @@ pub fn create_note(
             }
         }
     };
+    write_note(vault, kind.name(), title, folder, &body)
+}
+
+/// Writes a note of `suite_kind` `kind` (`sheet`, `doc`, `slides` or `dashboard`) whose text after the
+/// frontmatter is `body`, checks that it is valid hqmd, and never replaces a note.
+pub(crate) fn write_note(
+    vault: &Path,
+    kind: &str,
+    title: &str,
+    folder: Option<&str>,
+    body: &str,
+) -> Result<String> {
     let note = format!(
-        "---\ntitle: {}\nsuite_kind: {}\nsuite_fidelity: native\n---\n\n{body}",
+        "---\ntitle: {}\nsuite_kind: {kind}\nsuite_fidelity: native\n---\n\n{body}",
         yaml_quoted(title),
-        kind.name()
     );
     let doc = Document::parse(&note);
     let problems = validate(&doc);
@@ -301,12 +312,27 @@ fn csv_of(spec: &SheetSpec) -> String {
 pub fn sheet_bytes(text: &str, format: &str) -> Option<Result<(Vec<u8>, String)>> {
     let specs = sheets_of(text).ok()?;
     Some(match format {
-        "xlsx" => write_xlsx(&specs)
-            .map(|(bytes, report)| (bytes, report.fidelity_line()))
-            .map_err(Into::into),
+        "xlsx" => xlsx_with_charts(text, "", &specs),
         "csv" => Ok((csv_of(&specs[0]).into_bytes(), csv_fidelity(specs.len()))),
         other => Err(anyhow::anyhow!("`{other}` is not a sheet format")),
     })
+}
+
+/// The workbook with the note's plain `plot` blocks as native charts. A plot that filters or groups
+/// has no range behind it and is left out, and the statement says how many.
+fn xlsx_with_charts(text: &str, note: &str, specs: &[SheetSpec]) -> Result<(Vec<u8>, String)> {
+    let native = crate::charts::native_charts(text, note);
+    let (bytes, report) = write_xlsx_with_charts(specs, &native.charts)?;
+    let mut line = report.fidelity_line();
+    if native.left_out > 0 {
+        line.push_str(&format!(
+            " {} chart{} that filter or group rows {} not included.",
+            native.left_out,
+            if native.left_out == 1 { "" } else { "s" },
+            if native.left_out == 1 { "is" } else { "are" },
+        ));
+    }
+    Ok((bytes, line))
 }
 
 fn csv_fidelity(sheets: usize) -> String {
@@ -330,11 +356,9 @@ pub fn export_note(vault: &Path, note_rel: &str, format: &str, out: &Path) -> Re
         std::fs::read_to_string(&note).with_context(|| format!("{note_rel} cannot be read"))?;
     match format {
         "xlsx" => {
-            let (bytes, report) = write_xlsx(&sheets_of(&text)?)?;
+            let (bytes, fidelity) = xlsx_with_charts(&text, note_rel, &sheets_of(&text)?)?;
             fsx::atomic_write(out, &bytes)?;
-            Ok(Exported {
-                fidelity: report.fidelity_line(),
-            })
+            Ok(Exported { fidelity })
         }
         "csv" => {
             let specs = sheets_of(&text)?;

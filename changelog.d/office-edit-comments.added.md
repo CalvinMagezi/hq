@@ -1,0 +1,1 @@
+**HQ can leave review comments on a document or deck, and close them.** Ask HQ to review a note and it can leave a comment on a paragraph, list the open ones, and mark one resolved. Comments stay in your note and are never put in an exported Word, Excel, PowerPoint or PDF file.

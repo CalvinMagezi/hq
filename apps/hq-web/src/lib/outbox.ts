@@ -2,7 +2,7 @@ import { del, get, set } from 'idb-keyval'
 import { t } from '~/strings'
 import { keyFor as keyedName } from './savedCopy'
 
-export type OutboxKind = 'message' | 'note' | 'task'
+export type OutboxKind = 'message' | 'note' | 'task' | 'comment'
 
 export interface OutboxEntry {
   client_id: string

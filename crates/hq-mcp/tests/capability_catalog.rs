@@ -28,6 +28,7 @@ fn every_catalog_tool_is_registered() {
                 hq_tool_api::office::OFFICE_TOOL,
                 "office_create",
                 "office_export",
+                "office_edit",
             ];
             let optional = suite_tool.contains(&tool) && !cfg!(feature = "suite");
             !optional && registry.get(tool).is_none()

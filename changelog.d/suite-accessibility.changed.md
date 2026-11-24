@@ -1,0 +1,1 @@
+**Suite pages follow the system settings.** Reduced motion turns off slide transitions, forced colours keeps selected cells and chosen cards visible, and the grid can be set to compact rows for a mouse (a finger always gets full-size cells).

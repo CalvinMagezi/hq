@@ -111,15 +111,48 @@ pub fn find_active_by_dedup(
     })
 }
 
-/// Canonical emit: insert unless an active item with the same (kind, dedup_key)
-/// already exists, in which case collapse (skip). Best-effort callers ignore the result.
+/// Canonical emit: atomically insert unless an active or dismissed item with
+/// the same (kind, dedup_key) already exists, in which case collapse (skip).
+/// Best-effort callers ignore the result.
 pub fn emit(db: &Database, item: &ValueItem) -> Result<()> {
-    if let Some(key) = &item.dedup_key
-        && find_active_by_dedup(db, item.kind, key)?.is_some()
-    {
-        return Ok(());
-    }
-    insert(db, item)
+    db.with_conn(|c| {
+        let tx = rusqlite::Transaction::new_unchecked(c, rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(key) = &item.dedup_key {
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM value_items \
+                 WHERE kind = ?1 AND dedup_key = ?2 \
+                 AND state IN ('pending','routed','delivered','dismissed'))",
+                params![item.kind.as_str(), key],
+                |r| r.get(0),
+            )?;
+            if exists {
+                return Ok(());
+            }
+        }
+        insert_on(&tx, item)?;
+        tx.commit()?;
+        Ok(())
+    })
+}
+
+/// Dismiss every open item from `source_task` carrying `dedup_key` (never deletes).
+/// Runs on a caller-held connection so it can share a transaction.
+pub fn dismiss_open_by_dedup_on(
+    c: &rusqlite::Connection,
+    source_task: &str,
+    dedup_key: &str,
+) -> Result<usize> {
+    let n = c.execute(
+        "UPDATE value_items \
+         SET state = 'dismissed', \
+             engagement = COALESCE(engagement, 'dismissed'), \
+             engaged_at = COALESCE(engaged_at, ?3), \
+             engagement_mac = NULL \
+         WHERE source_task = ?1 AND dedup_key = ?2 \
+           AND state IN ('pending', 'routed', 'delivered')",
+        params![source_task, dedup_key, ts(&Utc::now())],
+    )?;
+    Ok(n)
 }
 
 /// Open the vault database and emit. For producers that only hold a vault path.

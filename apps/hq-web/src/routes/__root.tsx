@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { MoreHorizontal, Search, Settings } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { WebSocketProvider } from '~/context/WebSocketContext'
+import { NoteChangedBridge } from '~/lib/useNoteChanged'
 import { SearchOverlay } from '~/components/SearchOverlay'
 import { QuickNoteOverlay } from '~/components/QuickNoteOverlay'
 import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
@@ -121,6 +122,7 @@ function RootComponent() {
   return (
     <RootDocument>
       <WebSocketProvider>
+        <NoteChangedBridge />
         <SetupRedirect />
         <VaultShell embedded={embedded} />
         {/* The app has its own quick note screen. */}

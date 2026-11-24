@@ -85,6 +85,20 @@
   tools: [office_create, office_export]
   needs: [model]
 
+- id: start-from-template
+  group: documents
+  says: Start from a ready-made template
+  example: Make me a savings group ledger
+  tools: [office_create, office_export]
+  needs: [model]
+
+- id: edit-document
+  group: documents
+  says: Edit a sheet, doc or deck you have
+  example: Add June's sales to my stock sheet
+  tools: [office_edit, office_export]
+  needs: [model]
+
 - id: share-file
   group: documents
   says: Hand over a file you can send

@@ -101,16 +101,21 @@ private fun SavedPill(age: String) {
 private fun NoteBody(sheet: NoteSheet, blocks: BlockActions, modifier: Modifier) {
     val parsed = remember(sheet.body) { parseBlocks(NoteText.withoutFrontmatter(sheet.body)) }
     val scroll = rememberScrollState()
-    Box(modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = FadeHeight)) {
-            Blocks(parsed, blocks)
-            if (sheet.truncated) {
-                Text(stringResource(R.string.chat_this_note_is_long), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 12.dp))
+    androidx.compose.runtime.CompositionLocalProvider(
+        example.hq.spike.ui.chat.blocks.LocalNotePath provides sheet.path,
+        example.hq.spike.ui.chat.blocks.LocalBlocksRevision provides remember(sheet.path) { androidx.compose.runtime.mutableIntStateOf(0) },
+    ) {
+        Box(modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = FadeHeight)) {
+                Blocks(parsed, blocks)
+                if (sheet.truncated) {
+                    Text(stringResource(R.string.chat_this_note_is_long), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 12.dp))
+                }
             }
-        }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Mts.Hairline))
-        if (scroll.canScrollForward) {
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(FadeHeight).background(Brush.verticalGradient(listOf(Color.Transparent, Mts.Surface100))))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Mts.Hairline))
+            if (scroll.canScrollForward) {
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(FadeHeight).background(Brush.verticalGradient(listOf(Color.Transparent, Mts.Surface100))))
+            }
         }
     }
 }
