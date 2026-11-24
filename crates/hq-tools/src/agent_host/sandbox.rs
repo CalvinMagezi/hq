@@ -125,15 +125,18 @@ pub(super) fn extend_plan(mut plan: Value, grants: &hq_core::grants::SandboxDelt
         // local addresses unless a rule names them as private (as `plan` does for config ports).
         if !grants.loopback_ports.is_empty() {
             for host in LOOPBACK_NAMES {
-                list.push(json!({ "host": host, "ports": grants.loopback_ports, "private": true }));
+                let rule = json!({ "host": host, "ports": grants.loopback_ports, "private": true });
+                if !list.contains(&rule) {
+                    list.push(rule);
+                }
             }
         }
-        list.extend(
-            grants
-                .allow
-                .iter()
-                .map(|(host, port)| json!({ "host": host, "ports": [port] })),
-        );
+        for (host, port) in &grants.allow {
+            let rule = json!({ "host": host, "ports": [port] });
+            if !list.contains(&rule) {
+                list.push(rule);
+            }
+        }
     }
     plan
 }
@@ -226,6 +229,11 @@ mod tests {
             extend_plan(plan.clone(), &delta)["writable"],
             plan["writable"],
             "twice adds nothing"
+        );
+        assert_eq!(
+            extend_plan(plan.clone(), &delta)["allow"],
+            plan["allow"],
+            "a host granted twice is listed once"
         );
         assert_eq!(extend_plan(base.clone(), &SandboxDelta::default()), base);
         let none = json!({ "mode": "none" });

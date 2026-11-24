@@ -52,6 +52,8 @@ mod pane;
 mod programs;
 mod proto;
 #[cfg(unix)]
+mod proxy_env;
+#[cfg(unix)]
 mod publish;
 #[cfg(unix)]
 mod quota;
