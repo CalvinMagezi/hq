@@ -140,6 +140,7 @@ fn network_goes_only_through_the_allowlist_and_denials_are_logged() {
     let allow = vec![Allow {
         host: "localhost".into(),
         ports: vec![up],
+        port_ranges: Vec::new(),
         private: true,
     }];
     let script = format!(

@@ -1,4 +1,8 @@
-//! What the egress proxy needs of a sandboxed agent's environment beyond the usual variables.
+//! What the egress proxy needs of a sandboxed agent: its rules from the plan, and the environment
+//! beyond the usual variables.
+
+use crate::egress::Rule;
+use crate::sandbox::Allow;
 
 /// Java and Gradle ignore the proxy variables, so a build under the strict profile cannot resolve
 /// a host even when the owner allowed it. Every JVM reads this one, so they use the sandbox's proxy.
@@ -14,6 +18,19 @@ pub(crate) fn java_proxy_options(port: u16, existing: Option<&str>) -> String {
         Some(e) => format!("{e} {proxy}"),
         None => proxy,
     }
+}
+
+pub(crate) fn rules(allow: &[Allow]) -> Vec<Rule> {
+    allow
+        .iter()
+        .map(|a| {
+            let mut rule = Rule::new(&a.host);
+            rule.ports = a.ports.clone();
+            rule.port_ranges = a.port_ranges.clone();
+            rule.allow_private = a.private;
+            rule
+        })
+        .collect()
 }
 
 #[cfg(test)]

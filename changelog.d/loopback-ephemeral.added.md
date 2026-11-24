@@ -1,0 +1,1 @@
+A helper can ask to connect to local services on random ports (what Flutter's test runner needs) with `sandbox_request` capability loopback and resource ephemeral. It opens only ports 49152 to 65535 through the sandbox proxy, you are asked unless a profile allows it, and HQ's own ports and adb stay closed.

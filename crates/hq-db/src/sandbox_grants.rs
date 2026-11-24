@@ -414,6 +414,7 @@ pub fn delta_for_scopes(db: &Database, scopes: &[String], now: i64) -> Result<Sa
         merged.writable.extend(d.writable);
         merged.readable.extend(d.readable);
         merged.loopback_ports.extend(d.loopback_ports);
+        merged.loopback_ephemeral |= d.loopback_ephemeral;
         merged.allow.extend(d.allow);
     }
     merged.writable.sort();

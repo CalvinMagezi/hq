@@ -175,6 +175,9 @@ fn describe(req: &GrantRequest) -> String {
     let what = match req.capability {
         Capability::FsWrite => "write to",
         Capability::FsRead => "read",
+        Capability::Loopback if req.resource == hq_core::grants::EPHEMERAL_PORTS => {
+            return "connect to local services on random ports (49152 and up), such as a test runner's listener".to_string();
+        }
         Capability::Loopback => "connect to local port",
         Capability::Egress => "reach",
     };
@@ -239,6 +242,9 @@ fn delta_for_owner_approval(req: &GrantRequest) -> SandboxDelta {
     match req.capability {
         Capability::FsWrite => d.writable.push(PathBuf::from(&req.resource)),
         Capability::FsRead => d.readable.push(PathBuf::from(&req.resource)),
+        Capability::Loopback if req.resource == hq_core::grants::EPHEMERAL_PORTS => {
+            d.loopback_ephemeral = true;
+        }
         Capability::Loopback => d.loopback_ports.extend(req.resource.parse::<u16>()),
         Capability::Egress => {
             // `normalize` made the resource `host:port`; anything else never reaches here.
@@ -435,6 +441,7 @@ pub(super) fn launch_delta(
             delta.writable.extend(extra.writable);
             delta.readable.extend(extra.readable);
             delta.loopback_ports.extend(extra.loopback_ports);
+            delta.loopback_ephemeral |= extra.loopback_ephemeral;
             delta.allow.extend(extra.allow);
         }
     }
@@ -445,6 +452,7 @@ pub(super) fn launch_delta(
         delta.writable.extend(base.writable);
         delta.readable.extend(base.readable);
         delta.loopback_ports.extend(base.loopback_ports);
+        delta.loopback_ephemeral |= base.loopback_ephemeral;
         delta.allow.extend(base.allow);
     }
     let safe = |list: Vec<PathBuf>| -> Vec<PathBuf> {

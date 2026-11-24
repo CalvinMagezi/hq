@@ -2,10 +2,10 @@
 //! egress listener it may connect to, the paths it may touch, and the proxy
 //! variables that make its HTTP clients use the listener.
 
-use crate::egress::{Egress, Rule};
+use crate::egress::Egress;
 use crate::error::HostError;
 use crate::linked_git::{linked_git_dirs, linked_protected, linked_writable};
-use crate::proxy_env::{JAVA_OPTIONS_ENV, java_proxy_options};
+use crate::proxy_env::{JAVA_OPTIONS_ENV, java_proxy_options, rules};
 use crate::server;
 use hq_sandbox::{
     AgentSandbox, Backend, HiddenDir, Network, ReadRestriction, Relay, backend, canonical, wrap,
@@ -414,6 +414,9 @@ pub struct Allow {
     pub host: String,
     #[serde(default)]
     pub ports: Vec<u16>,
+    /// Port ranges, both ends included, for a client that picks a random local port.
+    #[serde(default)]
+    pub port_ranges: Vec<(u16, u16)>,
     /// The name may resolve to a private address (an operator-named endpoint).
     #[serde(default)]
     pub private: bool,
@@ -483,18 +486,6 @@ pub(crate) struct Confined {
     pub argv: Vec<String>,
     pub env: Vec<(String, String)>,
     pub egress_port: Option<u16>,
-}
-
-fn rules(allow: &[Allow]) -> Vec<Rule> {
-    allow
-        .iter()
-        .map(|a| {
-            let mut rule = Rule::new(&a.host);
-            rule.ports = a.ports.clone();
-            rule.allow_private = a.private;
-            rule
-        })
-        .collect()
 }
 
 /// Where one Claude Code account keeps its state: the default `~/.claude` (with
@@ -1335,6 +1326,7 @@ pub(crate) fn confine(
                     own_spec.allow.push(Allow {
                         host: host.to_string(),
                         ports: vec![443],
+                        port_ranges: Vec::new(),
                         private: false,
                     });
                 }
