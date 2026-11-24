@@ -7,6 +7,7 @@
 //! The tool's name and the actions that move an original are in `hq_tool_api::office`.
 
 pub mod author;
+pub mod edit;
 
 use std::path::PathBuf;
 
@@ -21,11 +22,18 @@ pub struct OfficeFileTool {
     vault: PathBuf,
 }
 
-pub fn create_office_tools(vault: PathBuf) -> Vec<Box<dyn HqTool>> {
+pub fn create_office_tools(
+    vault: PathBuf,
+    seam: Option<hq_tool_api::office::SharedSeam>,
+) -> Vec<Box<dyn HqTool>> {
     let mut tools: Vec<Box<dyn HqTool>> = vec![Box::new(OfficeFileTool {
         vault: vault.clone(),
     })];
-    tools.extend(author::create_author_tools(vault));
+    tools.push(Box::new(edit::OfficeEditTool {
+        vault: vault.clone(),
+        seam: seam.clone(),
+    }));
+    tools.extend(author::create_author_tools(vault, seam));
     tools
 }
 
@@ -114,7 +122,7 @@ mod tests {
         let vault = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(vault.path().join("Notebooks")).unwrap();
         std::fs::write(vault.path().join("Notebooks/a.docx"), b"x").unwrap();
-        let tool = create_office_tools(vault.path().to_path_buf()).remove(0);
+        let tool = create_office_tools(vault.path().to_path_buf(), None).remove(0);
         assert_eq!(tool.name(), OFFICE_TOOL);
 
         let ok = tool

@@ -45,7 +45,7 @@ When you hand the figures to a verifier helper, give it each figure with its sou
 When the person asks for a dashboard, or for a comparison they can open, make a page, not an export of your notes.
 
 - Write ONE self-contained `.html` file: no external scripts, fonts or images, so it works offline. Save it under `Exports/` in the vault and attach it to the reply.
-- Draw one bar chart per comparison, in inline SVG or CSS bars: one bar per place, the unit on the axis. A range is a bar with whiskers, or two values, never a midpoint.
+- Draw one bar chart per comparison, in inline SVG or CSS bars: one bar per place, the unit on the axis. That is for the page you write yourself. If the chart sits in a note that is exported, use inline SVG only: the exporter keeps `svg`, `g`, `rect`, `line`, `path`, `circle`, `text`, `title` and `desc` with plain presentation attributes (`fill`, `stroke`, `x`, `y`, `width`, `height`, `viewBox`, `transform`, `font-size`, `text-anchor`, `role`, `aria-label`) and a `style` of simple paint and font properties. It drops scripts, `foreignObject`, `on*` handlers, external links and every `url(...)`, so a gradient or an external image will not survive, and the HTML wrapped around the SVG is not kept. A chart in a PDF, DOCX or spreadsheet export is not drawn at all. A range is a bar with whiskers, or two values, never a midpoint.
 - Add a small table with source, date, retail or wholesale, and confidence for every figure.
 - Set an explicit light page background and dark text colours on both `html` and `body`, so the page reads in any theme.
 - A place with no figure shows the words "no figure found". Never draw a zero bar for it.

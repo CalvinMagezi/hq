@@ -6,6 +6,8 @@ import org.json.JSONObject
 /** What a module reports back to HQ; the JSON is the domain's wire contract and passes through unchanged. */
 interface DeviceOutcome {
     val code: String
+    /** True when the module settled the action on its own route so the handler must not post a result. */
+    val alreadySettled: Boolean get() = false
     fun toJson(): JSONObject
 }
 

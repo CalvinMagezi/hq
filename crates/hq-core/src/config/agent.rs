@@ -58,6 +58,11 @@ pub struct DaemonConfig {
     #[serde(default = "default_true")]
     pub adoption_digest: bool,
 
+    /// A weekly inbox reminder to review finance rows and import new messages, only for a person
+    /// who has a ledger. Reads counts from the ledger; never a message, and never a model.
+    #[serde(default = "default_true")]
+    pub finance_nudge: bool,
+
     /// Offers, once, to set up the free coding helpers on a connected computer that has none
     /// (`docs/HELPER_SETUP.md`). One inbox item; nothing is installed until the owner approves it.
     #[serde(default = "default_true")]
@@ -117,6 +122,7 @@ impl Default for DaemonConfig {
             link_capture: true,
             tool_failure_digest: true,
             adoption_digest: true,
+            finance_nudge: true,
             helper_setup_offer: true,
             inbox_tidy: true,
             daily_brief: true,

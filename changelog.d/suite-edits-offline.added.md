@@ -1,0 +1,1 @@
+**Sheet, slide and doc edits made offline wait and are sent later.** An edit that cannot reach HQ is kept on this device and sent against the version you saw. If the note changed in the meantime nothing is overwritten: your version stays on screen to copy.

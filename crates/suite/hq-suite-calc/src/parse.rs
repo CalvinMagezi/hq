@@ -214,6 +214,23 @@ pub struct RefContext {
 /// Columns one sheet may use (Excel's XFD), so sheets laid side by side never overlap.
 pub const MAX_COLUMNS: u32 = 16_384;
 
+/// Rows one sheet may use (Excel's 1,048,576). A range that ends here is a whole-column range
+/// (`$B:$B`), which the evaluator cuts back to the rows the sheet actually uses.
+pub const MAX_ROWS: u32 = 1_048_576;
+
+/// `B`, `$B`, `AA`: a column with no row, as written in a whole-column range.
+fn column_only(text: &str) -> Option<u32> {
+    let t = text.strip_prefix('$').unwrap_or(text);
+    if t.is_empty() || t.len() > 3 || !t.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let mut col = 0u32;
+    for c in t.chars() {
+        col = col * 26 + (c.to_ascii_uppercase() as u32 - 'A' as u32 + 1);
+    }
+    Some(col - 1)
+}
+
 struct Parser<'a> {
     toks: Vec<Tok>,
     at: usize,
@@ -376,6 +393,17 @@ impl Parser<'_> {
                 row: c.row,
             })
         };
+        // `$B:$B` or `B:B`: the whole column, down to the last row Excel has.
+        if let (Some(c0), Some(Tok::Colon), Some(Tok::Ident(to))) = (
+            column_only(first),
+            self.toks.get(self.at),
+            self.toks.get(self.at + 1),
+        ) && let Some(c1) = column_only(to)
+        {
+            self.at += 2;
+            let whole = |col: u32, row: u32| place(CellRef { col, row });
+            return Ok(Expr::Range(whole(c0, 0)?, whole(c1, MAX_ROWS - 1)?));
+        }
         let Some(from) = cell_ref(first) else {
             // Not a cell: a name for `LET` to bind, or a defined name this engine does not know.
             return Ok(Expr::Var(first.to_string()));

@@ -279,6 +279,13 @@ pub struct Settlement {
     pub resolved_backend: String,
 }
 
+/// Dismiss any open inbox notice for this run without deleting it.
+fn dismiss_open_alerts(conn: &Connection, run_id: &str) -> Result<()> {
+    let key = format!("subagent-run-{run_id}");
+    crate::value_items::dismiss_open_by_dedup_on(conn, "subagent_runs", &key)?;
+    Ok(())
+}
+
 /// Settle a run once. Returns `true` only for the call that did it, so a
 /// duplicate settle (race sweep, retry) is a no-op. `wake` also writes the
 /// terminal event in the same transaction.
@@ -307,14 +314,17 @@ pub fn settle(
             now,
         ],
     )?;
-    if changed == 1 && wake {
-        insert_event(
-            &tx,
-            run_id,
-            KIND_SETTLED,
-            &format!("{KIND_SETTLED}:{run_id}"),
-            now,
-        )?;
+    if changed == 1 {
+        dismiss_open_alerts(&tx, run_id)?;
+        if wake {
+            insert_event(
+                &tx,
+                run_id,
+                KIND_SETTLED,
+                &format!("{KIND_SETTLED}:{run_id}"),
+                now,
+            )?;
+        }
     }
     tx.commit()?;
     Ok(changed == 1)
@@ -511,6 +521,7 @@ pub fn review(
             "run `{run_id}` cannot take this verdict: it is unsettled, cancelled, missing, or (for accepted) did not complete"
         );
     }
+    dismiss_open_alerts(conn, run_id)?;
     Ok(())
 }
 
@@ -523,7 +534,7 @@ pub const CONSUMED_NOTE: &str =
 /// any other outcome is only marked reviewed, keeping its `partial` or `blocked` status. A run
 /// with a verdict already is left alone, so an explicit review always wins.
 pub fn close_consumed(conn: &Connection, run_id: &str, now: i64) -> Result<()> {
-    conn.execute(
+    let changed = conn.execute(
         "UPDATE subagent_runs SET
              accept_status = CASE WHEN accept_status = 'unverified' AND exec_status = 'completed'
                                   THEN 'accepted' ELSE accept_status END,
@@ -534,6 +545,9 @@ pub fn close_consumed(conn: &Connection, run_id: &str, now: i64) -> Result<()> {
            AND exec_status != 'cancelled'",
         params![run_id, now, CONSUMED_NOTE],
     )?;
+    if changed > 0 {
+        dismiss_open_alerts(conn, run_id)?;
+    }
     Ok(())
 }
 
@@ -550,6 +564,9 @@ pub fn cancel(conn: &Connection, run_id: &str, now: i64) -> Result<bool> {
         "UPDATE subagent_events SET status = ?2 WHERE run_id = ?1 AND status IN ('pending','claimed')",
         params![run_id, EVENT_SUPPRESSED],
     )?;
+    if changed == 1 {
+        dismiss_open_alerts(&tx, run_id)?;
+    }
     tx.commit()?;
     Ok(changed == 1)
 }
@@ -578,6 +595,7 @@ fn interrupt(conn: &Connection, ids: &[String], reason: &str, now: i64) -> Resul
             params![id, EXEC_INTERRUPTED, reason, now],
         )?;
         if changed == 1 {
+            dismiss_open_alerts(&tx, id)?;
             insert_event(
                 &tx,
                 id,

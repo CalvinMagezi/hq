@@ -364,7 +364,8 @@ export function sharedConnectionNow(): ConnectionState {
 }
 const sharedListeners = new Set<() => void>()
 
-function publish(state: ConnectionState) {
+/** Tells every reader of `useSharedConnection` the state. The shell's hook does this; a test page with no shell may too. */
+export function publish(state: ConnectionState) {
   if (shared === state) return
   shared = state
   for (const l of sharedListeners) l()

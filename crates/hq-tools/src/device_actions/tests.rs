@@ -58,6 +58,11 @@ fn the_domains_fill_the_table_one_entry_per_tool_in_offer_order() {
             ),
             ("calendar_list_events", "calendar.list", RiskClass::Read),
             ("contacts_search", "contacts.search", RiskClass::Read),
+            (
+                "finance_import_messages",
+                "finance.import",
+                RiskClass::Modify
+            ),
         ]
     );
     for spec in offered() {

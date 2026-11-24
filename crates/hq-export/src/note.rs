@@ -60,13 +60,27 @@ pub fn export_note_blocking(
     languages: &[String],
 ) -> Result<NoteExport, ExportError> {
     let raw = std::fs::read_to_string(note_abs)?;
+    export_note_text(vault, note_abs, &raw, format, brand, languages)
+}
+
+/// Like [`export_note_blocking`], for a note whose text the caller has already prepared (for
+/// example with its typed blocks written out as tables). `note_abs` still says where the note
+/// lives, so its title, relative links and pictures resolve as they would for the file.
+pub fn export_note_text(
+    vault: &Path,
+    note_abs: &Path,
+    raw: &str,
+    format: Format,
+    brand: Option<&BrandKit>,
+    languages: &[String],
+) -> Result<NoteExport, ExportError> {
     let stem = note_abs
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Note".to_owned());
     let note_dir = note_abs.parent().unwrap_or(vault);
     // Callouts are kept as written: this renderer draws them as real boxes.
-    let prepared = prepare_note_with(&raw, &stem, note_dir, vault, true);
+    let prepared = prepare_note_with(raw, &stem, note_dir, vault, true);
     let doc = Document::from_markdown(prepared.title.clone(), &prepared.markdown);
     let opts = ExportOptions {
         render: RenderOptions {
@@ -140,6 +154,48 @@ mod tests {
             2,
             "title once in <title>, once as h1"
         );
+    }
+
+    const CHART_NOTE: &str = "# Prices\n\n<div style=\"x\"><svg viewBox=\"0 0 100 50\" role=\"img\" aria-label=\"Bar chart\" onload=\"alert(1)\"><script>alert(1)</script><foreignObject><p>x</p></foreignObject><rect x=\"1\" y=\"2\" width=\"30\" height=\"40\" fill=\"#336\" style=\"fill:url(http://e.example/a)\"/><text x=\"2\" y=\"9\">bar chart</text><image href=\"https://e.example/i.png\"/></svg></div>\n\nAfter.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
+
+    #[test]
+    fn html_export_keeps_an_inline_svg_chart_and_nothing_unsafe() {
+        let (v, note) = vault_with_note(CHART_NOTE);
+        let out = export_note_blocking(v.path(), &note, Format::Html, None, &[]).unwrap();
+        let html = String::from_utf8(out.output.bytes).unwrap();
+        assert!(
+            html.contains("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 50\""),
+            "{html}"
+        );
+        assert!(html.contains("<rect x=\"1\""), "{html}");
+        assert!(html.contains("bar chart</text>"), "{html}");
+        for bad in [
+            "<script",
+            "foreignObject",
+            "onload",
+            "url(",
+            "e.example",
+            "<image",
+            "alert",
+        ] {
+            assert!(!html.contains(bad), "{bad} survived: {html}");
+        }
+        assert!(html.contains("<table>"), "other content is kept");
+    }
+
+    #[test]
+    fn a_chart_note_still_exports_to_every_other_format() {
+        let (v, note) = vault_with_note(CHART_NOTE);
+        for format in [
+            Format::Pdf,
+            Format::Docx,
+            Format::Md,
+            Format::Csv,
+            Format::Jira,
+        ] {
+            let out = export_note_blocking(v.path(), &note, format, None, &[]).unwrap();
+            assert!(!out.output.bytes.is_empty(), "{format:?}");
+        }
     }
 
     #[test]

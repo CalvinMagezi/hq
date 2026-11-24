@@ -1,0 +1,1 @@
+**Start from a ready-made note.** Ask HQ for an invoice, a stock list, a savings group ledger, a school fees tracker, a sales dashboard or a board deck and it makes a working one in Uganda shillings, with a little sample data to overwrite. The totals, status columns, tiles and chart already work.

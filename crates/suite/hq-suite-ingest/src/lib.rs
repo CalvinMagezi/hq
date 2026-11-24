@@ -6,9 +6,11 @@
 //! projects the fidelity tier from the importer's report. Mapping the importer's blocks into
 //! hqmd with typed blocks (milestone M2) lands here too.
 
+pub mod comments;
 pub mod media;
 pub mod project;
 
+pub use comments::{HqmdComments, word_comment_codec};
 pub use media::{ImageFormat, MediaItem, MediaScan, for_each_media, sniff_image};
 pub use project::{
     DocumentText, Failure, FailureKind, Projection, class_of, project, read_document,

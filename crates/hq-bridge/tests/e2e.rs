@@ -1,5 +1,5 @@
 //! Pairing end to end on loopback: real iroh endpoints, no relay, the real gate, the real migrated
-//! database. A second loopback address (`::1`) stands in for a second source.
+//! database. A second loopback address (`::1`, or `127.0.0.2` where there is no IPv6) stands in for a second source.
 
 use hq_bridge::{
     Bridge, BridgeConfig, JoinOptions, JoinResult, OpenTicket, PairingSpec, Purpose, Registrar,
@@ -25,7 +25,16 @@ use std::{
 use tokio::sync::oneshot;
 
 const V4: &str = "127.0.0.1:0";
-const V6: &str = "[::1]:0";
+/// Whether this host can bind IPv6 loopback. A container without IPv6 cannot, and the tests then use a second
+/// IPv4 loopback address as the second source instead, so they run there too.
+fn has_ipv6() -> bool {
+    std::net::UdpSocket::bind("[::1]:0").is_ok()
+}
+
+/// A second loopback address that is not `127.0.0.1`: `::1` where there is IPv6, else `127.0.0.2`.
+fn v6() -> &'static str {
+    if has_ipv6() { "[::1]:0" } else { "127.0.0.2:0" }
+}
 const GIVE_UP: Duration = Duration::from_secs(20);
 const GONE: Duration = Duration::from_secs(5);
 
@@ -68,7 +77,12 @@ impl Machine {
 
     /// A machine that listens on both loopback families, like the one showing a QR code.
     async fn host() -> Self {
-        Self::new("desk", &[V4, V6], true).await
+        // One endpoint takes one address per family, so with no IPv6 the desk is bound to IPv4 alone.
+        if has_ipv6() {
+            Self::new("desk", &[V4, v6()], true).await
+        } else {
+            Self::new("desk", &[V4], true).await
+        }
     }
 
     /// A machine on IPv4 loopback only.
@@ -435,7 +449,7 @@ async fn the_global_backstop_burns_the_ticket_for_the_real_device_too() {
 async fn one_source_that_guesses_is_shut_out_while_another_source_still_pairs() {
     let host = Machine::host().await;
     let guesser = Machine::phone().await; // 127.0.0.1
-    let friend = Machine::new("friend", &[V6], true).await; // ::1
+    let friend = Machine::new("friend", &[v6()], true).await; // a second source address
     let open = host
         .bridge
         .open_ticket(Tuning {
@@ -482,7 +496,7 @@ async fn one_source_that_guesses_is_shut_out_while_another_source_still_pairs() 
 #[tokio::test(flavor = "multi_thread")]
 async fn one_source_cannot_fill_the_concurrency_cap() {
     let host = Machine::host().await;
-    let friend = Machine::new("friend", &[V6], true).await;
+    let friend = Machine::new("friend", &[v6()], true).await;
     let open = host
         .bridge
         .open_ticket(Tuning {

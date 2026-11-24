@@ -41,6 +41,7 @@ class CalmCopyTest {
         "hd_conn_toast",
         "helpers_allowed_toast",
         "helpers_declined_toast",
+        "suite_comment_refused_toast",
     )
 
     private val pillKeys = listOf(
@@ -93,7 +94,7 @@ class CalmCopyTest {
         assertTrue("Expected Kotlin source files under ${root.path}", ktFiles.isNotEmpty())
 
         // Files whose `Notice(...)` call is the inline card composable in `ui/settings/`, not a snackbar.
-        val inlineNoticeFiles = setOf("SettingsScreens.kt", "SettingsNoticed.kt", "AssistantScreens.kt", "CalendarScreens.kt", "ContactsScreens.kt")
+        val inlineNoticeFiles = setOf("SettingsScreens.kt", "SettingsNoticed.kt", "AssistantScreens.kt", "CalendarScreens.kt", "ContactsScreens.kt", "FinanceScreens.kt")
         val callPattern = Regex("""(onNotice\(|say\(|SnackbarRow\(|Toast\.makeText\(|UndoSnackbar\(|InboxLine\(|TaskLine\()""")
         val noticePattern = Regex("""\bNotice\(""")
         val lineSetterPattern = Regex("""\.copy\([^)]*\b(line|undoLine)\s*=""")

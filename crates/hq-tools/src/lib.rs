@@ -29,6 +29,7 @@ pub mod copilot_credits;
 pub mod deliver;
 pub mod device_actions;
 pub mod external_runner;
+pub mod finance;
 pub mod github;
 #[cfg(feature = "gws")]
 pub mod gws;

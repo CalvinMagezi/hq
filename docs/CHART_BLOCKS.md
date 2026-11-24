@@ -31,11 +31,15 @@ renders as normal markdown.
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `type` | yes | `line`, `bar`, `pie` or `donut` |
+| `type` | yes | `line`, `bar`, `area`, `stacked`, `scatter`, `pie` or `donut`. A `scatter` chart needs a number for every label (its x position); see below. |
 | `labels` | yes | Category names (x axis, or one per slice). Strings or numbers. |
 | `series` | yes | Array of `{ "name": string, "values": number[] }`. Each `values` array must have exactly one number per label. |
 | `title` | no | Shown above the chart. |
 | `xLabel`, `yLabel` | no | Axis titles for line and bar charts. |
+
+## Kinds only the dashboard emits
+
+A `plot` block in a note (`docs/suite/SHEETS.md`) is served as this same JSON by `GET /api/suite/plot`, with three more types: `area` (filled lines over the labels), `stacked` (stacked bars, one series per group) and `scatter` (points; `xValues` holds the numeric x of each point, and `labels` repeats them as text). The limits below apply to them. The web app and the Android app draw all seven kinds, and a chat `chart` block may use any of them.
 
 ## Limits
 

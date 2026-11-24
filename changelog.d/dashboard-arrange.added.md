@@ -1,0 +1,1 @@
+**Arrange a dashboard.** Tiles and charts now follow the order of the note, and Arrange lets you move each one earlier or later (buttons, the arrow keys on its grip, or a drag) and make it small, wide or full width. The layout is saved in the note, so every device shows the same one. A new `size=` hint on the block's fence is documented in `docs/suite/HQMD.md`.

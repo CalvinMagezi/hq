@@ -242,6 +242,10 @@ fn a_second_name_for_the_file_is_refused() {
 
 #[test]
 fn another_owner_is_refused_at_the_open_file_not_only_at_the_directory() {
+    if me() == 0 {
+        // Root may make files for any owner, so the directory rule this test relies on cannot fire.
+        return;
+    }
     // Through the real opener the directory rule fires first (the test user cannot make a file
     // that someone else owns inside a directory it owns), so this covers that path...
     let dir = tempfile::tempdir().unwrap();

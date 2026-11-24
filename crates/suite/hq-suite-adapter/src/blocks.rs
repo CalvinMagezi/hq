@@ -49,7 +49,7 @@ fn kind_label(kind: &NodeKind) -> String {
     }
 }
 
-fn view_of(doc: &Document) -> BlocksView {
+pub(crate) fn view_of(doc: &Document) -> BlocksView {
     let blocks = doc
         .nodes()
         .iter()
@@ -79,7 +79,7 @@ pub fn list(vault: &Path, note: &str) -> Result<BlocksView> {
     Ok(view_of(&read(vault, note)?.1))
 }
 
-fn check_markdown(markdown: &str) -> Result<()> {
+pub(crate) fn check_markdown(markdown: &str) -> Result<()> {
     if markdown.trim().is_empty() {
         bail!("a block cannot be empty; delete it instead");
     }

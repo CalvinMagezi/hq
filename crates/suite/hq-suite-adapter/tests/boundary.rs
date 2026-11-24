@@ -222,8 +222,14 @@ const MAY_DEPEND_ON_SUITE: &[&str] = &["hq-cli", "hq-tools-office", "hq-web"];
 /// Source files outside `crates/suite/` that may name a suite crate, relative to the workspace.
 const MAY_NAME_SUITE: &[&str] = &[
     "crates/hq-cli/src/commands/start/daemon/tasks_periodic/suite_governor.rs",
+    // The scheduled dashboard snapshot: the daemon task that calls `snapshot::prepare`.
+    "crates/hq-cli/src/commands/start/daemon/tasks_periodic/suite_dashboard_refresh.rs",
     "crates/hq-cli/src/commands/suite.rs",
     "crates/hq-tools-office/src/author.rs",
+    // `office_edit`'s face over `hq_suite_adapter::edit` (and its tests): the tool is the only place
+    // a chat call changes part of a note.
+    "crates/hq-tools-office/src/edit.rs",
+    "crates/hq-tools-office/src/edit_tests.rs",
     "crates/hq-tools-office/src/lib.rs",
     "crates/hq-tools-office/src/author.rs",
     "crates/hq-web/src/suite_api.rs",

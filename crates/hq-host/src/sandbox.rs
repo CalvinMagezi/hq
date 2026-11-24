@@ -5,6 +5,7 @@
 use crate::egress::{Egress, Rule};
 use crate::error::HostError;
 use crate::linked_git::{linked_git_dirs, linked_protected, linked_writable};
+use crate::proxy_env::{JAVA_OPTIONS_ENV, java_proxy_options};
 use crate::server;
 use hq_sandbox::{
     AgentSandbox, Backend, HiddenDir, Network, ReadRestriction, Relay, backend, canonical, wrap,
@@ -1432,6 +1433,11 @@ pub(crate) fn confine(
     if let Some(port) = port {
         let url = format!("http://127.0.0.1:{port}");
         env.extend(PROXY_ENV_NAMES.iter().map(|n| (n.to_string(), url.clone())));
+        let existing = std::env::var(JAVA_OPTIONS_ENV).ok();
+        env.push((
+            JAVA_OPTIONS_ENV.into(),
+            java_proxy_options(port, existing.as_deref()),
+        ));
     }
     env.push(("DISABLE_AUTOUPDATER".into(), "1".into()));
     if port.is_some() {

@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { planPush, type PushKind, type Shown } from './lib/pushFold'
+import { SW_CACHED_API } from './lib/swCache'
 
 declare const self: ServiceWorkerGlobalScope
 
@@ -33,14 +34,6 @@ const API_CACHE_MAX_ENTRIES = 200
 // React Query and zustand already keep the vault, tasks and recent chats in IndexedDB.
 // These reads have no such copy, so the worker keeps one for offline use. The inbox
 // store holds only the last tab loaded, so each notifications filter is kept here too.
-const SW_CACHED_API = [
-  /^\/api\/notifications$/,
-  /^\/api\/vault-asset$/,
-  /^\/api\/search$/,
-  /^\/api\/vault\/folders$/,
-  /^\/api\/tasks\/[^/]+\/comments$/,
-  /^\/api\/threads\/[^/]+\/messages$/,
-]
 // Marks a response served from this cache, so the page does not count it as a sync.
 const FROM_CACHE_HEADER = 'x-hq-cache'
 // The server's CORS layer sends `Vary: origin`, and module imports carry an Origin

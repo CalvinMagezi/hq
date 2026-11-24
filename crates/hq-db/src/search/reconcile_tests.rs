@@ -921,7 +921,7 @@ mod path_map {
              INSERT INTO notes_fts (path, title, content, tags) VALUES ('q.md','q','z','');",
         )
         .unwrap();
-        c.execute_batch(include_str!("../../sql/150_notes_fts_rows.sql"))
+        c.execute_batch(include_str!("../../sql/151_notes_fts_rows.sql"))
             .unwrap();
         assert_eq!(mapped(&c, "p.md"), 1);
         assert_eq!(fts_rows(&c, "p.md"), 1);

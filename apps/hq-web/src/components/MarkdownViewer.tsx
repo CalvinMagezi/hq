@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { t } from '~/strings'
+import { t, tn } from '~/strings'
 import { SelectionToolbar } from './SelectionToolbar'
 import { Sheet } from './ui/Sheet'
 import { toastNotice } from '~/lib/toast'
@@ -9,6 +9,7 @@ import { useHQStore } from '~/store/hqStore'
 import { useVaultNoteStore } from '~/store/vaultNoteStore'
 import { blockRemoteImages } from '~/lib/remoteImages'
 import { chartSlot, fillChartSlots } from '~/lib/chartSlots'
+import { commentMarker, foldComments, isCommentLang } from '~/lib/commentView'
 import { parseChart, parseMermaidPie, renderChartHtml } from '~/lib/chart'
 import { codespanHtml, vaultFileLinkTarget, vaultLinkTarget } from '~/lib/noteRefs'
 import { isHtmlPath } from '~/lib/htmlDashboard'
@@ -71,8 +72,17 @@ async function configureMarked() {
         return null
     })
     marked.use({
+        // Review comments (hqmd `comment` blocks) are not drawn as code: a run of them folds into one small marker.
+        hooks: {
+            processAllTokens(tokens: any) {
+                const folded = foldComments(tokens as any[])
+                tokens.splice(0, tokens.length, ...folded)
+                return tokens
+            },
+        },
         renderer: {
             code(token: any) {
+                if (isCommentLang(token.lang)) return commentMarker(token.hqOpen ?? 0, tn('suite_comment_marker', token.hqComments ?? 1))
                 let langLabel = escapeHtml(token.lang || '')
                 if (token.lang === 'chart') {
                     const chart = parseChart(token.text)
@@ -298,23 +308,23 @@ export function MarkdownViewer({ content, activePath, zoom, bare, onOpenFile }: 
         <div className="markdown-viewer relative" key={activePath} ref={containerRef} style={zoom && zoom !== 1 ? { zoom: `${zoom}` } as React.CSSProperties : undefined}>
             {!bare && <SelectionToolbar containerRef={containerRef} onSendAction={handleSendSelection} />}
             {!bare && Object.keys(frontmatter).length > 0 && (
-                <div className="mb-6 rounded" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+                <div className="mb-6 rounded" style={{ background: 'var(--surface-200)', border: '1px solid var(--hairline)' }}>
                     <button
                         onClick={() => setMetaOpen(!metaOpen)}
-                        className="w-full text-left px-3 py-2 text-xs font-mono font-bold flex justify-between items-center"
-                        style={{ color: 'var(--text-dim)', cursor: 'pointer' }}
+                        className="w-full min-h-[44px] text-left px-3 py-2 text-xs font-mono font-bold flex justify-between items-center"
+                        style={{ color: 'var(--ink-muted)', cursor: 'pointer' }}
                     >
                         <span>📄 METADATA</span>
                         <span>{metaOpen ? '▾' : '▸'}</span>
                     </button>
 
                     {metaOpen && (
-                        <div className="px-3 pb-3 text-xs font-mono border-t" style={{ borderColor: 'var(--border)' }}>
+                        <div className="px-3 pb-3 text-xs font-mono border-t" style={{ borderColor: 'var(--hairline)' }}>
                             <div className="grid grid-cols-1 gap-1 pt-2">
                                 {Object.entries(frontmatter).map(([k, v]) => (
                                     <div key={k} className="flex">
-                                        <span className="w-24 opacity-60" style={{ color: 'var(--accent-blue)' }}>{k}</span>
-                                        <span className="truncate" style={{ color: 'var(--text-primary)' }}>{v as React.ReactNode}</span>
+                                        <span className="w-24 opacity-60" style={{ color: 'var(--text-blue)' }}>{k}</span>
+                                        <span className="truncate" style={{ color: 'var(--ink)' }}>{v as React.ReactNode}</span>
                                     </div>
                                 ))}
                             </div>

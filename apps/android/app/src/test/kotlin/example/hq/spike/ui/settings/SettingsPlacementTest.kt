@@ -71,7 +71,7 @@ class SettingsPlacementTest {
     }
 
     @Test fun everyOldSettingsLinkStillResolvesAndParses() {
-        val old = listOf("home", "safety", "keys", "messaging", "devices", "spending", "about", "background", "keeprunning", "notifications", "origins", "connectedtools", "computers", "capturewidgets", "storedkeys", "update", "speech", "assistant", "calendar", "contacts", "suggests")
+        val old = listOf("home", "safety", "keys", "messaging", "devices", "spending", "about", "background", "keeprunning", "notifications", "origins", "connectedtools", "computers", "capturewidgets", "storedkeys", "update", "speech", "assistant", "calendar", "contacts", "finance", "suggests")
         old.forEach { name ->
             assertNotNull("$name resolves", SettingsRoutes.stack(name))
             assertEquals("$name parses as a link", name, Links.parse("hq://settings/$name")?.screen)
@@ -161,9 +161,9 @@ class SettingsPlacementTest {
         assertEquals(SettingsWords.HomeCard.None, SettingsWords.homeCard(false, 0, false, false))
     }
 
-    @Test fun homeHasNineteenRowsAndEveryOneIsInTheSearchIndex() {
+    @Test fun homeHasTwentyRowsAndEveryOneIsInTheSearchIndex() {
         val rows = home().flatMap { it.rows }
-        assertEquals(19, rows.size)
+        assertEquals(20, rows.size)
         val indexedKeys = SettingsIndex.build(testWords()).filter { it.sectionTitle == null }.map { it.rowKey }
         assertEquals(rows.map { it.key }, indexedKeys)
     }

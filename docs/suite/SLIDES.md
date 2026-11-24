@@ -57,3 +57,9 @@ Not yet opened in PowerPoint.
 
 - More layouts, and per-run or per-shape colours (a colour applies to a whole card).
 - A card editor on the phone. The reader shows a slides note as the markdown it is; the file is made on a computer.
+
+## Editing cards: `office_edit` and `POST /api/suite/edit`
+
+A card is the run of blocks from a `## ` heading to the next one. `cards` lists them (`GET /api/suite/cards?path=`): number, `hash` (of all the card's blocks), layout, transition, colours and notes. Then `add_card` (after `after_card`, or at the end), `replace_card` (the whole card, notes and look with it), `move_card` (`to`), `delete_card`, `set_notes` (empty clears) and `set_card_style` (`transition`, `background`, `color`, `layout`; `null` clears one). A card edit quotes the card's `hash`, so a card that changed since it was read is refused, and the other cards come back byte for byte.
+
+Notes and look are written as the comments above (`<!-- notes: ... -->`, `<!-- transition: fade slow -->`) and their values are checked with the pptx writer's own parsers: a transition or colour the writer could not use is refused with the same sentence. A colour pair that is hard to read is allowed and comes back as a warning. An existing comment is changed in place; a new one goes under the card's heading. After every edit the deck is read back, and an edit that would make a different set of cards than asked (text with its own `## ` heading) is refused. Replace, delete and clearing notes are previewed first when an agent asks (see `SHEETS.md`).

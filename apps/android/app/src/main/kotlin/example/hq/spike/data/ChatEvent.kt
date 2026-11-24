@@ -22,6 +22,9 @@ sealed interface ChatEvent {
     /** HQ's answer to `resume`: while [running] the reply so far, else the id of the thread's last saved message. */
     data class ReplySoFar(val threadId: String?, val running: Boolean, val content: String, val messageId: String?) : ChatEvent
 
+    /** An HQ Suite edit (the phone's, the web's or an agent's) wrote the note at [path]; [hash] is its new revision. */
+    data class NoteEdited(val path: String, val hash: String?) : ChatEvent
+
     /** HQ asks the phone to do something on the device and report back; [payload] is the action's own fields. */
     data class DeviceAction(val actionId: String, val threadId: String?, val name: String, val version: Int, val payload: JSONObject, val expiresAt: String?) : ChatEvent
 
@@ -45,6 +48,7 @@ sealed interface ChatEvent {
                 "stream_lag" -> Lagged(o.optInt("skipped"))
                 "reply_so_far" -> ReplySoFar(thread, o.optBoolean("running", false), o.optString("content"), o.optStringOrNull("message_id"))
                 "device_action" -> deviceAction(o)
+                "note_changed" -> o.optStringOrNull("path")?.let { NoteEdited(it,o.optStringOrNull("hash")) }
                 else -> null
             }
         }

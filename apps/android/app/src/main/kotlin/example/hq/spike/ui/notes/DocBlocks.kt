@@ -41,6 +41,8 @@ import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 import kotlinx.coroutines.launch
 import example.hq.spike.data.suiteBlocks
+import example.hq.spike.data.suiteFindReplace
+import example.hq.spike.data.suiteInsertTable
 import example.hq.spike.data.suiteDeleteBlock
 import example.hq.spike.data.suiteEditBlock
 import example.hq.spike.data.suiteInsertBlock
@@ -62,9 +64,13 @@ private const val PREVIEW_LINES = 8
 fun DocBlocksEditor(path: String, onClose: (changed: Boolean) -> Unit) {
     val client = HqServices.get(LocalContext.current).client
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var blocks by remember(path) { mutableStateOf<Result<List<BlockRow>>?>(null) }
     var changed by remember(path) { mutableStateOf(false) }
     var editing by remember { mutableStateOf<BlockEdit?>(null) }
+    var tool by remember { mutableStateOf<DocTool?>(null) }
+    var toolBusy by remember { mutableStateOf(false) }
+    var toolMessage by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(path) { blocks = runCatching { client.suiteBlocks(path) } }
 
     Dialog(onDismissRequest = { onClose(changed) }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -79,6 +85,10 @@ fun DocBlocksEditor(path: String, onClose: (changed: Boolean) -> Unit) {
                         TextButton({ onClose(changed) }, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.docblocks_done), style = HqType.BodyBold, color = Mts.BrandBlue) }
                     }
                     val list = blocks?.getOrNull()
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                        TextButton({ tool = DocTool.Table }, Modifier.heightIn(min = 48.dp), enabled = list != null) { Text(stringResource(R.string.docblocks_table_open), style = HqType.BodySmBold, color = Mts.BrandBlue) }
+                        TextButton({ tool = DocTool.FindReplace }, Modifier.heightIn(min = 48.dp), enabled = list != null) { Text(stringResource(R.string.docblocks_replace_open), style = HqType.BodySmBold, color = Mts.BrandBlue) }
+                    }
                     when {
                         blocks == null -> Text(stringResource(R.string.docblocks_loading), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp))
                         list == null -> Text(stringResource(R.string.docblocks_load_failed), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp))
@@ -99,6 +109,27 @@ fun DocBlocksEditor(path: String, onClose: (changed: Boolean) -> Unit) {
                         }
                     }
                 }
+            }
+
+            val failedText = stringResource(R.string.docblocks_failed)
+            when (tool) {
+                DocTool.Table -> InsertTableDialog(onDismiss = { tool = null }) { headers, rows ->
+                    scope.launch {
+                        runCatching { client.suiteInsertTable(path, blocks?.getOrNull()?.lastOrNull(), headers, rows) }
+                            .onSuccess { fresh -> blocks = Result.success(fresh); changed = true; tool = null }
+                            .onFailure { tool = null }
+                    }
+                }
+                DocTool.FindReplace -> FindReplaceDialog(toolBusy, toolMessage, onDismiss = { tool = null; toolMessage = null }) { find, with ->
+                    toolBusy = true
+                    scope.launch {
+                        val result = runCatching { client.suiteFindReplace(path, find, with) }
+                        toolBusy = false
+                        toolMessage = result.fold({ r -> context.getString(R.string.docblocks_replace_done, r.changed, r.refused) }, { failedText })
+                        if (result.isSuccess) { changed = true; blocks = runCatching { client.suiteBlocks(path) } }
+                    }
+                }
+                null -> {}
             }
 
             editing?.let { target ->
