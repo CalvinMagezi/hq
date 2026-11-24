@@ -1,0 +1,1 @@
+A coding session that HQ restarts after granting it access now keeps its connection to HQ (its secret was refused during the restart), and builds in the strict sandbox that run on Java, such as Gradle, use the sandbox proxy so a host you allowed can be reached.

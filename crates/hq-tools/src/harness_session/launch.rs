@@ -383,12 +383,48 @@ pub(super) async fn run_launch(
     let mcp = mcp_access(db, &l.host, harness, l.session_id);
     let minted = mcp.is_some();
     let session_id = l.session_id.to_string();
+    // A session's secret works only while its row says running. Claude connects the moment it
+    // starts, well before the launch returns, so a resumed session must already be running or its
+    // first connection to HQ is refused and the agent never gets its HQ tools.
+    let restore = if l.resuming && minted {
+        mark_running_for_launch(db, &session_id)
+    } else {
+        None
+    };
     let launched = launch_with(db, harness, l, mcp).await;
-    if launched.is_err() && minted {
-        let _ =
-            db.with_conn(move |c| hq_db::session_tokens::revoke_if_unregistered(c, &session_id));
+    if launched.is_err() {
+        if let Some(prior) = restore {
+            restore_status(db, &session_id, &prior);
+        }
+        if minted {
+            let _ = db
+                .with_conn(move |c| hq_db::session_tokens::revoke_if_unregistered(c, &session_id));
+        }
     }
     launched
+}
+
+/// Marks a resumed session running before its agent starts. Returns the status it had, so a
+/// launch that fails can put it back.
+fn mark_running_for_launch(db: &Arc<Database>, session_id: &str) -> Option<String> {
+    let id = session_id.to_string();
+    db.with_conn(move |c| {
+        let prior = registry::get(c, &id)?.map(|r| r.status);
+        if prior
+            .as_deref()
+            .is_some_and(|s| s != registry::STATUS_RUNNING)
+        {
+            registry::set_status(c, &id, registry::STATUS_RUNNING)?;
+        }
+        Ok(prior.filter(|s| s != registry::STATUS_RUNNING))
+    })
+    .ok()
+    .flatten()
+}
+
+fn restore_status(db: &Arc<Database>, session_id: &str, status: &str) {
+    let (id, status) = (session_id.to_string(), status.to_string());
+    let _ = db.with_conn(move |c| registry::set_status(c, &id, &status));
 }
 
 /// A launch is narrowed when the calling chat read outside text, or when the task it starts from
@@ -1034,4 +1070,71 @@ pub(super) fn with_watch_state(db: &Arc<Database>, session_id: &str, mut report:
         }
     }
     report
+}
+
+#[cfg(test)]
+mod launch_status_tests {
+    use super::*;
+    use hq_db::harness_sessions_registry::{self as registry, NewSession, Placement};
+
+    fn stopped_session(db: &Arc<Database>, id: &str) {
+        db.with_conn(|c| {
+            registry::insert(
+                c,
+                &NewSession {
+                    id,
+                    harness: "codex",
+                    label: "",
+                    cwd: "/t",
+                    mission_id: None,
+                    placement: Placement {
+                        host: "local",
+                        agent_name: id,
+                        workspace_id: "w",
+                        pane_id: "p",
+                    },
+                    purpose: None,
+                },
+            )?;
+            registry::set_status(c, id, registry::STATUS_STOPPED)
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_resumed_session_is_running_before_its_agent_connects_and_a_failed_launch_restores_it() {
+        let db = Arc::new(Database::open_memory().unwrap());
+        stopped_session(&db, "hs-r");
+        let token = db
+            .with_conn(|c| hq_db::session_tokens::mint(c, "hs-r"))
+            .unwrap();
+        let accepted = |db: &Arc<Database>| {
+            db.with_conn(|c| hq_db::session_tokens::session_for_token(c, &token))
+                .unwrap()
+        };
+        assert_eq!(accepted(&db), None, "a stopped session's secret is refused");
+        let prior = mark_running_for_launch(&db, "hs-r");
+        assert_eq!(prior.as_deref(), Some(registry::STATUS_STOPPED));
+        assert_eq!(
+            accepted(&db).as_deref(),
+            Some("hs-r"),
+            "the agent's first connection works"
+        );
+        restore_status(&db, "hs-r", prior.as_deref().unwrap());
+        assert_eq!(
+            accepted(&db),
+            None,
+            "a launch that failed leaves it stopped"
+        );
+    }
+
+    #[test]
+    fn a_session_already_running_is_left_alone() {
+        let db = Arc::new(Database::open_memory().unwrap());
+        stopped_session(&db, "hs-run");
+        db.with_conn(|c| registry::set_status(c, "hs-run", registry::STATUS_RUNNING))
+            .unwrap();
+        assert_eq!(mark_running_for_launch(&db, "hs-run"), None);
+        assert_eq!(mark_running_for_launch(&db, "hs-unknown"), None);
+    }
 }
