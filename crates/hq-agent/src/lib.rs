@@ -27,6 +27,7 @@ pub mod shutdown;
 pub mod skill_review;
 pub(crate) mod subagent;
 pub mod threads;
+pub(crate) mod tool_hint;
 pub(crate) mod tool_policy;
 pub(crate) mod tools;
 pub(crate) mod web;

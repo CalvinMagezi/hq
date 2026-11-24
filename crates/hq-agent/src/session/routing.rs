@@ -131,7 +131,18 @@ impl AgentSession {
                         .and_then(|d| d.for_removed_tool(&tc.name));
                     return match hint {
                         Some(text) => Ok(text_result(text)),
-                        None => Err(anyhow::anyhow!("unknown tool: {}", tc.name)),
+                        None => {
+                            let suggestion = tools.did_you_mean(&tc.name);
+                            self.note_routing(
+                                if suggestion.is_empty() {
+                                    hq_db::tool_routing::UNKNOWN_TOOL
+                                } else {
+                                    hq_db::tool_routing::UNKNOWN_TOOL_HELPED
+                                },
+                                &tc.name,
+                            );
+                            Err(anyhow::anyhow!("unknown tool: {}.{suggestion}", tc.name))
+                        }
                     };
                 }
             }
@@ -179,6 +190,35 @@ impl AgentSession {
         }
 
         result
+    }
+
+    /// The "tools that may fit" line for this message, worked out on the device from the message
+    /// and the tools not loaded yet (see `crate::tool_hint`). `None` for most turns. The tools it
+    /// names are remembered so a later load of one can be counted as the hint being followed.
+    pub(super) async fn tool_hint_line(&mut self, message: &str) -> Option<String> {
+        let deferred = self.tools.lock().await.deferred_catalog();
+        let names = crate::tool_hint::likely_tools(message, &deferred);
+        self.last_hinted = names.clone();
+        if names.is_empty() {
+            return None;
+        }
+        self.note_routing(hq_db::tool_routing::HINT_SHOWN, &names.join(","));
+        crate::tool_hint::hint_line(message, &deferred)
+    }
+
+    /// Count one tool-finding event (a search hit or miss, a tool loaded, a wrong tool name) in
+    /// the local `tool_routing_events` table. Fire and forget, like the usage log: it never
+    /// fails or slows a call, and it stores a kind and a tool name, never what was searched for.
+    pub(super) fn note_routing(&self, kind: &'static str, tool: &str) {
+        let Some(db) = self.telemetry_db.clone() else {
+            return;
+        };
+        let session_id = self.session_id.clone();
+        let tool = tool.to_string();
+        tokio::task::spawn_blocking(move || {
+            let _ =
+                db.with_conn(|conn| hq_db::tool_routing::record(conn, &session_id, kind, &tool));
+        });
     }
 
     /// The arguments a tool is called with: the model's, minus anything that claims to be the
@@ -259,39 +299,64 @@ impl AgentSession {
 
         let matches = rank_tool_matches(&catalog, query, max_results);
 
+        self.note_routing(
+            if matches.is_empty() {
+                hq_db::tool_routing::SEARCH_MISS
+            } else {
+                hq_db::tool_routing::SEARCH_HIT
+            },
+            "",
+        );
         if matches.is_empty() {
+            let names: Vec<&str> = catalog.iter().map(|(n, _)| n.as_str()).collect();
+            let near: Vec<&str> = hq_tool_api::tool_rank::nearest(&names, query, 5)
+                .into_iter()
+                .map(|i| names[i])
+                .collect();
+            let text = if near.is_empty() {
+                format!(
+                    "No deferred tools match query \"{query}\". {} deferred tools exist; try other words for what you want to do.",
+                    catalog.len()
+                )
+            } else {
+                format!(
+                    "No deferred tools match query \"{query}\". Closest names: {}.",
+                    near.join(", ")
+                )
+            };
             return Ok(hq_core::types::ToolResult {
                 content: vec![ToolResultContent {
                     r#type: "text".to_string(),
-                    text: format!(
-                        "No deferred tools match query \"{}\". Available deferred tools: {}",
-                        query,
-                        catalog
-                            .iter()
-                            .map(|(n, _)| n.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
+                    text,
                 }],
                 details: None,
                 context_modifier: None,
             });
         }
 
-        let mut output = String::new();
         let found: Vec<String> = matches.iter().map(|(name, _)| name.clone()).collect();
         for name in &found {
             // Declared from the next request on, so the model can call it like any other tool.
             tools.activate(name);
+            self.note_routing(hq_db::tool_routing::ACTIVATION, name);
+            if self.last_hinted.contains(name) {
+                self.note_routing(hq_db::tool_routing::HINT_FOLLOWED, name);
+            }
         }
+        // The full schema reaches the model as a declared tool on the next request, so the
+        // result only needs the call shape and what the tool is for.
+        let mut output = String::from(
+            "Loaded. You can call these now; the full parameter schema is attached to each.\n\n",
+        );
         for name in &found {
             if let Some(def) = tools.definition_for(name) {
-                output.push_str(&format!(
-                    "## {}\n{}\n\nParameters:\n```json\n{}\n```\n\n",
-                    def.name,
-                    def.description,
-                    serde_json::to_string_pretty(&def.parameters).unwrap_or_default()
-                ));
+                let shape = hq_tool_api::registry::signature_of(&def.name, &def.parameters);
+                let hint = catalog
+                    .iter()
+                    .find(|(n, _)| n == name)
+                    .map(|(_, h)| h.as_str())
+                    .unwrap_or("");
+                output.push_str(&format!("- {shape}: {hint}\n"));
             }
         }
 
@@ -536,53 +601,26 @@ mod arg_preview_tests {
     }
 }
 
-/// Splits a tool-search query into lowercase words (three or more characters and not a
-/// stop word, so "the" and "of" match nothing by accident).
-const STOP_WORDS: &[&str] = &[
-    "the", "and", "for", "with", "that", "this", "from", "into", "you", "are", "need", "want",
-];
-
-fn query_terms(query: &str) -> Vec<String> {
-    let mut terms: Vec<String> = query
-        .to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.chars().count() >= 3 && !STOP_WORDS.contains(w))
-        .map(str::to_string)
-        .collect();
-    terms.sort();
-    terms.dedup();
-    terms
-}
-
-/// Catalogue entries that match any query word in the name or hint, the most words first and
-/// catalogue order among equals, at most `max_results`. A name match counts double so
-/// `office_create` outranks a tool that only mentions "office" in its hint.
+/// Catalogue entries that match the query, best first and catalogue order among equals, at most
+/// `max_results`. Scoring is the shared offline ranker in `hq_tool_api::tool_rank`, so native
+/// `tool_search` and the gateway's `hq_discover` find the same tools for the same words.
 fn rank_tool_matches<'a>(
     catalog: &'a [(String, String)],
     query: &str,
     max_results: usize,
 ) -> Vec<&'a (String, String)> {
-    let terms = query_terms(query);
-    let mut scored: Vec<(usize, &(String, String))> = catalog
+    let docs: Vec<hq_tool_api::tool_rank::RankDoc<'_>> = catalog
         .iter()
-        .filter_map(|entry| {
-            let name = entry.0.to_lowercase();
-            let hint = entry.1.to_lowercase();
-            let score: usize = terms
-                .iter()
-                .map(|t| {
-                    usize::from(name.contains(t.as_str())) * 2
-                        + usize::from(hint.contains(t.as_str()))
-                })
-                .sum();
-            (score > 0).then_some((score, entry))
+        .map(|(name, hint)| hq_tool_api::tool_rank::RankDoc {
+            name,
+            hint,
+            description: "",
+            keywords: &[],
         })
         .collect();
-    scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-    scored
+    hq_tool_api::tool_rank::rank(&docs, query, max_results)
         .into_iter()
-        .take(max_results)
-        .map(|(_, e)| e)
+        .map(|i| &catalog[i])
         .collect()
 }
 

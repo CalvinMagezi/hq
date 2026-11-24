@@ -22,3 +22,10 @@ Notes for working under `crates/hq-agent/`, moved out of the root `CLAUDE.md` so
   modes, in process). It is the only sub-agent substrate.
   `agent_send_message` and `agent_read_inbox` are plain vault-mailbox tools for
   handing text to `relay` or another local mailbox id.
+- **Tool hint**: `crates/hq-agent/src/tool_hint.rs` adds one "Tools that may fit this message (not
+  loaded yet; call tool_search to load): ..." line to the per-turn context note when the message
+  clearly needs a deferred tool. It ranks with `hq_tool_api::tool_rank`, offline, from the message
+  and the not-yet-loaded catalogue only: never usage, history or adoption data, and never the system
+  prompt or the tool list (the cached prefix). Keep it that way; a hint that depended on what the
+  person had used would break `docs/security/ADOPTION_DATA.md`. Shown and followed hints are
+  counted in `hq_db::tool_routing`.

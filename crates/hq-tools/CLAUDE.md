@@ -87,6 +87,13 @@ Notes for working under `crates/hq-tools/`, moved out of the root `CLAUDE.md` so
   `due-reminders` daemon task reminds about tasks made in chat. A new catalog tool must be registered (`crates/hq-mcp/tests/capability_catalog.rs`).
   Plan: `docs/plans/simple-hq.md`. Off with `daemon.adoption_digest: false`.
 
+- **Argument checks are opt-in**: a tool that returns `true` from `HqTool::checks_arguments` has its
+  arguments checked against `parameters()` before `execute` (`hq_tool_api::arg_check`), through
+  `validate_and_execute`, which the MCP gateway and native sessions both use. A wrong, missing or
+  mistyped argument gets a specific error with the closest real name and the call shape; `"5"` for 5 is
+  fixed. Opt in only when the schema lists every argument `execute` reads: one it does not list is
+  refused. Runtime `_hq_*` keys are never checked. Today: `session_search`, `tool_output_read`.
+
 ## Skills and document generation (optional)
 
 HQ has its own markdown skills under `.vault/skills/`, validated by

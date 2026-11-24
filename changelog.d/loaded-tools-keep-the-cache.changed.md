@@ -1,0 +1,1 @@
+**Loading a tool mid-chat costs less.** When HQ loads an extra tool during a conversation, it now adds it to the end of the tool list instead of slotting it in alphabetically, so providers that remember the earlier part of the request can keep reusing it instead of charging for it again.

@@ -199,6 +199,77 @@ impl crate::tools::AgentTool for ContractTool {
     }
 }
 
+/// A read-only tool with a chosen name and one-line purpose, for catalogue tests.
+struct NamedTool {
+    name: &'static str,
+    hint: &'static str,
+}
+
+#[async_trait]
+impl crate::tools::AgentTool for NamedTool {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn description(&self) -> &str {
+        self.hint
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object"})
+    }
+
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    async fn execute(&self, _id: &str, _args: serde_json::Value) -> anyhow::Result<ToolResult> {
+        Ok(ToolResult {
+            content: vec![ToolResultContent {
+                r#type: "text".to_string(),
+                text: "ok".to_string(),
+            }],
+            details: None,
+            context_modifier: None,
+        })
+    }
+}
+
+/// A session whose every tool is deferred, over a small realistic catalogue.
+fn deferred_catalog_session(
+    replies: Vec<BufferedReply>,
+) -> (AgentSession, Arc<MockProvider>, Arc<hq_db::Database>) {
+    let provider = Arc::new(MockProvider::new(replies, vec![]));
+    let tools: Vec<Box<dyn crate::tools::AgentTool>> = [
+        ("office_create", "Make a spreadsheet, document or dashboard"),
+        ("office_export", "Export an office file as PDF or Word"),
+        ("task_create", "Add a task or reminder"),
+        ("calendar_event_create", "Add an event to the calendar"),
+        ("web_fetch", "Fetch a web page"),
+        ("vault_search", "Search notes in the vault"),
+        ("email_send", "Send an email"),
+        ("image_generate", "Make an image from a description"),
+    ]
+    .into_iter()
+    .map(|(name, hint)| Box::new(NamedTool { name, hint }) as Box<dyn crate::tools::AgentTool>)
+    .collect();
+    let mut registry = crate::governance::ToolGuardian::with_default_mode(
+        vec![std::env::current_dir().unwrap()],
+        SecurityProfile::Guarded,
+    )
+    .build_registry(tools, crate::governance::LiveUserTurn::unattended());
+    registry.keep_eager_only(Vec::new());
+    let config = SessionConfig {
+        max_retries: 0,
+        max_duration_secs: None,
+        ..SessionConfig::default()
+    };
+    let mut agent = AgentSession::new(provider.clone(), registry, config);
+    let db = Arc::new(hq_db::Database::open_memory().unwrap());
+    agent.set_telemetry_db(db.clone());
+    (agent, provider, db)
+}
+
 /// A read-only tool that blocks (async sleep) for a fixed duration —
 /// stands in for a slow, concurrent-safe tool (a network read, a search).
 struct BlockingReadTool {
@@ -2123,6 +2194,24 @@ async fn an_auto_loaded_skill_is_logged_with_its_version_the_task_and_a_purpose(
     assert_eq!(trigger, "auto_load");
 }
 
+/// The routing counters, once the fire-and-forget writes have landed.
+async fn routing_counts(
+    db: &Arc<hq_db::Database>,
+    ready: impl Fn(&hq_db::tool_routing::RoutingSummary) -> bool,
+) -> hq_db::tool_routing::RoutingSummary {
+    let mut last = hq_db::tool_routing::RoutingSummary::default();
+    for _ in 0..100 {
+        last = db
+            .with_conn(|c| hq_db::tool_routing::summary_since(c, 0))
+            .unwrap();
+        if ready(&last) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    last
+}
+
 #[tokio::test]
 async fn a_deferred_tool_is_found_declared_and_called() {
     let provider = Arc::new(MockProvider::new(
@@ -2157,28 +2246,103 @@ async fn a_deferred_tool_is_found_declared_and_called() {
         ..SessionConfig::default()
     };
     let mut agent = AgentSession::new(provider.clone(), registry, config);
+    let db = Arc::new(hq_db::Database::open_memory().unwrap());
+    agent.set_telemetry_db(db.clone());
 
     let result = agent.prompt("use the contract tool").await.unwrap();
 
     assert_eq!(result.text(), "done");
-    let requests = provider.requests.lock().unwrap();
-    let declared =
-        |i: usize| -> Vec<String> { requests[i].tools.iter().map(|t| t.name.clone()).collect() };
-    assert!(
-        !declared(0).contains(&"contract_tool".to_string()),
-        "deferred at first"
-    );
-    assert!(declared(0).contains(&"tool_search".to_string()));
-    assert!(
-        declared(1).contains(&"contract_tool".to_string()),
-        "declared once found"
-    );
-    assert!(
-        requests[2]
+    {
+        let requests = provider.requests.lock().unwrap();
+        let declared = |i: usize| -> Vec<String> {
+            requests[i].tools.iter().map(|t| t.name.clone()).collect()
+        };
+        assert!(
+            !declared(0).contains(&"contract_tool".to_string()),
+            "deferred at first"
+        );
+        assert!(declared(0).contains(&"tool_search".to_string()));
+        assert!(
+            declared(1).contains(&"contract_tool".to_string()),
+            "declared once found"
+        );
+        assert!(
+            requests[2]
+                .messages
+                .iter()
+                .any(|m| m.role == MessageRole::Tool && m.content == "tool output"),
+            "and it ran"
+        );
+        // The search result is the compact call shape: the schema arrives as a declared tool.
+        let found = requests[1]
             .messages
             .iter()
-            .any(|m| m.role == MessageRole::Tool && m.content == "tool output"),
-        "and it ran"
+            .find(|m| m.role == MessageRole::Tool)
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+        assert!(found.contains("contract_tool("), "{found}");
+        assert!(!found.contains("Parameters:"), "{found}");
+    }
+
+    // The search and the load are counted, with no search words stored.
+    let counts = routing_counts(&db, |c| c.search_hits == 1 && c.activations == 1).await;
+    assert_eq!(
+        (counts.search_hits, counts.activations),
+        (1, 1),
+        "{counts:?}"
+    );
+    assert_eq!(counts.search_misses, 0);
+}
+
+#[tokio::test]
+async fn a_misspelt_tool_name_gets_the_closest_real_names() {
+    let provider = Arc::new(MockProvider::new(
+        vec![
+            BufferedReply::ToolCall {
+                id: "call-typo".to_string(),
+                name: "contract_tol".to_string(),
+                arguments: serde_json::json!({"input": "value"}),
+            },
+            BufferedReply::Complete("done".to_string()),
+        ],
+        vec![],
+    ));
+    let allowed_path = std::env::current_dir().unwrap();
+    let registry = crate::governance::ToolGuardian::with_default_mode(
+        vec![allowed_path],
+        SecurityProfile::Guarded,
+    )
+    .build_registry(
+        vec![Box::new(ContractTool { cancel: None })],
+        crate::governance::LiveUserTurn::unattended(),
+    );
+    let config = SessionConfig {
+        max_retries: 0,
+        max_duration_secs: None,
+        ..SessionConfig::default()
+    };
+    let mut agent = AgentSession::new(provider.clone(), registry, config);
+    let db = Arc::new(hq_db::Database::open_memory().unwrap());
+    agent.set_telemetry_db(db.clone());
+
+    agent.prompt("use the contract tool").await.unwrap();
+
+    {
+        let requests = provider.requests.lock().unwrap();
+        let reply = requests[1]
+            .messages
+            .iter()
+            .find(|m| m.role == MessageRole::Tool)
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+        assert!(reply.contains("unknown tool: contract_tol"), "{reply}");
+        assert!(reply.contains("Did you mean: contract_tool("), "{reply}");
+    }
+    let counts = routing_counts(&db, |c| c.wrong_names() == 1).await;
+    assert_eq!(
+        (counts.unknown_tools_helped, counts.unknown_tools),
+        (1, 0),
+        "{counts:?}"
     );
 }
 
@@ -2401,4 +2565,95 @@ fn a_cut_tool_output_names_where_its_full_text_is() {
     let (full, total) = hq_tools::spill::read(vault.path(), r, 0, 10_000_000).unwrap();
     assert_eq!(total, long.chars().count());
     assert!(full.contains("line 3000"));
+}
+
+#[tokio::test]
+async fn a_message_that_needs_a_deferred_tool_gets_one_line_naming_it() {
+    let (mut agent, provider, db) = deferred_catalog_session(vec![
+        BufferedReply::ToolCall {
+            id: "call-search".to_string(),
+            name: "tool_search".to_string(),
+            arguments: serde_json::json!({"query": "spreadsheet"}),
+        },
+        BufferedReply::Complete("done".to_string()),
+    ]);
+    agent.set_system_prompt("stable prompt".into());
+
+    agent
+        .prompt("make me a spreadsheet of this month's expenses")
+        .await
+        .unwrap();
+
+    {
+        let requests = provider.requests.lock().unwrap();
+        let users: Vec<&str> = requests[0]
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .map(|m| m.content.as_str())
+            .collect();
+        assert_eq!(users.len(), 2, "the note, then the message: {users:?}");
+        assert!(users[0].starts_with(crate::session::r#loop::TURN_CONTEXT_HEADER));
+        assert!(users[0].contains("Tools that may fit"), "{}", users[0]);
+        assert!(users[0].contains("office_create"), "{}", users[0]);
+        assert_eq!(users[1], "make me a spreadsheet of this month's expenses");
+    }
+    assert_eq!(
+        agent.system_prompt.as_deref(),
+        Some("stable prompt"),
+        "the system prompt is not touched"
+    );
+
+    // Shown once, and followed because the model then loaded the tool it named.
+    let counts = routing_counts(&db, |c| c.hints_followed == 1).await;
+    assert_eq!(
+        (counts.hints_shown, counts.hints_followed),
+        (1, 1),
+        "{counts:?}"
+    );
+}
+
+#[tokio::test]
+async fn ordinary_talk_gets_no_hint_and_no_extra_message() {
+    let (mut agent, provider, db) =
+        deferred_catalog_session(vec![BufferedReply::Complete("you're welcome".to_string())]);
+
+    agent.prompt("thanks, that was helpful!").await.unwrap();
+
+    {
+        let requests = provider.requests.lock().unwrap();
+        let users: Vec<&str> = requests[0]
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .map(|m| m.content.as_str())
+            .collect();
+        assert_eq!(users, ["thanks, that was helpful!"]);
+    }
+    let counts = routing_counts(&db, |_| false).await;
+    assert_eq!(counts.hints_shown, 0, "{counts:?}");
+}
+
+#[tokio::test]
+async fn a_hint_joins_the_existing_turn_context_in_one_message() {
+    let (mut agent, provider, _db) =
+        deferred_catalog_session(vec![BufferedReply::Complete("ok".to_string())]);
+    agent.set_turn_context("- recent memory: the rent is due on the 1st".into());
+
+    agent.prompt("send an email to the landlord").await.unwrap();
+
+    let requests = provider.requests.lock().unwrap();
+    let notes: Vec<&str> = requests[0]
+        .messages
+        .iter()
+        .filter(|m| {
+            m.role == MessageRole::User
+                && m.content
+                    .starts_with(crate::session::r#loop::TURN_CONTEXT_HEADER)
+        })
+        .map(|m| m.content.as_str())
+        .collect();
+    assert_eq!(notes.len(), 1, "one note, not two: {notes:?}");
+    assert!(notes[0].contains("the rent is due on the 1st"));
+    assert!(notes[0].contains("email_send"), "{}", notes[0]);
 }

@@ -96,7 +96,13 @@ impl AgentSession {
     ) -> Result<SessionResult> {
         self.enrich_with_matching_skills(text);
 
-        if let Some(context) = self.turn_context.take() {
+        let hint = self.tool_hint_line(text).await;
+        let context = match (self.turn_context.take(), hint) {
+            (Some(context), Some(hint)) => Some(format!("{context}\n{hint}")),
+            (Some(context), None) => Some(context),
+            (None, hint) => hint,
+        };
+        if let Some(context) = context {
             self.push_message(ChatMessage {
                 image_parts: Vec::new(),
                 role: MessageRole::User,

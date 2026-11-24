@@ -123,6 +123,18 @@ pub trait HqTool: Send + Sync {
         ToolPolicy::Standard
     }
 
+    /// Whether a call's arguments are checked against `parameters()` before `execute` runs.
+    ///
+    /// Many tools read their arguments with helpers that quietly fall back to a default, so a
+    /// wrong argument name does nothing and the model never learns why. A tool that returns
+    /// `true` gets a specific error instead (what is missing, which name does not exist and
+    /// which one was probably meant, the call shape), and harmless slips such as `"5"` for 5
+    /// are fixed. Opt in only when the schema lists every argument `execute` reads, since an
+    /// argument missing from the schema would be refused. Default `false`.
+    fn checks_arguments(&self) -> bool {
+        false
+    }
+
     /// Per-call deadline in milliseconds, forwarded to agent sessions whose
     /// `GovernedTool` enforces it. Default `None`, no deadline. Declare one
     /// only when `execute` stops its work on cancellation.
@@ -153,10 +165,31 @@ pub trait HqTool: Send + Sync {
 /// Run `validate`, then `execute` only when it passes. Every caller of an
 /// `HqTool` goes through here, so a tool's validation is never skipped.
 pub async fn validate_and_execute(tool: &dyn HqTool, args: Value) -> Result<Value> {
+    let args = if tool.checks_arguments() {
+        checked_arguments(tool, args)?
+    } else {
+        args
+    };
     if let ValidationResult::Err { message, .. } = tool.validate(&args).await {
         anyhow::bail!("{message}");
     }
     tool.execute(args).await
+}
+
+/// The arguments with harmless slips fixed, or an error naming everything still wrong and the
+/// call shape, for a tool that opted in with `checks_arguments`.
+fn checked_arguments(tool: &dyn HqTool, args: Value) -> Result<Value> {
+    let parameters = tool.parameters();
+    let checked = crate::arg_check::check(&parameters, args);
+    if checked.problems.is_empty() {
+        return Ok(checked.args);
+    }
+    anyhow::bail!(
+        "invalid arguments for {}: {}. Call shape: {}",
+        tool.name(),
+        checked.problems.join("; "),
+        signature_of(tool.name(), &parameters)
+    )
 }
 
 const HINT_MAX_WORDS: usize = 9;
@@ -306,6 +339,13 @@ pub struct ToolSummary {
 }
 
 impl ToolSummary {
+    /// One-line call shape built from the parameter schema: `name(path*: string, limit?: integer)`.
+    /// A `*` marks a required argument, a `?` an optional one. No descriptions, so it costs a
+    /// fraction of the full schema while still telling the model what to pass.
+    pub fn signature(&self) -> String {
+        signature_of(&self.name, &self.parameters)
+    }
+
     fn from_tool(t: &dyn HqTool) -> Self {
         Self {
             name: t.name().to_string(),
@@ -316,6 +356,59 @@ impl ToolSummary {
             behavioral_prompt: t.behavioral_prompt().map(|s| s.to_string()),
         }
     }
+}
+
+/// One-line call shape for a tool: `name(path*: string, limit?: integer)`. `*` marks a required
+/// argument and `?` an optional one. Shared by the gateway and the native session so both show
+/// the same shape.
+pub fn signature_of(name: &str, parameters: &Value) -> String {
+    let props = parameters.get("properties").and_then(|p| p.as_object());
+    let required: Vec<&str> = parameters
+        .get("required")
+        .and_then(|r| r.as_array())
+        .map(|r| r.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+    let mut args: Vec<String> = Vec::new();
+    if let Some(props) = props {
+        let mut keys: Vec<&String> = props.keys().collect();
+        // Required first, then optional, each in name order, so the line is stable.
+        keys.sort_by_key(|k| (!required.contains(&k.as_str()), k.to_string()));
+        for k in keys {
+            let ty = match props[k].get("type") {
+                Some(Value::String(t)) => t.clone(),
+                Some(Value::Array(a)) => a
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .find(|t| *t != "null")
+                    .unwrap_or("any")
+                    .to_string(),
+                _ => "any".to_string(),
+            };
+            let mark = if required.contains(&k.as_str()) {
+                "*"
+            } else {
+                "?"
+            };
+            args.push(format!("{k}{mark}: {ty}"));
+        }
+    }
+    format!("{name}({})", args.join(", "))
+}
+
+/// The ` Did you mean: ...?` suffix for an unknown tool name, built from the call shapes of the
+/// closest names, or an empty string when nothing is close. `tools` is `(name, parameters)` for
+/// every tool the caller may use. At most three are offered.
+pub fn did_you_mean(wanted: &str, tools: &[(&str, &Value)]) -> String {
+    let names: Vec<&str> = tools.iter().map(|(n, _)| *n).collect();
+    let near = crate::tool_rank::nearest(&names, wanted, 3);
+    if near.is_empty() {
+        return String::new();
+    }
+    let shapes: Vec<String> = near
+        .into_iter()
+        .map(|i| signature_of(tools[i].0, tools[i].1))
+        .collect();
+    format!(" Did you mean: {}?", shapes.join("; "))
 }
 
 /// Central registry of all available tools.
@@ -385,29 +478,66 @@ impl ToolRegistry {
     /// - If `category` is `Some`, only tools whose category matches are returned.
     /// - If `query` is `Some`, the name and description are searched (case-insensitive substring).
     pub fn discover(&self, category: Option<&str>, query: Option<&str>) -> Vec<ToolSummary> {
-        let mut out: Vec<ToolSummary> = self
+        // Name order first, so equal scores (and a category-only call) come back alphabetically.
+        let mut tools: Vec<&dyn HqTool> = self
             .tools
             .values()
-            .filter(|t| {
-                if let Some(cat) = category
-                    && t.category() != cat
-                {
-                    return false;
-                }
-                if let Some(q) = query {
-                    let q_lower = q.to_lowercase();
-                    let in_name = t.name().to_lowercase().contains(&q_lower);
-                    let in_desc = t.description().to_lowercase().contains(&q_lower);
-                    if !in_name && !in_desc {
-                        return false;
-                    }
-                }
-                true
-            })
-            .map(|t| ToolSummary::from_tool(t.as_ref()))
+            .map(|t| t.as_ref())
+            .filter(|t| category.is_none_or(|cat| t.category() == cat))
             .collect();
-        out.sort_by(|a, b| a.name.cmp(&b.name));
-        out
+        tools.sort_by(|a, b| a.name().cmp(b.name()));
+
+        let Some(q) = query.map(str::trim).filter(|q| !q.is_empty()) else {
+            return tools.into_iter().map(ToolSummary::from_tool).collect();
+        };
+
+        // Ranked by the shared offline scorer, best match first.
+        let hints: Vec<std::borrow::Cow<'_, str>> =
+            tools.iter().map(|t| t.effective_hint()).collect();
+        let docs: Vec<crate::tool_rank::RankDoc<'_>> = tools
+            .iter()
+            .zip(&hints)
+            .map(|(t, hint)| crate::tool_rank::RankDoc {
+                name: t.name(),
+                hint,
+                description: t.description(),
+                keywords: &[],
+            })
+            .collect();
+        let ranked = crate::tool_rank::rank(&docs, q, usize::MAX);
+        if !ranked.is_empty() {
+            return ranked
+                .into_iter()
+                .map(|i| ToolSummary::from_tool(tools[i]))
+                .collect();
+        }
+
+        // Nothing scored: fall back to the old literal substring test, so a fragment such as
+        // "vault_s" still finds what it used to.
+        let q_lower = q.to_lowercase();
+        tools
+            .into_iter()
+            .filter(|t| {
+                t.name().to_lowercase().contains(&q_lower)
+                    || t.description().to_lowercase().contains(&q_lower)
+            })
+            .map(ToolSummary::from_tool)
+            .collect()
+    }
+
+    /// The suffix to append to an `unknown tool` error: the closest real tools and their call
+    /// shapes. `allowed` limits suggestions to what a scoped caller may use, so the error never
+    /// names a tool the caller cannot call. Empty when nothing is close.
+    pub fn did_you_mean(&self, wanted: &str, allowed: Option<&[&str]>) -> String {
+        let params: Vec<(String, Value)> = self
+            .tools
+            .values()
+            .filter(|t| allowed.is_none_or(|a| a.contains(&t.name())))
+            .map(|t| (t.name().to_string(), t.parameters()))
+            .collect();
+        let mut sorted: Vec<(&str, &Value)> = params.iter().map(|(n, p)| (n.as_str(), p)).collect();
+        sorted.sort_by(|a, b| a.0.cmp(b.0));
+        did_you_mean(wanted, &sorted)
     }
 
     /// Return tool summaries visible at or below `max_policy`.
@@ -880,5 +1010,123 @@ mod tests {
         let mut reg = ToolRegistry::new();
         reg.register(Box::new(FakeTool::new("plain", "Does a thing", "misc")));
         assert!(reg.behavioral_block(180).is_empty());
+    }
+
+    #[test]
+    fn signature_marks_required_first_then_optional_with_types() {
+        let summary = ToolSummary {
+            name: "file_read".into(),
+            description: String::new(),
+            category: "files".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer"},
+                    "path": {"type": "string"},
+                    "mode": {"type": ["string", "null"]},
+                },
+                "required": ["path"],
+            }),
+            search_hint: None,
+            behavioral_prompt: None,
+        };
+        assert_eq!(
+            summary.signature(),
+            "file_read(path*: string, limit?: integer, mode?: string)"
+        );
+    }
+
+    #[test]
+    fn signature_of_a_tool_with_no_parameters_is_empty_parens() {
+        let summary = ToolSummary {
+            name: "ping".into(),
+            description: String::new(),
+            category: "x".into(),
+            parameters: serde_json::json!({}),
+            search_hint: None,
+            behavioral_prompt: None,
+        };
+        assert_eq!(summary.signature(), "ping()");
+    }
+
+    #[test]
+    fn did_you_mean_offers_close_names_with_their_call_shape() {
+        let params = serde_json::json!({
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        });
+        let tools = [("vault_search", &params), ("web_fetch", &params)];
+        let hint = did_you_mean("vault_serach", &tools);
+        assert_eq!(hint, " Did you mean: vault_search(query*: string)?");
+        assert_eq!(did_you_mean("zzzzzzzz_qqqq", &tools), "");
+    }
+
+    struct Strict {
+        strict: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl HqTool for Strict {
+        fn name(&self) -> &str {
+            "note_read"
+        }
+        fn description(&self) -> &str {
+            "Read a note"
+        }
+        fn parameters(&self) -> Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "required": ["path"],
+            })
+        }
+        fn checks_arguments(&self) -> bool {
+            self.strict
+        }
+        async fn execute(&self, args: Value) -> Result<Value> {
+            Ok(args)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_tool_that_opts_in_gets_a_specific_error_and_slips_fixed() {
+        let tool = Strict { strict: true };
+
+        let err = validate_and_execute(&tool, serde_json::json!({"file": "a.md"}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.starts_with("invalid arguments for note_read:"), "{err}");
+        assert!(
+            err.contains("`file` is not an argument (did you mean `path`?)"),
+            "{err}"
+        );
+        assert!(err.contains("`path` is required"), "{err}");
+        assert!(
+            err.contains("Call shape: note_read(path*: string, limit?: integer)"),
+            "{err}"
+        );
+
+        // A slip that cannot change the meaning is fixed, and runtime keys pass through.
+        let out = validate_and_execute(
+            &tool,
+            serde_json::json!({"path": "a.md", "limit": "5", "_hq_connector": "c"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["limit"], 5);
+        assert_eq!(out["_hq_connector"], "c");
+    }
+
+    #[tokio::test]
+    async fn a_tool_that_does_not_opt_in_is_left_exactly_as_it_was() {
+        let tool = Strict { strict: false };
+        let args = serde_json::json!({"file": "a.md", "limit": "5"});
+        let out = validate_and_execute(&tool, args.clone()).await.unwrap();
+        assert_eq!(out, args, "no check, no fix");
     }
 }
