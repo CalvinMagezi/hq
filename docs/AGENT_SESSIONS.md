@@ -976,6 +976,15 @@ adds `suggested_starter` to a waiting request. `GET /api/sandbox-grants/rules` l
 the grant revoke route), `/starters` lists the shipped sets, `/summary?days=7` counts what HQ approved by
 policy, approved for the owner, asked, declined and refused (counts only, on this device).
 
+A test runner that listens on a random local port (Flutter's tests do) reaches that port through the
+sandbox's egress proxy, which refuses local addresses it was not told about, so the helper's run fails
+with a 403. `sandbox_request` with capability `loopback` and resource `ephemeral` (also `any`) opens only
+the operating system's ephemeral ports, 49152 to 65535 (`hq_core::grants::EPHEMERAL_RANGE`), through the
+proxy; HQ's own ports, adb and the databases sit below that range and stay closed. It is never in a
+starter set and a profile approves it only with `loopback_ephemeral: true`; otherwise the owner is asked
+(it lets the session connect to any local service a program started on a random port). A client that
+connects directly instead of through the proxy is not covered.
+
 Owner routes (web credential only, never an MCP key or a helper token): `GET /api/sandbox-grants[?session=<id>]`,
 `POST /api/sandbox-grants/{id}/revoke`, `GET /api/sandbox-grants/profiles` (each configured profile with `~`
 resolved and credential paths dropped), and `POST /api/sandbox-grants/profile` with

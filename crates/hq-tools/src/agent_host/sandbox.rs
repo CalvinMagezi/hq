@@ -121,6 +121,18 @@ pub(super) fn extend_plan(mut plan: Value, grants: &hq_core::grants::SandboxDelt
     }
     let allow = obj.entry("allow").or_insert_with(|| json!([]));
     if let Some(list) = allow.as_array_mut() {
+        // A client that picks a random local port (a test runner talking to its own listener)
+        // reaches it through the proxy; only the ephemeral range is opened, so HQ's own ports, adb
+        // and the databases that sit below it stay closed.
+        if grants.loopback_ephemeral {
+            let (lo, hi) = hq_core::grants::EPHEMERAL_RANGE;
+            for host in LOOPBACK_NAMES {
+                let rule = json!({ "host": host, "port_ranges": [[lo, hi]], "private": true });
+                if !list.contains(&rule) {
+                    list.push(rule);
+                }
+            }
+        }
         // A client that honours HTTP_PROXY reaches a local port through the proxy, which refuses
         // local addresses unless a rule names them as private (as `plan` does for config ports).
         if !grants.loopback_ports.is_empty() {
@@ -236,6 +248,15 @@ mod tests {
             "a host granted twice is listed once"
         );
         assert_eq!(extend_plan(base.clone(), &SandboxDelta::default()), base);
+        let eph = SandboxDelta {
+            loopback_ephemeral: true,
+            ..Default::default()
+        };
+        let plan = extend_plan(base.clone(), &eph);
+        assert!(plan["allow"].as_array().unwrap().contains(
+            &json!({"host": "127.0.0.1", "port_ranges": [[49152, 65535]], "private": true})
+        ));
+        assert_eq!(extend_plan(plan.clone(), &eph)["allow"], plan["allow"]);
         let none = json!({ "mode": "none" });
         assert_eq!(extend_plan(none.clone(), &delta), none);
     }

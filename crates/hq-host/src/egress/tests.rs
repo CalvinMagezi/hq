@@ -459,3 +459,22 @@ fn a_tunnel_must_name_the_host_it_asked_for() {
     let log = egress.decisions("a");
     assert!(log.iter().filter(|d| !d.allowed).count() >= 2, "{log:?}");
 }
+
+#[test]
+fn a_port_range_rule_opens_the_random_local_ports_and_nothing_below_them() {
+    let mut rule = Rule::new("localhost").private();
+    rule.port_ranges.push((49152, 65535));
+    for open in [49152, 60000, 65535] {
+        assert!(rule.matches("localhost", open), "{open}");
+    }
+    // HQ's own ports, adb and the usual databases sit below the ephemeral range.
+    for closed in [443, 5037, 5432, 5678, 7747, 47480, 49151] {
+        assert!(!rule.matches("localhost", closed), "{closed}");
+    }
+    assert!(
+        !rule.matches("example.org", 60000),
+        "the host still has to match"
+    );
+    let plain = Rule::new("localhost").private();
+    assert!(plain.matches("localhost", 443) && !plain.matches("localhost", 60000));
+}

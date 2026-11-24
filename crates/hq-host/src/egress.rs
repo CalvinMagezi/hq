@@ -39,8 +39,10 @@ const MAX_HELLO_BYTES: usize = 16 * 1024;
 pub struct Rule {
     /// An exact host name, or `*.suffix` for any subdomain (not the bare suffix).
     pub host: String,
-    /// Allowed ports; empty means 443 only.
+    /// Allowed ports; empty means 443 only (unless `port_ranges` names some).
     pub ports: Vec<u16>,
+    /// Allowed port ranges, both ends included: a test runner that listens on a random local port.
+    pub port_ranges: Vec<(u16, u16)>,
     /// The host may resolve to a private, loopback or link-local address. Set only
     /// for an endpoint the operator named, such as the HQ MCP address on a tailnet.
     pub allow_private: bool,
@@ -55,6 +57,7 @@ impl Rule {
         Self {
             host: host.to_ascii_lowercase(),
             ports: Vec::new(),
+            port_ranges: Vec::new(),
             allow_private: false,
             check_sni: true,
         }
@@ -77,10 +80,14 @@ impl Rule {
     }
 
     fn matches(&self, host: &str, port: u16) -> bool {
-        let ports_ok = if self.ports.is_empty() {
+        let in_range = self
+            .port_ranges
+            .iter()
+            .any(|(lo, hi)| (*lo..=*hi).contains(&port));
+        let ports_ok = if self.ports.is_empty() && self.port_ranges.is_empty() {
             port == DEFAULT_PORT
         } else {
-            self.ports.contains(&port)
+            self.ports.contains(&port) || in_range
         };
         let host_ok = match self.host.strip_prefix("*.") {
             Some(suffix) => host

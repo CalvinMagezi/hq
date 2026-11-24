@@ -54,6 +54,11 @@ pub const DENIED_HOME_DIRS: &[&str] = &[
 /// Another Claude account's directory (`~/.claude-<name>`).
 const OTHER_CLAUDE_PREFIX: &str = ".claude-";
 const DEFAULT_EGRESS_PORT: u16 = 443;
+/// The loopback resource for "any port a program picks for itself" (a test runner's listener).
+pub const EPHEMERAL_PORTS: &str = "ephemeral";
+/// The range that means: the operating system's ephemeral ports. Well-known services (HQ's own
+/// ports, adb, databases) sit below it, so they stay out of reach.
+pub const EPHEMERAL_RANGE: (u16, u16) = (49152, 65535);
 
 /// What a request is for. Recipes and devices are brokered rather than widened, so they are not
 /// here yet: a request for them is `Unsupported`.
@@ -82,6 +87,9 @@ pub struct GrantProfile {
     pub readable: Vec<String>,
     #[serde(default)]
     pub loopback_ports: Vec<u16>,
+    /// Allow connections to local services on random ports (see [`EPHEMERAL_RANGE`]).
+    #[serde(default)]
+    pub loopback_ephemeral: bool,
     /// `host` or `host:port`, exact names only.
     #[serde(default)]
     pub egress: Vec<String>,
@@ -165,6 +173,7 @@ impl GrantProfile {
                 .copied()
                 .filter(|p| *p != 0)
                 .collect(),
+            loopback_ephemeral: self.loopback_ephemeral,
             egress: self.egress.clone(),
         }
     }
@@ -176,6 +185,7 @@ impl GrantProfile {
             writable: r.writable.iter().map(PathBuf::from).collect(),
             readable: r.readable.iter().map(PathBuf::from).collect(),
             loopback_ports: r.loopback_ports,
+            loopback_ephemeral: r.loopback_ephemeral,
             allow: r.egress.iter().filter_map(|e| split_host(e)).collect(),
         }
     }
@@ -205,6 +215,7 @@ pub fn starter_profile(name: &str) -> Option<GrantProfile> {
             ]),
             readable: list(&["~/Library/Android/sdk", "~/Android/Sdk"]),
             loopback_ports: Vec::new(),
+            loopback_ephemeral: false,
             egress: list(&[
                 "pub.dev",
                 "dl.google.com",
@@ -219,12 +230,14 @@ pub fn starter_profile(name: &str) -> Option<GrantProfile> {
             writable: Vec::new(),
             readable: Vec::new(),
             loopback_ports: Vec::new(),
+            loopback_ephemeral: false,
             egress: list(&["registry.npmjs.org", "registry.yarnpkg.com"]),
         }),
         "rust-build" => Some(GrantProfile {
             writable: Vec::new(),
             readable: Vec::new(),
             loopback_ports: Vec::new(),
+            loopback_ephemeral: false,
             egress: list(&["crates.io", "index.crates.io", "static.crates.io"]),
         }),
         _ => None,
@@ -309,6 +322,9 @@ pub struct SandboxDelta {
     pub readable: Vec<PathBuf>,
     #[serde(default)]
     pub loopback_ports: Vec<u16>,
+    /// Local services on random ports, through the egress proxy.
+    #[serde(default)]
+    pub loopback_ephemeral: bool,
     /// `(host, port)` the egress proxy may reach.
     #[serde(default)]
     pub allow: Vec<(String, u16)>,
@@ -319,6 +335,7 @@ impl SandboxDelta {
         self.writable.is_empty()
             && self.readable.is_empty()
             && self.loopback_ports.is_empty()
+            && !self.loopback_ephemeral
             && self.allow.is_empty()
     }
 }
@@ -410,12 +427,16 @@ pub fn denied_path(path: &Path, home: &Path) -> Option<RefuseReason> {
 /// What cannot be read stays as written for `classify` to refuse.
 pub fn normalize(req: &GrantRequest) -> GrantRequest {
     let resource = match req.capability {
-        Capability::Loopback => req
-            .resource
-            .trim()
-            .parse::<u16>()
-            .map(|p| p.to_string())
-            .unwrap_or_else(|_| req.resource.clone()),
+        Capability::Loopback => {
+            let r = req.resource.trim().to_ascii_lowercase();
+            if matches!(r.as_str(), EPHEMERAL_PORTS | "any" | "*") {
+                EPHEMERAL_PORTS.to_string()
+            } else {
+                r.parse::<u16>()
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|_| req.resource.clone())
+            }
+        }
         Capability::Egress => split_host(&req.resource)
             .map(|(h, p)| format!("{h}:{p}"))
             .unwrap_or_else(|| req.resource.clone()),
@@ -461,6 +482,18 @@ fn classify_path(req: &GrantRequest, ctx: &TaskContext, profile: &GrantProfile) 
 }
 
 fn classify_loopback(req: &GrantRequest, profile: &GrantProfile) -> Decision {
+    if req.resource == EPHEMERAL_PORTS {
+        // Reaches every local service a program started on a random port, so only a profile that
+        // says so approves it; otherwise the owner is asked.
+        return if profile.loopback_ephemeral {
+            Decision::Approve(SandboxDelta {
+                loopback_ephemeral: true,
+                ..Default::default()
+            })
+        } else {
+            Decision::Ask(AskReason::OutsideProfile)
+        };
+    }
     let Ok(port) = req.resource.trim().parse::<u16>() else {
         return Decision::Refuse(RefuseReason::Invalid);
     };
@@ -546,6 +579,7 @@ mod tests {
             writable: vec!["/home/user/.gradle".into()],
             readable: vec!["/home/user/Android/sdk".into()],
             loopback_ports: vec![5037],
+            loopback_ephemeral: false,
             egress: vec!["pub.dev".into(), "repo.example.org:8443".into()],
         }
     }
@@ -737,6 +771,7 @@ mod tests {
             writable: vec!["~/.gradle".into(), "~/.ssh".into()],
             readable: vec!["/home/user".into()],
             loopback_ports: vec![0, 5037],
+            loopback_ephemeral: false,
             egress: vec!["pub.dev".into(), "*.bad".into()],
         };
         let d = p.delta(Path::new("/home/user"));
@@ -887,6 +922,43 @@ mod tests {
         assert_eq!(
             run(Capability::FsRead, "/a\0b", Some(mobile())),
             Decision::Refuse(RefuseReason::Invalid)
+        );
+    }
+
+    #[test]
+    fn random_local_ports_need_the_profile_to_say_so_and_otherwise_ask_the_owner() {
+        for spelling in ["ephemeral", "ANY", " * "] {
+            let n = normalize(&req(Capability::Loopback, spelling));
+            assert_eq!(n.resource, EPHEMERAL_PORTS, "{spelling}");
+        }
+        assert_eq!(
+            run(Capability::Loopback, "ephemeral", Some(mobile())),
+            Decision::Ask(AskReason::OutsideProfile),
+            "a profile that lists exact ports does not open every random one"
+        );
+        let mut open = mobile();
+        open.loopback_ephemeral = true;
+        let d = run(Capability::Loopback, "ephemeral", Some(open));
+        let Decision::Approve(delta) = d else {
+            panic!("{d:?}")
+        };
+        assert!(delta.loopback_ephemeral && delta.loopback_ports.is_empty());
+        assert!(rule_covers(
+            Capability::Loopback,
+            EPHEMERAL_PORTS,
+            &req(Capability::Loopback, EPHEMERAL_PORTS)
+        ));
+        assert!(!rule_covers(
+            Capability::Loopback,
+            "5037",
+            &req(Capability::Loopback, EPHEMERAL_PORTS)
+        ));
+        assert!(
+            !SandboxDelta {
+                loopback_ephemeral: true,
+                ..Default::default()
+            }
+            .is_empty()
         );
     }
 }

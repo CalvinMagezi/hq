@@ -37,6 +37,7 @@ fn claude_answers_a_prompt_under_the_sandbox() {
         allow: vec![Allow {
             host: "api.anthropic.com".into(),
             ports: vec![443],
+            port_ranges: Vec::new(),
             private: false,
         }],
         writable: Vec::new(),
