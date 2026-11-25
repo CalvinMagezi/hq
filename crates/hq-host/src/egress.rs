@@ -535,8 +535,16 @@ fn serve(
     };
     // One request per connection: the headers say so, and the connection ends
     // when the upstream's reply does, so a second request cannot name another host.
+    // A WebSocket upgrade must keep its `Connection: Upgrade`; the request still goes to the one
+    // host already checked, and the tunnel then carries the upgraded stream.
+    let upgrade = head.headers.iter().any(|l| {
+        l.split_once(':').is_some_and(|(n, v)| {
+            n.trim().eq_ignore_ascii_case("upgrade") && v.trim().eq_ignore_ascii_case("websocket")
+        })
+    });
+    let connection = if upgrade { "Upgrade" } else { "close" };
     let mut req = format!(
-        "{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
+        "{} {} HTTP/1.1\r\nHost: {}\r\nConnection: {connection}\r\n",
         head.method, path, authority
     );
     for line in &head.headers {
