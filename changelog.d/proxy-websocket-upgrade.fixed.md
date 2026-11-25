@@ -1,0 +1,1 @@
+A sandboxed helper's WebSocket connection to a local service (what Flutter's test runner opens) now works through the sandbox proxy, and Gradle builds connect to the proxy over IPv4, which the sandbox allows.

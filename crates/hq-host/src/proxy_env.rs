@@ -12,7 +12,7 @@ pub(crate) const JAVA_OPTIONS_ENV: &str = "JAVA_TOOL_OPTIONS";
 pub(crate) fn java_proxy_options(port: u16, existing: Option<&str>) -> String {
     let proxy = format!(
         "-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort={port} -Dhttps.proxyHost=127.0.0.1 \
-         -Dhttps.proxyPort={port} -Dhttp.nonProxyHosts="
+         -Dhttps.proxyPort={port} -Dhttp.nonProxyHosts= -Djava.net.preferIPv4Stack=true"
     );
     match existing.map(str::trim).filter(|e| !e.is_empty()) {
         Some(e) => format!("{e} {proxy}"),
@@ -47,6 +47,10 @@ mod tests {
         assert!(
             plain.contains("-Dhttp.nonProxyHosts="),
             "nothing bypasses the proxy"
+        );
+        assert!(
+            plain.contains("-Djava.net.preferIPv4Stack=true"),
+            "an IPv6 socket does not match the sandbox's rule for the proxy port"
         );
         let kept = java_proxy_options(4321, Some("  -Xmx2g "));
         assert!(kept.starts_with("-Xmx2g -Dhttp.proxyHost="), "{kept}");

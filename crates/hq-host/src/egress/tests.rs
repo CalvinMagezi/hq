@@ -284,6 +284,37 @@ fn plain_http_is_forwarded_once_with_a_close() {
     handle.join().unwrap();
 }
 
+fn forwarded_head(request: &str) -> String {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let up = listener.local_addr().unwrap().port();
+    let seen = std::thread::spawn(move || {
+        let (mut s, _) = listener.accept().unwrap();
+        let mut buf = [0u8; 2048];
+        let n = s.read(&mut buf).unwrap();
+        let _ = s.write_all(b"HTTP/1.1 204 No Content\r\n\r\n");
+        String::from_utf8_lossy(&buf[..n]).into_owned()
+    });
+    let egress = Egress::new();
+    let port = egress
+        .open("a", vec![Rule::new("localhost").port(up).private()])
+        .unwrap();
+    ask(port, &request.replace("UP", &up.to_string()));
+    seen.join().unwrap()
+}
+
+#[test]
+fn a_websocket_upgrade_keeps_its_connection_header_and_other_requests_still_close() {
+    let upgrade = forwarded_head(
+        "GET http://localhost:UP/ws HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+    );
+    assert!(upgrade.contains("Connection: Upgrade\r\n"), "{upgrade}");
+    assert!(!upgrade.contains("Connection: close"), "{upgrade}");
+    let other = forwarded_head(
+        "GET http://localhost:UP/x HTTP/1.1\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n",
+    );
+    assert!(other.contains("Connection: close\r\n"), "{other}");
+}
+
 #[test]
 fn plain_http_does_not_forward_proxy_credentials() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
