@@ -408,7 +408,10 @@ pub(crate) async fn web_auth_middleware(
             let checking = state.clone();
             tokio::task::spawn_blocking(move || {
                 let credential = presented.and_then(|t| checking.web_credential(&t));
-                (checking.web_auth_enabled(), credential)
+                // A credential only verifies when a configured or device token exists, which is
+                // exactly when sign-in is on: skip the second database read in that case.
+                let enabled = credential.is_some() || checking.web_auth_enabled();
+                (enabled, credential)
             })
             .await
             .unwrap_or((true, None))

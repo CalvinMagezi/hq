@@ -96,7 +96,11 @@ pub(super) async fn wait_for_cancel(flag: &AtomicBool) {
 /// polling shape as `wait_for_cancel`, for the same reason.
 async fn wait_for_steer(pending: &std::sync::Mutex<Option<String>>) -> String {
     loop {
-        if let Some(text) = pending.lock().unwrap().take() {
+        if let Some(text) = pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
             return text;
         }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
@@ -139,7 +143,7 @@ impl AgentSession {
             if tried_fallback && let Some(fallback) = self.config.fallback_model.as_ref() {
                 request.model = fallback.clone();
             }
-            let backend_request = BackendRequest::from_chat(&request, want_stream);
+            let backend_request = BackendRequest::from_chat_owned(request, want_stream);
             let ctx = self.session_context();
 
             match hq_llm::SESSION_CONTEXT
@@ -155,7 +159,7 @@ impl AgentSession {
                     self.compact().await;
                     let retry_request = self.build_turn_request(hq_managed_tools).await;
                     let retry_backend_request =
-                        BackendRequest::from_chat(&retry_request, want_stream);
+                        BackendRequest::from_chat_owned(retry_request, want_stream);
                     let retry_ctx = self.session_context();
                     return hq_llm::SESSION_CONTEXT
                         .scope(retry_ctx, backend.start(&retry_backend_request))

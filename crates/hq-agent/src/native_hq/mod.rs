@@ -368,7 +368,6 @@ pub async fn run_native_hq(
             // borrow-free and 'static.
             let sink = on_detached.expect("checked by match guard");
             let prompt_owned = prompt.to_string();
-            let image_parts = image_parts.clone();
             let mut fut = Box::pin(async move {
                 session
                     .prompt_stream_with_images(&prompt_owned, image_parts)
@@ -427,26 +426,25 @@ pub async fn run_native_hq(
                 }
             }
         }
-        Some(t) => match tokio::time::timeout(
-            t,
-            session.prompt_stream_with_images(prompt, image_parts.clone()),
-        )
-        .await
-        {
-            Ok(inner) => inner,
-            Err(_) => {
-                let text = "Request timed out. Try breaking it into smaller steps.".to_string();
-                record_thread_turn(config, &thread_identity, prompt, &text);
-                return Ok(NativeHqResult {
-                    text,
-                    success: false,
-                    quality: QUALITY_FAILED,
-                    latency_ms: start.elapsed().as_millis() as u64,
-                    output_tokens: 0,
-                    detached: false,
-                });
+        Some(t) => {
+            match tokio::time::timeout(t, session.prompt_stream_with_images(prompt, image_parts))
+                .await
+            {
+                Ok(inner) => inner,
+                Err(_) => {
+                    let text = "Request timed out. Try breaking it into smaller steps.".to_string();
+                    record_thread_turn(config, &thread_identity, prompt, &text);
+                    return Ok(NativeHqResult {
+                        text,
+                        success: false,
+                        quality: QUALITY_FAILED,
+                        latency_ms: start.elapsed().as_millis() as u64,
+                        output_tokens: 0,
+                        detached: false,
+                    });
+                }
             }
-        },
+        }
         None => session.prompt_stream_with_images(prompt, image_parts).await,
     };
     let latency_ms = start.elapsed().as_millis() as u64;

@@ -45,7 +45,10 @@ pub(crate) async fn forget_handler(
     State(state): State<Arc<WsState>>,
     Path(host): Path<String>,
 ) -> Response {
-    match state.db.with_conn(|c| fetch_sites::forget(c, &host)) {
+    match state
+        .db_blocking(move |c| fetch_sites::forget(c, &host))
+        .await
+    {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
         Err(e) => ApiError::internal(e).into_response(),
     }

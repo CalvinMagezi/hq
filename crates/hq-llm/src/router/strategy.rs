@@ -256,9 +256,12 @@ impl LlmRouter {
                         return Ok(Box::pin(prepended.chain(stream)));
                     }
                     Some(Err(e)) => {
-                        let is_rate_limit = e.to_string().contains("429")
-                            || e.to_string().contains("Too Many Requests")
-                            || e.to_string().contains("rate");
+                        // A bare "rate" substring also matched "generate" and "moderate", which
+                        // skipped the non-streaming fallback for unrelated errors.
+                        let is_rate_limit = matches!(
+                            classify_anyhow_error(&e),
+                            crate::provider::LlmError::RateLimit { .. }
+                        );
                         if is_rate_limit {
                             let latency = call_start.elapsed();
                             tracing::debug!(

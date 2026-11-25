@@ -420,7 +420,16 @@ pub(crate) async fn tree_handler(
     if !state.path_allowed(&path_param) {
         return ApiError::not_found().into_response();
     }
-    crate::vault_api::recursive_tree(&state.vault_path, &path_param, state.profile().is_lite())
+    // The recursive walk reads every folder under the root, so it runs off the async runtime.
+    let (vault, lite) = (state.vault_path.clone(), state.profile().is_lite());
+    match tokio::task::spawn_blocking(move || {
+        crate::vault_api::recursive_tree(&vault, &path_param, lite)
+    })
+    .await
+    {
+        Ok(response) => response,
+        Err(e) => ApiError::internal(e).into_response(),
+    }
 }
 
 pub(crate) async fn pinned_handler(State(state): State<Arc<WsState>>) -> axum::response::Response {

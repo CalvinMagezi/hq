@@ -256,7 +256,7 @@ fn in_savepoint<T>(conn: &Connection, work: impl FnOnce(&Connection) -> Result<T
 pub(super) fn delete_content_rows(conn: &Connection, path: &str) -> Result<usize> {
     in_savepoint(conn, |conn| {
         let mut removed = 0;
-        removed += conn.execute("DELETE FROM notes_fts WHERE path = ?1", [path])?;
+        removed += super::fts::delete_fts_row(conn, path)?;
         removed += conn.execute("DELETE FROM embeddings WHERE note_path = ?1", [path])?;
         removed += conn.execute("DELETE FROM sync_state WHERE path = ?1", [path])?;
         removed += conn.execute("DELETE FROM vault_cache WHERE path = ?1", [path])?;
@@ -416,7 +416,7 @@ fn load_indexed_paths(conn: &Connection, prefix: &str) -> Result<BTreeSet<String
     let mut paths = BTreeSet::new();
     for sql in [
         "SELECT path FROM sync_state WHERE path >= ?1 AND path < ?2",
-        "SELECT path FROM notes_fts WHERE path >= ?1 AND path < ?2",
+        "SELECT path FROM notes_fts_rows WHERE path >= ?1 AND path < ?2",
         "SELECT note_path FROM embeddings WHERE note_path >= ?1 AND note_path < ?2",
         "SELECT path FROM vault_cache WHERE path >= ?1 AND path < ?2",
     ] {
@@ -523,10 +523,10 @@ pub fn index_freshness(conn: &Connection) -> Result<IndexFreshness> {
         keyword_indexed: count("SELECT COUNT(*) FROM notes_fts")?,
         embedded: count("SELECT COUNT(*) FROM embeddings")?,
         awaiting_embedding: count(
-            "SELECT COUNT(*) FROM notes_fts WHERE path NOT IN (SELECT note_path FROM embeddings)",
+            "SELECT COUNT(*) FROM notes_fts_rows WHERE path NOT IN (SELECT note_path FROM embeddings)",
         )?,
         orphan_embeddings: count(
-            "SELECT COUNT(*) FROM embeddings WHERE note_path NOT IN (SELECT path FROM notes_fts)",
+            "SELECT COUNT(*) FROM embeddings WHERE note_path NOT IN (SELECT path FROM notes_fts_rows)",
         )?,
         stale_embeddings: super::semantic::stale_embedding_count(conn)?,
         last_synced_at: conn
@@ -596,10 +596,10 @@ pub fn repair_orphans(conn: &Connection, vault_path: &Path, apply: bool) -> Resu
         gone
     };
     let mut report = RepairReport {
-        indexed_without_file: missing(column_values(conn, "SELECT path FROM notes_fts")?),
+        indexed_without_file: missing(column_values(conn, "SELECT path FROM notes_fts_rows")?),
         embeddings_without_note: missing(column_values(
             conn,
-            "SELECT note_path FROM embeddings WHERE note_path NOT IN (SELECT path FROM notes_fts)",
+            "SELECT note_path FROM embeddings WHERE note_path NOT IN (SELECT path FROM notes_fts_rows)",
         )?),
         cached_without_file: missing(column_values(conn, "SELECT path FROM vault_cache")?),
         synced_without_file: missing(column_values(conn, "SELECT path FROM sync_state")?),

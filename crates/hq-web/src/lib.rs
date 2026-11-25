@@ -133,6 +133,20 @@ pub struct WsState {
 }
 
 impl WsState {
+    /// Runs `f` with a pooled database connection on a blocking thread, so a handler never holds
+    /// an async worker while SQLite or the pool checkout waits. The error is the closure's own
+    /// (`ApiError::from` classifies it); a panic or cancelled task becomes an internal error.
+    pub(crate) async fn db_blocking<F, T>(&self, f: F) -> anyhow::Result<T>
+    where
+        F: FnOnce(&rusqlite::Connection) -> anyhow::Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || db.with_conn(f))
+            .await
+            .map_err(|e| anyhow::Error::from(crate::error::ApiError::internal(e)))?
+    }
+
     pub fn new(vault_path: PathBuf, static_dir: Option<PathBuf>) -> Self {
         let (tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         let db = hq_db::Database::open(&vault_path.join("_data").join("vault.db"))

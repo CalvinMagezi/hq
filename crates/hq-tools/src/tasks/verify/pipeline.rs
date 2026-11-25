@@ -21,6 +21,7 @@ use hq_db::tasks as t;
 use hq_db::tasks::Task;
 use serde_json::{Value, json};
 
+use super::apply::{ApplyArgs, Decision, apply_verdict, decide, plan_verdict, record_deferral};
 use super::artifact::{Artifact, TaskFacts, discover, repos_for_cwds};
 use super::collect::{
     ChecksSummary, PrFacts, collect_checks, collect_diff, collect_note, collect_pr,
@@ -875,238 +876,45 @@ pub async fn finish_as(
     resolution: Resolution,
     disposition: Disposition,
 ) -> Result<Finished> {
-    let marker = ev.marker;
-    let task_id = ev.task.id.clone();
-    let (verdict, level, independence, criteria, reasons, waiting_for) = match resolution {
-        Resolution::Defer {
-            reason,
-            waiting_for,
-            retry_after_secs,
-        } => {
-            let stored = reason.clone();
-            let id = task_id.clone();
-            let recorded = env.db.with_conn(move |c| {
-                t::in_write_tx(c, |c| {
-                    if t::review_marker(c, &id)? != marker {
-                        return Ok(false);
-                    }
-                    t::record_wait(
-                        c,
-                        &id,
-                        waiting_for.as_str(),
-                        &stored,
-                        retry_after_secs,
-                        chrono::Utc::now().timestamp(),
-                    )?;
-                    Ok(true)
-                })
-            })?;
-            if !recorded {
-                return Ok(Finished::Voided {
-                    reason: "the task was submitted again while it was being verified".to_string(),
-                });
-            }
-            return Ok(Finished::Deferred {
-                reason,
-                waiting_for,
-                retry_after_secs,
-            });
-        }
-        Resolution::Pass {
-            level,
-            independence,
-            criteria,
-            summary,
-        } => {
-            let assessed = ev.contract.is_assessed_only();
-            let reasons = if assessed {
-                format!("assessed, not checked: the task states no acceptance criteria. {summary}")
-            } else {
-                summary
-            };
-            (
-                t::VERDICT_PASS,
-                level,
-                independence,
-                criteria,
-                reasons,
-                None,
-            )
-        }
-        Resolution::Fail { reasons, criteria } => (
-            t::VERDICT_FAIL,
-            t::LEVEL_NONE,
-            "none",
-            criteria,
-            reasons,
-            Some(WaitingFor::Worker),
-        ),
-        Resolution::Inconclusive {
-            reasons,
-            waiting_for,
-        } => (
-            t::VERDICT_INCONCLUSIVE,
-            t::LEVEL_NONE,
-            "none",
-            json!([]),
-            reasons,
-            Some(waiting_for),
-        ),
+    let planned = match plan_verdict(resolution, ev) {
+        Ok(planned) => planned,
+        Err(wait) => return record_deferral(env, ev, wait).await,
     };
-    let enforced = env.cfg.mode == VerificationMode::Enforce && env.cfg.enforces(ev.tier);
-    // A pass completes the task only while measured trust in the verifier allows it; otherwise
-    // the verdict is kept and the task is left for the owner, who is told why once.
-    let held = if verdict == t::VERDICT_PASS && enforced {
-        let (cfg, tier) = (env.cfg.clone(), ev.tier);
-        env.db
-            .with_conn(move |c| t::autonomy_block(c, &cfg, tier))
-            // If calibration cannot be read, the pass is held: trust is not assumed.
-            .unwrap_or_else(|e| Some(format!("calibration could not be read ({e})")))
-    } else {
-        None
-    };
-    let (reasons, waiting_for) = match &held {
-        Some(why) => (
-            format!("{reasons}\nHeld for the owner: {why}."),
-            Some(WaitingFor::Owner),
-        ),
-        None => (reasons, waiting_for),
-    };
-    let applies = verdict == t::VERDICT_PASS && enforced && held.is_none();
-    // Tier 2 work is approved now and completed when its veto window closes.
-    let hold_for = (applies
-        && disposition == Disposition::Act
-        && ev.tier >= t::MAX_TIER
-        && env.cfg.veto_hours > 0)
-        .then(|| i64::from(env.cfg.veto_hours) * 3600);
-    let release_at = hold_for.map(|secs| chrono::Utc::now().timestamp().saturating_add(secs));
-    let (reasons, waiting_for) = match release_at {
-        Some(at) => (
-            format!(
-                "{reasons}\nTier 2: it completes at {} UTC unless the owner vetoes it first.",
-                clock(at)
-            ),
-            Some(WaitingFor::Owner),
-        ),
-        None => (reasons, waiting_for),
-    };
-    let sends_back =
-        enforced && disposition == Disposition::Act && waiting_for == Some(WaitingFor::Worker);
+    let Decision {
+        planned,
+        held,
+        applies,
+        release_at,
+        sends_back,
+    } = decide(env, ev, disposition, planned);
     if applies && let Some(reason) = still_current(env, &ev.currency).await {
         return Ok(Finished::Voided { reason });
     }
 
-    let verifier = new_verifier_id();
-    let observations = ev.log.to_json();
-    let artifact = ev.primary_artifact();
-    let contract_hash = ev.contract.hash.clone();
-    let tier = ev.tier;
-    let route_tags = env.route_tags;
-    let max_attempts = env.cfg.max_attempts;
-    let vault_path = env.vault_path;
-    let findings = reasons.clone();
-    let currency_snapshot = ev.currency.to_json();
-    let verifier_config = t::verifier_config_key(
-        &env.cfg.reviewers(),
-        ev.log.of_kind("reviewer_run").next().is_some(),
-    );
-    let outcome = env.db.with_conn(move |c| {
-        t::in_write_tx(c, |c| {
-            // The work must still be the submission that was checked: a verdict recorded about
-            // an earlier one would hide the new submission from the queue.
-            if t::review_marker(c, &task_id)? != marker {
-                return Ok(Err(
-                    "the task was submitted again while it was being verified".to_string(),
-                ));
-            }
-            if applies || sends_back {
-                let current = t::get_task(c, &task_id)?
-                    .ok_or_else(|| anyhow::anyhow!("task {task_id} vanished"))?;
-                if current.status != t::STATUS_READY_FOR_REVIEW {
-                    return Ok(Err(
-                        "the task was changed while it was being verified".to_string()
-                    ));
-                }
-            }
-            let new = t::NewVerdict {
-                task_id: &task_id,
-                artifact: &artifact,
-                contract_hash: &contract_hash,
-                tier,
-                verdict,
-                level,
-                verifier: &verifier,
-                independence,
-                observations: &observations,
-                criteria: &criteria,
-                reasons: &reasons,
-                applied: applies,
-                canary: false,
-                submission: marker,
-                waiting_for: waiting_for.map(WaitingFor::as_str),
-                verifier_config: &verifier_config,
-            };
-            let recorded = t::record_verdict(c, &new)?;
-            t::clear_wait(c, &task_id)?;
-            if disposition == Disposition::Record {
-                return Ok(Ok((recorded, Moved::Nothing, None)));
-            }
-            if let Some(at) = release_at {
-                t::create_hold(c, &task_id, &recorded.id, at, &currency_snapshot)?;
-                t::add_comment(
-                    c,
-                    &task_id,
-                    "verifier",
-                    &format!(
-                        "Verified by HQ ({} evidence, tier {}, artifact {}). Because this is tier 2 it \
-                         completes at {} UTC unless you veto it first: `hq verify veto {}`.",
-                        recorded.level,
-                        recorded.tier,
-                        recorded.artifact,
-                        clock(at),
-                        t::get_task(c, &task_id)?.map(|t| t.display_id).unwrap_or_default()
-                    ),
-                    None,
-                )?;
-                let task = t::get_task(c, &task_id)?;
-                return Ok(Ok((recorded, Moved::Held, task.map(|t| (t, Vec::new())))));
-            }
-            if applies {
-                let ctx = t::WriteCtx {
-                    actor: Some(&verifier),
-                    verdict_id: Some(&recorded.id),
-                    ..Default::default()
-                };
-                let patch = t::TaskPatch {
-                    status: Some(t::STATUS_COMPLETE.to_string()),
-                    ..Default::default()
-                };
-                let done =
-                    t::update_task_as(c, &task_id, &patch, Some(t::STATUS_READY_FOR_REVIEW), &ctx)?;
-                t::add_comment(c, &task_id, "verifier", &completion_note(&recorded), None)?;
-                let unblocked = crate::tasks::unblocked_by_transition(
-                    c,
-                    Some(t::STATUS_READY_FOR_REVIEW),
-                    &done,
-                )?;
-                return Ok(Ok((recorded, Moved::Completed, Some((done, unblocked)))));
-            }
-            if sends_back {
-                let reworked = t::send_back(c, &task_id, &verifier, &reasons, max_attempts)?;
-                let moved = match reworked {
-                    t::Reworked::Returned { .. } => Moved::Returned,
-                    t::Reworked::Escalated { .. } => Moved::Escalated,
-                };
-                // A task that now waits on the owner is the one thing the owner is told about.
-                let task = (moved == Moved::Escalated)
-                    .then(|| t::get_task(c, &task_id))
-                    .transpose()?
-                    .flatten();
-                return Ok(Ok((recorded, moved, task.map(|t| (t, Vec::new())))));
-            }
-            Ok(Ok((recorded, Moved::Nothing, None)))
-        })
-    })?;
+    let findings = planned.reasons.clone();
+    let waiting_for = planned.waiting_for;
+    let (route_tags, vault_path) = (env.route_tags, env.vault_path);
+    let args = ApplyArgs {
+        task_id: ev.task.id.clone(),
+        marker: ev.marker,
+        artifact: ev.primary_artifact(),
+        contract_hash: ev.contract.hash.clone(),
+        tier: ev.tier,
+        verifier: new_verifier_id(),
+        observations: ev.log.to_json(),
+        verifier_config: t::verifier_config_key(
+            &env.cfg.reviewers(),
+            ev.log.of_kind("reviewer_run").next().is_some(),
+        ),
+        currency_snapshot: ev.currency.to_json(),
+        max_attempts: env.cfg.max_attempts,
+        disposition,
+        planned,
+        applies,
+        release_at,
+        sends_back,
+    };
+    let outcome = env.db.with_conn(move |c| apply_verdict(c, &args))?;
     match outcome {
         Err(reason) => Ok(Finished::Voided { reason }),
         Ok((verdict, moved, follow_up)) => {

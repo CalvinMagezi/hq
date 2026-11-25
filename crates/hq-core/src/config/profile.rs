@@ -198,12 +198,8 @@ fn item(id: &str, label: &str, hosts: &[&str], carries: &'static str) -> EgressI
     }
 }
 
-/// Every outbound destination `cfg` can reach, with `env` standing in for the environment.
-/// Destinations on this machine are not listed. Web search and fetch, image generation and the
-/// coding-agent host are not either: the Lite registry has none of those tools, and under the
-/// full profile the report is informational.
-pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
-    let mut items = Vec::new();
+/// Providers keyed by a config value or an environment variable.
+fn keyed_provider_items(cfg: &HqConfig, env: EnvLookup<'_>, items: &mut Vec<EgressItem>) {
     // Providers that are keyed only by an environment variable.
     let cfg_none: Option<String> = None;
 
@@ -297,7 +293,10 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
             items.push(e);
         }
     }
+}
 
+/// Providers the owner listed under `providers:`.
+fn custom_provider_items(cfg: &HqConfig, items: &mut Vec<EgressItem>) {
     for p in cfg.providers.iter().filter(|p| p.enabled) {
         let host = host_of(&p.api_base).unwrap_or_default();
         if !is_loopback(&host) {
@@ -309,7 +308,10 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
             ));
         }
     }
+}
 
+/// Enabled LLM backends.
+fn backend_items(cfg: &HqConfig, items: &mut Vec<EgressItem>) {
     for b in cfg.backends.backends.iter().filter(|b| b.enabled) {
         match b.kind {
             BackendKind::GithubCopilotCli => {
@@ -357,7 +359,10 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
             }
         }
     }
+}
 
+/// The chat relays, which a token alone switches on.
+fn relay_items(cfg: &HqConfig, env: EnvLookup<'_>, items: &mut Vec<EgressItem>) {
     let relay = &cfg.relay;
     // A token is enough, whether or not the relay itself is enabled.
     if present(&relay.telegram_token, env, &["TELEGRAM_BOT_TOKEN"]) {
@@ -380,7 +385,10 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
         e.refusal = Some("Lite has no chat relay; remove the token");
         items.push(e);
     }
+}
 
+/// Remote MCP servers and decision routes.
+fn tool_endpoint_items(cfg: &HqConfig, items: &mut Vec<EgressItem>) {
     for m in &cfg.remote_mcp {
         if let Some(host) = host_of(&m.url).filter(|h| !is_loopback(h)) {
             items.push(item(
@@ -404,7 +412,10 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
             }
         }
     }
+}
 
+/// Gmail, agent hosts, Ollama, self-update, web push and the Copilot meter.
+fn service_items(cfg: &HqConfig, env: EnvLookup<'_>, items: &mut Vec<EgressItem>) {
     let reads_gmail = cfg.companies.iter().any(|c| {
         c.listeners.iter().any(|l| l.kind == "email")
             || c.connectors.iter().any(|b| b.kind == "gws")
@@ -492,6 +503,20 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
         );
         items.push(e);
     }
+}
+
+/// Every outbound destination `cfg` can reach, with `env` standing in for the environment.
+/// Destinations on this machine are not listed. Web search and fetch, image generation and the
+/// coding-agent host are not either: the Lite registry has none of those tools, and under the
+/// full profile the report is informational.
+pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
+    let mut items = Vec::new();
+    keyed_provider_items(cfg, env, &mut items);
+    custom_provider_items(cfg, &mut items);
+    backend_items(cfg, &mut items);
+    relay_items(cfg, env, &mut items);
+    tool_endpoint_items(cfg, &mut items);
+    service_items(cfg, env, &mut items);
 
     items
 }

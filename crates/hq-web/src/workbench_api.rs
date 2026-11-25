@@ -543,7 +543,11 @@ pub(crate) async fn rename_handler(
     if let Err(e) = plain_text(&label, "a name") {
         return e.into_response();
     }
-    match state.db.with_conn(|c| registry::set_label(c, &id, &label)) {
+    let (target, new_label) = (id.clone(), label.clone());
+    match state
+        .db_blocking(move |c| registry::set_label(c, &target, &new_label))
+        .await
+    {
         Ok(true) => Json(json!({ "ok": true, "label": label })).into_response(),
         Ok(false) => ApiError::NotFound(format!("no harness session '{id}'")).into_response(),
         Err(e) => ApiError::from(e).into_response(),

@@ -359,8 +359,31 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
     })
 }
 
-/// Collect value-bus items from the SQLite database.
+/// Collect value-bus items from the SQLite database, each with the extra facts its card shows.
+#[cfg(test)]
 pub(crate) fn scan_value_items(
+    db: &hq_db::Database,
+    state_filter: Option<&str>,
+) -> Result<Vec<NotificationItem>, anyhow::Error> {
+    enrich_items(db, scan_value_rows(db, state_filter)?)
+}
+
+/// Adds the per-card lookups (`with_site_approvals`, `with_folder_nudge`) to `items`. Each is one
+/// or two queries, so a list that will be cut down does it after the cut.
+fn enrich_items(
+    db: &hq_db::Database,
+    items: Vec<NotificationItem>,
+) -> Result<Vec<NotificationItem>, anyhow::Error> {
+    db.with_conn(|conn| {
+        Ok(items
+            .into_iter()
+            .map(|item| with_folder_nudge(conn, with_site_approvals(conn, item)))
+            .collect())
+    })
+}
+
+/// The value-bus rows as stored: no per-card lookups.
+fn scan_value_rows(
     db: &hq_db::Database,
     state_filter: Option<&str>,
 ) -> Result<Vec<NotificationItem>, anyhow::Error> {
@@ -374,13 +397,9 @@ pub(crate) fn scan_value_items(
         };
         let sql = format!("{VALUE_ITEM_COLUMNS}{filter}{cleared}");
         let mut stmt = conn.prepare(&sql)?;
-        let items = stmt
+        Ok(stmt
             .query_map([], notification_from_row)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(items
-            .into_iter()
-            .map(|item| with_folder_nudge(conn, with_site_approvals(conn, item)))
-            .collect())
+            .collect::<rusqlite::Result<Vec<_>>>()?)
     })
 }
 
@@ -439,7 +458,7 @@ pub(crate) fn aggregate_notifications(
     limit: usize,
     include_agent: bool,
 ) -> Result<NotificationsResponse, anyhow::Error> {
-    let mut all = scan_value_items(db, state_filter)?;
+    let mut all = scan_value_rows(db, state_filter)?;
     if !include_agent {
         all.retain(|n| n.audience == "owner");
     }
@@ -469,6 +488,8 @@ pub(crate) fn aggregate_notifications(
     let needs_you_helpers = waiting_decisions().filter(|n| !n.owner_only).count();
     let expired_count = restorable_expired_count(db)?;
     all.truncate(limit);
+    // Counts above never read the per-card facts, so only the rows returned pay for them.
+    let all = enrich_items(db, all)?;
 
     Ok(NotificationsResponse {
         notifications: all,
@@ -725,13 +746,21 @@ pub(crate) async fn list_notifications_handler(
     headers: axum::http::HeaderMap,
 ) -> Response {
     let limit = params.limit.unwrap_or(50);
-    match aggregate_notifications(
-        &state.db,
-        params.state.as_deref(),
-        params.category.as_deref(),
-        limit,
-        params.include_agent.as_deref() == Some("1"),
-    ) {
+    // Reads and enriches every open item, and the client polls: keep it off the async runtime.
+    let db = state.db.clone();
+    let include_agent = params.include_agent.as_deref() == Some("1");
+    let aggregated = tokio::task::spawn_blocking(move || {
+        aggregate_notifications(
+            &db,
+            params.state.as_deref(),
+            params.category.as_deref(),
+            limit,
+            include_agent,
+        )
+    })
+    .await
+    .unwrap_or_else(|e| Err(anyhow::anyhow!("notifications task failed: {e}")));
+    match aggregated {
         Ok(res) => with_etag(&res, &headers),
         Err(e) => {
             warn!(error = %e, "list_notifications_handler failed");

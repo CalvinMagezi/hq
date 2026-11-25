@@ -143,6 +143,36 @@ fn lease_intervals(conn: &Connection, task_id: &str) -> Result<(Vec<(i64, i64)>,
     Ok((out, live))
 }
 
+/// [`lease_intervals`] for many tasks at once: the intervals of each task in `task_ids`, from one
+/// query. A task with no readable lease has no entry.
+fn leases_for<'a>(
+    conn: &Connection,
+    task_ids: impl Iterator<Item = &'a String>,
+) -> Result<BTreeMap<String, Vec<(i64, i64)>>> {
+    let ids = serde_json::to_string(&task_ids.collect::<Vec<_>>())?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT task_id, {EPOCH}started_at) AS INTEGER), \
+                {EPOCH}COALESCE(ended_at, CASE WHEN harness_session_id IS NULL \
+                    THEN last_heartbeat_at ELSE datetime('now') END)) AS INTEGER) \
+         FROM task_work_sessions WHERE task_id IN (SELECT value FROM json_each(?1))"
+    ))?;
+    let mut out: BTreeMap<String, Vec<(i64, i64)>> = BTreeMap::new();
+    for row in stmt.query_map(params![ids], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, Option<i64>>(1)?,
+            r.get::<_, Option<i64>>(2)?,
+        ))
+    })? {
+        let (task, start, end) = row?;
+        // As in `lease_intervals`: an unreadable timestamp leaves the interval out.
+        if let (Some(start), Some(end)) = (start, end) {
+            out.entry(task).or_default().push((start, end));
+        }
+    }
+    Ok(out)
+}
+
 /// The task's logged moves, or `None` when one has a timestamp that cannot be read.
 fn moves(conn: &Connection, task_id: &str) -> Result<Option<Vec<Move>>> {
     let mut stmt = conn.prepare(&format!(
@@ -348,6 +378,9 @@ pub fn time_report(conn: &Connection, since_days: i64, ttl_secs: i64) -> Result<
         params![since],
         |r| r.get(0),
     )?;
+    // Every lease of every task in the report, read in one query and grouped here, instead of one
+    // query per task.
+    let mut leases_by_task = leases_for(conn, by_task.keys())?;
     for (task, row) in &by_task {
         let ReportTask {
             initiative_id: init,
@@ -358,9 +391,10 @@ pub fn time_report(conn: &Connection, since_days: i64, ttl_secs: i64) -> Result<
         } = row;
         // Only the part of each lease inside the window counts, so an old lease on a
         // task worked again this week adds nothing from last year.
-        let (mut intervals, _) = lease_intervals(conn, task)?;
-        let mut intervals: Vec<(i64, i64)> = intervals
-            .drain(..)
+        let mut intervals: Vec<(i64, i64)> = leases_by_task
+            .remove(task)
+            .unwrap_or_default()
+            .into_iter()
             .map(|(s, e)| (s.max(since_epoch), e))
             .collect();
         let leased = union_seconds(&mut intervals);

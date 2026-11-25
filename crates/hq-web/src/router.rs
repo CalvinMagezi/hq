@@ -19,30 +19,9 @@ pub(crate) fn suite_routes() -> Router<Arc<WsState>> {
     return Router::new();
 }
 
-pub fn create_router(state: Arc<WsState>) -> Router {
-    state.load_configured_state();
-    let static_dir = state
-        .static_dir
-        .as_deref()
-        .unwrap_or(std::path::Path::new("web/dist"))
-        .to_path_buf();
-
-    // An agent's `office_edit` write reaches open pages as a `note_changed` event.
-    let announcer = state.clone();
-    hq_tool_api::office::set_note_listener(Some(Box::new(move |note, revision| {
-        announcer.announce_note(note, revision);
-    })));
-    notifications_watch::spawn_notifications_watcher(state.clone());
-    web_push::spawn_dispatcher(state.clone());
-    tasks_watch::spawn_tasks_watcher(state.clone());
-    // Both act on coding-agent sessions and sub-agent runs, which Lite does not have.
-    if !state.profile().is_lite() {
-        session_driver::spawn_session_driver(state.clone());
-        subagent_followup::spawn_subagent_followup(state.clone());
-    }
-
-    let finance = finance_api::routes(Router::new());
-    let router = device_actions_api::routes(oauth::routes(finance, &state))
+/// The socket, health and status probes, device sign-in and the admin broadcast.
+fn core_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
+    router
         .route("/ws", get(ws::ws_handler))
         .route("/health", get(api::health_handler))
         .route(hello::HELLO_PATH, get(hello::hello_handler))
@@ -83,6 +62,11 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/admin/broadcast",
             axum::routing::post(api::admin_broadcast_handler),
         )
+}
+
+/// Notes, folders, the tree, search and what the vault reports about itself.
+fn note_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
+    router
         .route("/api/search", get(api::search_handler))
         .route(
             "/api/note",
@@ -127,6 +111,11 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route("/api/vault/folders", get(vault_api::folders_handler))
         .route("/api/vault-signals", get(vault_api::signals_handler))
         .route("/api/tree", get(api::tree_handler))
+}
+
+/// Settings, the HQ Suite, adoption and offers, first-run setup, usage and budgets.
+fn settings_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
+    router
         .route("/api/settings", get(settings_api::settings_handler))
         .route(
             "/api/settings/provider-key",
@@ -189,6 +178,11 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/usage/providers",
             get(usage_providers_api::usage_providers_handler),
         )
+}
+
+/// Pins, vault assets, chat uploads and threads, coder sessions, helper setup and fetch sites.
+fn chat_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
+    router
         .route("/api/pinned", get(api::pinned_handler))
         .route("/api/pin", axum::routing::post(api::pin_toggle_handler))
         .route("/api/vault-asset", get(api::vault_asset_handler))
@@ -246,6 +240,11 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/fetch-sites/{host}",
             axum::routing::delete(fetch_sites_api::forget_handler),
         )
+}
+
+/// The inbox: notifications, their actions, the tidy and web push.
+fn notification_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
+    router
         .route(
             "/api/notifications",
             get(notifications_api::list_notifications_handler),
@@ -314,6 +313,11 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/notifications/push/test",
             post(web_push::api::test_handler),
         )
+}
+
+/// Tasks and everything that hangs off them: initiatives, time, grants, session folders, verification.
+fn task_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
+    router
         .route(
             "/api/spaces",
             get(tasks_api::list_spaces_handler).post(tasks_api::create_space_handler),
@@ -504,6 +508,11 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/work-sessions",
             get(tasks_api::recent_work_sessions_handler),
         )
+}
+
+/// Work sessions, helper runs, the workbench and harness sessions.
+fn session_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
+    router
         .route(
             "/api/edge-worker",
             get(edge_worker_api::edge_worker_handler),
@@ -593,6 +602,11 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/harness-sessions/{id}/unwatch",
             post(sessions_api::unwatch_handler),
         )
+}
+
+/// The Gmail hook, the JSON 404s and `/mcp`. Merged last: these wildcard routes must come after every specific route.
+fn catch_all_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
+    router
         .route(
             "/hooks/gmail",
             axum::routing::post(gmail_ingest::gmail_hook_handler),
@@ -604,7 +618,41 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route("/mcp/{*rest}", axum::routing::any(not_found_json))
         // OAuth clients probe here after a 401; a disabled connector must not answer with the shell.
         .route("/.well-known/{*rest}", axum::routing::any(not_found_json))
-        .route("/mcp", axum::routing::post(mcp_http::mcp_handler));
+        .route("/mcp", axum::routing::post(mcp_http::mcp_handler))
+}
+
+pub fn create_router(state: Arc<WsState>) -> Router {
+    state.load_configured_state();
+    let static_dir = state
+        .static_dir
+        .as_deref()
+        .unwrap_or(std::path::Path::new("web/dist"))
+        .to_path_buf();
+
+    // An agent's `office_edit` write reaches open pages as a `note_changed` event.
+    let announcer = state.clone();
+    hq_tool_api::office::set_note_listener(Some(Box::new(move |note, revision| {
+        announcer.announce_note(note, revision);
+    })));
+    notifications_watch::spawn_notifications_watcher(state.clone());
+    web_push::spawn_dispatcher(state.clone());
+    tasks_watch::spawn_tasks_watcher(state.clone());
+    // Both act on coding-agent sessions and sub-agent runs, which Lite does not have.
+    if !state.profile().is_lite() {
+        session_driver::spawn_session_driver(state.clone());
+        subagent_followup::spawn_subagent_followup(state.clone());
+    }
+
+    let finance = finance_api::routes(Router::new());
+    let router = device_actions_api::routes(oauth::routes(finance, &state));
+    let router = core_routes(router);
+    let router = note_routes(router);
+    let router = settings_routes(router);
+    let router = chat_routes(router);
+    let router = notification_routes(router);
+    let router = task_routes(router);
+    let router = session_routes(router);
+    let router = catch_all_routes(router);
     let router = match github_connect_api::flow_for(&state) {
         Some(flow) => router
             .merge(github_connect_api::browser_routes(flow.clone()))

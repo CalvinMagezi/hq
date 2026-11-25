@@ -370,7 +370,7 @@ pub struct ChildExecContext {
     pub envelope_sink: Option<EnvelopeSink>,
     /// Parent conversation messages shared into children (fork context) when the
     /// request's context policy allows it.
-    pub parent_messages: Option<Vec<ChatMessage>>,
+    pub parent_messages: Option<Arc<[ChatMessage]>>,
     /// The originating chat turn id (e.g. a `background_turns` row). Copied
     /// into every [`ChildCompletionEvent`] so a consumer can route async child
     /// results back to the turn that spawned them.

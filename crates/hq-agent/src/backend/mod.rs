@@ -159,6 +159,19 @@ impl BackendRequest {
         }
     }
 
+    /// [`Self::from_chat`] that takes the request, so the transcript and tool schemas move
+    /// instead of being copied. Use it when the request is not needed afterwards.
+    pub fn from_chat_owned(request: ChatRequest, stream: bool) -> Self {
+        Self {
+            model: request.model,
+            messages: request.messages,
+            tools: request.tools,
+            temperature: request.temperature,
+            max_tokens: request.max_tokens,
+            stream,
+        }
+    }
+
     /// Convert back to a [`ChatRequest`] for an [`LlmProvider`](hq_llm::LlmProvider)-backed adapter.
     pub fn to_chat_request(&self) -> ChatRequest {
         ChatRequest {

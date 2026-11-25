@@ -622,6 +622,18 @@ const OLD_AGENT_HOST_HEADING: &str = "herdr:";
 /// forwards). They are valid keys, not typos.
 const SECTIONS_READ_BY_OTHER_COMMANDS: &[&str] = &["edge"];
 
+/// `HqConfig::default()`'s serialized top-level keys, computed once: the set cannot change while
+/// the process runs, and serializing the whole default config on every load was wasted work.
+fn known_top_level_keys() -> Option<&'static serde_yaml::Mapping> {
+    static KNOWN: std::sync::OnceLock<Option<serde_yaml::Mapping>> = std::sync::OnceLock::new();
+    KNOWN
+        .get_or_init(|| match serde_yaml::to_value(HqConfig::default()) {
+            Ok(serde_yaml::Value::Mapping(keys)) => Some(keys),
+            _ => None,
+        })
+        .as_ref()
+}
+
 /// The top-level keys of a config.yaml that no `HqConfig` field and no other command claims.
 /// Compares against `HqConfig::default()`'s own serialized field set rather than a hand-maintained
 /// list, so it can't drift from the struct.
@@ -629,8 +641,7 @@ fn unrecognized_top_level_keys(raw_yaml: &str) -> Vec<String> {
     let Ok(serde_yaml::Value::Mapping(user_keys)) = serde_yaml::from_str(raw_yaml) else {
         return Vec::new();
     };
-    let Ok(serde_yaml::Value::Mapping(known_keys)) = serde_yaml::to_value(HqConfig::default())
-    else {
+    let Some(known_keys) = known_top_level_keys() else {
         return Vec::new();
     };
     user_keys
@@ -649,10 +660,9 @@ fn unrecognized_top_level_keys(raw_yaml: &str) -> Vec<String> {
 /// renamed when the file still uses it (figment's alias handling cannot cope with
 /// a defaults layer that already holds the new name). The file on disk is not
 /// touched. None when there is no readable file.
-fn config_yaml(path: &std::path::Path) -> Option<figment::providers::Data<Yaml>> {
+fn config_yaml(text: &str) -> figment::providers::Data<Yaml> {
     const OLD: &str = OLD_AGENT_HOST_HEADING;
     const NEW: &str = "agent_host:";
-    let text = std::fs::read_to_string(path).ok()?;
     let has = |key: &str| text.lines().any(|l| l.starts_with(key));
     if has(OLD) && !has(NEW) {
         let upgraded: String = text
@@ -665,9 +675,9 @@ fn config_yaml(path: &std::path::Path) -> Option<figment::providers::Data<Yaml>>
                 }
             })
             .collect();
-        return Some(Yaml::string(&upgraded));
+        return Yaml::string(&upgraded);
     }
-    Some(Yaml::string(&text))
+    Yaml::string(text)
 }
 
 impl HqConfig {
@@ -707,8 +717,14 @@ impl HqConfig {
     /// what `save()` rewrites from, so an env-supplied secret never gets
     /// written back into the committed-shaped YAML file.
     fn file_layer_figment(config_path: &std::path::Path) -> Figment {
+        Self::file_layer_figment_from(std::fs::read_to_string(config_path).ok().as_deref())
+    }
+
+    /// [`Self::file_layer_figment`] over file text the caller already read, so one load reads the
+    /// file once.
+    fn file_layer_figment_from(text: Option<&str>) -> Figment {
         let mut probe = Figment::new();
-        if let Some(layer) = config_yaml(config_path) {
+        if let Some(layer) = text.map(config_yaml) {
             probe = probe.merge(layer);
         }
         probe = probe.merge(Env::prefixed("HQ_").split("__"));
@@ -725,7 +741,7 @@ impl HqConfig {
         };
 
         let mut figment = Figment::from(Serialized::defaults(base));
-        if let Some(layer) = config_yaml(config_path) {
+        if let Some(layer) = text.map(config_yaml) {
             figment = figment.merge(layer);
         }
         figment
@@ -760,7 +776,8 @@ impl HqConfig {
     /// The guts of `load()`, parameterized on the config file path so it's
     /// testable without touching `HQ_CONFIG_PATH`/`~/.hq/config.yaml`.
     pub fn load_from_path(config_path: &std::path::Path) -> anyhow::Result<Self> {
-        let figment = Self::file_layer_figment(config_path)
+        let text = std::fs::read_to_string(config_path).ok();
+        let figment = Self::file_layer_figment_from(text.as_deref())
             // HQ_VAULT_PATH, HQ_OPENROUTER_API_KEY, HQ_RELAY__DISCORD_TOKEN, etc.
             // `.split("__")` maps a double underscore to nesting, so secrets on
             // nested config sections (relay/remote_mcp) can be
@@ -770,7 +787,9 @@ impl HqConfig {
         let mut config: HqConfig = figment.extract()?;
         config.profile = effective_profile(config.profile, Platform::current());
         set_http_referer(config.http_referer.clone());
-        Self::warn_unrecognized_top_level_keys(config_path);
+        if let Some(raw) = text.as_deref() {
+            Self::warn_unrecognized_top_level_keys(config_path, raw);
+        }
         Ok(config)
     }
 
@@ -780,11 +799,8 @@ impl HqConfig {
     /// typo doesn't go unnoticed. Compares against `HqConfig::default()`'s
     /// own serialized field set rather than a hand-maintained list, so it
     /// can't drift from the struct.
-    fn warn_unrecognized_top_level_keys(config_path: &std::path::Path) {
-        let Ok(raw) = std::fs::read_to_string(config_path) else {
-            return;
-        };
-        for key in unrecognized_top_level_keys(&raw) {
+    fn warn_unrecognized_top_level_keys(config_path: &std::path::Path, raw: &str) {
+        for key in unrecognized_top_level_keys(raw) {
             tracing::warn!(
                 key,
                 path = %config_path.display(),
