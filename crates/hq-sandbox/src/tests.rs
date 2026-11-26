@@ -249,6 +249,7 @@ fn the_proxy_network_reaches_only_the_proxy_port() {
         unix_sockets: vec![],
         relay: None,
         loopback_ports: vec![],
+        loopback_except: None,
     };
     let connect = |port: u16| {
         inside(
@@ -294,6 +295,7 @@ fn a_listed_loopback_port_is_reachable_directly_and_others_stay_closed() {
         unix_sockets: vec![],
         relay: None,
         loopback_ports: vec![service_port],
+        loopback_except: None,
     };
     let connect = |port: u16| {
         inside(
@@ -325,6 +327,7 @@ fn bubblewrap_refuses_loopback_ports_it_cannot_open() {
             unix_socket: "/run/eg.sock".into(),
         }),
         loopback_ports: vec![11434],
+        loopback_except: None,
     };
     let err = bwrap_args(&s, &argv("true")).unwrap_err();
     assert!(err.0.contains("loopback"), "{err}");
@@ -364,6 +367,7 @@ fn bubblewrap_refuses_a_proxy_network_instead_of_pretending() {
         unix_sockets: vec![],
         relay: None,
         loopback_ports: vec![],
+        loopback_except: None,
     };
     let err = bwrap_args(&s, &argv("true")).unwrap_err();
     assert!(err.0.contains("relay"), "{err}");
@@ -386,6 +390,7 @@ fn the_profile_denies_before_it_allows_and_lists_every_rule() {
         unix_sockets: vec!["/run/sock".into()],
         relay: None,
         loopback_ports: vec![],
+        loopback_except: None,
     };
     let p = seatbelt_profile(&s);
     let at = |needle: &str| {
@@ -418,6 +423,7 @@ fn the_profile_denies_before_it_allows_and_lists_every_rule() {
         unix_sockets: vec![],
         relay: None,
         loopback_ports: vec![11434],
+        loopback_except: None,
     };
     let p = seatbelt_profile(&s);
     assert!(p.contains("(allow network-outbound (remote ip \"localhost:18080\") (remote ip \"localhost:11434\"))"), "{p}");
@@ -616,6 +622,7 @@ fn bubblewrap_with_a_relay_unshares_the_network_and_starts_the_relay_first() {
             unix_socket: "/run/eg.sock".into(),
         }),
         loopback_ports: vec![],
+        loopback_except: None,
     };
     s.private_tmp = vec!["/tmp".into()];
     let args: Vec<String> = bwrap_args(&s, &argv("true"))
@@ -739,6 +746,7 @@ fn a_denied_socket_is_refused_even_under_an_open_network() {
         unix_sockets: vec!["/run/hq/agent.sock".into()],
         relay: None,
         loopback_ports: vec![],
+        loopback_except: None,
     };
     let p = seatbelt_profile(&s);
     let deny = p
@@ -972,5 +980,32 @@ fn a_program_is_taken_only_from_a_place_only_root_can_write() {
     assert_eq!(
         trusted_in("sh", std::iter::once(PathBuf::from("bin"))),
         None
+    );
+}
+
+#[test]
+fn any_loopback_port_is_allowed_except_the_listed_ones_and_never_the_proxy_port() {
+    let mut s = sandbox(Path::new("/proj"));
+    s.network = Network::Proxy {
+        port: 18080,
+        unix_sockets: vec![],
+        relay: None,
+        loopback_ports: vec![],
+        loopback_except: Some(vec![5037, 18080, 5678]),
+    };
+    let p = seatbelt_profile(&s);
+    let at = |needle: &str| {
+        p.find(needle)
+            .unwrap_or_else(|| panic!("{needle} missing: {p}"))
+    };
+    assert!(p.contains("(remote ip \"localhost:*\")"), "{p}");
+    assert!(
+        at("(deny network-outbound (remote ip \"localhost:5037\"))")
+            > at("(remote ip \"localhost:*\")")
+    );
+    assert!(p.contains("(deny network-outbound (remote ip \"localhost:5678\"))"));
+    assert!(
+        !p.contains("(deny network-outbound (remote ip \"localhost:18080\"))"),
+        "{p}"
     );
 }

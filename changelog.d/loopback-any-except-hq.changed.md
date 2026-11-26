@@ -1,0 +1,1 @@
+A helper's request for random local ports now opens every local port except HQ's own, adb, Ollama and SSH, because the macOS sandbox cannot allow a range. Gradle's client can reach its daemon, and the approval card says what is allowed.

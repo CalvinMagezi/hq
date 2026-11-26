@@ -450,6 +450,9 @@ pub struct SandboxSpec {
     /// Loopback ports the agent may connect to directly (macOS only).
     #[serde(default)]
     pub loopback_ports: Vec<u16>,
+    /// When set, the agent may connect to any loopback port except these (macOS only).
+    #[serde(default)]
+    pub loopback_except: Option<Vec<u16>>,
 }
 
 impl SandboxSpec {
@@ -463,6 +466,7 @@ impl SandboxSpec {
             readable: Vec::new(),
             agent_readable: BTreeMap::new(),
             loopback_ports: Vec::new(),
+            loopback_except: None,
         }
     }
 }
@@ -988,6 +992,11 @@ fn strict_policy(
                     .copied()
                     .filter(|p| *p != 0)
                     .collect()
+            },
+            loopback_except: if bwrap {
+                None
+            } else {
+                spec.loopback_except.clone()
             },
         },
     })

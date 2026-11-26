@@ -176,7 +176,7 @@ fn describe(req: &GrantRequest) -> String {
         Capability::FsWrite => "write to",
         Capability::FsRead => "read",
         Capability::Loopback if req.resource == hq_core::grants::EPHEMERAL_PORTS => {
-            return "connect to local services on random ports (49152 and up), such as a test runner's listener".to_string();
+            return "connect to local services on any port except HQ's own, adb, Ollama and SSH (a build tool's daemon or a test runner's listener)".to_string();
         }
         Capability::Loopback => "connect to local port",
         Capability::Egress => "reach",

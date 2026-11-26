@@ -56,6 +56,11 @@ const OTHER_CLAUDE_PREFIX: &str = ".claude-";
 const DEFAULT_EGRESS_PORT: u16 = 443;
 /// The loopback resource for "any port a program picks for itself" (a test runner's listener).
 pub const EPHEMERAL_PORTS: &str = "ephemeral";
+/// Local ports a helper that was granted "any local port" still cannot reach: HQ's web server,
+/// the host gate and the bridge's forwards, adb, Ollama and SSH. The macOS sandbox can only allow
+/// all local ports or none, so this list is what keeps them closed; a service on a port not named
+/// here is reachable.
+pub const PROTECTED_LOCAL_PORTS: &[u16] = &[22, 5037, 5678, 7747, 11434, 47480, 47490];
 /// The range that means: the operating system's ephemeral ports. Well-known services (HQ's own
 /// ports, adb, databases) sit below it, so they stay out of reach.
 pub const EPHEMERAL_RANGE: (u16, u16) = (49152, 65535);
