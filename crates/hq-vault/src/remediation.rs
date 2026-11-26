@@ -115,6 +115,16 @@ pub fn repair_nested_frontmatter(
     Ok(report)
 }
 
+/// Whether `body`, the text after a note's own frontmatter, opens with a second block of
+/// properties: the shape [`repair_nested_frontmatter`] merges.
+pub fn has_nested_frontmatter(body: &str) -> bool {
+    let (Some(block), _) = hq_core::frontmatter_utils::split_frontmatter(body.trim_start()) else {
+        return false;
+    };
+    serde_yaml::from_str::<std::collections::HashMap<String, serde_yaml::Value>>(block)
+        .is_ok_and(|parsed| !parsed.is_empty())
+}
+
 /// The note rewritten with one frontmatter, or `None` when it is not the nested shape.
 fn unnest(raw: &str) -> Option<String> {
     let (Some(outer), body) = hq_core::frontmatter_utils::split_frontmatter(raw) else {

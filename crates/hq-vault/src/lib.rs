@@ -3,6 +3,7 @@
 pub mod check;
 pub mod client;
 pub mod frontmatter;
+pub mod health;
 pub mod links;
 pub mod note_lock;
 pub mod notes;

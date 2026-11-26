@@ -16,7 +16,7 @@
 use anyhow::Result;
 use hq_db::Database;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing::info;
 
 use crate::db::{decay_old_memories, get_memory_stats};

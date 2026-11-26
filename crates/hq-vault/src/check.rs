@@ -66,7 +66,7 @@ pub fn broken_links_in(
         .map(|l| BrokenLink {
             link: content[l.span.clone()].to_string(),
             line: l.line,
-            did_you_mean: did_you_mean(&l.target, &stems),
+            did_you_mean: nearest_name(&l.target, &stems),
         })
         .collect();
     let ambiguous = links
@@ -120,7 +120,7 @@ fn stem_of(rel: &str) -> String {
 
 /// The one existing note whose name is nearest to `target`, if it is near enough and nothing
 /// else is as near. A guess is shown to the writer, never written into a note.
-fn did_you_mean(target: &str, stems: &[(String, String)]) -> Option<String> {
+pub(crate) fn nearest_name(target: &str, stems: &[(String, String)]) -> Option<String> {
     let want = fold(target.rsplit('/').next().unwrap_or(target));
     let want = want.strip_suffix(".md").unwrap_or(&want);
     if want.chars().count() < 4 {
