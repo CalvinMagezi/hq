@@ -7,6 +7,7 @@ import { sectionState, type SectionState } from '~/lib/homeSections'
 import { Panes, PaneHead } from '~/components/ui/Panes'
 import { HomeSections } from '~/components/vault/HomeSections'
 import { BriefingCard } from '~/components/tasks/verification/BriefingCard'
+import { VaultHealthCard } from '~/components/vault/VaultHealthCard'
 import { topFolders } from '~/components/vault/noteRows'
 import { t } from '~/strings'
 import '~/components/vault/notes.css'
@@ -108,6 +109,7 @@ function VaultHome() {
             intro={
                 <>
                     <BriefingCard variant="home" />
+                    <VaultHealthCard />
                 </>
             }
         />
