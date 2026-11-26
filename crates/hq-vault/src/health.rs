@@ -11,7 +11,7 @@
 
 use crate::links::{LinkRef, NoteInput, NoteSet, Resolution, aliases_of, extract, fold};
 use crate::relink::Snapshot;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Most examples listed per class in a [`Report`].
@@ -21,7 +21,7 @@ pub const MAX_LISTED: usize = 50;
 const MIN_DUPLICATE_CHARS: usize = 40;
 
 /// A link that reaches no note.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeadLink {
     pub note: String,
     pub line: usize,
@@ -33,7 +33,7 @@ pub struct DeadLink {
 }
 
 /// A link that fits more than one note.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AmbiguousLink {
     pub note: String,
     pub line: usize,
@@ -42,7 +42,7 @@ pub struct AmbiguousLink {
 }
 
 /// A link to a note that exists, to a heading or block that does not.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BrokenAnchor {
     pub note: String,
     pub line: usize,
@@ -54,12 +54,12 @@ pub struct BrokenAnchor {
 }
 
 /// Notes whose text is the same once spacing is ignored.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DuplicateGroup {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FrontmatterProblem {
     /// Opens with `---` and never closes.
@@ -70,14 +70,14 @@ pub enum FrontmatterProblem {
     Nested,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrontmatterIssue {
     pub note: String,
     pub problem: FrontmatterProblem,
 }
 
 /// How the links in the vault came out.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinkCounts {
     pub total: usize,
     /// Reach one note or a file.
@@ -90,7 +90,7 @@ pub struct LinkCounts {
 }
 
 /// Every count in a [`Report`], for a trend line and for the summary.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Counts {
     pub notes: usize,
     pub unread: usize,
@@ -113,7 +113,7 @@ impl Counts {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Report {
     pub counts: Counts,
     pub dead_links: Vec<DeadLink>,
@@ -132,15 +132,89 @@ pub struct Report {
 /// The report with each list capped at [`MAX_LISTED`]. The counts are exact.
 pub fn scan(snap: &Snapshot) -> Report {
     let mut report = scan_full(snap);
-    report.dead_links.truncate(MAX_LISTED);
-    report.ambiguous_links.truncate(MAX_LISTED);
-    report.broken_anchors.truncate(MAX_LISTED);
-    report.loose.truncate(MAX_LISTED);
-    report.duplicates.truncate(MAX_LISTED);
-    report.empty.truncate(MAX_LISTED);
-    report.frontmatter.truncate(MAX_LISTED);
-    report.unread.truncate(MAX_LISTED);
+    report.cap();
     report
+}
+
+/// The kinds of item an owner can ignore, as stored.
+pub mod kind {
+    pub const DEAD_LINK: &str = "dead_link";
+    pub const AMBIGUOUS_LINK: &str = "ambiguous_link";
+    pub const BROKEN_ANCHOR: &str = "broken_anchor";
+    pub const LOOSE: &str = "loose";
+    pub const EMPTY: &str = "empty";
+    pub const DUPLICATE: &str = "duplicate";
+    pub const FRONTMATTER: &str = "frontmatter";
+}
+
+/// What the owner chose to leave alone: `(kind, key)` pairs from [`kind`] and the `key()` of
+/// an item.
+pub type Ignored = HashSet<(String, String)>;
+
+impl DeadLink {
+    /// Names this link in the note it is written in, so a repeat elsewhere is a different item.
+    pub fn key(&self) -> String {
+        format!("{}|{}", self.note, self.link)
+    }
+}
+
+impl AmbiguousLink {
+    pub fn key(&self) -> String {
+        format!("{}|{}", self.note, self.link)
+    }
+}
+
+impl BrokenAnchor {
+    pub fn key(&self) -> String {
+        format!("{}|{}", self.note, self.link)
+    }
+}
+
+impl DuplicateGroup {
+    /// The notes in the group, which is what the owner is deciding about.
+    pub fn key(&self) -> String {
+        self.notes.join("|")
+    }
+}
+
+impl Report {
+    /// Keep at most [`MAX_LISTED`] examples in each list. The counts are not changed.
+    pub fn cap(&mut self) {
+        self.dead_links.truncate(MAX_LISTED);
+        self.ambiguous_links.truncate(MAX_LISTED);
+        self.broken_anchors.truncate(MAX_LISTED);
+        self.loose.truncate(MAX_LISTED);
+        self.duplicates.truncate(MAX_LISTED);
+        self.empty.truncate(MAX_LISTED);
+        self.frontmatter.truncate(MAX_LISTED);
+        self.unread.truncate(MAX_LISTED);
+    }
+
+    /// Drop what the owner chose to ignore and count again. Call on a [`scan_full`] report,
+    /// before [`Report::cap`], so a capped list is not mistaken for the whole.
+    pub fn apply_ignores(&mut self, ignored: &Ignored) {
+        if ignored.is_empty() {
+            return;
+        }
+        let has = |k: &str, key: String| ignored.contains(&(k.to_string(), key));
+        self.dead_links.retain(|d| !has(kind::DEAD_LINK, d.key()));
+        self.ambiguous_links
+            .retain(|a| !has(kind::AMBIGUOUS_LINK, a.key()));
+        self.broken_anchors
+            .retain(|b| !has(kind::BROKEN_ANCHOR, b.key()));
+        self.loose.retain(|p| !has(kind::LOOSE, p.clone()));
+        self.empty.retain(|p| !has(kind::EMPTY, p.clone()));
+        self.duplicates.retain(|g| !has(kind::DUPLICATE, g.key()));
+        self.frontmatter
+            .retain(|f| !has(kind::FRONTMATTER, f.note.clone()));
+        self.counts.links.dead = self.dead_links.len();
+        self.counts.links.ambiguous = self.ambiguous_links.len();
+        self.counts.links.broken_anchors = self.broken_anchors.len();
+        self.counts.loose = self.loose.len();
+        self.counts.empty = self.empty.len();
+        self.counts.duplicates = self.duplicates.len();
+        self.counts.frontmatter = self.frontmatter.len();
+    }
 }
 
 /// The report with every example listed.
@@ -605,6 +679,57 @@ mod tests {
         assert_eq!(capped.counts.links.dead, 120);
         assert_eq!(capped.dead_links.len(), MAX_LISTED);
         assert_eq!(scan_full(&s).dead_links.len(), 120);
+    }
+
+    #[test]
+    fn ignored_items_leave_the_lists_and_the_counts_and_nothing_else_does() {
+        let s = snap(
+            &[
+                (
+                    "Notebooks/A.md",
+                    "[[Gone One]] [[Gone Two]] and enough words to not be empty",
+                ),
+                (
+                    "Notebooks/Lonely.md",
+                    "a note nobody links to, with enough words in it",
+                ),
+            ],
+            &[],
+        );
+        let mut r = scan_full(&s);
+        assert_eq!(r.counts.links.dead, 2);
+        // `A.md` links only to notes that are not there, so it is as loose as the other.
+        assert_eq!(r.counts.loose, 2);
+        let ignored: Ignored = [
+            (kind::DEAD_LINK.to_string(), r.dead_links[0].key()),
+            (kind::LOOSE.to_string(), "Notebooks/Lonely.md".to_string()),
+            (
+                kind::DEAD_LINK.to_string(),
+                "Notebooks/Other.md|[[Gone Two]]".to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        r.apply_ignores(&ignored);
+        assert_eq!(r.counts.links.dead, 1);
+        assert_eq!(r.dead_links[0].link, "[[Gone Two]]");
+        assert_eq!(r.counts.loose, 1);
+        assert_eq!(r.loose, ["Notebooks/A.md"]);
+        assert_eq!(r.counts.links.total, 2, "an ignored link is still a link");
+    }
+
+    #[test]
+    fn a_report_survives_being_stored_as_json() {
+        let s = snap(
+            &[(
+                "Notebooks/A.md",
+                "[[Missing]] with enough words so it is a note",
+            )],
+            &[],
+        );
+        let r = scan(&s);
+        let back: Report = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        assert_eq!(back, r);
     }
 
     #[test]
