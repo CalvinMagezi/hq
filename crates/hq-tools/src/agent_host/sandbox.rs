@@ -119,6 +119,25 @@ pub(super) fn extend_plan(mut plan: Value, grants: &hq_core::grants::SandboxDelt
             }
         }
     }
+    if grants.loopback_ephemeral {
+        // Seatbelt cannot allow a port range, so the sandbox opens every local port and closes
+        // the protected ones; the owner's own list is kept.
+        let mut closed: Vec<u16> = obj
+            .get("loopback_except")
+            .and_then(Value::as_array)
+            .map(|l| {
+                l.iter()
+                    .filter_map(|p| p.as_u64().map(|p| p as u16))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for port in hq_core::grants::PROTECTED_LOCAL_PORTS {
+            if !closed.contains(port) {
+                closed.push(*port);
+            }
+        }
+        obj.insert("loopback_except".into(), json!(closed));
+    }
     let allow = obj.entry("allow").or_insert_with(|| json!([]));
     if let Some(list) = allow.as_array_mut() {
         // A client that picks a random local port (a test runner talking to its own listener)
@@ -257,6 +276,17 @@ mod tests {
             &json!({"host": "127.0.0.1", "port_ranges": [[49152, 65535]], "private": true})
         ));
         assert_eq!(extend_plan(plan.clone(), &eph)["allow"], plan["allow"]);
+        let closed = &plan["loopback_except"];
+        assert!(
+            closed.as_array().unwrap().contains(&json!(5678))
+                && closed.as_array().unwrap().contains(&json!(5037))
+        );
+        assert_eq!(extend_plan(plan.clone(), &eph)["loopback_except"], *closed);
+        assert!(
+            extend_plan(base.clone(), &SandboxDelta::default())
+                .get("loopback_except")
+                .is_none()
+        );
         let none = json!({ "mode": "none" });
         assert_eq!(extend_plan(none.clone(), &delta), none);
     }

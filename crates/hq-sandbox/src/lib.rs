@@ -55,6 +55,9 @@ pub enum Network {
         /// Further loopback ports reachable directly, any protocol (Seatbelt
         /// only: inside bubblewrap's namespace loopback is the sandbox's own).
         loopback_ports: Vec<u16>,
+        /// Any loopback port except these (Seatbelt can allow one port or all of them, never a
+        /// range, so the ports that must stay closed are listed). Seatbelt only.
+        loopback_except: Option<Vec<u16>>,
     },
 }
 
@@ -272,12 +275,16 @@ pub fn seatbelt_profile(s: &AgentSandbox) -> String {
             port,
             unix_sockets,
             loopback_ports,
+            loopback_except,
             ..
         } => {
             let allowed_ports = std::iter::once(port).chain(loopback_ports);
             let mut allowed: Vec<String> = allowed_ports
                 .map(|p| format!("(remote ip \"localhost:{p}\")"))
                 .collect();
+            if loopback_except.is_some() {
+                allowed.push("(remote ip \"localhost:*\")".to_string());
+            }
             allowed.extend(
                 unix_sockets
                     .iter()
@@ -287,6 +294,13 @@ pub fn seatbelt_profile(s: &AgentSandbox) -> String {
                 "(deny network-outbound)(allow network-outbound {})",
                 allowed.join(" ")
             ));
+            // The last matching rule wins, so these hold even though every loopback port is
+            // allowed above. The proxy's own port is never denied.
+            for closed in loopback_except.iter().flatten().filter(|c| *c != port) {
+                p.push_str(&format!(
+                    "(deny network-outbound (remote ip \"localhost:{closed}\"))"
+                ));
+            }
         }
     }
     // After the network rules, so nothing re-allows these: a connect to the host
