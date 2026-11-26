@@ -4,7 +4,7 @@
 //! parses one way here and another way in a renderer fails a test in one place or the other.
 //! The corpus is the eval: every case has a hand-written truth, and there is no tolerance.
 
-use hq_vault::links::{NoteInput, NoteSet, Resolution, extract};
+use hq_vault::links::{NoteInput, NoteSet, Resolution, Syntax, extract};
 use serde_json::Value;
 
 const CORPUS: &str = include_str!("fixtures/links_cases.json");
@@ -75,6 +75,14 @@ fn every_case_in_the_corpus_reads_and_resolves_as_written() {
             }
             if link.alias.as_deref() != str_of(truth, "alias") {
                 problems.push(format!("alias {:?}", link.alias));
+            }
+            let syntax = if str_of(truth, "syntax") == Some("markdown") {
+                Syntax::Markdown
+            } else {
+                Syntax::Wiki
+            };
+            if link.syntax != syntax {
+                problems.push(format!("syntax {:?}", link.syntax));
             }
             if link.embed != truth["embed"].as_bool().unwrap_or(false) {
                 problems.push(format!("embed {}", link.embed));

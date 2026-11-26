@@ -68,6 +68,10 @@ class MessageBlocksTest {
         assertNull(NoteRefs.fromLink("https://example.com/x.md"))
         assertNull(NoteRefs.sanitize("../etc/passwd"))
         assertEquals("Mobile-First-Roadmap" to "Roadmap", NoteRefs.wikilink("Mobile-First-Roadmap|Roadmap"))
+        assertEquals("Plan" to "Plan#Goals", NoteRefs.wikilink("Plan#Goals"))
+        assertEquals("Folder/Note" to "the note", NoteRefs.wikilink("Folder/Note#Part|the note"))
+        assertEquals("Note" to "Note", NoteRefs.wikilink(" Note \\| "))
+        assertEquals("" to "#Goals", NoteRefs.wikilink("#Goals"))
         assertEquals("Projects › Agent-HQ", NoteRefs.folderTrail("Notebooks/Projects/Agent-HQ/Plan.md"))
     }
 

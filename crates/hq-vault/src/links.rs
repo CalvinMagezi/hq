@@ -512,20 +512,33 @@ impl NoteSet {
 
     /// What `link`, written in the note at `from`, points at.
     pub fn resolve(&self, from: &str, link: &LinkRef) -> Resolution {
-        let target = link.target.trim();
+        self.resolve_target(from, link.syntax, &link.target)
+    }
+
+    /// What a target written as `target`, in a link of the given syntax in the note at `from`,
+    /// points at. For trying a spelling before it is written into a note.
+    pub fn resolve_target(&self, from: &str, syntax: Syntax, target: &str) -> Resolution {
+        let target = target.trim();
         if target.is_empty() {
             return Resolution::SameNote;
         }
-        if link.syntax == Syntax::Markdown && is_external(target) {
+        if syntax == Syntax::Markdown && is_external(target) {
             return Resolution::External;
         }
         let target = target.trim_start_matches("./");
-        if link.syntax == Syntax::Markdown
+        if syntax == Syntax::Markdown
             && let Some(found) = self.resolve_path_form(from, target)
         {
             return found;
         }
         self.resolve_name(target.trim_start_matches('/'))
+    }
+
+    /// Whether `path` is exactly a note (with or without `.md`) or an attachment in the set.
+    pub fn knows_path(&self, path: &str) -> bool {
+        let path = path.trim_start_matches('/');
+        self.by_full.contains_key(&fold(strip_md(path)))
+            || self.by_att_full.contains_key(&fold(path))
     }
 
     /// A markdown link is a path: relative to the note it sits in, or from the vault root.
@@ -631,6 +644,24 @@ pub fn nearest<'a>(from: &str, candidates: &'a [String]) -> Option<&'a str> {
     }
 }
 
+/// The notes and files `content` links to, as the writer named them: each target once, in
+/// order, without `.md`, heading or alias. Outside addresses and links to the same note are
+/// left out.
+pub fn target_names(content: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for link in extract(content) {
+        if link.target.is_empty() || (link.syntax == Syntax::Markdown && is_external(&link.target))
+        {
+            continue;
+        }
+        let name = strip_md(&link.target).to_string();
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
 /// A name as links compare it: Unicode-composed and lowercase.
 pub fn fold(s: &str) -> String {
     s.trim().nfc().collect::<String>().to_lowercase()
@@ -662,7 +693,7 @@ fn normalize_dots(path: &str) -> Option<String> {
 
 /// A target with a scheme (`https:`, `mailto:`) or a `//` start leaves the vault. A one-letter
 /// scheme is a Windows drive, which is not a web address.
-fn is_external(target: &str) -> bool {
+pub fn is_external(target: &str) -> bool {
     if target.starts_with("//") {
         return true;
     }
@@ -1092,6 +1123,12 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn target_names_lists_each_destination_once_without_decoration() {
+        let text = "[[A#h]] [[A|again]] [[Folder/B.md]] [x](c/d.md#s) [w](https://e.com) [[#same]] ![[pic.png]]";
+        assert_eq!(target_names(text), ["A", "Folder/B", "c/d", "pic.png"]);
     }
 
     #[test]
