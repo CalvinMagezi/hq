@@ -228,11 +228,14 @@ fn stats(config: &HqConfig) -> Result<()> {
     // Recent activity (last 24h)
     println!("\n  Recent Activity (24h)");
     println!("  ---------------------");
+    // `created_at` holds an RFC 3339 string, so the cutoff must be one too: comparing it with
+    // `unixepoch()` made every row count as new.
+    let since = (chrono::Utc::now() - chrono::Duration::hours(24)).to_rfc3339();
     let recent_memories: i64 = db
         .with_conn(|conn| {
             conn.query_row(
-                "SELECT COUNT(*) FROM memories WHERE created_at > unixepoch() - 86400",
-                [],
+                "SELECT COUNT(*) FROM memories WHERE created_at > ?1",
+                [&since],
                 |r| r.get(0),
             )
             .map_err(Into::into)

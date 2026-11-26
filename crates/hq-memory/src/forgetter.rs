@@ -60,8 +60,8 @@ impl MemoryForgetter {
     ///   are well-linked (3+ backlinks). These anchor important knowledge schemas
     ///   and should resist decay strongly.
     ///
-    /// Protected: memories with access_count > 0 or replay_count > 0 get partial
-    /// restore, since being accessed/replayed signals ongoing relevance.
+    /// Protected: unconsolidated memories with access_count > 0 get a partial restore,
+    /// since being served to a session signals ongoing relevance.
     pub fn run_cycle(&self) -> Result<ForgetterResult> {
         // ── Tier 1: Standard decay — unconsolidated memories ──────────────
         let standard_decayed = decay_old_memories(&self.db, 0.015, 7)?;
@@ -114,15 +114,6 @@ impl MemoryForgetter {
         self.db.with_conn(|conn| {
             conn.execute(
                 "UPDATE memories SET importance = MIN(1.0, importance + 0.0075) WHERE access_count > 0 AND consolidated = 0 AND created_at < ?1",
-                [&cutoff_14d],
-            )?;
-            Ok(())
-        })?;
-
-        // ── Replay-count protection ──────────────────────────────────────
-        self.db.with_conn(|conn| {
-            conn.execute(
-                "UPDATE memories SET importance = MIN(1.0, importance + 0.0075) WHERE replay_count > 0 AND consolidated = 0 AND created_at < ?1",
                 [&cutoff_14d],
             )?;
             Ok(())
@@ -301,8 +292,15 @@ impl MemoryForgetter {
             let mut stmt = conn.prepare(
                 "SELECT memory_ids, created_at FROM consolidations ORDER BY created_at DESC",
             )?;
+            // An older row may hold an integer timestamp. Reading it as text would fail the
+            // whole forgetting cycle, so take whatever is stored and render it.
             let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                let created_at = match row.get::<_, rusqlite::types::Value>(1)? {
+                    rusqlite::types::Value::Text(text) => text,
+                    rusqlite::types::Value::Integer(n) => n.to_string(),
+                    _ => String::new(),
+                };
+                Ok((row.get::<_, String>(0)?, created_at))
             })?;
             let mut result = Vec::new();
             for row in rows {
@@ -465,5 +463,158 @@ mod tests {
             vault.note_exists("_graph/linked-a.md"),
             "stale but connected pages must survive because canonical_key correctly finds their entity_edges row"
         );
+    }
+
+    // ── Decay and pruning ────────────────────────────────────────────────
+
+    use crate::db::{StoreMemoryParams, store_consolidation, store_memory};
+
+    fn temp_vault() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    fn store(db: &Database, summary: &str, importance: f64) -> i64 {
+        store_memory(
+            db,
+            &StoreMemoryParams {
+                source: "chat-turn",
+                harness: "web",
+                raw_text: "",
+                summary,
+                entities: &[],
+                topics: &[],
+                importance,
+                user_id: None,
+            },
+        )
+        .unwrap()
+    }
+
+    fn age(db: &Database, id: i64, days: i64) {
+        let at = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE memories SET created_at = ?1 WHERE id = ?2",
+                rusqlite::params![at, id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    fn importance_of(db: &Database, id: i64) -> Option<f64> {
+        db.with_conn(|c| {
+            Ok(
+                c.query_row("SELECT importance FROM memories WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })
+                .ok(),
+            )
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn old_unconsolidated_memories_decay_and_fresh_ones_do_not() {
+        let db = Database::open_memory().unwrap();
+        let vault = temp_vault();
+        let old = store(&db, "old", 0.5);
+        let fresh = store(&db, "fresh", 0.5);
+        age(&db, old, 10);
+        age(&db, fresh, 2);
+
+        let result = MemoryForgetter::new(db.clone(), vault.path().to_path_buf())
+            .run_cycle()
+            .unwrap();
+
+        assert_eq!(result.decayed, 1);
+        assert!((importance_of(&db, old).unwrap() - 0.485).abs() < 1e-9);
+        assert!((importance_of(&db, fresh).unwrap() - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_memory_that_was_served_regains_some_importance() {
+        let db = Database::open_memory().unwrap();
+        let vault = temp_vault();
+        let used = store(&db, "used", 0.5);
+        let unused = store(&db, "unused", 0.5);
+        age(&db, used, 20);
+        age(&db, unused, 20);
+        crate::touch_memory(&db, used).unwrap();
+
+        MemoryForgetter::new(db.clone(), vault.path().to_path_buf())
+            .run_cycle()
+            .unwrap();
+
+        // Both lose 0.015, and only the one that was served gets 0.0075 back.
+        assert!((importance_of(&db, unused).unwrap() - 0.485).abs() < 1e-9);
+        assert!((importance_of(&db, used).unwrap() - 0.4925).abs() < 1e-9);
+    }
+
+    #[test]
+    fn weak_old_memories_are_pruned_to_the_archive_and_the_rest_stay() {
+        let db = Database::open_memory().unwrap();
+        let vault = temp_vault();
+        let weak_old = store(&db, "WEAK-OLD-FACT", 0.04);
+        let weak_young = store(&db, "weak but young", 0.04);
+        let strong_old = store(&db, "strong and old", 0.9);
+        age(&db, weak_old, 70);
+        age(&db, weak_young, 20);
+        age(&db, strong_old, 70);
+
+        let result = MemoryForgetter::new(db.clone(), vault.path().to_path_buf())
+            .run_cycle()
+            .unwrap();
+
+        assert_eq!(result.pruned, 1);
+        assert!(importance_of(&db, weak_old).is_none(), "pruned");
+        assert!(importance_of(&db, weak_young).is_some(), "under 60 days");
+        assert!(importance_of(&db, strong_old).is_some(), "important");
+
+        let archive_dir = vault.path().join("_archive").join("memories");
+        let archived: String = std::fs::read_dir(&archive_dir)
+            .unwrap()
+            .flatten()
+            .map(|e| std::fs::read_to_string(e.path()).unwrap())
+            .collect();
+        assert!(archived.contains("WEAK-OLD-FACT"), "{archived}");
+        assert!(!archived.contains("strong and old"));
+    }
+
+    /// Nothing writes the `[[...-insight]]` links the classifier counts, so a consolidated memory
+    /// always lands in the fast-decay tier. Pinned here so replacing that rule is a visible edit.
+    #[test]
+    fn a_consolidated_memory_with_no_backlinks_decays_at_the_fast_rate() {
+        let db = Database::open_memory().unwrap();
+        let vault = temp_vault();
+        let id = store(&db, "consolidated", 0.5);
+        age(&db, id, 10);
+        store_consolidation(&db, &[id], "an insight", &[]).unwrap();
+
+        MemoryForgetter::new(db.clone(), vault.path().to_path_buf())
+            .run_cycle()
+            .unwrap();
+
+        assert!((importance_of(&db, id).unwrap() - 0.45).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_consolidation_with_an_integer_timestamp_does_not_fail_the_cycle() {
+        let db = Database::open_memory().unwrap();
+        let vault = temp_vault();
+        let id = store(&db, "legacy", 0.5);
+        age(&db, id, 10);
+        db.with_conn(|c| {
+            c.execute(
+                "INSERT INTO consolidations (memory_ids, insight, created_at) VALUES (?1, 'old', 1700000000)",
+                [format!("[{id}]")],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let result = MemoryForgetter::new(db, vault.path().to_path_buf()).run_cycle();
+
+        assert!(result.is_ok(), "{:?}", result.err());
     }
 }
