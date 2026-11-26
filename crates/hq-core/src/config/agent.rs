@@ -76,6 +76,10 @@ pub struct DaemonConfig {
     /// are no lanes or nothing to say.
     #[serde(default = "default_true")]
     pub daily_brief: bool,
+
+    /// Fires the reminders the owner set (`hq reminders`, the `remind_*` tools). No model is involved.
+    #[serde(default = "default_true")]
+    pub reminders: bool,
 }
 
 /// How chat turns are turned into memories.
@@ -126,6 +130,7 @@ impl Default for DaemonConfig {
             helper_setup_offer: true,
             inbox_tidy: true,
             daily_brief: true,
+            reminders: true,
         }
     }
 }

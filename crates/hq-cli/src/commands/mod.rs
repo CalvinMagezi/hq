@@ -20,6 +20,7 @@ pub mod host;
 pub mod host_install;
 pub mod inbox;
 pub mod model_probe;
+pub mod reminders;
 /// Off Unix there is no coding-agent host; the command exists so `hq host` can say so.
 #[cfg(not(unix))]
 pub mod host {

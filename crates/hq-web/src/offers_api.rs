@@ -434,6 +434,8 @@ mod tests {
         let body = crate::notifications_api::NotificationActionRequest {
             action: action.to_string(),
             starter: None,
+            minutes: None,
+            until: None,
         };
         crate::notifications_api::notification_action_handler(
             State(state.clone()),
