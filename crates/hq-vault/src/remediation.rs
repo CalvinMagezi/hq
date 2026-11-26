@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::notes::write_atomic;
@@ -15,48 +14,6 @@ fn md_files(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
-}
-
-pub fn count_notes_and_stems(
-    dir: &Path,
-    total: &mut u32,
-    broken: &mut u32,
-    stems: &mut HashSet<String>,
-    paths: &mut Vec<PathBuf>,
-) {
-    let start = paths.len();
-    md_files(dir, paths);
-    for path in &paths[start..] {
-        *total += 1;
-        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-            stems.insert(stem.to_lowercase());
-        }
-        if let Ok(content) = std::fs::read_to_string(path) {
-            let trimmed = content.trim();
-            if trimmed.starts_with("---") && trimmed[3..].find("---").is_none() {
-                *broken += 1;
-            }
-        }
-    }
-}
-
-pub fn extract_wikilinks(content: &str) -> Vec<String> {
-    let mut links = Vec::new();
-    let mut remaining = content;
-    while let Some(start) = remaining.find("[[") {
-        remaining = &remaining[start + 2..];
-        if let Some(end) = remaining.find("]]") {
-            let target = &remaining[..end];
-            let target = target.split('|').next().unwrap_or(target).trim();
-            if !target.is_empty() && target.len() < 200 {
-                links.push(target.to_string());
-            }
-            remaining = &remaining[end + 2..];
-        } else {
-            break;
-        }
-    }
-    links
 }
 
 /// What [`repair_nested_frontmatter`] found and, when applied, changed.

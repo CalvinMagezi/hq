@@ -207,6 +207,28 @@ impl Report {
         self.duplicates.retain(|g| !has(kind::DUPLICATE, g.key()));
         self.frontmatter
             .retain(|f| !has(kind::FRONTMATTER, f.note.clone()));
+        self.recount();
+    }
+
+    /// Keep only what concerns the note at `path`: links written in it, a duplicate group it is
+    /// in, its own frontmatter, and whether it is loose or empty. For checking one note just
+    /// written. Call on a [`scan_full`] report.
+    pub fn only_note(&mut self, path: &str) {
+        self.dead_links.retain(|d| d.note == path);
+        self.ambiguous_links.retain(|a| a.note == path);
+        self.broken_anchors.retain(|b| b.note == path);
+        self.loose.retain(|p| p == path);
+        self.empty.retain(|p| p == path);
+        self.duplicates
+            .retain(|g| g.notes.iter().any(|n| n == path));
+        self.frontmatter.retain(|f| f.note == path);
+        self.unread.retain(|p| p == path);
+        self.recount();
+    }
+
+    /// The counts that are the length of a list, taken from the lists. The totals of links and
+    /// notes are left as the scan found them.
+    fn recount(&mut self) {
         self.counts.links.dead = self.dead_links.len();
         self.counts.links.ambiguous = self.ambiguous_links.len();
         self.counts.links.broken_anchors = self.broken_anchors.len();
@@ -214,6 +236,7 @@ impl Report {
         self.counts.empty = self.empty.len();
         self.counts.duplicates = self.duplicates.len();
         self.counts.frontmatter = self.frontmatter.len();
+        self.counts.unread = self.unread.len();
     }
 }
 
@@ -716,6 +739,31 @@ mod tests {
         assert_eq!(r.counts.loose, 1);
         assert_eq!(r.loose, ["Notebooks/A.md"]);
         assert_eq!(r.counts.links.total, 2, "an ignored link is still a link");
+    }
+
+    #[test]
+    fn a_report_can_be_narrowed_to_one_note() {
+        let s = snap(
+            &[
+                (
+                    "Notebooks/A.md",
+                    "[[Gone]] with enough words to not be empty at all",
+                ),
+                (
+                    "Notebooks/B.md",
+                    "[[Also Gone]] with enough words to not be empty either",
+                ),
+            ],
+            &[],
+        );
+        let mut r = scan_full(&s);
+        r.only_note("Notebooks/A.md");
+        assert_eq!(r.counts.links.dead, 1);
+        assert_eq!(r.dead_links[0].link, "[[Gone]]");
+        assert_eq!(r.counts.problems(), 1);
+        let mut clean = scan_full(&s);
+        clean.only_note("Notebooks/Missing.md");
+        assert_eq!(clean.counts.problems(), 0);
     }
 
     #[test]
