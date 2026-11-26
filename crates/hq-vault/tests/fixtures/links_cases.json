@@ -1,0 +1,165 @@
+{
+  "about": "Shared link conformance corpus. Rust (crates/hq-vault/tests/links_corpus.rs) checks tokens and resolution. The web app and Android check the tokens only. Add a case here before changing any link parser.",
+  "notes": [
+    { "path": "Notebooks/Projects/Alpha/Plan.md" },
+    { "path": "Notebooks/Projects/Beta/Plan.md" },
+    { "path": "Notebooks/Projects/Alpha/Notes.md" },
+    { "path": "Notebooks/Daily/2026-11-26.md" },
+    { "path": "Notebooks/People/Josephine Nakato.md", "aliases": ["Jo"] },
+    { "path": "Notebooks/Café Menu.md" },
+    { "path": "Notebooks/Top.md" }
+  ],
+  "attachments": ["_attachments/receipt.PNG", "Notebooks/Projects/Alpha/spec.pdf"],
+  "cases": [
+    {
+      "name": "bare name, one note",
+      "from": "Notebooks/Top.md",
+      "text": "see [[Top]]",
+      "links": [{ "target": "Top", "resolution": "unique", "path": "Notebooks/Top.md" }]
+    },
+    {
+      "name": "case does not matter",
+      "from": "Notebooks/Top.md",
+      "text": "[[daily/2026-11-26]] and [[TOP]]",
+      "links": [
+        { "target": "daily/2026-11-26", "resolution": "unique", "path": "Notebooks/Daily/2026-11-26.md" },
+        { "target": "TOP", "resolution": "unique", "path": "Notebooks/Top.md" }
+      ]
+    },
+    {
+      "name": "heading and alias",
+      "from": "Notebooks/Top.md",
+      "text": "[[Notes#Goals|the goals]]",
+      "links": [
+        { "target": "Notes", "heading": "Goals", "alias": "the goals", "resolution": "unique", "path": "Notebooks/Projects/Alpha/Notes.md" }
+      ]
+    },
+    {
+      "name": "block id",
+      "from": "Notebooks/Top.md",
+      "text": "[[Notes#^a1b2]]",
+      "links": [{ "target": "Notes", "block": "a1b2", "resolution": "unique", "path": "Notebooks/Projects/Alpha/Notes.md" }]
+    },
+    {
+      "name": "folder path and .md ending",
+      "from": "Notebooks/Top.md",
+      "text": "[[Alpha/Notes]] [[Alpha/Notes.md]] [[Projects/Alpha/Notes]]",
+      "links": [
+        { "target": "Alpha/Notes", "resolution": "unique", "path": "Notebooks/Projects/Alpha/Notes.md" },
+        { "target": "Alpha/Notes.md", "resolution": "unique", "path": "Notebooks/Projects/Alpha/Notes.md" },
+        { "target": "Projects/Alpha/Notes", "resolution": "unique", "path": "Notebooks/Projects/Alpha/Notes.md" }
+      ]
+    },
+    {
+      "name": "one name on two notes is ambiguous, a path picks one",
+      "from": "Notebooks/Top.md",
+      "text": "[[Plan]] [[Beta/Plan]]",
+      "links": [
+        { "target": "Plan", "resolution": "ambiguous", "paths": ["Notebooks/Projects/Alpha/Plan.md", "Notebooks/Projects/Beta/Plan.md"] },
+        { "target": "Beta/Plan", "resolution": "unique", "path": "Notebooks/Projects/Beta/Plan.md" }
+      ]
+    },
+    {
+      "name": "similar names do not match",
+      "from": "Notebooks/Top.md",
+      "text": "[[Plans]] [[Master Plan]] [[Gamma/Plan]]",
+      "links": [
+        { "target": "Plans", "resolution": "dangling" },
+        { "target": "Master Plan", "resolution": "dangling" },
+        { "target": "Gamma/Plan", "resolution": "dangling" }
+      ]
+    },
+    {
+      "name": "alias",
+      "from": "Notebooks/Top.md",
+      "text": "[[Jo]]",
+      "links": [{ "target": "Jo", "resolution": "unique", "path": "Notebooks/People/Josephine Nakato.md" }]
+    },
+    {
+      "name": "unicode form",
+      "from": "Notebooks/Top.md",
+      "text": "[[Café Menu]]",
+      "links": [{ "target": "Café Menu", "resolution": "unique", "path": "Notebooks/Café Menu.md" }]
+    },
+    {
+      "name": "embeds and attachments",
+      "from": "Notebooks/Top.md",
+      "text": "![[receipt.png]] ![[Top]] ![[missing.png]] [[spec.pdf]]",
+      "links": [
+        { "target": "receipt.png", "embed": true, "resolution": "attachment", "path": "_attachments/receipt.PNG" },
+        { "target": "Top", "embed": true, "resolution": "unique", "path": "Notebooks/Top.md" },
+        { "target": "missing.png", "embed": true, "resolution": "dangling" },
+        { "target": "spec.pdf", "resolution": "attachment", "path": "Notebooks/Projects/Alpha/spec.pdf" }
+      ]
+    },
+    {
+      "name": "same note",
+      "from": "Notebooks/Top.md",
+      "text": "[[#Intro]] [jump](#intro)",
+      "links": [
+        { "target": "", "heading": "Intro", "resolution": "same_note" },
+        { "target": "", "heading": "intro", "resolution": "same_note" }
+      ]
+    },
+    {
+      "name": "markdown links",
+      "from": "Notebooks/Projects/Alpha/Plan.md",
+      "text": "[n](Notes.md) [t](../../Top.md#Top%20Heading) [s](<../Beta/Plan.md>) [w](https://example.com/x) [m](mailto:a@example.com)",
+      "links": [
+        { "target": "Notes.md", "resolution": "unique", "path": "Notebooks/Projects/Alpha/Notes.md" },
+        { "target": "../../Top.md", "heading": "Top Heading", "resolution": "unique", "path": "Notebooks/Top.md" },
+        { "target": "../Beta/Plan.md", "resolution": "unique", "path": "Notebooks/Projects/Beta/Plan.md" },
+        { "target": "https://example.com/x", "resolution": "external" },
+        { "target": "mailto:a@example.com", "resolution": "external" }
+      ]
+    },
+    {
+      "name": "markdown escapes and titles",
+      "from": "Notebooks/Top.md",
+      "text": "[c](Caf%C3%A9%20Menu.md \"the menu\")",
+      "links": [{ "target": "Café Menu.md", "resolution": "unique", "path": "Notebooks/Café Menu.md" }]
+    },
+    {
+      "name": "fenced code hides links",
+      "from": "Notebooks/Top.md",
+      "text": "[[Top]]\n```\n[[Top]] [[Nope]]\n```\n~~~\n[[Nope]]\n~~~\n[[Notes]]",
+      "links": [
+        { "target": "Top", "resolution": "unique", "path": "Notebooks/Top.md" },
+        { "target": "Notes", "resolution": "unique", "path": "Notebooks/Projects/Alpha/Notes.md" }
+      ]
+    },
+    {
+      "name": "inline code hides links",
+      "from": "Notebooks/Top.md",
+      "text": "type `[[Nope]]` or ``[[Nope]] ` x`` then [[Top]]",
+      "links": [{ "target": "Top", "resolution": "unique", "path": "Notebooks/Top.md" }]
+    },
+    {
+      "name": "unclosed fence hides the rest",
+      "from": "Notebooks/Top.md",
+      "text": "[[Top]]\n```\n[[Nope]]",
+      "links": [{ "target": "Top", "resolution": "unique", "path": "Notebooks/Top.md" }]
+    },
+    {
+      "name": "escaped, empty and broken brackets are not links",
+      "from": "Notebooks/Top.md",
+      "text": "\\[[Nope]] [[]] [[Open\nbroken]] [[Top]]",
+      "links": [{ "target": "Top", "resolution": "unique", "path": "Notebooks/Top.md" }]
+    },
+    {
+      "name": "frontmatter links count",
+      "from": "Notebooks/Top.md",
+      "text": "---\nrelated: \"[[Notes]]\"\n---\n\nbody",
+      "links": [{ "target": "Notes", "resolution": "unique", "path": "Notebooks/Projects/Alpha/Notes.md", "in_frontmatter": true }]
+    },
+    {
+      "name": "spaces around a target are not part of it",
+      "from": "Notebooks/Top.md",
+      "text": "[[ Top ]] [[ Top | label ]]",
+      "links": [
+        { "target": "Top", "resolution": "unique", "path": "Notebooks/Top.md" },
+        { "target": "Top", "alias": "label", "resolution": "unique", "path": "Notebooks/Top.md" }
+      ]
+    }
+  ]
+}

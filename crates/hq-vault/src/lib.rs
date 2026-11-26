@@ -2,12 +2,14 @@
 
 pub mod client;
 pub mod frontmatter;
+pub mod links;
 pub mod note_lock;
 pub mod notes;
 pub mod rel_path;
 pub mod remediation;
 pub mod reorg;
 pub mod system;
+pub mod walk;
 
 pub use client::VaultClient;
 pub use notes::{NoteHeading, NoteSection};
