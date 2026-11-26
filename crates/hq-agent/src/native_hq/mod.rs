@@ -324,7 +324,7 @@ pub async fn run_native_hq(
         .as_ref()
         .map(|i| i.source.label())
         .unwrap_or("cli");
-    if !hooks.skip_memory_ingestion {
+    if ingest::learns_from_turn(hooks.identity.as_ref(), hooks.skip_memory_ingestion) {
         wire_post_turn_ingestion(
             &mut session,
             &config.vault_path,

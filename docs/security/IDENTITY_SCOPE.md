@@ -94,9 +94,24 @@ exactly one verified person is present:
 Spaces that already exist under other names stay owner only until an owner moves
 their tasks into a `people-<slug>` space; nothing is migrated automatically.
 
+## What HQ remembers
+
+Memory is the owner's. `RequestIdentity::acts_for_owner` (`crates/hq-core/src/identity.rs`) is the
+one test for "this request speaks for the owner": not a family guest, and an unrestricted scope. A
+request with no identity (the CLI, the daemon) is the owner's own.
+
+- **Reading.** A session that fails the test gets none of `MEMORY.md` and none of the recalled
+  rows in its prompt (`build_memory_context` is skipped in `crates/hq-agent/src/builder/prompt.rs`).
+- **Writing.** A turn that fails the test is never learned from
+  (`learns_from_turn` in `crates/hq-agent/src/native_hq/ingest.rs`), so a guest's words cannot
+  later surface as facts about the owner.
+
+Rows written before this rule may include guest turns. They carry no marker that says so, so they
+cannot be separated automatically; the owner-facing memory page is where they get reviewed.
+
 ## Not yet covered
 
-Generated documents and non-vault context sources (memory
-entities, session search) are not filtered yet. Discord passes only the message
+Generated documents and non-vault context sources (session search, memory
+entities) are not filtered yet. Discord passes only the message
 author as the audience, so an owner mention in a busy guild channel is treated
 as owner-only.

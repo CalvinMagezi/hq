@@ -55,8 +55,9 @@ impl SessionBuilder {
             let is_worker = self.worker_checkouts.is_some();
             let soul_with_user = self.compose_soul(&inputs, is_worker);
 
-            // Dynamic memory from MemoryQuerier (merged with static MEMORY.md)
-            let memory_text = if is_worker {
+            // Dynamic memory from MemoryQuerier (merged with static MEMORY.md). It is the
+            // owner's: a family guest or a restricted audience gets none of it.
+            let memory_text = if is_worker || !self.reads_owner_history() {
                 Default::default()
             } else {
                 build_memory_context(&inputs.shared_db, &sys_ctx.memory)

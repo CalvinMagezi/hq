@@ -1,5 +1,39 @@
 use super::*;
 
+/// What HQ learns is the owner's. A family guest or an unverified audience is never learned
+/// from, the owner and a caller with no identity are, and the caller's own opt-out still wins.
+#[test]
+fn only_the_owners_turns_are_learned_from() {
+    use hq_core::identity::{FamilyGuestInfo, RequestIdentity};
+    use hq_core::privacy::DisclosureScope;
+
+    let mut owner = RequestIdentity::from_discord(7);
+    owner.scope = DisclosureScope::Unrestricted;
+    let mut guest = owner.clone();
+    guest.family_guest = Some(FamilyGuestInfo {
+        name: "Sam".into(),
+        origin_channel_id: 7,
+        owner_name: "owner".into(),
+        allowed_harnesses: Vec::new(),
+    });
+    let unverified = RequestIdentity::from_discord(7);
+
+    assert!(ingest::learns_from_turn(None, false), "CLI and daemon");
+    assert!(ingest::learns_from_turn(Some(&owner), false));
+    assert!(
+        !ingest::learns_from_turn(Some(&guest), false),
+        "a family guest"
+    );
+    assert!(
+        !ingest::learns_from_turn(Some(&unverified), false),
+        "an unverified Discord audience is restricted"
+    );
+    assert!(
+        !ingest::learns_from_turn(Some(&owner), true),
+        "the caller's own opt-out"
+    );
+}
+
 /// A web chat is not framed as part of the Telegram conversation.
 #[tokio::test]
 async fn isolated_session_carries_no_other_interface_turns() {
