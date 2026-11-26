@@ -66,7 +66,7 @@
 
 - id: tidy-notes
   group: notes
-  says: Find links in your notes that lead nowhere
+  says: Find broken links in your notes
   example: Check my notes for broken links
   tools: [vault_health]
   needs: [model]

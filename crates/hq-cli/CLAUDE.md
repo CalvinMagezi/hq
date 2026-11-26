@@ -7,6 +7,7 @@ Notes for working under `crates/hq-cli/`, moved out of the root `CLAUDE.md` so a
 | What | Path |
 |------|------|
 | CLI binary | `crates/hq-cli/src/main.rs` |
+| The notes check (`hq vault health [--json]`, the Notes line in `hq doctor`, daemon task `vault-health` every 6 hours, off with `daemon.vault_health: false`) | `crates/hq-cli/src/commands/vault_health.rs`, `crates/hq-cli/src/commands/start/daemon/tasks_slow/vault_health.rs`, `hq_tools::vault_health`, `GET /api/vault/health` in `crates/hq-web/src/vault_health_api.rs`, `apps/hq-web/src/routes/notes/health.tsx`, `docs/VAULT_HEALTH.md` |
 | Pull-based updates | `crates/hq-update/`, `crates/hq-cli/src/commands/update.rs`, `deploy/install.sh`, `deploy/update/`, `docs/UPDATE_SYSTEM.md` |
 | Encrypted backup and restore (`hq backup create|verify|restore|keygen|prune`, `hq restore`, the opt-in `backup:` daemon task) | `crates/hq-backup/` (`archive.rs` create, verify and restore with every check, `crypto.rs` the sealed container, `key.rs` passphrase and key file, `snapshot.rs` the consistent database copy, `retention.rs`), `crates/hq-cli/src/commands/backup.rs`, `crates/hq-cli/src/commands/start/daemon/tasks_periodic/backup.rs`, `BackupConfig` in `crates/hq-core/src/config/backup.rs`, `hq_db::migrations::newer_migrations`, `docs/BACKUP.md` |
 | Restart notices | `crates/hq-cli/src/commands/notify_restart.rs` (`hq notify-restart`) |

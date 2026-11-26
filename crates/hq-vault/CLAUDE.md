@@ -10,6 +10,9 @@ Notes for working under `crates/hq-vault/`, moved out of the root `CLAUDE.md` so
 | Links between notes: reading them out of text, saying what each one points at, changing only the target part (`extract`, `NoteSet::resolve`, `retarget`, `apply_edits`) | `crates/hq-vault/src/links.rs`, the shared corpus `crates/hq-vault/tests/fixtures/links_cases.json` (run by `tests/links_corpus.rs`) |
 | The notes and attachments a link can name, listed by the index's rules | `crates/hq-vault/src/walk.rs` |
 | Real-vault census and scale benchmark (opt-in, read-only) | `crates/hq-vault/tests/links_diag.rs` |
+| Keeping links pointing where they pointed when notes move (`plan_moves`, `apply`; `reorg::move_note` and `move_folder` use it), who links here (`backlink_index`) | `crates/hq-vault/src/relink.rs` |
+| Links in one note against the rest of the vault, for the write tools' warnings and `vault_links` | `crates/hq-vault/src/check.rs` |
+| The notes check: dead and ambiguous links, missing headings, repeated notes, unreadable properties (`scan`, `scan_full`, `Report::apply_ignores`, `only_note`) | `crates/hq-vault/src/health.rs`, `docs/VAULT_HEALTH.md` |
 
 ## Rules
 
