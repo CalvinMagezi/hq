@@ -206,6 +206,11 @@ fn fix_id(kind: Kind, note: &str, before: &str, after: &str) -> String {
 
 /// Plan every fix the snapshot allows.
 pub fn plan(snap: &Snapshot, ctx: &Context) -> Plan {
+    plan_with(snap, ctx, &NameIndex::for_snapshot(snap))
+}
+
+/// [`plan`] with a name index built by the caller, to share it with the report.
+pub fn plan_with(snap: &Snapshot, ctx: &Context, names: &NameIndex) -> Plan {
     let texts: HashMap<&str, &str> = snap
         .notes
         .iter()
@@ -218,19 +223,6 @@ pub fn plan(snap: &Snapshot, ctx: &Context) -> Plan {
         }),
         snap.attachments.iter().cloned(),
     );
-    let stems: Vec<(String, String)> = snap
-        .notes
-        .iter()
-        .map(|n| {
-            let name = n.path.rsplit('/').next().unwrap_or(&n.path);
-            (
-                name.strip_suffix(".md").unwrap_or(name).to_string(),
-                n.path.clone(),
-            )
-        })
-        .collect();
-
-    let names = NameIndex::new(&stems);
     let mut out = Plan::default();
     let mut skipped: BTreeMap<String, SkipReason> = BTreeMap::new();
 
@@ -262,7 +254,7 @@ pub fn plan(snap: &Snapshot, ctx: &Context) -> Plan {
             if link.in_frontmatter {
                 continue;
             }
-            let Some((tier, kind, to)) = choose(&set, &names, ctx, &note.path, &link) else {
+            let Some((tier, kind, to)) = choose(&set, names, ctx, &note.path, &link) else {
                 continue;
             };
             let want = Resolution::Unique(to);

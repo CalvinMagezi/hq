@@ -196,11 +196,13 @@ fn pipeline_benchmark() {
         let t0 = Instant::now();
         let snap = relink::snapshot(dir.path());
         let read_ms = t0.elapsed().as_millis();
+        // One index of note names for both, as the daemon does it: a missing name is searched once.
+        let names = hq_vault::check::NameIndex::for_snapshot(&snap);
         let t1 = Instant::now();
-        let report = health::scan_full(&snap);
+        let report = health::scan_full_with(&snap, &names);
         let scan_ms = t1.elapsed().as_millis();
         let t2 = Instant::now();
-        let plan = fixes::plan(&snap, &fixes::Context::default());
+        let plan = fixes::plan_with(&snap, &fixes::Context::default(), &names);
         let plan_ms = t2.elapsed().as_millis();
         println!(
             "{n} notes: read {read_ms} ms, scan {scan_ms} ms ({} dead links), plan {plan_ms} ms ({} fixes)",

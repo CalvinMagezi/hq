@@ -124,7 +124,9 @@ pub fn scan_snapshot(
     ignored: &Ignored,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<Scanned> {
-    let mut report = health::scan_full(snap);
+    // One index of note names for the report and the plan, so a missing name is searched once.
+    let names = hq_vault::check::NameIndex::for_snapshot(snap);
+    let mut report = health::scan_full_with(snap, &names);
     report.apply_ignores(ignored);
 
     // Notes that moved since the last scan, remembered so a link to the old name can follow.
@@ -148,7 +150,7 @@ pub fn scan_snapshot(
         .into_iter()
         .collect();
 
-    let (plan, _) = plan_with(snap, db, ignored, renames)?;
+    let (plan, _) = plan_with(snap, db, ignored, renames, &names)?;
     report.similar = near_duplicates(db, snap, &report);
     report.counts.similar = report.similar.len();
     report.counts.similar_checked = similar_checked(db, snap);
@@ -167,6 +169,7 @@ fn plan_with(
     db: &Database,
     ignored: &Ignored,
     renames: HashMap<String, String>,
+    names: &hq_vault::check::NameIndex,
 ) -> Result<(Plan, Context)> {
     let mut ctx = Context {
         renames,
@@ -174,7 +177,7 @@ fn plan_with(
     };
     // The first pass says which notes would be touched; only those are looked up in the
     // provenance table.
-    let first = fixes::plan(snap, &ctx);
+    let first = fixes::plan_with(snap, &ctx, names);
     let candidates: HashSet<&str> = first
         .fixes
         .iter()
@@ -206,7 +209,7 @@ fn plan_with(
         }
         Ok(out)
     })?;
-    let mut plan = fixes::plan(snap, &ctx);
+    let mut plan = fixes::plan_with(snap, &ctx, names);
     // A link the owner said to leave alone is not offered for repair either.
     plan.fixes.retain(|f| {
         let key = format!("{}|{}", f.note, f.before);
@@ -368,7 +371,13 @@ pub fn plan_now(vault_path: &Path, db: &Database) -> Result<(Plan, Context)> {
         .with_conn(|conn| hq_db::vault_health::renames(conn, chrono::Utc::now()))?
         .into_iter()
         .collect();
-    plan_with(&snap, db, &ignored, renames)
+    plan_with(
+        &snap,
+        db,
+        &ignored,
+        renames,
+        &hq_vault::check::NameIndex::for_snapshot(&snap),
+    )
 }
 
 // ─── The Inbox ───────────────────────────────────────────────────────────────

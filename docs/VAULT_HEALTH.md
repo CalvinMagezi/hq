@@ -114,4 +114,9 @@ the result of the move, instead of pointing it at the wrong one.
   when its exact text appears under a new name, and the links to the old name can then be fixed.
   A rename that also changes the text is not recognised.
 - Notes that say almost the same thing are compared only when there are at most 6,000 of them.
-- Checking twenty thousand notes with a quarter of a million links takes about half a second.
+- Speed, measured on a laptop-class machine with 20,000 notes and 240,000 links: reading and
+  resolving every link takes about half a second. Looking for a near-match name for each broken
+  link is the slow part, and it depends on how many links are broken, not on how many notes
+  there are. With 22,000 broken links, a vault far messier than a real one, the whole check takes
+  about ten seconds; with a few hundred it is well under one. The check runs in the background
+  and a screen never waits on a scan it did not ask for.

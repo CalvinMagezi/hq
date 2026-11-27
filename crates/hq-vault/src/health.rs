@@ -271,6 +271,11 @@ impl Report {
 
 /// The report with every example listed.
 pub fn scan_full(snap: &Snapshot) -> Report {
+    scan_full_with(snap, &crate::check::NameIndex::for_snapshot(snap))
+}
+
+/// [`scan_full`] with a name index built by the caller, to share it with the planner.
+pub fn scan_full_with(snap: &Snapshot, names: &crate::check::NameIndex) -> Report {
     let texts: HashMap<&str, &str> = snap
         .notes
         .iter()
@@ -283,13 +288,6 @@ pub fn scan_full(snap: &Snapshot) -> Report {
         }),
         snap.attachments.iter().cloned(),
     );
-    let stems: Vec<(String, String)> = snap
-        .notes
-        .iter()
-        .map(|n| (stem_of(&n.path), n.path.clone()))
-        .collect();
-
-    let names = crate::check::NameIndex::new(&stems);
     let mut r = Report {
         unread: snap.unread.clone(),
         ..Report::default()
@@ -394,11 +392,6 @@ pub fn scan_full(snap: &Snapshot) -> Report {
 }
 
 // ─── Parts ───────────────────────────────────────────────────────────────────
-
-fn stem_of(path: &str) -> String {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    name.strip_suffix(".md").unwrap_or(name).to_string()
-}
 
 fn body_of(text: &str) -> &str {
     hq_core::frontmatter_utils::split_frontmatter(text).1

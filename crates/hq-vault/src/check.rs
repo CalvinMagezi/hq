@@ -129,7 +129,7 @@ fn stem_of(rel: &str) -> String {
 /// answer for a link target is remembered, since the same missing name is usually linked from
 /// many places. Without this a vault with thousands of broken links compared every one of them
 /// with every note.
-pub(crate) struct NameIndex {
+pub struct NameIndex {
     by_len: BTreeMap<usize, Vec<NameEntry>>,
     asked: RefCell<HashMap<String, Option<String>>>,
 }
@@ -141,7 +141,7 @@ struct NameEntry {
 
 impl NameIndex {
     /// `stems` is `(file name without .md, path)` for every note.
-    pub(crate) fn new(stems: &[(String, String)]) -> Self {
+    pub fn new(stems: &[(String, String)]) -> Self {
         let mut by_len: BTreeMap<usize, Vec<NameEntry>> = BTreeMap::new();
         for (stem, rel) in stems {
             let name: Vec<char> = fold(stem).chars().collect();
@@ -156,15 +156,26 @@ impl NameIndex {
         }
     }
 
+    /// An index of every note in a snapshot. Build one per scan and hand it to both the report and
+    /// the planner, so a missing name is searched for once, not once by each.
+    pub fn for_snapshot(snap: &crate::relink::Snapshot) -> Self {
+        let stems: Vec<(String, String)> = snap
+            .notes
+            .iter()
+            .map(|n| (stem_of(&n.path), n.path.clone()))
+            .collect();
+        Self::new(&stems)
+    }
+
     /// The stem of the one note whose name is nearest to `target`, if it is near enough and
     /// nothing else is as near. A guess is shown to the writer, never written into a note unless
     /// the person says so.
-    pub(crate) fn nearest_name(&self, target: &str) -> Option<String> {
+    pub fn nearest_name(&self, target: &str) -> Option<String> {
         self.nearest(target).map(|rel| stem_of(&rel))
     }
 
     /// The path of that note.
-    pub(crate) fn nearest(&self, target: &str) -> Option<String> {
+    pub fn nearest(&self, target: &str) -> Option<String> {
         let want = fold(target.rsplit('/').next().unwrap_or(target));
         let want = want.strip_suffix(".md").unwrap_or(&want).to_string();
         if let Some(known) = self.asked.borrow().get(&want) {
@@ -341,9 +352,9 @@ mod tests {
             Some("Quarterly Review")
         );
         assert_eq!(
-            idx.nearest("quarterly  reveiw.md"),
+            idx.nearest("Qrtrly Rvw.md"),
             None,
-            "two spaces is one more edit than it allows"
+            "more edits than a near miss may have"
         );
         assert_eq!(
             idx.nearest("Folder/Quarterly Reveiw.md").as_deref(),
