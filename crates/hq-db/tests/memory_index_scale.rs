@@ -75,7 +75,7 @@ fn backfill_and_search_scale() {
         start.elapsed()
     );
 
-    // The one-time cost a database with existing memories pays when migration 153 runs: the same
+    // The one-time cost a database with existing memories pays when migration 154 runs: the same
     // statement the migration ends with, over every existing row.
     db.with_conn(|c| {
         c.execute_batch("DELETE FROM memories_fts")?;
