@@ -29,7 +29,7 @@ pub(crate) struct ListParams {
     /// Words to look for. When set, the other filters are ignored.
     #[serde(default)]
     q: String,
-    /// `all` (default), `review`, `outdated`, `unattributed` or `pinned`.
+    /// `all` (default), `review`, `outdated`, `archived`, `unattributed` or `pinned`.
     #[serde(default)]
     filter: String,
     limit: Option<i64>,
@@ -49,6 +49,7 @@ pub(crate) async fn list_handler(
         status: match params.filter.as_str() {
             "review" => Some("review".to_string()),
             "outdated" => Some("superseded".to_string()),
+            "archived" => Some("archived".to_string()),
             _ => None,
         },
         unattributed_only: params.filter == "unattributed",
@@ -313,6 +314,25 @@ mod tests {
         let (_, held) = t.call("GET", "/api/memory?filter=unattributed", "").await;
         assert_eq!(held["items"].as_array().unwrap().len(), 1);
         assert_eq!(held["items"][0]["id"], b);
+
+        t.state
+            .db
+            .with_conn(|c| {
+                c.execute("UPDATE memories SET status = 'archived' WHERE id = ?1", [a])?;
+                Ok(())
+            })
+            .unwrap();
+        let (_, away) = t.call("GET", "/api/memory?filter=archived", "").await;
+        assert_eq!(away["items"].as_array().unwrap().len(), 1);
+        assert_eq!(away["items"][0]["id"], a);
+        assert_eq!(away["counts"]["archived"], 1);
+        t.state
+            .db
+            .with_conn(|c| {
+                c.execute("UPDATE memories SET status = 'active' WHERE id = ?1", [a])?;
+                Ok(())
+            })
+            .unwrap();
 
         let (_, found) = t.call("GET", "/api/memory?q=thursdays", "").await;
         assert_eq!(found["items"][0]["id"], a);

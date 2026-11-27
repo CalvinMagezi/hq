@@ -54,6 +54,7 @@ export function memoryMeta(item: MemoryItem, nowMs: number): string {
 function hintFor(item: MemoryItem): string | null {
   if (item.origin !== 'owner') return t('memory_hint_shared')
   if (item.status === 'review') return t('memory_hint_review')
+  if (item.status === 'archived') return t('memory_hint_archived')
   return null
 }
 
@@ -122,6 +123,7 @@ export function MemoryView({
           active: counts.active,
           review: counts.review,
           outdated: counts.out_of_date,
+          archived: counts.archived,
         })}
       </p>
       {!canChange && (

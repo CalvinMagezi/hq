@@ -6,7 +6,7 @@ import type { StringKey } from '~/strings'
 
 export type MemoryStatus = 'active' | 'review' | 'superseded' | string
 export type RecallMode = 'shadow' | 'query' | 'recent' | 'off'
-export type MemoryFilter = 'all' | 'review' | 'outdated' | 'unattributed' | 'pinned'
+export type MemoryFilter = 'all' | 'review' | 'outdated' | 'archived' | 'unattributed' | 'pinned'
 export type Standing = 'active' | 'review' | 'outdated'
 
 export interface MemoryItem {
@@ -31,6 +31,7 @@ export interface MemoryCounts {
   active: number
   review: number
   out_of_date: number
+  archived: number
   unattributed: number
   pinned: number
 }
@@ -64,6 +65,7 @@ export const MEMORY_FILTERS: { id: MemoryFilter; label: StringKey }[] = [
   { id: 'all', label: 'memory_filter_all' },
   { id: 'review', label: 'memory_filter_review' },
   { id: 'outdated', label: 'memory_filter_outdated' },
+  { id: 'archived', label: 'memory_filter_archived' },
   { id: 'unattributed', label: 'memory_filter_unattributed' },
   { id: 'pinned', label: 'memory_filter_pinned' },
 ]
@@ -98,6 +100,7 @@ export function memoryBadges(item: MemoryItem): StringKey[] {
   if (item.pinned) badges.push('memory_badge_pinned')
   if (item.status === 'review') badges.push('memory_badge_review')
   if (item.status === 'superseded') badges.push('memory_badge_outdated')
+  if (item.status === 'archived') badges.push('memory_badge_archived')
   if (item.origin !== 'owner') badges.push('memory_badge_shared')
   if (item.provenance === 'owner_edited') badges.push('memory_badge_edited')
   return badges
@@ -127,6 +130,6 @@ export function isHeldBack(item: MemoryItem): boolean {
 /** What the one standing button of a note does: keep a held-back one, bring an outdated one back, or retire a live one. */
 export function standingAction(item: MemoryItem): { label: StringKey; to: Standing } {
   if (isHeldBack(item)) return { label: 'memory_keep', to: 'active' }
-  if (item.status === 'superseded') return { label: 'memory_use_again', to: 'active' }
+  if (item.status === 'superseded' || item.status === 'archived') return { label: 'memory_use_again', to: 'active' }
   return { label: 'memory_mark_outdated', to: 'outdated' }
 }
