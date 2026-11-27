@@ -224,9 +224,9 @@ class SettingsWordsTest {
         assertEquals(listOf(WORK_TASKS_ROW, WORK_HELPERS_ROW), groups[0].rows.map { it.key })
         assertEquals(listOf("Messaging apps", "Other devices", "Computers and tools", "GitHub"), groups[2].rows.map { it.title })
         assertEquals(SettingsWords.claudeViaLaptop(testWords()), groups[2].note)
-        assertEquals(listOf(SettingsPage.Safety, SettingsPage.Suggests), groups[4].rows.map { it.page })
+        assertEquals(listOf(SettingsPage.Safety, SettingsPage.Suggests, SettingsPage.Memory), groups[4].rows.map { it.page })
         assertEquals("Read only", groups[4].rows.first().status)
-        assertEquals("What HQ suggests", groups[4].rows.last().title)
+        assertEquals("What HQ remembers", groups[4].rows.last().title)
         assertNull(groups[3].rows.firstOrNull())
     }
 
@@ -296,7 +296,7 @@ class SettingsWordsTest {
     @Test fun theHomeListSaysItIsCheckingUntilItHasAskedAndNeverThenSaysNotAnswering() {
         val groups = SettingsWords.home(testWords(), SettingsSnapshot(), now, listOf(HomeRow(null, "background", "Background work", "On")), loaded = false)
         assertEquals("On", groups.first { it.title == "This phone" }.rows.single().status)
-        assertTrue(groups.filter { it.title != "This phone" }.flatMap { it.rows }.filter { it.page != SettingsPage.About && it.page != SettingsPage.Update && it.page != SettingsPage.Technical && it.key != WORK_TASKS_ROW && it.key != WORK_HELPERS_ROW && it.key != SUGGESTS_ROW }.all { it.status == "Not read yet" })
+        assertTrue(groups.filter { it.title != "This phone" }.flatMap { it.rows }.filter { it.page != SettingsPage.About && it.page != SettingsPage.Update && it.page != SettingsPage.Technical && it.key != WORK_TASKS_ROW && it.key != WORK_HELPERS_ROW && it.key != SUGGESTS_ROW && it.key != MEMORY_ROW }.all { it.status == "Not read yet" })
         assertTrue(SettingsWords.home(testWords(), SettingsSnapshot(), now, emptyList(), loaded = true).filter { it.title != "This phone" }.flatMap { it.rows }.any { it.status == "No answer yet" })
     }
 

@@ -4450,6 +4450,7 @@
     <string name="inbox_bring_back_failed">Couldn\'t bring that back, try again.</string>
     <string name="row_suggests">What HQ suggests</string>
     <string name="trail_suggests">Ideas and offers HQ makes</string>
+    <string name="trail_memory">Look, correct or forget</string>
     <plurals name="settings_suggests_intro">
         <item quantity="one">HQ now and then suggests something it can do. Here is how often, and what you answered, over the last %1$s day.</item>
         <item quantity="other">HQ now and then suggests something it can do. Here is how often, and what you answered, over the last %1$s days.</item>

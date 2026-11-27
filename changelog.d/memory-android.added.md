@@ -1,0 +1,1 @@
+**See and correct what HQ remembers on your phone.** Settings, What HQ remembers lists the notes HQ saved, with Pin, Keep and Forget for each, and the switch that pauses saving. Forget says what it cannot reach, such as the chat the note came from.
