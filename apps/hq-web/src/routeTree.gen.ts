@@ -34,6 +34,7 @@ import { Route as SettingsTimeRouteImport } from './routes/settings/time'
 import { Route as SettingsSpendingRouteImport } from './routes/settings/spending'
 import { Route as SettingsSafetyRouteImport } from './routes/settings/safety'
 import { Route as SettingsMessagingRouteImport } from './routes/settings/messaging'
+import { Route as SettingsMemoryRouteImport } from './routes/settings/memory'
 import { Route as SettingsKeysRouteImport } from './routes/settings/keys'
 import { Route as SettingsGithubRouteImport } from './routes/settings/github'
 import { Route as SettingsFoldersRouteImport } from './routes/settings/folders'
@@ -176,6 +177,11 @@ const SettingsMessagingRoute = SettingsMessagingRouteImport.update({
   path: '/messaging',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsMemoryRoute = SettingsMemoryRouteImport.update({
+  id: '/memory',
+  path: '/memory',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsKeysRoute = SettingsKeysRouteImport.update({
   id: '/keys',
   path: '/keys',
@@ -288,6 +294,7 @@ export interface FileRoutesByFullPath {
   '/settings/folders': typeof SettingsFoldersRoute
   '/settings/github': typeof SettingsGithubRoute
   '/settings/keys': typeof SettingsKeysRoute
+  '/settings/memory': typeof SettingsMemoryRoute
   '/settings/messaging': typeof SettingsMessagingRoute
   '/settings/safety': typeof SettingsSafetyRoute
   '/settings/spending': typeof SettingsSpendingRoute
@@ -329,6 +336,7 @@ export interface FileRoutesByTo {
   '/settings/folders': typeof SettingsFoldersRoute
   '/settings/github': typeof SettingsGithubRoute
   '/settings/keys': typeof SettingsKeysRoute
+  '/settings/memory': typeof SettingsMemoryRoute
   '/settings/messaging': typeof SettingsMessagingRoute
   '/settings/safety': typeof SettingsSafetyRoute
   '/settings/spending': typeof SettingsSpendingRoute
@@ -373,6 +381,7 @@ export interface FileRoutesById {
   '/settings/folders': typeof SettingsFoldersRoute
   '/settings/github': typeof SettingsGithubRoute
   '/settings/keys': typeof SettingsKeysRoute
+  '/settings/memory': typeof SettingsMemoryRoute
   '/settings/messaging': typeof SettingsMessagingRoute
   '/settings/safety': typeof SettingsSafetyRoute
   '/settings/spending': typeof SettingsSpendingRoute
@@ -418,6 +427,7 @@ export interface FileRouteTypes {
     | '/settings/folders'
     | '/settings/github'
     | '/settings/keys'
+    | '/settings/memory'
     | '/settings/messaging'
     | '/settings/safety'
     | '/settings/spending'
@@ -459,6 +469,7 @@ export interface FileRouteTypes {
     | '/settings/folders'
     | '/settings/github'
     | '/settings/keys'
+    | '/settings/memory'
     | '/settings/messaging'
     | '/settings/safety'
     | '/settings/spending'
@@ -502,6 +513,7 @@ export interface FileRouteTypes {
     | '/settings/folders'
     | '/settings/github'
     | '/settings/keys'
+    | '/settings/memory'
     | '/settings/messaging'
     | '/settings/safety'
     | '/settings/spending'
@@ -710,6 +722,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsMessagingRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/memory': {
+      id: '/settings/memory'
+      path: '/memory'
+      fullPath: '/settings/memory'
+      preLoaderRoute: typeof SettingsMemoryRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/keys': {
       id: '/settings/keys'
       path: '/keys'
@@ -884,6 +903,7 @@ interface SettingsRouteChildren {
   SettingsFoldersRoute: typeof SettingsFoldersRoute
   SettingsGithubRoute: typeof SettingsGithubRoute
   SettingsKeysRoute: typeof SettingsKeysRoute
+  SettingsMemoryRoute: typeof SettingsMemoryRoute
   SettingsMessagingRoute: typeof SettingsMessagingRoute
   SettingsSafetyRoute: typeof SettingsSafetyRoute
   SettingsSpendingRoute: typeof SettingsSpendingRoute
@@ -902,6 +922,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsFoldersRoute: SettingsFoldersRoute,
   SettingsGithubRoute: SettingsGithubRoute,
   SettingsKeysRoute: SettingsKeysRoute,
+  SettingsMemoryRoute: SettingsMemoryRoute,
   SettingsMessagingRoute: SettingsMessagingRoute,
   SettingsSafetyRoute: SettingsSafetyRoute,
   SettingsSpendingRoute: SettingsSpendingRoute,

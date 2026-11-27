@@ -24,6 +24,7 @@ const HINT: Record<string, StringKey> = {
   safety: 'sethint_safety',
   folders: 'sethint_folders',
   access: 'sethint_access',
+  memory: 'sethint_memory',
   backup: 'sethint_backup',
   chat: 'sethint_chat',
   work_tasks: 'sethint_work_tasks',
