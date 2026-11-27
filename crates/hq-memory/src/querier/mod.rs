@@ -130,7 +130,7 @@ fn staleness_caveat(iso_date: &str) -> &'static str {
 }
 
 /// Compute a human-readable relative age string.
-fn relative_age(iso_date: &str) -> String {
+pub(crate) fn relative_age(iso_date: &str) -> String {
     let Ok(dt) = chrono::DateTime::parse_from_rfc3339(iso_date) else {
         return "?".into();
     };

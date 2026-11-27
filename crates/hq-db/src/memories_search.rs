@@ -51,6 +51,18 @@ pub fn search_keyword(
     Ok(hits)
 }
 
+/// Memories holding any of the words of `query`, best first. Unlike [`search_keyword`] it never
+/// narrows to the rows that hold every word, so a caller that wants to judge partial matches
+/// itself (how many of the question's words a memory covers) sees them all.
+pub fn search_any(
+    conn: &Connection,
+    query: &str,
+    view: View,
+    limit: i64,
+) -> Result<Vec<MemoryHit>> {
+    run(conn, &sanitize_fts_query_any(query), view, limit)
+}
+
 fn run(conn: &Connection, fts: &str, view: View, limit: i64) -> Result<Vec<MemoryHit>> {
     if fts.is_empty() {
         return Ok(Vec::new());
@@ -308,6 +320,25 @@ mod tests {
                 .unwrap()
                 .len(),
             5
+        );
+    }
+
+    #[test]
+    fn search_any_returns_partial_matches_that_search_keyword_would_hide() {
+        let conn = db();
+        let both = add(&conn, "Mira is paid monthly", "[]", "[]");
+        let one = add(&conn, "Tobias is paid weekly", "[]", "[]");
+
+        // One row has both words, so the all-words search stops there...
+        assert_eq!(found(&conn, "Mira paid", View::Recall), vec![both]);
+        // ...and the any-word search still reports the other row that holds one of them.
+        let mut any = ids(&search_any(&conn, "Mira paid", View::Recall, 10).unwrap());
+        any.sort_unstable();
+        assert_eq!(any, vec![both, one]);
+        assert_eq!(
+            search_any(&conn, "Mira paid", View::Recall, 10).unwrap()[0].id,
+            both,
+            "the row with more of the words ranks first"
         );
     }
 }
