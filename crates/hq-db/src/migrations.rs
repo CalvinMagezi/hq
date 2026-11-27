@@ -1292,4 +1292,96 @@ mod tests {
         assert_eq!(state("v-dup-old"), "dismissed");
         assert_eq!(state("v-dup-new"), "delivered");
     }
+
+    /// The memory index migrations on a database that already holds memories: nothing is lost, an
+    /// old row can be found, a Discord row is held back from recall, and a number written as a
+    /// timestamp becomes text. Running them again changes nothing.
+    #[test]
+    fn the_memory_index_migrations_keep_existing_rows_and_fix_old_timestamps() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let idx = super::MIGRATIONS
+            .iter()
+            .position(|(v, _)| *v == "154_memory_index")
+            .unwrap();
+        super::apply(&conn, &super::MIGRATIONS[..idx]).unwrap();
+        conn.execute_batch(
+            "INSERT INTO memories (id, content, source, importance, created_at, harness, summary)
+                 VALUES (1, 'old row with only content', 'chat-turn', 0.5, 1700000000, 'web', '');
+             INSERT INTO memories (id, content, source, importance, created_at, harness, summary)
+                 VALUES (2, 'from the shared channel', 'chat-turn', 0.5,
+                         '2026-03-01T10:00:00+00:00', 'discord', 'from the shared channel');
+             INSERT INTO memories (id, content, source, importance, created_at, harness, summary)
+                 VALUES (3, 'written in milliseconds', 'chat-turn', 0.5, 1700000000000, 'telegram',
+                         'written in milliseconds');
+             INSERT INTO consolidations (memory_ids, insight, created_at) VALUES ('[1]', 'x', 1700000000);",
+        )
+        .unwrap();
+
+        super::run(&conn).unwrap();
+
+        let row = |id: i64| -> (String, String, String, i64, String) {
+            conn.query_row(
+                "SELECT status, origin, provenance, seen_count, created_at FROM memories WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap()
+        };
+        let (status, origin, provenance, seen, created) = row(1);
+        assert_eq!(
+            (status.as_str(), origin.as_str(), provenance.as_str(), seen),
+            ("active", "owner", "model_inferred", 1)
+        );
+        assert_eq!(created, "2023-11-14T22:13:20+00:00", "seconds became text");
+        assert_eq!(
+            row(2).1,
+            "unknown_channel",
+            "a shared-channel row is held back"
+        );
+        assert_eq!(
+            row(2).4,
+            "2026-03-01T10:00:00+00:00",
+            "a text timestamp is untouched"
+        );
+        assert_eq!(
+            row(3).1,
+            "owner",
+            "Telegram is a one-to-one chat with the owner"
+        );
+        assert_eq!(
+            row(3).4,
+            "2023-11-14T22:13:20+00:00",
+            "milliseconds became text"
+        );
+        let consolidation: String = conn
+            .query_row("SELECT created_at FROM consolidations", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(consolidation, "2023-11-14T22:13:20+00:00");
+
+        // The old row had no summary, only content; it is searchable by that.
+        let hits = crate::memories_search::search_keyword(
+            &conn,
+            "content",
+            crate::memories_search::View::Recall,
+            10,
+        )
+        .unwrap();
+        assert_eq!(hits.iter().map(|h| h.id).collect::<Vec<_>>(), vec![1]);
+        let shared = crate::memories_search::search_keyword(
+            &conn,
+            "shared channel",
+            crate::memories_search::View::Recall,
+            10,
+        )
+        .unwrap();
+        assert!(shared.is_empty(), "held back from recall");
+
+        // Applying the same migrations to a database that has them changes nothing.
+        super::run(&conn).unwrap();
+        assert_eq!(row(1).4, "2023-11-14T22:13:20+00:00");
+        let indexed: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memories_fts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(indexed, 3);
+    }
 }
