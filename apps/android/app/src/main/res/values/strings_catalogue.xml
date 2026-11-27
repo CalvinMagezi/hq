@@ -4986,6 +4986,13 @@
     <string name="memory_learning_item">Save new notes</string>
     <string name="memory_learning_on">HQ saves a note after chats where you tell it something.</string>
     <string name="memory_learning_paused">Paused. HQ saves nothing new. What it already saved is still used.</string>
+    <plurals name="chat_remembered">
+        <item quantity="one">Remembered %1$s note</item>
+        <item quantity="other">Remembered %1$s notes</item>
+    </plurals>
+    <string name="chat_remembered_label">What HQ remembered for this reply</string>
+    <string name="chat_remembered_gone">HQ no longer has this note.</string>
+    <string name="chat_remembered_manage">Look at all your notes</string>
     <string name="memory_search_label">Search what HQ remembers</string>
     <string name="memory_search_placeholder">Search your notes</string>
     <string name="memory_filter_label">Show</string>

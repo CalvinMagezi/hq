@@ -13,6 +13,8 @@ const MAX_STEPS: usize = 200;
 const MAX_STEP_ARGS_CHARS: usize = 2_000;
 const MAX_STEP_RESULT_CHARS: usize = 1_000;
 const MAX_REASONING_CHARS: usize = 20_000;
+/// Most remembered notes one reply records. Recall shows at most five.
+const MAX_RECALLED: usize = 10;
 /// Longest tool result sent live to the browser; the full result stays in the session.
 pub(super) const LIVE_RESULT_CHARS: usize = 4_000;
 const REDACTED: &str = "[REDACTED]";
@@ -55,6 +57,8 @@ pub(super) struct TurnRecord {
     timings: Vec<hq_core::types::CallTiming>,
     /// When this reply began, so each span reads as an offset from it.
     began: Began,
+    /// The remembered notes shown to the model for this message, by number.
+    recalled: Vec<i64>,
 }
 
 /// Wall-clock start of a reply (milliseconds since the epoch), taken when its record is made.
@@ -186,6 +190,9 @@ impl TurnRecord {
             SessionEvent::Timing(t) if self.timings.len() < MAX_TIMINGS => {
                 self.timings.push(t.clone());
             }
+            SessionEvent::Recalled { ids } => {
+                self.recalled = ids.iter().copied().take(MAX_RECALLED).collect();
+            }
             SessionEvent::StepCredits { .. } if self.credits.len() < MAX_STEPS => {
                 self.record_credits(event)
             }
@@ -290,6 +297,9 @@ impl TurnRecord {
         }
         if !self.files.is_empty() {
             meta.insert("files".into(), Value::Array(self.files.clone()));
+        }
+        if !self.recalled.is_empty() {
+            meta.insert("recalled".into(), json!(self.recalled));
         }
         if stopped {
             meta.insert("stopped".into(), Value::Bool(true));
@@ -744,5 +754,25 @@ mod tests {
         rec.observe(&SessionEvent::TextDelta("hi".into()));
         let saved = rec.take(None, false).unwrap();
         assert!(saved.meta.unwrap()["timings"]["spans"].is_array());
+    }
+
+    #[test]
+    fn a_reply_remembers_which_notes_it_was_shown_and_no_more_than_the_cap() {
+        let mut rec = TurnRecord::default();
+        rec.observe(&SessionEvent::Recalled {
+            ids: (1..=30).collect(),
+        });
+        rec.observe(&SessionEvent::TextDelta("hi".into()));
+        let meta = rec.take(None, false).unwrap().meta.unwrap();
+        assert_eq!(meta["recalled"].as_array().unwrap().len(), MAX_RECALLED);
+        assert_eq!(meta["recalled"][0], 1);
+    }
+
+    #[test]
+    fn a_reply_with_nothing_recalled_carries_no_recalled_key() {
+        let mut rec = TurnRecord::default();
+        rec.observe(&SessionEvent::TextDelta("hi".into()));
+        let saved = rec.take(None, false).unwrap();
+        assert!(saved.meta.is_none_or(|m| m.get("recalled").is_none()));
     }
 }
