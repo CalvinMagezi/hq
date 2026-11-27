@@ -103,6 +103,7 @@ fun NotesOverlays(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String
                 is NotesRoute.Folder -> FolderPage(ui, actions)
                 is NotesRoute.Write -> ui.write?.let { WritePage(it, ui.folders, actions) }
                 is NotesRoute.Trash -> TrashPage(ui, actions)
+                is NotesRoute.Health -> HealthPage(ui, actions)
             }
         }
     }
@@ -576,3 +577,54 @@ private fun LeaveDialog(name: String, actions: NotesActions) {
     val context = androidx.compose.ui.platform.LocalContext.current
     ConfirmDialog(ConfirmCopy.leaveNote(context, name.ifBlank { context.getString(R.string.leave_note_fallback) }), onKeep = actions.onKeepEditing, onAct = actions.onDiscard, onExtra = actions.onSave)
 }
+
+/** What the notes check found, one thing to a row: the link or the notes, where, and a Fix or Open button. */
+@Composable
+private fun HealthPage(ui: NotesUi, actions: NotesActions) {
+    val health = ui.health
+    Column(Modifier.fillMaxSize()) {
+        TopBar(stringResource(R.string.notes_health_page), null, actions.onBack)
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp)) {
+            item { Text(stringResource(R.string.notes_health_intro), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
+            if (health == null || health.problems == 0) {
+                item { Text(stringResource(R.string.notes_health_all_good), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+            }
+            if (health != null && health.certain > 0) {
+                item {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(pluralStringResource(R.plurals.notes_health_fix_count, health.certain, health.certain), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.weight(1f))
+                        HealthButton(stringResource(R.string.notes_health_fix), !ui.healthBusy) { actions.onHealthFix(emptyList()) }
+                    }
+                }
+            }
+            if (health != null) {
+                items(health.items, key = { it.note + "|" + it.text }) { item ->
+                    val trail = NoteRefs.folderTrail(item.note).ifEmpty { stringResource(R.string.notes_your_notes) }
+                    Column(
+                        Modifier.fillMaxWidth().drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                    ) {
+                        Text(item.text, style = HqType.BodyBold, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(trail, style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.padding(top = 2.dp))
+                        item.detail?.let { Text(stringResource(R.string.notes_health_did_you_mean, it), style = HqType.Caption, color = Mts.InkMuted) }
+                        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (item.fixId != null) {
+                                val tier = stringResource(if (item.sure) R.string.notes_health_tier_a else R.string.notes_health_tier_b)
+                                HealthButton(stringResource(R.string.notes_health_fix) + " (" + tier + ")", !ui.healthBusy) { actions.onHealthFix(listOf(item.fixId)) }
+                            }
+                            HealthButton(stringResource(R.string.notes_health_open), true) { actions.onOpenNote(item.note) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HealthButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(Modifier.heightIn(min = 48.dp).clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+        Text(label, style = HqType.BodySmBold, color = if (enabled) Mts.BrandBlue else Mts.InkMuted)
+    }
+}
+

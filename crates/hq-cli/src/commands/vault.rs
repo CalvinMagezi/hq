@@ -45,7 +45,10 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
     let lite = config.profile.is_lite();
     // `--json` on list, tree and read prints one JSON value instead of text.
     // Only for the read-only listings: in `write` and `export` the word is the user's own text.
-    let json_verb = matches!(sub, "list" | "ls" | "tree" | "read" | "cat" | "health");
+    let json_verb = matches!(
+        sub,
+        "list" | "ls" | "tree" | "read" | "cat" | "health" | "repairs"
+    );
     let json = json_verb && args.iter().any(|a| a == "--json");
     let args: Vec<String> = args
         .iter()
@@ -75,7 +78,8 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
         }
         "import" => super::vault_import::import(cx.config, args, &|r: &str| cx.deny(r)).await?,
         "repair" => repair(&cx, args)?,
-        "health" => super::vault_health::run(cx.config, cx.json)?,
+        "health" => super::vault_health::run(cx.config, args, cx.json)?,
+        "repairs" => super::vault_health::repairs(cx.config, cx.json)?,
         _ => usage()?,
     }
 
@@ -563,6 +567,15 @@ fn moved(cx: &Cx<'_>, args: &[String]) -> Result<()> {
 
 /// Finds search rows left by deleted notes and notes with frontmatter inside the body.
 fn repair(cx: &Cx<'_>, args: &[String]) -> Result<()> {
+    // `--undo <run>` takes back a notes-check repair (see `hq vault repairs`); nothing else runs.
+    if let Some(at) = args.iter().position(|a| a == "--undo") {
+        let Some(run) = args.get(at + 1) else {
+            anyhow::bail!(
+                "name the repair to undo: hq vault repair --undo <run> (see hq vault repairs)"
+            );
+        };
+        return super::vault_health::undo(cx.config, run);
+    }
     let apply = args.iter().any(|a| a == "--apply");
     let db = hq_db::Database::open_existing(&cx.config.db_path())?;
     let vault_path = cx.config.vault_path.clone();
@@ -617,6 +630,11 @@ fn usage() -> Result<()> {
     println!(
         "  health [--json]      Check the notes for links that reach nothing, duplicates and properties that do not read"
     );
+    println!(
+        "  health --apply       Fix the links HQ is certain about (--tier all adds the likely ones). Originals are saved first"
+    );
+    println!("  repairs [--json]     List what the notes check changed, newest first");
+    println!("  repair --undo <run>  Put the notes of one of those back");
     println!("  stats                Show vault statistics");
     println!("  context              Show system context");
     Ok(())

@@ -236,6 +236,16 @@ impl SessionBuilder {
                     db.clone(),
                     Some(&self.config),
                 ));
+                // Reminders ring the owner's phone, so only the owner's own sessions set them.
+                let origin = self
+                    .identity
+                    .as_ref()
+                    .map(|id| hq_tools::reminders::tools::ReminderOrigin::from_identity(db, id));
+                tools.extend(hq_tools::reminders::tools::create_remind_tools(
+                    db.clone(),
+                    origin,
+                    &self.config.reminders,
+                ));
             }
         }
 
@@ -626,6 +636,8 @@ const MOBILE_EAGER_TOOLS: &[&str] = &[
     "harness_session_logs",
     "load_skill",
     "notify_owner",
+    "remind_create",
+    "remind_list",
     "report_progress",
     "background_turn_status",
     // Every fold block names history_restore, so the model calls it without a search first.
