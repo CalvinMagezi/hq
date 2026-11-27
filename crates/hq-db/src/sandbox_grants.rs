@@ -146,8 +146,8 @@ pub fn get(db: &Database, id: &str) -> Result<Option<Grant>> {
 }
 
 /// Moves a pending request to `state` (active or declined) when the owner answers. An approval
-/// runs until `expires_at`, counted from now, and makes a restart due. Anything not pending is
-/// left alone, so a late or repeated answer cannot revive a revoked or expired grant.
+/// runs until `expires_at`, counted from now, and makes a restart due; a decline owes the helper
+/// a notice, kept in the same `restart_due` flag. Anything not pending is left alone, so a late or repeated answer cannot revive a revoked or expired grant.
 pub fn decide(
     db: &Database,
     id: &str,
@@ -156,11 +156,12 @@ pub fn decide(
     expires_at: Option<i64>,
 ) -> Result<bool> {
     let active = state == ACTIVE;
+    let owed = active || state == DECLINED;
     db.with_conn(|c| {
         let n = c.execute(
             "UPDATE sandbox_grants SET state = ?2, decided_by = ?3, decided_at = ?4,
                 applied_at = ?5, expires_at = CASE WHEN ?7 THEN ?8 ELSE expires_at END,
-                restart_due = ?7
+                restart_due = ?9
              WHERE id = ?1 AND state = ?6 AND (expires_at IS NULL OR expires_at > ?4)",
             params![
                 id,
@@ -170,7 +171,51 @@ pub fn decide(
                 active.then_some(now),
                 PENDING,
                 active,
-                expires_at
+                expires_at,
+                owed
+            ],
+        )?;
+        Ok(n == 1)
+    })
+}
+
+/// Sessions with a request still waiting, a grant in force they have not been restarted to
+/// carry, or a decline they have not been told of.
+pub fn sessions_awaiting(db: &Database, now: i64) -> Result<Vec<String>> {
+    db.with_conn(|c| {
+        let mut stmt = c.prepare(
+            "SELECT DISTINCT session_id FROM sandbox_grants
+             WHERE capability <> ?1 AND (expires_at IS NULL OR expires_at > ?2)
+               AND (state = ?3 OR (state IN (?4, ?5) AND restart_due = 1))",
+        )?;
+        let args = params![PROFILE, now, PENDING, ACTIVE, DECLINED];
+        let rows = stmt.query_map(args, |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    })
+}
+
+/// Activates a waiting request that a standing rule covers, noting which rule, so revoking the
+/// rule revokes this grant too. Anything not pending is left alone.
+pub fn approve_by_rule(
+    db: &Database,
+    id: &str,
+    rule_id: &str,
+    now: i64,
+    expires_at: i64,
+) -> Result<bool> {
+    db.with_conn(|c| {
+        let n = c.execute(
+            "UPDATE sandbox_grants SET state = ?2, decided_by = ?3, decision_note = ?4,
+                decided_at = ?5, applied_at = ?5, expires_at = ?6, restart_due = 1
+             WHERE id = ?1 AND state = ?7",
+            params![
+                id,
+                ACTIVE,
+                BY_POLICY,
+                rule_note(rule_id),
+                now,
+                expires_at,
+                PENDING
             ],
         )?;
         Ok(n == 1)
@@ -204,8 +249,43 @@ pub fn restart_due(db: &Database, session_id: &str) -> Result<bool> {
 pub fn clear_restart_due(db: &Database, session_id: &str) -> Result<()> {
     db.with_conn(|c| {
         c.execute(
-            "UPDATE sandbox_grants SET restart_due = 0 WHERE session_id = ?1",
-            [session_id],
+            "UPDATE sandbox_grants SET restart_due = 0 WHERE session_id = ?1 AND state = ?2",
+            params![session_id, ACTIVE],
+        )?;
+        Ok(())
+    })
+}
+
+/// Owes the session a restart again, after one that could not stop it.
+pub fn set_restart_due(db: &Database, session_id: &str) -> Result<()> {
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE sandbox_grants SET restart_due = 1 WHERE session_id = ?1 AND state = ?2",
+            params![session_id, ACTIVE],
+        )?;
+        Ok(())
+    })
+}
+
+/// Declines the owner made that this session has not been told of, oldest first.
+pub fn untold_declines(db: &Database, session_id: &str) -> Result<Vec<Grant>> {
+    db.with_conn(|c| {
+        let mut stmt = c.prepare(&format!(
+            "SELECT {COLUMNS} FROM sandbox_grants
+             WHERE session_id = ?1 AND state = ?2 AND restart_due = 1
+             ORDER BY requested_at, rowid"
+        ))?;
+        let rows = stmt.query_map(params![session_id, DECLINED], row)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    })
+}
+
+/// Records that a decline reached its session, by id so a newer one is never marked with it.
+pub fn mark_decline_told(db: &Database, id: &str) -> Result<()> {
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE sandbox_grants SET restart_due = 0 WHERE id = ?1 AND state = ?2",
+            params![id, DECLINED],
         )?;
         Ok(())
     })

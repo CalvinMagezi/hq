@@ -1,0 +1,1 @@
+**A sandbox access answer takes effect by itself.** Once you approve or decline, HQ restarts the helper (or tells it no) as soon as it is idle, without the helper asking again. "Allow for this repository" also answers other helpers already waiting for the same thing.
