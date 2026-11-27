@@ -631,6 +631,7 @@ fn a_short_reply_to_an_ordinary_message_is_still_not_worth_a_note() {
 fn remember_that_in_an_assistant_line_is_not_a_request() {
     let turn = "user: What is the gate code?\n---\nassistant: Remember that the code is private.";
     assert!(!ingest::asks_to_remember(turn));
+}
 
 /// The owner's own sessions are told what time it is for them, in their zone, once they have one.
 /// A guest's session is not, so the owner's whereabouts do not reach a chat that is not theirs.
