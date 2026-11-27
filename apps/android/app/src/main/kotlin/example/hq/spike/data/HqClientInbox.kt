@@ -44,9 +44,12 @@ suspend fun HqClient.notifications(state: String?, limit: Int = 50): HqClient.In
     }
 
 /** Records the owner's answer: approve, allow_task, allow_repo, allow_starter, reject or dismiss. */
-suspend fun HqClient.answerNotification(id: String, action: String, starter: String? = null) {
+suspend fun HqClient.answerNotification(id: String, action: String, starter: String? = null, minutes: Long? = null, until: Long? = null) {
     val body = JSONObject().put("action", action)
     if (!starter.isNullOrBlank()) body.put("starter", starter)
+    // A reminder's Snooze: when it rings again. `until` (epoch seconds) wins over `minutes`.
+    if (minutes != null) body.put("minutes", minutes)
+    if (until != null) body.put("until", until)
     send(authed("/api/notifications/${java.net.URLEncoder.encode(id, "UTF-8")}/action").post(json(body)).build()) { }
 }
 

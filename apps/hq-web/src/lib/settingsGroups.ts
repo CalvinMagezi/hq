@@ -23,7 +23,7 @@ export interface SettingsRowDef {
   id: string
   label: StringKey
   /** Null for a row that acts instead of opening a page (Sign out this browser). */
-  path: SettingsPath | '/helpers' | '/tasks' | null
+  path: SettingsPath | '/helpers' | '/tasks' | '/reminders' | null
 }
 
 export interface SettingsGroupDef {
@@ -59,6 +59,7 @@ export function settingsGroups({ lite, hub }: WhereHqRuns): SettingsGroupDef[] {
       label: 'group_work',
       rows: [
         { id: 'work_tasks', label: 'row_work_tasks', path: '/tasks' },
+        { id: 'work_reminders', label: 'row_work_reminders', path: '/reminders' },
         { id: 'work_helpers', label: 'row_work_helpers', path: '/helpers' },
       ],
     },
@@ -96,14 +97,14 @@ export function settingsGroups({ lite, hub }: WhereHqRuns): SettingsGroupDef[] {
   // Lite keeps its tasks and runs no helpers.
   if (lite) {
     const work = groups.find((g) => g.id === 'work')!
-    work.rows = work.rows.filter((r) => r.id === 'work_tasks')
+    work.rows = work.rows.filter((r) => r.id === 'work_tasks' || r.id === 'work_reminders')
     // Lite runs no chats, so there is nothing to set about them.
     const chats = groups.find((g) => g.id === 'chats')!
     chats.rows = chats.rows.filter((r) => r.id !== 'chat')
   }
   if (!lite) return groups
   return groups
-    .map((g) => ({ ...g, rows: g.rows.filter((r) => r.path === null || r.path === '/tasks' || LITE_PATHS.includes(r.path as SettingsPath)) }))
+    .map((g) => ({ ...g, rows: g.rows.filter((r) => r.path === null || r.path === '/tasks' || r.path === '/reminders' || LITE_PATHS.includes(r.path as SettingsPath)) }))
     .filter((g) => g.rows.length > 0)
 }
 

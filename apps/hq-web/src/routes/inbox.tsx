@@ -22,6 +22,7 @@ import {
   type InboxTab,
   type NotificationState,
   type SilenceTopic,
+  type NotificationActionOpts,
 } from '~/lib/notificationsApi'
 import { toastUndo, toastAlert, toastNotice } from '~/lib/toast'
 import { useWS } from '~/context/WebSocketContext'
@@ -136,7 +137,7 @@ function NotificationsPage() {
 
   const queryClient = useQueryClient()
 
-  const handleAction = async (id: string, action: string, opts?: { starter?: string }) => {
+  const handleAction = async (id: string, action: string, opts?: NotificationActionOpts) => {
     setLoadingAction(`${action}-${id}`)
     try {
       const res = await executeNotificationAction(id, action, opts)
