@@ -632,3 +632,38 @@ fn remember_that_in_an_assistant_line_is_not_a_request() {
     let turn = "user: What is the gate code?\n---\nassistant: Remember that the code is private.";
     assert!(!ingest::asks_to_remember(turn));
 }
+
+/// The owner's own sessions are told what time it is for them, in their zone, once they have one.
+/// A guest's session is not, so the owner's whereabouts do not reach a chat that is not theirs.
+#[test]
+fn the_owner_clock_line_goes_to_the_owner_only_and_only_with_a_zone() {
+    let vault = tempfile::tempdir().unwrap();
+    let config = HqConfig {
+        vault_path: vault.path().to_path_buf(),
+        ..Default::default()
+    };
+    let owner =
+        hq_core::identity::RequestIdentity::from_proxy_user("owner", vec!["*".into()], None);
+    let hooks = |identity| NativeHqHooks {
+        identity: Some(identity),
+        ..Default::default()
+    };
+
+    // No zone saved: nothing to say, and nothing guessed.
+    assert!(owner_clock_line(&config, &hooks(owner.clone())).is_none());
+
+    let db = hq_db::Database::open(&config.db_path()).unwrap();
+    hq_db::owner_prefs::set(&db, hq_db::owner_prefs::OWNER_TIMEZONE, "Africa/Kampala").unwrap();
+    let line = owner_clock_line(&config, &hooks(owner.clone())).expect("a zone is saved");
+    assert!(
+        line.contains("Africa/Kampala") && line.starts_with("It is "),
+        "{line}"
+    );
+
+    let mut guest = owner;
+    guest.scope = hq_core::privacy::DisclosureScope::deny_all();
+    assert!(
+        owner_clock_line(&config, &hooks(guest)).is_none(),
+        "a restricted audience is not told where the owner is"
+    );
+}

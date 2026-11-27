@@ -83,7 +83,7 @@ pub fn has_nested_frontmatter(body: &str) -> bool {
 }
 
 /// The note rewritten with one frontmatter, or `None` when it is not the nested shape.
-fn unnest(raw: &str) -> Option<String> {
+pub fn unnest(raw: &str) -> Option<String> {
     let (Some(outer), body) = hq_core::frontmatter_utils::split_frontmatter(raw) else {
         return None;
     };

@@ -487,3 +487,21 @@ async fn one_approval_covers_a_whole_helper_setup_and_the_card_says_what_it_does
         "the one approved call runs"
     );
 }
+
+// A reminder only rings the owner's own phone, so setting one never waits for approval. Three of
+// the four tools are plain reads or edits of the owner's own reminders.
+#[test]
+fn reminders_never_wait_for_the_owner() {
+    for tool in [
+        "remind_create",
+        "remind_list",
+        "remind_update",
+        "remind_cancel",
+    ] {
+        assert_eq!(zone_of(tool), Zone::A, "{tool}");
+        assert!(
+            !needs_owner(tool, "reminders", &json!({"title": "x", "in_minutes": 5})),
+            "{tool}"
+        );
+    }
+}

@@ -785,16 +785,32 @@ async fn held_out_cases_hold() {
 
 #[tokio::test(start_paused = true)]
 async fn a_helper_started_after_outside_text_is_narrowed_and_a_clean_one_is_not() {
-    for (source, expect_narrowed) in [(None, false), (Some("web_fetch"), true)] {
+    for (source, expect_narrowed, bypass, tool) in [
+        (None, false, false, "harness_session_spawn"),
+        (Some("web_fetch"), true, false, "harness_session_spawn"),
+        (Some("web_fetch"), true, false, "harness_session_resume"),
+        // The relay's owner chat in bypass mode starts helpers without the permission checks.
+        (Some("web_fetch"), true, true, "harness_session_spawn"),
+    ] {
         let mut case = Case::new(
             "start a helper",
-            "harness_session_spawn",
+            tool,
             json!({"harness": "pi"}),
             Outcome::Allowed,
         );
         case.source = source;
         isolate_config();
-        let guardian = guardian_for(&case);
+        let mut guardian = guardian_for(&case);
+        if bypass {
+            guardian = ToolGuardian::new(
+                vec![PathBuf::from("/tmp")],
+                SecurityProfile::Standard,
+                crate::governance::PermissionMode::BypassPermissions,
+            );
+            let db = Arc::new(hq_db::Database::open_memory().unwrap());
+            driven_session(&db);
+            guardian.set_owner_approval(Some(OwnerApproval::new(db, CHAT_SCOPE)));
+        }
         if let Some(source) = case.source {
             call(
                 &guardian,
