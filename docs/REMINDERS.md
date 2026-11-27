@@ -70,6 +70,15 @@ Leaving a ping alone is not an answer. A nudge keeps following up.
 - A reminder's text is part of its inbox item. It is pushed like other inbox items, and a push shows
   the title only unless you turned details on for that device.
 
+## On the web
+
+Settings, Work, **Reminders** (`/reminders`) lists upcoming reminders grouped as overdue, today,
+tomorrow and later, with the finished ones on their own tab. **New reminder** takes a title, a time
+(in an hour, this evening, tomorrow morning, next Monday, or a day and time you pick), a repeat and
+"Keep reminding me until I mark it done". Each reminder has Done, Snooze and Stop. A reminder's
+ping in the Inbox shows Done and the same snooze times. "This evening" and "tomorrow morning" are
+18:00 and 09:00 in your saved time zone, and "this evening" is left out when it is nearly 18:00.
+
 ## From a chat
 
 Ask in any chat, on the phone, the web, Telegram or Discord: "remind me at 4 to call Moses about

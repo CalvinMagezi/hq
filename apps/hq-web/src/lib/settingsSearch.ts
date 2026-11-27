@@ -27,6 +27,7 @@ const HINT: Record<string, StringKey> = {
   backup: 'sethint_backup',
   chat: 'sethint_chat',
   work_tasks: 'sethint_work_tasks',
+  work_reminders: 'sethint_work_reminders',
   work_helpers: 'sethint_work_helpers',
 }
 
