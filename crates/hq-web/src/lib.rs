@@ -44,6 +44,7 @@ mod origin;
 mod prefs_api;
 mod profile_gate;
 mod provider_keys;
+mod reminder_actions;
 mod restart_api;
 mod router;
 mod sandbox_grants_api;
