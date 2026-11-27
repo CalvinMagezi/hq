@@ -139,6 +139,7 @@ internal fun icon(key: String): ImageVector = when (key) {
     "gauge" -> HqIcons.Gauge
     HQ_CODER_ROW -> HqIcons.Code
     SUGGESTS_ROW -> HqIcons.Spark
+    MEMORY_ROW -> HqIcons.Notes
     WORK_TASKS_ROW -> HqIcons.Tasks
     REMINDERS_ROW -> HqIcons.Clock
     WORK_HELPERS_ROW -> HqIcons.Helpers
@@ -177,6 +178,7 @@ internal fun title(page: SettingsPage) = when (page) {
     SettingsPage.Contacts -> stringResource(R.string.contacts_row_title)
     SettingsPage.Finance -> stringResource(R.string.finance_row_title)
     SettingsPage.Suggests -> stringResource(R.string.row_suggests)
+    SettingsPage.Memory -> stringResource(R.string.row_memory)
     SettingsPage.Reminders -> stringResource(R.string.reminders_title)
 }
 
@@ -219,6 +221,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Contacts -> ContactsPage()
                 SettingsPage.Finance -> FinancePage()
                 SettingsPage.Suggests -> SuggestsPage()
+                SettingsPage.Memory -> MemoryPage()
                 SettingsPage.Reminders -> RemindersPage()
                 SettingsPage.Noticed -> NoticedPage(Counters.get(androidx.compose.ui.platform.LocalContext.current))
                 SettingsPage.Origins -> ReadOnlyList(ui, stringResource(R.string.settings_none_origins)) { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }

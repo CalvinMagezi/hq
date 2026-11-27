@@ -4532,6 +4532,7 @@ inbox_bring_back_named: "{label}: {title}"
 inbox_bring_back_failed: "Couldn't bring that back, try again."
 row_suggests: "What HQ suggests"
 trail_suggests: "Ideas and offers HQ makes"
+trail_memory: "Look, correct or forget"
 settings_suggests_intro:
   one: "HQ now and then suggests something it can do. Here is how often, and what you answered, over the last {days} day."
   other: "HQ now and then suggests something it can do. Here is how often, and what you answered, over the last {days} days."

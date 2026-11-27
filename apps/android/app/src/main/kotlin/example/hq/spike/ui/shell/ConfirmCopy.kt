@@ -32,6 +32,9 @@ object ConfirmCopy {
     /** Forgetting what HQ remembers about its suggestions cannot be taken back, so it is a red confirm. */
     fun clearOffers(c: Context) = red(c, c.getString(R.string.settings_suggests_clear_title), c.getString(R.string.settings_suggests_clear_body), c.getString(R.string.settings_suggests_clear_keep), c.getString(R.string.settings_suggests_clear_confirm), R.string.confirm_busy_working)
 
+    /** Forgetting a remembered note deletes it and what HQ made from it, and cannot be taken back, so it is a red confirm. */
+    fun forgetMemory(c: Context) = red(c, c.getString(R.string.memory_forget_title), c.getString(R.string.memory_forget_body), c.getString(R.string.memory_forget_keep), c.getString(R.string.memory_forget_act), R.string.confirm_busy_working)
+
     fun leaveNote(c: Context, note: String) = red(c, c.getString(R.string.notes_save_your_changes), c.getString(R.string.leave_note_body, note), c.getString(R.string.notes_keep_editing), c.getString(R.string.notes_discard_changes), R.string.confirm_busy_working, c.getString(R.string.leave_note_save))
 
     private fun ask(c: Context, title: String, body: String, keep: String, act: String) = ConfirmWords(title, body, keep, act, c.getString(R.string.confirm_busy_working), ConfirmKind.Ask)

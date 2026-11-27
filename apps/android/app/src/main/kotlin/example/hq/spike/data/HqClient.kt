@@ -368,6 +368,9 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     /** A POST with a JSON body (empty by default) whose answer is a JSON object, or none. */
     suspend fun postJson(path: String, body: JSONObject = JSONObject()): JSONObject = send(authed(path).post(json(body)).build()) { if (it.isBlank()) JSONObject() else JSONObject(it) }
 
+    /** A PUT with a JSON body whose answer is a JSON object, or none. */
+    suspend fun putJson(path: String, body: JSONObject): JSONObject = send(authed(path).put(json(body)).build()) { if (it.isBlank()) JSONObject() else JSONObject(it) }
+
     suspend fun deleteAt(path: String) { send(authed(path).delete().build()) { } }
 
     suspend fun deleteJson(path: String): JSONObject = send(authed(path).delete().build()) { if (it.isBlank()) JSONObject() else JSONObject(it) }
