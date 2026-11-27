@@ -19,8 +19,13 @@ pub const FOCUS_MAX_LANES: &str = "focus.max_lanes";
 /// The IANA zone the owner's times mean (`Africa/Kampala`). Reminders and daily nudges read it.
 pub const OWNER_TIMEZONE: &str = "owner.timezone";
 
+/// Whether HQ saves new notes about what the owner says (`true` or `false`). Off means paused:
+/// nothing new is learned, and what is already saved is still used and still listed.
+pub const MEMORY_LEARNING: &str = "memory.learning";
+
 /// Every key that may be stored.
-pub const KNOWN: [&str; 4] = [
+pub const KNOWN: [&str; 5] = [
+    MEMORY_LEARNING,
     CHAT_AUTO_TITLE,
     HELPERS_ASK_LEVEL,
     FOCUS_MAX_LANES,
@@ -30,7 +35,7 @@ pub const KNOWN: [&str; 4] = [
 /// Whether `value` is one this key accepts.
 pub fn valid(key: &str, value: &str) -> bool {
     match key {
-        CHAT_AUTO_TITLE => matches!(value, "true" | "false"),
+        CHAT_AUTO_TITLE | MEMORY_LEARNING => matches!(value, "true" | "false"),
         HELPERS_ASK_LEVEL => matches!(value, "nothing" | "loses_work" | "everything"),
         FOCUS_MAX_LANES => matches!(value, "1" | "2" | "3" | "4" | "5"),
         OWNER_TIMEZONE => value.parse::<chrono_tz::Tz>().is_ok(),
@@ -94,9 +99,25 @@ pub fn auto_title_on(db: &Database) -> bool {
     !matches!(get(db, CHAT_AUTO_TITLE), Ok(Some(v)) if v == "false")
 }
 
+/// Whether HQ saves new notes from chats. On unless the owner paused it.
+pub fn memory_learning_on(db: &Database) -> bool {
+    !matches!(get(db, MEMORY_LEARNING), Ok(Some(v)) if v == "false")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn learning_is_on_until_the_owner_pauses_it() {
+        let db = Database::open_memory().unwrap();
+        assert!(memory_learning_on(&db));
+        set(&db, MEMORY_LEARNING, "false").unwrap();
+        assert!(!memory_learning_on(&db));
+        set(&db, MEMORY_LEARNING, "true").unwrap();
+        assert!(memory_learning_on(&db));
+        assert!(set(&db, MEMORY_LEARNING, "maybe").is_err());
+    }
 
     #[test]
     fn a_choice_is_stored_replaced_and_read_back() {

@@ -4450,6 +4450,7 @@
     <string name="inbox_bring_back_failed">Couldn\'t bring that back, try again.</string>
     <string name="row_suggests">What HQ suggests</string>
     <string name="trail_suggests">Ideas and offers HQ makes</string>
+    <string name="trail_memory">Look, correct or forget</string>
     <plurals name="settings_suggests_intro">
         <item quantity="one">HQ now and then suggests something it can do. Here is how often, and what you answered, over the last %1$s day.</item>
         <item quantity="other">HQ now and then suggests something it can do. Here is how often, and what you answered, over the last %1$s days.</item>
@@ -4982,6 +4983,9 @@
     <string name="memory_mode_query">Each message brings up only the notes that fit it.</string>
     <string name="memory_mode_recent">Chats get your most important notes.</string>
     <string name="memory_mode_off">HQ does not bring up what it learned from chats.</string>
+    <string name="memory_learning_item">Save new notes</string>
+    <string name="memory_learning_on">HQ saves a note after chats where you tell it something.</string>
+    <string name="memory_learning_paused">Paused. HQ saves nothing new. What it already saved is still used.</string>
     <string name="memory_search_label">Search what HQ remembers</string>
     <string name="memory_search_placeholder">Search your notes</string>
     <string name="memory_filter_label">Show</string>

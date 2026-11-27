@@ -41,7 +41,7 @@ class SettingsPlacementTest {
         assertEquals(listOf("Tasks", "Helpers"), titles["Work"])
         assertEquals(listOf("AI service and keys", "Spending limits"), titles["AI and money"])
         assertEquals(listOf("Messaging apps", "Other devices", "Computers and tools", "GitHub"), titles["Chats and devices"])
-        assertEquals(listOf("Safety and limits", "What HQ suggests"), titles["Safety"])
+        assertEquals(listOf("Safety and limits", "What HQ suggests", "What HQ remembers"), titles["Safety"])
         assertEquals(listOf("Backup and moving phones", "Updates", "Technical details"), titles["Your data and this app"])
     }
 

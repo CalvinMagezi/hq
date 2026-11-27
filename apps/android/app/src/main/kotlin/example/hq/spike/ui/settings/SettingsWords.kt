@@ -33,13 +33,14 @@ data class SettingsSnapshot(
 )
 
 /** Keys on this phone, Speech model and Connected tools are sections inside Keys, Assistant and Computers; their old names live on in [SettingsRoutes]. */
-enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, Computers, CaptureWidgets, SetupApp, PairApp, Technical, Noticed, Update, Assistant, Calendar, Contacts, Finance, Suggests }
+enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, Computers, CaptureWidgets, SetupApp, PairApp, Technical, Noticed, Update, Assistant, Calendar, Contacts, Finance, Suggests, Memory }
 
 /** The Settings row that opens the GitHub connection. */
 const val HQ_CODER_ROW = "github"
 
 /** The Settings row that opens What HQ suggests; its line is fixed, it needs nothing from HQ to be worded. */
 const val SUGGESTS_ROW = "suggests"
+const val MEMORY_ROW = "memory"
 
 /** The Settings rows that open Tasks and Helpers, which are off the bar. */
 const val WORK_TASKS_ROW = "work_tasks"
@@ -197,6 +198,7 @@ object SettingsWords {
     val SAFETY_SPECS: List<HomeRowSpec> = listOf(
         HomeRowSpec(SettingsPage.Safety, "shield", R.string.row_safety),
         HomeRowSpec(SettingsPage.Suggests, SUGGESTS_ROW, R.string.row_suggests),
+        HomeRowSpec(SettingsPage.Memory, MEMORY_ROW, R.string.row_memory),
     )
 
     val DATA_SPECS: List<HomeRowSpec> = listOf(
@@ -285,6 +287,7 @@ object SettingsWords {
             w.s(R.string.settings_group_safety), listOf(
                 row(w, SAFETY_SPECS[0], if (snap.settings == null) notAnswered(w) else w.s(R.string.connect_scope_read_only_title)),
                 row(w, SAFETY_SPECS[1], w.s(R.string.trail_suggests)),
+                row(w, SAFETY_SPECS[2], w.s(R.string.trail_memory)),
             ),
         ),
         HomeGroup(
@@ -312,7 +315,7 @@ object SettingsWords {
         if (loaded) groups else groups.map { g -> if (g.title == w.s(R.string.settings_group_phone)) g else g.copy(rows = g.rows.map { if (it.page in LOCAL_PAGES || it.key in FIXED_ROWS) it else it.copy(status = w.s(R.string.settings_checking)) }) }
 
     /** Rows whose line never comes from HQ, so it has nothing to check. */
-    private val FIXED_ROWS = setOf(WORK_TASKS_ROW, WORK_HELPERS_ROW, SUGGESTS_ROW)
+    private val FIXED_ROWS = setOf(WORK_TASKS_ROW, WORK_HELPERS_ROW, SUGGESTS_ROW, MEMORY_ROW)
 
     /** Pages whose line comes from this phone, not from HQ. */
     private val LOCAL_PAGES = setOf(SettingsPage.About, SettingsPage.Update, SettingsPage.Technical)

@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use crate::WsState;
 use crate::error::ApiError;
-use hq_db::owner_prefs::{CHAT_AUTO_TITLE, HELPERS_ASK_LEVEL};
+use hq_db::owner_prefs::{CHAT_AUTO_TITLE, HELPERS_ASK_LEVEL, MEMORY_LEARNING};
 
 /// The effective value of every pref: what the owner chose, else what HQ does without a choice.
 pub(crate) fn effective(state: &WsState) -> Value {
@@ -22,7 +22,11 @@ pub(crate) fn effective(state: &WsState) -> Value {
                 .map(|c| c.inbox.fleet.helper_policy.as_str().to_string())
                 .unwrap_or_else(|_| "nothing".to_string())
         });
-    json!({ CHAT_AUTO_TITLE: auto_title, HELPERS_ASK_LEVEL: ask })
+    json!({
+        CHAT_AUTO_TITLE: auto_title,
+        HELPERS_ASK_LEVEL: ask,
+        MEMORY_LEARNING: hq_db::owner_prefs::memory_learning_on(&state.db),
+    })
 }
 
 pub(crate) async fn prefs_get_handler(State(state): State<Arc<WsState>>) -> Response {
