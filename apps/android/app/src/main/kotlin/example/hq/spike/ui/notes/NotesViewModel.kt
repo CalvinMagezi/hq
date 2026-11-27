@@ -35,6 +35,11 @@ import example.hq.spike.data.archiveTask
 import example.hq.spike.data.note
 import example.hq.spike.data.notePathById
 import example.hq.spike.data.vaultSignals
+import example.hq.spike.data.countVaultHealthAgain
+import example.hq.spike.data.fixVaultLinks
+import example.hq.spike.data.setAsideVaultHealth
+import example.hq.spike.data.undoVaultRepair
+import example.hq.spike.data.vaultHealth
 import example.hq.spike.data.markNoteSeen
 import example.hq.spike.data.keepNote
 import example.hq.spike.data.pinnedNotes
@@ -98,6 +103,16 @@ class NotesActions(
     val onReload: () -> Unit = {},
     /** A dialog over the open note opened (true) or closed (false): while any is open a change made elsewhere waits, then the note reloads. */
     val onHoldReload: (Boolean) -> Unit = {},
+    /** Opens the page that lists what the notes check found. */
+    val onOpenHealth: () -> Unit = {},
+    /** Fixes these (by the ids the check named), or every certain fix when the list is empty. */
+    val onHealthFix: (List<String>) -> Unit = {},
+    /** Puts back the notes of one repair run. */
+    val onHealthUndo: (String) -> Unit = {},
+    /** Leaves what is here now alone, so only what is new counts. */
+    val onHealthSetAside: () -> Unit = {},
+    /** Counts what was set aside again. */
+    val onHealthCountAgain: () -> Unit = {},
 )
 
 class NotesViewModel(app: Application) : AndroidViewModel(app) {
@@ -133,6 +148,8 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         onScrolled = scrolls::save, scrollOf = scrolls::restore,
         onReload = { (_state.value.top as? NotesRoute.Reader)?.let { loadReader(it.path) } },
         onHoldReload = ::holdReload,
+        onOpenHealth = { push(NotesRoute.Health) }, onHealthFix = ::fixHealth, onHealthUndo = ::undoHealth,
+        onHealthSetAside = ::setAsideHealth, onHealthCountAgain = ::countHealthAgain,
     )
 
     /** How many dialogs over the open note are up, and whether the note changed while one was. */
@@ -218,10 +235,12 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
             val pinned = async { guard { client.pinnedNotes() } }
             val folders = async { guard { client.folders() } }
             val trash = async { guard { client.trash().first.size } }
+            val health = async { guard { client.vaultHealth() } }
             val sig = signals.await()
             val pin = pinned.await()
             val fol = folders.await()
             val tr = trash.await()
+            val checked = VaultHealthParse.from(health.await())
             slowJob?.cancel()
             // Worked out here, not inside the update below: an update can run twice and must give the same answer.
             val fresh = sig?.let { freshAfter(it) } ?: false
@@ -229,7 +248,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
                 if (sig == null && pin == null && fol == null) it.copy(loaded = true, slow = false, offline = VaultRules.isOffline(status), error = !VaultRules.isOffline(status))
                 else {
                     val base = if (sig != null) VaultReducer.signals(it, sig.recent, sig.hasNew, VaultRules.dotCleared(visible, fresh, it.dotCleared)) else it
-                    base.copy(loaded = true, slow = false, offline = false, error = false, pinned = pin ?: it.pinned, folders = fol ?: it.folders, trashCount = tr ?: it.trashCount)
+                    base.copy(loaded = true, slow = false, offline = false, error = false, pinned = pin ?: it.pinned, folders = fol ?: it.folders, trashCount = tr ?: it.trashCount, health = checked ?: it.health)
                 }
             }
         }
@@ -462,6 +481,79 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: HqUnavailable) {
                 _state.update { it.copy(notice = Notice(app.getString(if (what is PendingUndo.TaskAdded) R.string.vault_task_not_removed else R.string.trash_restore_failed))) }
+            }
+        }
+    }
+
+    /** Fixes the links HQ is sure about, or just the named ones. The answer carries the check as it reads afterwards. */
+    private fun fixHealth(ids: List<String>) {
+        if (_state.value.healthBusy) return
+        val app = getApplication<Application>()
+        _state.update { it.copy(healthBusy = true) }
+        viewModelScope.launch {
+            try {
+                val answer = client.fixVaultLinks(ids)
+                val done = answer.optJSONObject("applied")?.optJSONArray("fixes")?.length() ?: 0
+                val health = VaultHealthParse.from(answer.optJSONObject("health"))
+                val said = app.resources.getQuantityString(R.plurals.notes_health_fixed, done, done)
+                _state.update { it.copy(healthBusy = false, health = health ?: it.health, notice = Notice(said)) }
+                // Notes changed, so the lists on this screen are read again.
+                refresh()
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(healthBusy = false, notice = Notice(app.getString(R.string.notes_health_fix_failed))) }
+            }
+        }
+    }
+
+    /** Leaves everything that is here now alone, except what HQ can fix. Changes no note. */
+    private fun setAsideHealth() {
+        if (_state.value.healthBusy) return
+        val app = getApplication<Application>()
+        _state.update { it.copy(healthBusy = true) }
+        viewModelScope.launch {
+            try {
+                val answer = client.setAsideVaultHealth()
+                val health = VaultHealthParse.from(answer)
+                val said = app.getString(R.string.notes_health_set_aside_done, answer.optInt("set_aside_now"))
+                _state.update { it.copy(healthBusy = false, health = health ?: it.health, notice = Notice(said)) }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(healthBusy = false, notice = Notice(app.getString(R.string.notes_health_leave_alone_failed))) }
+            }
+        }
+    }
+
+    /** Counts what was set aside or ignored again. */
+    private fun countHealthAgain() {
+        if (_state.value.healthBusy) return
+        val app = getApplication<Application>()
+        _state.update { it.copy(healthBusy = true) }
+        viewModelScope.launch {
+            try {
+                val health = VaultHealthParse.from(client.countVaultHealthAgain())
+                _state.update { it.copy(healthBusy = false, health = health ?: it.health, notice = Notice(app.getString(R.string.notes_health_counted_again))) }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(healthBusy = false, notice = Notice(app.getString(R.string.notes_health_count_again_failed))) }
+            }
+        }
+    }
+
+    /** Takes back one repair run. A note edited since is left as the owner has it, and the line says so. */
+    private fun undoHealth(runId: String) {
+        if (_state.value.healthBusy) return
+        val app = getApplication<Application>()
+        _state.update { it.copy(healthBusy = true) }
+        viewModelScope.launch {
+            try {
+                val answer = client.undoVaultRepair(runId)
+                val undone = answer.optJSONObject("undone")
+                val kept = undone?.optJSONArray("edited_since")?.length() ?: 0
+                val back = (undone?.optJSONArray("restored")?.length() ?: 0) + (undone?.optJSONArray("untrashed")?.length() ?: 0)
+                val said = if (kept > 0) app.resources.getQuantityString(R.plurals.notes_health_undo_kept, kept, kept) else app.resources.getQuantityString(R.plurals.notes_health_undone, back, back)
+                val health = VaultHealthParse.from(answer.optJSONObject("health"))
+                _state.update { it.copy(healthBusy = false, health = health ?: it.health, notice = Notice(said)) }
+                refresh()
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(healthBusy = false, notice = Notice(app.getString(R.string.notes_health_undo_failed))) }
             }
         }
     }

@@ -1,0 +1,1 @@
+**Helpers started after outside text really are sandboxed.** A helper started from a chat that had read outside text now runs under the strict sandbox as documented (such a start needs a task), keeps it when resumed or restarted, and passes it to the helpers it starts. Sessions already running at upgrade are covered only when their task is marked.
