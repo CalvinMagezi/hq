@@ -289,7 +289,9 @@ capability is one of them, so the model is never told what the person has not us
 language and active hours; the bounded prompt block.
 
 **Phase 4: "What HQ has learned about you".** The page on web and Android, with Forget for traits
-and memories.
+and memories. *Built for memories on the web and in the terminal* (`docs/MEMORY.md`): Settings,
+What HQ remembers lists, searches, edits, pins and forgets, and Forget says what it could not
+reach. The Android page and the traits half are not built yet.
 
 **Phase 5: the push gate.** Quiet hours from active hours, hourly coalescing, applied to every push.
 
