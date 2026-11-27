@@ -81,6 +81,7 @@ export const SETTINGS_SECTIONS = [
   'messaging',
   'safety',
   'folders',
+  'memory',
   'backup',
   'spending',
 ] as const

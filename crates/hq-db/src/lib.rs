@@ -44,6 +44,7 @@ pub mod owner_prefs;
 pub mod pool;
 pub mod provenance;
 pub mod push_subscriptions;
+pub mod reminders;
 pub mod sandbox_grants;
 pub mod search;
 pub mod self_update_runs;
