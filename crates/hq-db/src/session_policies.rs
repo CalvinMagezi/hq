@@ -1,5 +1,5 @@
 //! What each session is held to: the command policy it started with
-//! (`sql/105_session_policies.sql`) and the strict sandbox (`sql/157_session_strict.sql`).
+//! (`sql/105_session_policies.sql`) and the strict sandbox (`sql/159_session_strict.sql`).
 
 use anyhow::Result;
 use hq_core::command_policy::Policy;
