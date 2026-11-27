@@ -26,6 +26,7 @@ pub mod prose_quality;
 pub mod publish_check;
 pub mod quota;
 pub mod redact;
+pub mod sensitive;
 pub mod server_proof;
 pub mod setup_provider;
 pub mod telegram_access;

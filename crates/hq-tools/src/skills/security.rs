@@ -40,10 +40,7 @@ static SECURITY_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|
             "destructive operation",
             r"(?i)\brm\s+-[a-z]*(rf|fr)|--force\b|\bgit\s+push\b|\bdelete\b|\brotate\b|\bdrop\s+table\b",
         ),
-        (
-            INSTRUCTION_OVERRIDE,
-            r"(?i)\bignore\s+((all|any|the|previous|prior|earlier|above)\s+)+instructions\b|\bdisregard\b|\byou\s+are\s+now\b",
-        ),
+        (INSTRUCTION_OVERRIDE, hq_core::sensitive::INSTRUCTION_OVERRIDE_PATTERN),
         (
             RECIPIENT_ADDRESS,
             r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b",

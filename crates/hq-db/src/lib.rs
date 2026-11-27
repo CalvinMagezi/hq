@@ -30,6 +30,7 @@ pub mod link_captures;
 pub mod mcp_connector;
 pub mod memories_owner;
 pub mod memories_search;
+pub mod memory_embeddings;
 pub mod memory_recall_log;
 pub mod migrations;
 pub mod moved;

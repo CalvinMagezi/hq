@@ -285,6 +285,30 @@ struct Term {
 
 /// Which memories to bring up for `query`.
 pub fn recall(db: &Database, query: &RecallQuery<'_>) -> Result<Recalled> {
+    recall_with_meaning(db, query, None)
+}
+
+/// The question as a vector, made on this machine by `model`. With it, recall also finds a
+/// memory that shares no word with the question.
+#[derive(Debug, Clone, Copy)]
+pub struct Meaning<'a> {
+    pub vector: &'a [f32],
+    pub model: &'a str,
+}
+
+/// A memory closer than this to the question, by meaning alone, is worth bringing up.
+/// Not tuned on a real vault: keyword recall is what the eval gates, and this arm is checked by
+/// the opt-in eval with the real model (`HQ_EVAL_MODEL=1`).
+pub const MIN_MEANING_SIMILARITY: f32 = 0.55;
+/// How many memories the meaning arm may add before ranking.
+const MEANING_CANDIDATES: usize = 8;
+
+/// [`recall`], also looking by meaning when the question has been embedded.
+pub fn recall_with_meaning(
+    db: &Database,
+    query: &RecallQuery<'_>,
+    meaning: Option<Meaning<'_>>,
+) -> Result<Recalled> {
     if query.audience != Audience::Owner {
         return Ok(Recalled::silent("not the owner"));
     }
@@ -333,6 +357,9 @@ pub fn recall(db: &Database, query: &RecallQuery<'_>) -> Result<Recalled> {
         .into_iter()
         .filter_map(|(row, lexical)| score(row, lexical, &terms, now))
         .collect();
+    if let Some(m) = meaning {
+        add_meaning(db, query, m, &terms, &mut scored, now)?;
+    }
     if scored.is_empty() {
         return Ok(Recalled::silent("nothing fits"));
     }
@@ -441,6 +468,74 @@ struct Row {
     importance: f64,
     created_at: String,
     pinned: bool,
+}
+
+/// Fold in what the question means: a memory both arms found is lifted by its closeness, and a
+/// memory only the meaning arm found is added when it is close enough on its own.
+fn add_meaning(
+    db: &Database,
+    query: &RecallQuery<'_>,
+    meaning: Meaning<'_>,
+    terms: &[Term],
+    scored: &mut Vec<Scored>,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    let near = db.with_conn(|conn| {
+        hq_db::memory_embeddings::nearest(
+            conn,
+            meaning.vector,
+            meaning.model,
+            MIN_MEANING_SIMILARITY,
+            MEANING_CANDIDATES,
+        )
+    })?;
+    for (id, similarity) in near {
+        if query.exclude.contains(&id) {
+            continue;
+        }
+        let similarity = f64::from(similarity);
+        if let Some(s) = scored.iter_mut().find(|s| s.id == id) {
+            s.score += 0.15 * similarity;
+            continue;
+        }
+        let Some(row) = db.with_conn(|conn| read_row(conn, id))? else {
+            continue;
+        };
+        scored.push(score_by_meaning(row, similarity, terms, now));
+    }
+    Ok(())
+}
+
+/// A memory found only by meaning. Its score has no word overlap in it, so closeness carries
+/// the weight and age and importance break ties.
+fn score_by_meaning(row: Row, similarity: f64, terms: &[Term], now: DateTime<Utc>) -> Scored {
+    let summary_stems: HashSet<String> = words_of(&row.summary).iter().map(|w| stem(w)).collect();
+    let when = DateTime::parse_from_rfc3339(&row.created_at)
+        .ok()
+        .map(|d| d.with_timezone(&Utc));
+    let age_days = when.map_or(0.0, |w| (now - w).num_days().max(0) as f64);
+    let recency = if row.pinned {
+        1.0
+    } else {
+        0.5_f64.powf(age_days / HALF_LIFE_DAYS)
+    };
+    let shared = terms
+        .iter()
+        .filter(|t| summary_stems.contains(&t.stem))
+        .count();
+    let score = 0.60 * similarity + 0.10 * recency + 0.10 * row.importance.clamp(0.0, 1.0);
+    Scored {
+        id: row.id,
+        summary: row.summary.clone(),
+        created_at: row.created_at,
+        score,
+        coverage: shared as f64 / terms.len().max(1) as f64,
+        stems: summary_stems
+            .into_iter()
+            .filter(|s| !STOPWORDS.contains(&s.as_str()))
+            .collect(),
+        when,
+    }
 }
 
 fn read_row(conn: &rusqlite::Connection, id: i64) -> Result<Option<Row>> {
@@ -1118,5 +1213,121 @@ mod tests {
 
         let rest = recall(&db, &query(Box::leak(Box::new([feeds])))).unwrap();
         assert_eq!(ids(&rest), vec![other]);
+    }
+    // ─── By meaning ─────────────────────────────────────────────────────────
+
+    fn put_vector(db: &Database, id: i64, v: &[f32]) {
+        db.with_conn(|c| hq_db::memory_embeddings::store(c, id, "test-model", v))
+            .unwrap();
+    }
+
+    fn ask_with(db: &Database, message: &str, vector: &[f32]) -> Recalled {
+        recall_with_meaning(
+            db,
+            &RecallQuery {
+                message,
+                prior_message: None,
+                audience: Audience::Owner,
+                exclude: &[],
+            },
+            Some(Meaning {
+                vector,
+                model: "test-model",
+            }),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_question_that_shares_no_word_finds_the_memory_by_meaning() {
+        let db = db();
+        let feeds = add(
+            &db,
+            "Acme Feeds delivers on Thursdays",
+            &["Acme Feeds"],
+            &[],
+            0.6,
+        );
+        let shop = add(&db, "The shop closes at 6pm on Saturdays", &[], &[], 0.6);
+        put_vector(&db, feeds, &[1.0, 0.0, 0.0]);
+        put_vector(&db, shop, &[0.0, 0.0, 1.0]);
+        let question = "Which day does the supplier come?";
+        assert!(ask(&db, question).items.is_empty(), "no word in common");
+        let found = ask_with(&db, question, &[0.9, 0.2, 0.0]);
+        assert_eq!(found.items.len(), 1);
+        assert_eq!(found.items[0].id, feeds);
+    }
+
+    #[test]
+    fn a_question_far_from_everything_stays_quiet_even_with_meaning() {
+        let db = db();
+        let feeds = add(
+            &db,
+            "Acme Feeds delivers on Thursdays",
+            &["Acme Feeds"],
+            &[],
+            0.6,
+        );
+        put_vector(&db, feeds, &[1.0, 0.0, 0.0]);
+        let found = ask_with(&db, "Which day does the supplier come?", &[0.0, 1.0, 0.0]);
+        assert!(found.items.is_empty());
+    }
+
+    #[test]
+    fn meaning_never_brings_back_a_held_back_or_shared_memory() {
+        let db = db();
+        let held = add(&db, "Acme Feeds delivers on Thursdays", &[], &[], 0.6);
+        let shared = add(
+            &db,
+            "Acme Feeds delivers on Thursdays and Fridays",
+            &[],
+            &[],
+            0.6,
+        );
+        put_vector(&db, held, &[1.0, 0.0]);
+        put_vector(&db, shared, &[1.0, 0.0]);
+        set(&db, held, "status", "review");
+        set(&db, shared, "origin", "unknown_channel");
+        let found = ask_with(&db, "Which day does the supplier come?", &[1.0, 0.0]);
+        assert!(found.items.is_empty());
+    }
+
+    #[test]
+    fn a_guest_gets_nothing_by_meaning_either() {
+        let db = db();
+        let feeds = add(&db, "Acme Feeds delivers on Thursdays", &[], &[], 0.6);
+        put_vector(&db, feeds, &[1.0, 0.0]);
+        let found = recall_with_meaning(
+            &db,
+            &RecallQuery {
+                message: "Which day does the supplier come?",
+                prior_message: None,
+                audience: Audience::Other,
+                exclude: &[],
+            },
+            Some(Meaning {
+                vector: &[1.0, 0.0],
+                model: "test-model",
+            }),
+        )
+        .unwrap();
+        assert!(found.items.is_empty());
+    }
+
+    #[test]
+    fn a_memory_found_by_words_and_by_meaning_is_lifted_not_repeated() {
+        let db = db();
+        let feeds = add(
+            &db,
+            "Acme Feeds delivers on Thursdays",
+            &["Acme Feeds"],
+            &[],
+            0.6,
+        );
+        put_vector(&db, feeds, &[1.0, 0.0]);
+        let words_only = ask(&db, "When does Acme Feeds deliver?");
+        let both = ask_with(&db, "When does Acme Feeds deliver?", &[1.0, 0.0]);
+        assert_eq!(both.items.len(), 1);
+        assert!(both.items[0].score > words_only.items[0].score);
     }
 }
