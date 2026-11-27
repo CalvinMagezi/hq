@@ -1,0 +1,1 @@
+**Due-date reminders follow your clock, not the server's.** They used the clock of the machine HQ runs on, so a server set to UTC reminded someone in Uganda between 11:00 and midnight. They now use the time zone you set (`owner.timezone`) and fall back to the machine's clock only when none is set.

@@ -241,7 +241,7 @@ async fn run_agent_chat(
         &mut session,
         &config.vault_path,
         &config.db_path(),
-        "cli",
+        hq_agent::native_hq::TurnSource::cli(),
     );
 
     // ── Print startup header ──

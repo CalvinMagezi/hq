@@ -122,40 +122,33 @@ fn rel_to_vault(vault: &Path, path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Helper to recursively search a directory for a markdown note matching
-/// `stem` (case-insensitive). Never follows symlinks: `DirEntry::file_type`
-/// reports the link itself (it does not `stat` through it), so a symlink
-/// planted inside the vault pointing outside it is skipped rather than
-/// walked into — the vault-boundary check this search exists to respect
-/// would otherwise be bypassed entirely, since its result is a raw path
-/// handed straight back to the caller.
-fn find_note_by_stem(dir: &Path, stem: &str) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(dir).ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        if name.starts_with('.') || name.starts_with('_') {
-            continue;
-        }
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_symlink() {
-            continue;
-        }
-        if file_type.is_dir() {
-            if let Some(hit) = find_note_by_stem(&path, stem) {
-                return Some(hit);
-            }
-        } else if path.extension().is_some_and(|e| e == "md")
-            && path
-                .file_stem()
-                .is_some_and(|s| s.to_string_lossy().eq_ignore_ascii_case(stem))
-        {
-            return Some(path);
-        }
+/// A note by the name a link gives it, through the resolver every link in the vault uses:
+/// a bare name, the end of a path (`Alpha/Plan`), with or without `.md`, any case, with a
+/// `#heading` or `|alias` tail ignored. Symlinks are never followed (the walk skips them), so
+/// the result is always a path the vault listing itself holds. When two notes share the name,
+/// the one nearest the top wins, then the first by path, so the answer does not change
+/// between requests.
+fn find_note_by_name(vault: &Path, name: &str) -> Option<String> {
+    use hq_vault::links::{NoteInput, NoteSet, Resolution, Syntax};
+    let name = name.split(['#', '|']).next()?.trim();
+    if name.is_empty() {
+        return None;
     }
-    None
+    let walked = hq_vault::walk::walk(vault, false);
+    let set = NoteSet::new(
+        walked.notes.into_iter().map(|n| NoteInput {
+            path: n.rel,
+            aliases: Vec::new(),
+        }),
+        [],
+    );
+    match set.resolve_target("", Syntax::Wiki, name) {
+        Resolution::Unique(path) => Some(path),
+        Resolution::Ambiguous(paths) => paths
+            .into_iter()
+            .min_by_key(|p| (p.matches('/').count(), p.clone())),
+        _ => None,
+    }
 }
 
 /// Whether `rel` is rejected outright as a path-traversal or absolute-path
@@ -173,7 +166,7 @@ pub(crate) fn is_rejected_note_ref(rel: &str) -> bool {
 /// Supports:
 /// 1. Exact relative paths (e.g. `Notebooks/Inbox/Plan.md`)
 /// 2. Missing `.md` extensions (e.g. `Notebooks/Inbox/Plan`)
-/// 3. Bare note names/wikilinks (e.g. `Plan`) searched in root and `Notebooks/`
+/// 3. Names as links write them (e.g. `Plan`, `Alpha/Plan#Goals`), by the shared link resolver
 ///
 /// Rejects path traversal (`..`), absolute paths, and external paths.
 /// A folder inside the vault, which `GET /api/note` answers with its listing. The vault root is
@@ -207,24 +200,12 @@ pub(crate) fn resolve_note_path(vault: &Path, rel: &str) -> Option<(PathBuf, Str
             return Some((abs, with_md));
         }
     }
-    // 3. Bare note name (no directory separators): look in Notebooks/ recursively
-    if !rel.contains('/') && !rel.contains('\\') {
-        let stem = rel.strip_suffix(".md").unwrap_or(rel);
-        if let Some(hit) = find_note_by_stem(&vault.join("Notebooks"), stem) {
-            // Belt-and-suspenders vault-boundary check, independent of
-            // `find_note_by_stem`'s own symlink handling: never hand back a
-            // path `rel_to_vault` can't express as one truly inside the
-            // vault (its `strip_prefix` falls back to `""` for anything
-            // else, which would otherwise read as "the vault root").
-            let vault_canonical =
-                std::fs::canonicalize(vault).unwrap_or_else(|_| vault.to_path_buf());
-            let hit_canonical = std::fs::canonicalize(&hit).ok()?;
-            if !hit_canonical.starts_with(&vault_canonical) {
-                return None;
-            }
-            let rel_str = rel_to_vault(vault, &hit);
-            return Some((hit, rel_str));
-        }
+    // 3. A note by the name a link gives it: `Plan`, `Alpha/Plan`, `plan.md`, `Plan#Goals`.
+    if let Some(found) = find_note_by_name(vault, rel)
+        && let Some(abs) = resolve_in_vault(vault, &found)
+        && abs.is_file()
+    {
+        return Some((abs, found));
     }
     None
 }

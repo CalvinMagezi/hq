@@ -4,7 +4,7 @@
 use anyhow::Result;
 use hq_db::Database;
 
-use crate::types::{Connection as MemConnection, Consolidation, Memory, MemoryStats};
+use crate::types::{Connection as MemConnection, Consolidation, Memory, MemoryStats, Trace};
 
 // ─── Row parsing ────────────────────────────────────────────────────
 
@@ -49,7 +49,7 @@ pub fn get_unconsolidated_memories(db: &Database, limit: i64) -> Result<Vec<Memo
     db.with_conn(|conn| {
         query_memories(
             conn,
-            "SELECT * FROM memories WHERE consolidated = 0 ORDER BY replay_count DESC, created_at DESC LIMIT ?1",
+            "SELECT * FROM memories WHERE consolidated = 0 ORDER BY created_at DESC LIMIT ?1",
             &[&limit],
         )
     })
@@ -121,17 +121,39 @@ pub struct StoreMemoryParams<'a> {
     pub user_id: Option<&'a str>,
 }
 
-/// Store a new memory. Returns the inserted row ID.
+/// Store a new memory as an ordinary chat summary from the owner. Returns the inserted row ID.
 pub fn store_memory(db: &Database, params: &StoreMemoryParams<'_>) -> Result<i64> {
+    store_memory_with(db, params, &Trace::default())
+}
+
+/// Store a new memory with a record of where it came from. Returns the inserted row ID.
+pub fn store_memory_with(
+    db: &Database,
+    params: &StoreMemoryParams<'_>,
+    trace: &Trace<'_>,
+) -> Result<i64> {
     let now = chrono::Utc::now().to_rfc3339();
     let entities_json = serde_json::to_string(params.entities)?;
     let topics_json = serde_json::to_string(params.topics)?;
 
     db.with_conn(|conn| {
         conn.execute(
-            "INSERT INTO memories (source, harness, raw_text, summary, entities, topics, importance, content, created_at, user_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?4, ?8, ?9)",
-            rusqlite::params![params.source, params.harness, params.raw_text, params.summary, entities_json, topics_json, params.importance, now, params.user_id],
+            "INSERT INTO memories (source, harness, raw_text, summary, entities, topics, importance, content, created_at, user_id, origin, provenance, thread_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?4, ?8, ?9, ?10, ?11, ?12)",
+            rusqlite::params![
+                params.source,
+                params.harness,
+                params.raw_text,
+                params.summary,
+                entities_json,
+                topics_json,
+                params.importance,
+                now,
+                params.user_id,
+                trace.origin.as_str(),
+                trace.provenance.as_str(),
+                trace.thread_id
+            ],
         )?;
         Ok(conn.last_insert_rowid())
     })
@@ -239,4 +261,166 @@ fn query_memories(
 fn cutoff_iso(days: i64) -> String {
     let cutoff = chrono::Utc::now() - chrono::Duration::days(days);
     cutoff.to_rfc3339()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store(db: &Database, summary: &str, importance: f64) -> i64 {
+        store_memory(
+            db,
+            &StoreMemoryParams {
+                source: "chat-turn",
+                harness: "web",
+                raw_text: "",
+                summary,
+                entities: &[],
+                topics: &[],
+                importance,
+                user_id: None,
+            },
+        )
+        .unwrap()
+    }
+
+    /// Backdate a row so age-based rules can be exercised without waiting.
+    fn age(db: &Database, id: i64, days: i64) {
+        let at = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE memories SET created_at = ?1 WHERE id = ?2",
+                rusqlite::params![at, id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    fn importance_of(db: &Database, id: i64) -> f64 {
+        db.with_conn(|c| {
+            Ok(
+                c.query_row("SELECT importance FROM memories WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn recent_memories_come_back_most_important_first_then_newest() {
+        let db = Database::open_memory().unwrap();
+        let older = store(&db, "older", 0.5);
+        let newer = store(&db, "newer", 0.5);
+        let top = store(&db, "top", 0.9);
+        age(&db, older, 5);
+        age(&db, newer, 1);
+        age(&db, top, 30);
+
+        let ids: Vec<i64> = get_recent_memories(&db, 10)
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        // Importance wins over age, and equal importance falls back to the newest.
+        assert_eq!(ids, vec![top, newer, older]);
+    }
+
+    #[test]
+    fn recent_memories_respect_the_limit() {
+        let db = Database::open_memory().unwrap();
+        for i in 0..5 {
+            store(&db, &format!("m{i}"), 0.5);
+        }
+        assert_eq!(get_recent_memories(&db, 3).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn unconsolidated_memories_exclude_consolidated_ones_and_list_newest_first() {
+        let db = Database::open_memory().unwrap();
+        let old = store(&db, "old", 0.5);
+        let new = store(&db, "new", 0.5);
+        let done = store(&db, "done", 0.5);
+        age(&db, old, 4);
+        age(&db, new, 1);
+        store_consolidation(&db, &[done], "an insight", &[]).unwrap();
+
+        let ids: Vec<i64> = get_unconsolidated_memories(&db, 10)
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ids, vec![new, old]);
+    }
+
+    #[test]
+    fn a_consolidation_marks_its_sources_and_shows_in_the_stats() {
+        let db = Database::open_memory().unwrap();
+        let a = store(&db, "a", 0.5);
+        let b = store(&db, "b", 0.5);
+        store(&db, "c", 0.5);
+
+        store_consolidation(&db, &[a, b], "a and b agree", &[]).unwrap();
+
+        let stats = get_memory_stats(&db).unwrap();
+        assert_eq!(stats.total, 3);
+        assert_eq!(stats.unconsolidated, 1);
+        assert_eq!(stats.consolidations, 1);
+        let history = get_consolidation_history(&db, 5).unwrap();
+        assert_eq!(history[0].source_ids, vec![a, b]);
+        assert_eq!(history[0].insight, "a and b agree");
+    }
+
+    #[test]
+    fn decay_lowers_only_old_unconsolidated_memories_and_never_below_the_floor() {
+        let db = Database::open_memory().unwrap();
+        let old = store(&db, "old", 0.5);
+        let fresh = store(&db, "fresh", 0.5);
+        let consolidated = store(&db, "consolidated", 0.5);
+        let at_floor = store(&db, "at the floor", 0.01);
+        for id in [old, consolidated, at_floor] {
+            age(&db, id, 10);
+        }
+        age(&db, fresh, 1);
+        store_consolidation(&db, &[consolidated], "x", &[]).unwrap();
+
+        let changed = decay_old_memories(&db, 0.1, 7).unwrap();
+
+        assert_eq!(changed, 2, "the old unconsolidated pair, not fresh or done");
+        assert!((importance_of(&db, old) - 0.4).abs() < 1e-9);
+        assert!((importance_of(&db, fresh) - 0.5).abs() < 1e-9);
+        assert!((importance_of(&db, consolidated) - 0.5).abs() < 1e-9);
+        assert!((importance_of(&db, at_floor) - 0.01).abs() < 1e-9);
+    }
+
+    #[test]
+    fn touching_a_memory_counts_the_access_and_stamps_the_time() {
+        let db = Database::open_memory().unwrap();
+        let id = store(&db, "used", 0.5);
+        assert_eq!(get_recent_memories(&db, 1).unwrap()[0].access_count, 0);
+
+        touch_memory(&db, id).unwrap();
+        touch_memory(&db, id).unwrap();
+
+        let m = &get_recent_memories(&db, 1).unwrap()[0];
+        assert_eq!(m.access_count, 2);
+        assert!(m.last_accessed_at.is_some());
+    }
+
+    #[test]
+    fn the_summary_is_also_kept_in_the_legacy_content_column() {
+        let db = Database::open_memory().unwrap();
+        let id = store(&db, "the summary", 0.5);
+        let content: String = db
+            .with_conn(|c| {
+                Ok(
+                    c.query_row("SELECT content FROM memories WHERE id = ?1", [id], |r| {
+                        r.get(0)
+                    })?,
+                )
+            })
+            .unwrap();
+        assert_eq!(content, "the summary");
+    }
 }

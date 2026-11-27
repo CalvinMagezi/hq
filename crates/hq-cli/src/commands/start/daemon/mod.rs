@@ -264,6 +264,8 @@ const LITE_DAEMON_TASKS: &[&str] = &[
     "tool-failure-digest",
     "vault-cap-enforcer",
     "scheduled-offers",
+    // Calls no model, so Lite keeps it: a reminder the owner set must still ring.
+    "reminders",
 ];
 
 /// The scheduled tasks `profile: mobile` never runs: only the one that watches the disk, the
@@ -523,6 +525,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         ),
         // Tasks made in chat that are due today or tomorrow, or overdue; acts in waking hours only.
         DaemonTask::with_default_timeout("due-reminders", Duration::from_secs(3600)),
+        // Reminders the owner set: rings the due ones and follows up on nudges; `daemon.reminders`.
+        DaemonTask::with_default_timeout("reminders", Duration::from_secs(30)),
         // Next steps the owner scheduled, back in their chat at the chosen time.
         DaemonTask::with_default_timeout("scheduled-offers", Duration::from_secs(60)),
         // Links the owner shared, summarised into their notes; `daemon.link_capture`.
@@ -684,7 +688,7 @@ async fn dispatch_task(
         "skill-outcomes" => tasks_periodic::run_skill_outcomes(db),
 
         // Slow cycle (6h — daily)
-        "vault-health" => tasks_slow::run_vault_health(vault_path, db).await,
+        "vault-health" => tasks_slow::run_vault_health(vault_path, db, config).await,
         "memory-forgetting" => tasks_slow::run_memory_forgetting(vault_path, db).await,
         "thread-log-rotation" => tasks_slow::run_thread_log_rotation(vault_path).await,
         "vault-cleanup" => tasks_slow::run_vault_cleanup(vault_path, db).await,
@@ -701,6 +705,7 @@ async fn dispatch_task(
         "owner-decisions" => tasks_periodic::run_owner_decisions(db).await,
         "due-reminders" => tasks_periodic::run_due_reminders(db).await,
         "scheduled-offers" => tasks_periodic::run_scheduled_offers(db).await,
+        "reminders" => tasks_periodic::run_reminders(db, config).await,
         "link-capture" => tasks_periodic::run_link_capture(vault_path, db, config).await,
         "collection-tip" => tasks_periodic::run_collection_tip(db, config).await,
         "task-auto-archive" => tasks_periodic::run_task_auto_archive(db, config).await,
@@ -937,6 +942,7 @@ mod lite_tests {
             "session-supervisor",
             "stack-dispatch",
             "due-reminders",
+            "reminders",
         ] {
             assert!(phone.contains(&kept), "{kept}");
         }
