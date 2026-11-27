@@ -15,7 +15,7 @@
 //! A link to a note that is not there and that nothing resembles, a missing heading, and any
 //! ambiguity that no folder settles are reported and never fixed.
 
-use crate::check::nearest_note;
+use crate::check::NameIndex;
 use crate::links::{
     Edit, LinkRef, NoteInput, NoteSet, Resolution, Syntax, aliases_of, extract, nearest, retarget,
 };
@@ -230,6 +230,7 @@ pub fn plan(snap: &Snapshot, ctx: &Context) -> Plan {
         })
         .collect();
 
+    let names = NameIndex::new(&stems);
     let mut out = Plan::default();
     let mut skipped: BTreeMap<String, SkipReason> = BTreeMap::new();
 
@@ -261,7 +262,7 @@ pub fn plan(snap: &Snapshot, ctx: &Context) -> Plan {
             if link.in_frontmatter {
                 continue;
             }
-            let Some((tier, kind, to)) = choose(&set, &stems, ctx, &note.path, &link) else {
+            let Some((tier, kind, to)) = choose(&set, &names, ctx, &note.path, &link) else {
                 continue;
             };
             let want = Resolution::Unique(to);
@@ -346,7 +347,7 @@ fn make_fix(
 /// What to do about one link, if anything: how sure, why, and the note it should reach.
 fn choose(
     set: &NoteSet,
-    stems: &[(String, String)],
+    names: &NameIndex,
     ctx: &Context,
     from: &str,
     link: &LinkRef,
@@ -365,7 +366,9 @@ fn choose(
                 return Some((Tier::A, Kind::StalePath, p));
             }
             if !link.target.contains('/') {
-                return nearest_note(&link.target, stems).map(|p| (Tier::B, Kind::NearMiss, p));
+                return names
+                    .nearest(&link.target)
+                    .map(|p| (Tier::B, Kind::NearMiss, p));
             }
             None
         }

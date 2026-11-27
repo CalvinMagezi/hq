@@ -289,6 +289,7 @@ pub fn scan_full(snap: &Snapshot) -> Report {
         .map(|n| (stem_of(&n.path), n.path.clone()))
         .collect();
 
+    let names = crate::check::NameIndex::new(&stems);
     let mut r = Report {
         unread: snap.unread.clone(),
         ..Report::default()
@@ -346,7 +347,7 @@ pub fn scan_full(snap: &Snapshot) -> Report {
                         note: note.path.clone(),
                         line: link.line,
                         link: note.text[link.span.clone()].to_string(),
-                        did_you_mean: did_you_mean(&link.target, &stems),
+                        did_you_mean: names.nearest_name(&link.target),
                         target: link.target,
                     });
                 }
@@ -507,11 +508,6 @@ pub(crate) fn duplicate_groups(snap: &Snapshot) -> Vec<DuplicateGroup> {
         .collect();
     groups.sort_by(|a, b| a.notes.cmp(&b.notes));
     groups
-}
-
-/// The one note whose name is nearest to `target`, if it is near enough and nothing is as near.
-fn did_you_mean(target: &str, stems: &[(String, String)]) -> Option<String> {
-    crate::check::nearest_name(target, stems)
 }
 
 #[cfg(test)]
