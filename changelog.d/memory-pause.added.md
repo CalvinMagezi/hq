@@ -1,0 +1,1 @@
+**Pause what HQ saves.** Settings, What HQ remembers has a switch, "Save new notes". Turn it off and HQ saves nothing new from your chats, for example when someone else is using your phone. Notes already saved are still used and still listed, and you can still delete any of them.

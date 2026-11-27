@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use crate::WsState;
 use crate::error::ApiError;
-use hq_db::owner_prefs::{CHAT_AUTO_TITLE, HELPERS_ASK_LEVEL, OWNER_TIMEZONE};
+use hq_db::owner_prefs::{CHAT_AUTO_TITLE, HELPERS_ASK_LEVEL, MEMORY_LEARNING, OWNER_TIMEZONE};
 
 /// The effective value of every pref: what the owner chose, else what HQ does without a choice.
 pub(crate) fn effective(state: &WsState) -> Value {
@@ -23,7 +23,12 @@ pub(crate) fn effective(state: &WsState) -> Value {
                 .unwrap_or_else(|_| "nothing".to_string())
         });
     let zone = hq_db::owner_prefs::timezone(&state.db).map(|z| z.name());
-    json!({ CHAT_AUTO_TITLE: auto_title, HELPERS_ASK_LEVEL: ask, OWNER_TIMEZONE: zone })
+    json!({
+        CHAT_AUTO_TITLE: auto_title,
+        HELPERS_ASK_LEVEL: ask,
+        OWNER_TIMEZONE: zone,
+        MEMORY_LEARNING: hq_db::owner_prefs::memory_learning_on(&state.db),
+    })
 }
 
 pub(crate) async fn prefs_get_handler(State(state): State<Arc<WsState>>) -> Response {

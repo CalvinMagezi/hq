@@ -36,6 +36,9 @@ export interface MemoryViewProps {
   onPin: (id: number, pinned: boolean) => void
   onStanding: (id: number, standing: Standing) => void
   onForget: (id: number) => Done
+  /** Whether HQ saves new notes. Undefined until HQ answers, and the switch is then off the table. */
+  learning?: boolean
+  onLearning?: (on: boolean) => void
   nowMs?: number
   /** For tests: start with a note's options open, its editor open, or its Forget question asked. */
   initial?: { openId?: number; editingId?: number; confirmId?: number }
@@ -73,6 +76,8 @@ export function MemoryView({
   onPin,
   onStanding,
   onForget,
+  learning,
+  onLearning,
   nowMs = Date.now(),
   initial,
 }: MemoryViewProps) {
@@ -126,6 +131,25 @@ export function MemoryView({
           archived: counts.archived,
         })}
       </p>
+      {onLearning && (
+        <div className="a-set" data-testid="memory-learning">
+          <div className="a-li">
+            <div className="a-li-main">
+              <b id="memory-learning-label">{t('memory_learning_item')}</b>
+              <span>{learning === false ? t('memory_learning_paused') : t('memory_learning_on')}</span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              className="a-sw"
+              aria-checked={learning === true}
+              aria-labelledby="memory-learning-label"
+              disabled={learning === undefined || !canChange}
+              onClick={() => onLearning(learning !== true)}
+            />
+          </div>
+        </div>
+      )}
       {!canChange && (
         <p className="a-body-sm a-warn-t" data-testid="memory-offline">
           {t('memory_offline')}

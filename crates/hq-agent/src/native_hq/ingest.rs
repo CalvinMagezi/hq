@@ -159,6 +159,11 @@ pub fn wire_post_turn_ingestion(
         )
     });
     session.set_post_turn_callback(Arc::new(move |exchange| {
+        // Paused from Settings, What HQ remembers: nothing new is saved. Read every turn so a
+        // change applies to a chat that is already open.
+        if !hq_db::owner_prefs::memory_learning_on(&db) {
+            return;
+        }
         let reply_chars: usize = exchange
             .iter()
             .filter(|(role, _)| role == "assistant")

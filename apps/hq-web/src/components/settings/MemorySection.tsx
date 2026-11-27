@@ -14,6 +14,7 @@ import {
   type Pending,
   type Standing,
 } from '~/lib/memoryApi'
+import { usePrefs } from '~/lib/prefsApi'
 import { t } from '~/strings'
 import { MemoryView, type ForgottenNote } from './MemoryView'
 
@@ -22,6 +23,7 @@ const SEARCH_DELAY_MS = 250
 /** Settings > What HQ remembers: loads the list and runs each change, then reloads. */
 export function MemorySection() {
   const client = useQueryClient()
+  const { prefs, set: setPrefValue } = usePrefs()
   const reachable = useSharedConnection() === 'connected'
   const [filter, setFilter] = useState<MemoryFilter>('all')
   const [query, setQuery] = useState('')
@@ -101,6 +103,8 @@ export function MemorySection() {
         if (ok) setForgotten({ stillThere: notReached > 0 ? ['memory_still_chat', 'memory_still_backups'] : [] })
         return ok
       }}
+      learning={prefs?.['memory.learning']}
+      onLearning={(on) => setPrefValue({ key: 'memory.learning', value: on })}
     />
   )
 }
