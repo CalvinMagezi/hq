@@ -460,11 +460,28 @@ pub(super) fn launch_is_strict(db: &Arc<Database>, l: &Launch<'_>) -> Result<boo
     })
 }
 
-/// What a narrowed launch is told instead of the caller's prompt, or `None` when the launch is not
-/// narrowed. A narrowed session must work on a task: its brief is that task's stored text.
-fn narrowed_prompt(db: &Arc<Database>, l: &Launch<'_>) -> Result<Option<String>> {
+/// The prompt a launch is given, and whether the caller's own was withheld.
+///
+/// A resumed session already has its brief, so only the words of a chat that read outside text are
+/// kept from it. A new narrowed session is told its task's stored text instead of the prompt, except
+/// a worker delegated by an agent already held strict, whose prompt is how it learns its team.
+fn launch_prompt(db: &Arc<Database>, l: &Launch<'_>) -> Result<(Option<String>, bool)> {
+    let own = l.prompt.map(str::to_string);
     if !launch_is_narrowed(db, l) {
-        return Ok(None);
+        return Ok((own, false));
+    }
+    let tainted_caller = super::narrow::active();
+    if l.resuming {
+        return Ok(match tainted_caller {
+            true => (None, own.is_some()),
+            false => (own, false),
+        });
+    }
+    if !tainted_caller
+        && let Some((parent, _)) = l.parent
+        && db.with_conn(|c| session_policies::is_held_strict(c, parent))?
+    {
+        return Ok((own, false));
     }
     let Some(task) = l.mission_id else {
         bail!(
@@ -475,7 +492,7 @@ fn narrowed_prompt(db: &Arc<Database>, l: &Launch<'_>) -> Result<Option<String>>
     let goal = db
         .with_conn(|c| Ok(super::origin::task_goal(c, task)))?
         .unwrap_or_default();
-    Ok(Some(super::narrow::brief(task, &goal)))
+    Ok((Some(super::narrow::brief(task, &goal)), false))
 }
 
 async fn launch_with(
@@ -486,12 +503,9 @@ async fn launch_with(
 ) -> Result<Value> {
     let profile = harness.profile.as_ref();
     let acp_argv = acp_argv_for(harness, &l)?;
-    let narrowed_brief = narrowed_prompt(db, &l)?;
+    let (prompt, withheld) = launch_prompt(db, &l)?;
     let strict = launch_is_strict(db, &l)?;
-    let prompt = narrowed_brief
-        .as_deref()
-        .or(l.prompt)
-        .filter(|p| !p.trim().is_empty());
+    let prompt = prompt.as_deref().filter(|p| !p.trim().is_empty());
     // A resume is not handed the prompt at start: its prompt is a follow-up, typed in as one.
     let prompt_at_start = match (prompt, l.one_shot, l.resuming) {
         (Some(_), _, _) if acp_argv.is_some() => Vec::new(),
@@ -594,6 +608,11 @@ async fn launch_with(
         (task, _) => task,
     };
     let mut report = launch_report(harness, &l, &launched, &settled, note);
+    if withheld {
+        report["prompt_withheld"] = json!(
+            "this chat has read outside text, so your prompt was not typed; the session was resumed under the strict sandbox and stays under it"
+        );
+    }
     if let Some(task) = task {
         report["task"] = task;
     }
