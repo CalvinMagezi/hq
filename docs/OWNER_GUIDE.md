@@ -146,4 +146,5 @@ login link" in `docs/HETZNER.md`.)
 | **Sign in to HQ** | Paste your login link into the box. Lost it? See [If you're signed out](#if-youre-signed-out). |
 | Your Telegram or Discord bot doesn't answer | Open **Settings**, **Chat apps**. The card shows whether the bot is running and paired, and lets you check the token, pair again or restart HQ. |
 | A page won't open at all, not even saved data | Same as "Can't reach your HQ": Tailscale first. |
+| You want to see, correct or delete what HQ remembers about you | Open Settings, What HQ remembers. See [What HQ remembers](MEMORY.md). |
 | A link in a note does nothing, or Notes shows a **Review** card | See [The notes check](VAULT_HEALTH.md). It lists links that lead nowhere and where each one is. |
