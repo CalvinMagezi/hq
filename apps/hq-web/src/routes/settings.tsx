@@ -43,6 +43,7 @@ import {
   type FolderGrant,
 } from '~/lib/sessionFoldersApi'
 import { AccessView } from '~/components/settings/AccessView'
+import { MemorySection } from '~/components/settings/MemorySection'
 import {
   SANDBOX_GRANTS_QUERY_KEY,
   SANDBOX_PROFILES_QUERY_KEY,
@@ -295,6 +296,10 @@ export function AccessPage() {
   return <AccessSection />
 }
 
+export function MemoryPage() {
+  return <MemorySection />
+}
+
 export function BackupPage() {
   const status = useBackupStatus()
   const hello = useQuery({ queryKey: ['hello'], queryFn: ({ signal }) => fetchHello(signal) }).data
@@ -321,6 +326,7 @@ const TITLES: Record<string, StringKey> = {
   '/settings/safety': 'row_safety',
   '/settings/folders': 'row_folders',
   '/settings/access': 'row_access',
+  '/settings/memory': 'row_memory',
   '/settings/backup': 'row_backup',
 }
 
