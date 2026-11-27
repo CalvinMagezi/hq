@@ -1,6 +1,9 @@
-//! Memory metadata from a chat turn without a model: an extractive summary, the names the turn
-//! keeps returning to, tags borrowed from the nearest tagged notes, and a base importance the
-//! salience pattern can raise. Chosen with `daemon.memory_extraction: local`.
+//! Memory metadata from a chat turn without a model: an extractive summary of what the owner
+//! said, the names they used, tags borrowed from the nearest tagged notes, and a base importance
+//! the salience pattern can raise. Chosen with `daemon.memory_extraction: local`.
+//!
+//! Only the owner's words are kept. What the assistant answered is its own claim, and a memory
+//! that repeats it would be recalled later as something the owner said.
 
 use hq_db::Database;
 
@@ -8,8 +11,7 @@ use crate::types::ExtractedMemory;
 
 /// A routine turn; the salience boost in the ingester lifts decisions, failures and milestones.
 const BASE_IMPORTANCE: f64 = 0.5;
-const QUESTION_CHARS: usize = 140;
-const ANSWER_CHARS: usize = 240;
+const OWNER_CHARS: usize = 240;
 const MAX_ENTITIES: usize = 10;
 /// Capitalised words that start sentences or fill speech, never names on their own.
 const NOT_NAMES: &[&str] = &[
@@ -89,34 +91,42 @@ const NOT_NAMES: &[&str] = &[
 ];
 
 pub async fn extract_local(db: &Database, text: &str) -> ExtractedMemory {
-    let topics = crate::neighbour_tags(db, text, None)
+    let owner = owner_text(text);
+    let topics = crate::neighbour_tags(db, &owner, None)
         .await
         .unwrap_or_default();
     ExtractedMemory {
-        summary: summarize(text),
-        entities: entities(text),
+        summary: summarize(&owner),
+        entities: entities(&owner),
         topics,
         importance: BASE_IMPORTANCE,
     }
 }
 
-/// "Asked: <first sentence of the first user message> Answered: <first sentence of the last
-/// reply>", from the `role: content` blocks the post-turn hook joins with `---` lines.
-fn summarize(text: &str) -> String {
-    let mut question = None;
-    let mut answer = None;
-    for block in text.split("\n---\n") {
-        if let Some(body) = block.strip_prefix("user:") {
-            question = question.or_else(|| first_sentence(body, QUESTION_CHARS));
-        } else if let Some(body) = block.strip_prefix("assistant:") {
-            answer = first_sentence(body, ANSWER_CHARS).or(answer);
-        }
+/// What the owner wrote in a turn made of `role: content` blocks joined by `---` lines. Text with
+/// no role blocks at all is taken to be the owner's own. A turn with only an assistant block has
+/// nothing of theirs, so it gives nothing.
+pub(crate) fn owner_text(text: &str) -> String {
+    let blocks: Vec<&str> = text.split("\n---\n").collect();
+    let is_turn = blocks
+        .iter()
+        .any(|b| b.starts_with("user:") || b.starts_with("assistant:"));
+    if !is_turn {
+        return text.to_string();
     }
-    match (question, answer) {
-        (Some(q), Some(a)) => format!("Asked: {q} Answered: {a}"),
-        (None, Some(a)) => a,
-        (Some(q), None) => format!("Asked: {q}"),
-        (None, None) => first_sentence(text, ANSWER_CHARS).unwrap_or_default(),
+    blocks
+        .iter()
+        .filter_map(|b| b.strip_prefix("user:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The first sentence the owner wrote, marked "Asked:" when it is a question.
+fn summarize(owner: &str) -> String {
+    match first_sentence(owner, OWNER_CHARS) {
+        Some(s) if s.trim_end_matches("...").ends_with('?') => format!("Asked: {s}"),
+        Some(s) => s,
+        None => String::new(),
     }
 }
 
@@ -214,25 +224,58 @@ mod tests {
     const TURN: &str = "user: How do I pair the Galaxy A32 with the laptop?\n---\nassistant: ## Pairing\n\nOpen the desktop app and scan the QR code with the Galaxy A32. The bridge then reconnects by key over iroh. Agent HQ keeps the paired list.";
 
     #[test]
-    fn the_summary_is_the_question_and_the_first_sentence_of_the_answer() {
+    fn the_summary_is_what_the_owner_asked_and_none_of_the_answer() {
+        let owner = owner_text(TURN);
         assert_eq!(
-            summarize(TURN),
-            "Asked: How do I pair the Galaxy A32 with the laptop? Answered: Open the desktop app and scan the QR code with the Galaxy A32."
+            summarize(&owner),
+            "Asked: How do I pair the Galaxy A32 with the laptop?"
+        );
+        assert!(
+            !summarize(&owner).contains("desktop app"),
+            "the answer is not the owner's"
         );
     }
 
     #[test]
-    fn names_are_kept_and_sentence_filler_is_not() {
-        let names = entities(TURN);
+    fn a_statement_is_kept_as_the_owner_said_it() {
+        let turn = "user: Acme Feeds delivers on Thursdays now. Please keep that in mind.\n---\nassistant: Noted, I will remember Fridays.";
+        assert_eq!(
+            summarize(&owner_text(turn)),
+            "Acme Feeds delivers on Thursdays now."
+        );
+    }
+
+    #[test]
+    fn names_come_from_the_owner_and_not_from_the_assistant() {
+        let names = entities(&owner_text(TURN));
         assert!(names.contains(&"Galaxy A32".to_string()), "{names:?}");
-        assert!(names.contains(&"Agent HQ".to_string()), "{names:?}");
-        assert!(names.contains(&"QR".to_string()), "{names:?}");
-        for filler in ["How", "Open", "The", "Pairing"] {
+        // These appear only in the assistant's answer.
+        for answer_only in ["Agent HQ", "QR", "Pairing"] {
+            assert!(
+                !names.contains(&answer_only.to_string()),
+                "{answer_only} in {names:?}"
+            );
+        }
+        for filler in ["How", "Open", "The"] {
             assert!(
                 !names.contains(&filler.to_string()),
                 "{filler} in {names:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_turn_with_nothing_from_the_owner_gives_no_memory() {
+        let turn = "assistant: The release installed and the data saver stays on.";
+        assert_eq!(owner_text(turn), "");
+        assert_eq!(summarize(&owner_text(turn)), "");
+    }
+
+    #[test]
+    fn plain_text_with_no_roles_is_taken_as_the_owners() {
+        let note = "Decided to stop buying packaging from Bright Boxes because of late deliveries.";
+        assert_eq!(owner_text(note), note);
+        assert_eq!(summarize(note), note);
     }
 
     #[test]

@@ -4,7 +4,7 @@
 use anyhow::Result;
 use hq_db::Database;
 
-use crate::types::{Connection as MemConnection, Consolidation, Memory, MemoryStats};
+use crate::types::{Connection as MemConnection, Consolidation, Memory, MemoryStats, Trace};
 
 // ─── Row parsing ────────────────────────────────────────────────────
 
@@ -121,17 +121,39 @@ pub struct StoreMemoryParams<'a> {
     pub user_id: Option<&'a str>,
 }
 
-/// Store a new memory. Returns the inserted row ID.
+/// Store a new memory as an ordinary chat summary from the owner. Returns the inserted row ID.
 pub fn store_memory(db: &Database, params: &StoreMemoryParams<'_>) -> Result<i64> {
+    store_memory_with(db, params, &Trace::default())
+}
+
+/// Store a new memory with a record of where it came from. Returns the inserted row ID.
+pub fn store_memory_with(
+    db: &Database,
+    params: &StoreMemoryParams<'_>,
+    trace: &Trace<'_>,
+) -> Result<i64> {
     let now = chrono::Utc::now().to_rfc3339();
     let entities_json = serde_json::to_string(params.entities)?;
     let topics_json = serde_json::to_string(params.topics)?;
 
     db.with_conn(|conn| {
         conn.execute(
-            "INSERT INTO memories (source, harness, raw_text, summary, entities, topics, importance, content, created_at, user_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?4, ?8, ?9)",
-            rusqlite::params![params.source, params.harness, params.raw_text, params.summary, entities_json, topics_json, params.importance, now, params.user_id],
+            "INSERT INTO memories (source, harness, raw_text, summary, entities, topics, importance, content, created_at, user_id, origin, provenance, thread_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?4, ?8, ?9, ?10, ?11, ?12)",
+            rusqlite::params![
+                params.source,
+                params.harness,
+                params.raw_text,
+                params.summary,
+                entities_json,
+                topics_json,
+                params.importance,
+                now,
+                params.user_id,
+                trace.origin.as_str(),
+                trace.provenance.as_str(),
+                trace.thread_id
+            ],
         )?;
         Ok(conn.last_insert_rowid())
     })
