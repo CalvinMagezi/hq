@@ -1,0 +1,1 @@
+**A session keeps its sandbox.** A session started under the strict sandbox because of outside content now stays under it when it is resumed or restarted, and so do the sessions it starts. Sessions already running at upgrade are not covered unless their task is marked.

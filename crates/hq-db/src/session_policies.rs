@@ -1,4 +1,5 @@
-//! The command policy each session started with (`sql/105_session_policies.sql`).
+//! What each session is held to: the command policy it started with
+//! (`sql/105_session_policies.sql`) and the strict sandbox (`sql/154_session_strict.sql`).
 
 use anyhow::Result;
 use hq_core::command_policy::Policy;
@@ -27,10 +28,42 @@ pub fn get(c: &Connection, session_id: &str) -> Result<Option<Policy>> {
     Ok(rules.and_then(|r| serde_json::from_str(&r).ok()))
 }
 
+/// Holds `session_id` to the strict sandbox for every later launch. There is no way back.
+pub fn hold_strict(c: &Connection, session_id: &str) -> Result<()> {
+    c.execute(
+        "INSERT OR IGNORE INTO session_strict (session_id) VALUES (?1)",
+        params![session_id],
+    )?;
+    Ok(())
+}
+
+/// Whether `session_id` is held to the strict sandbox.
+pub fn is_held_strict(c: &Connection, session_id: &str) -> Result<bool> {
+    Ok(c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM session_strict WHERE session_id = ?1)",
+        params![session_id],
+        |r| r.get(0),
+    )?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Database;
+
+    #[test]
+    fn a_session_held_strict_stays_so() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            assert!(!is_held_strict(c, "hs-1")?);
+            hold_strict(c, "hs-1")?;
+            hold_strict(c, "hs-1")?;
+            assert!(is_held_strict(c, "hs-1")?);
+            assert!(!is_held_strict(c, "hs-2")?);
+            Ok(())
+        })
+        .unwrap();
+    }
 
     #[test]
     fn a_policy_is_stored_whole_and_read_back() {

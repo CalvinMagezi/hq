@@ -1,6 +1,7 @@
 use super::category::{Purpose, purpose_for};
 use super::*;
 use crate::agent_host::{McpAccess, prompt_note};
+use hq_db::session_policies;
 
 pub(super) fn build_args(
     harness: &Harness,
@@ -438,6 +439,27 @@ fn launch_is_narrowed(db: &Arc<Database>, l: &Launch<'_>) -> bool {
         })
 }
 
+/// Whether this launch runs under the strict sandbox: it is narrowed now, or the session (on a
+/// resume) or the session that started it already was. The answer is stored before anything is
+/// launched, so it still holds when HQ restarts the session from somewhere that read no outside
+/// text. A store that cannot be read or written fails the launch.
+pub(super) fn launch_is_strict(db: &Arc<Database>, l: &Launch<'_>) -> Result<bool> {
+    let narrowed = launch_is_narrowed(db, l);
+    db.with_conn(|c| {
+        let mut strict = narrowed;
+        for id in [Some(l.session_id), l.parent.map(|(id, _)| id)]
+            .into_iter()
+            .flatten()
+        {
+            strict = strict || session_policies::is_held_strict(c, id)?;
+        }
+        if strict {
+            session_policies::hold_strict(c, l.session_id)?;
+        }
+        Ok(strict)
+    })
+}
+
 /// What a narrowed launch is told instead of the caller's prompt, or `None` when the launch is not
 /// narrowed. A narrowed session must work on a task: its brief is that task's stored text.
 fn narrowed_prompt(db: &Arc<Database>, l: &Launch<'_>) -> Result<Option<String>> {
@@ -465,6 +487,7 @@ async fn launch_with(
     let profile = harness.profile.as_ref();
     let acp_argv = acp_argv_for(harness, &l)?;
     let narrowed_brief = narrowed_prompt(db, &l)?;
+    let strict = launch_is_strict(db, &l)?;
     let prompt = narrowed_brief
         .as_deref()
         .or(l.prompt)
@@ -521,7 +544,7 @@ async fn launch_with(
         policy: l.policy.and_then(|p| serde_json::to_value(p).ok()),
         acp_argv,
         acp_model: harness.model.clone(),
-        strict: launch_is_narrowed(db, &l),
+        strict,
         grants,
     };
     let began = std::time::Instant::now();

@@ -368,6 +368,24 @@ fn extract_resume_token_returns_none_when_absent() {
 }
 
 #[tokio::test]
+async fn a_narrowed_session_stays_strict_when_resumed_or_delegating_from_a_clean_context() {
+    let (_dir, host) = fake_host(&[]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    let strict = |id: &str, parent: Option<&str>| {
+        let mut l = launch(host.clone(), id, None);
+        l.parent = parent.map(|p| (p, 1));
+        super::launch::launch_is_strict(&db, &l).unwrap()
+    };
+
+    assert!(!strict("hs-wide", None));
+    assert!(super::narrow::scoped(async { strict("hs-n", None) }).await);
+    assert!(strict("hs-n", None), "resumed from a clean context");
+    assert!(strict("hs-child", Some("hs-n")), "started by a strict one");
+    assert!(strict("hs-child", None), "and its own resume");
+    assert!(!strict("hs-other", Some("hs-wide")));
+}
+
+#[tokio::test]
 async fn launch_records_the_session_and_types_the_prompt() {
     let (dir, host) = fake_host(&[
         ("workspace create", CREATED.into(), None),
