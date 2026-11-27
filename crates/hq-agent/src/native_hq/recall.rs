@@ -56,6 +56,8 @@ pub struct MemoryTurnRecall {
     shown: Mutex<HashSet<i64>>,
     /// Whether to also look by meaning, with the on-device model.
     meaning: bool,
+    /// The memories shown by the last call, for the "remembered N notes" chip.
+    last: Mutex<Vec<i64>>,
 }
 
 impl MemoryTurnRecall {
@@ -66,6 +68,7 @@ impl MemoryTurnRecall {
             session_id,
             shown: Mutex::new(HashSet::new()),
             meaning: false,
+            last: Mutex::new(Vec::new()),
         }
     }
 
@@ -151,7 +154,14 @@ impl TurnRecall for MemoryTurnRecall {
         if let Ok(mut shown) = self.shown.lock() {
             shown.extend(ids.iter().copied());
         }
+        if let Ok(mut last) = self.last.lock() {
+            *last = ids;
+        }
         Some(recalled.block)
+    }
+
+    fn last_shown(&self) -> Vec<i64> {
+        self.last.lock().map(|l| l.clone()).unwrap_or_default()
     }
 }
 
@@ -260,6 +270,7 @@ mod tests {
             block.contains("Acme Feeds delivers on Thursdays"),
             "{block}"
         );
+        assert_eq!(recall.last_shown(), vec![id], "says which note was shown");
 
         // The same memory is not shown a second time in this chat.
         assert!(
@@ -276,6 +287,19 @@ mod tests {
             (2, 1),
             "two turns written down, one with a memory"
         );
+    }
+
+    #[tokio::test]
+    async fn shadow_mode_shows_no_note_so_there_is_nothing_to_say_was_remembered() {
+        let (db, _) = db_with_feeds();
+        let recall = MemoryTurnRecall::new(db, MemoryRecall::Shadow, "s".into());
+        assert!(
+            recall
+                .recall("When does Acme Feeds deliver?", None)
+                .await
+                .is_none()
+        );
+        assert!(recall.last_shown().is_empty());
     }
 
     #[tokio::test]

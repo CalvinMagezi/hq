@@ -69,6 +69,8 @@ export interface ThreadMessage {
   nextSteps?: NextStep[]
   /** Files this reply made, checked by the server. */
   files?: ReplyFile[]
+  /** The notes HQ remembered and showed the model for this reply, by number. */
+  recalled?: number[]
 }
 
 /** A reply still streaming in one chat. Every chat has its own, so several run at once. */

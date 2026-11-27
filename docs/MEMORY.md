@@ -48,6 +48,10 @@ on your device with no extra model call and no data leaving it.
 Read the counts with `hq memory recall-report`. It says whether `query` is ready to switch on.
 Switching is your decision: it is not done for you.
 
+When a reply used notes this way, the web chat shows **Remembered 2 notes** under it. Tap it to read
+them, or to open your notes and correct or forget one. Discord and Telegram replies show nothing
+extra. In `shadow` mode nothing is shown to the model, so there is nothing to show.
+
 When the on-device model is already on the machine, HQ can also find a note by what it means, not
 only by its words. It never downloads the model for this.
 

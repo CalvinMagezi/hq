@@ -1,0 +1,1 @@
+**See what HQ remembered for a reply.** When recall is switched to `query` and HQ brings up saved notes for your message, the reply shows "Remembered 2 notes". Tap it to read them, or to open your notes and correct one. Replies on Discord and Telegram show nothing extra.
