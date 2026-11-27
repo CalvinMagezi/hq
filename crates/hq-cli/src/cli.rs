@@ -720,6 +720,9 @@ pub(crate) enum Commands {
     /// Questions with a recommended default and a deadline: create, list, answer
     #[command(subcommand)]
     Decide(commands::decide::DecideAction),
+    /// Set, list and finish reminders HQ rings on your phone
+    #[command(subcommand)]
+    Reminders(commands::reminders::RemindersAction),
 
     /// The few lanes of work you chose to move forward: list, add, park, remove
     #[command(subcommand)]

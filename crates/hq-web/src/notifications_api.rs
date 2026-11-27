@@ -166,6 +166,12 @@ pub(crate) struct NotificationActionRequest {
     /// For `allow_starter` on a helper's access request: which starter set to allow.
     #[serde(default)]
     pub(crate) starter: Option<String>,
+    /// For `snooze` on a reminder: how many minutes from now (default 60).
+    #[serde(default)]
+    pub(crate) minutes: Option<i64>,
+    /// For `snooze` on a reminder: the time to ring again, in epoch seconds. Wins over `minutes`.
+    #[serde(default)]
+    pub(crate) until: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -297,6 +303,9 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
     let actions: &[&str] = match (state == NotificationState::Pending, needs_answer) {
         (false, _) => &[],
         (true, false) if later_offer => &["open", "dismiss"],
+        (true, false) if source_task == hq_core::types::REMINDER_SOURCE => {
+            crate::reminder_actions::PENDING_ACTIONS
+        }
         (true, true) if notice => &["dismiss"],
         (true, true) => &["approve", "reject"],
         (true, false) => &["dismiss", "acknowledge"],
@@ -633,6 +642,7 @@ pub(crate) fn action_outcome(action: &str) -> Option<&'static str> {
         "approve" | "engage" | OPEN_ACTION | ALLOW_SITE_ACTION | ALLOW_FOLDER_ACTION => {
             Some("approved")
         }
+        a if crate::reminder_actions::is_reminder_action(a) => Some("approved"),
         a if hq_tools::harness_session::sandbox_access::is_access_action(a) => Some("approved"),
         "dismiss" | "reject" => Some("dismissed"),
         _ => None,
@@ -678,6 +688,13 @@ pub(crate) async fn restore_notification_handler(
     let window = crate::threads_api::UNDO_WINDOW_SECS;
     match hq_db::value_items::restore_dismissed(&state.db, val_id, window) {
         Ok(true) => {
+            if let Err(e) = crate::reminder_actions::undo_dismiss(
+                &state.db,
+                val_id,
+                chrono::Utc::now().timestamp(),
+            ) {
+                warn!(id = %id, error = %e, "bringing a reminder back failed");
+            }
             state.broadcast(
                 &serde_json::json!({"type": "notification:restored", "id": id}).to_string(),
             );
@@ -825,6 +842,25 @@ pub(crate) async fn notification_action_handler(
     {
         return ApiError::bad_request("open is only for an offer you set aside").into_response();
     }
+    // Done and Snooze belong to a reminder's ping; on anything else they would be an approval.
+    // A snooze time is checked now, so a bad one is refused instead of half-answered.
+    let reminder_ping = crate::reminder_actions::is_reminder_item(&state.db, val_id);
+    let snooze_at = if crate::reminder_actions::is_reminder_action(&body.action) {
+        if !reminder_ping {
+            return ApiError::bad_request(format!("{} is only for a reminder", body.action))
+                .into_response();
+        }
+        match crate::reminder_actions::snooze_until(
+            body.minutes,
+            body.until,
+            chrono::Utc::now().timestamp(),
+        ) {
+            Ok(at) => at,
+            Err(e) => return ApiError::bad_request(e.to_string()).into_response(),
+        }
+    } else {
+        0
+    };
     // A standing-access answer is checked before anything is recorded: one that cannot be applied
     // (no task, unknown starter, not an access request) is refused instead of half-answered.
     if hq_tools::harness_session::sandbox_access::is_access_action(&body.action)
@@ -906,6 +942,18 @@ pub(crate) async fn notification_action_handler(
         }
         if let Err(e) = note_first_task_answer(&state.db, val_id, engagement) {
             warn!(id = %id, error = %e, "recording the first coding task's yes failed");
+        }
+    }
+    if first_answer && reminder_ping {
+        let now = chrono::Utc::now().timestamp();
+        if let Err(e) =
+            crate::reminder_actions::apply(&state.db, val_id, &body.action, snooze_at, now)
+        {
+            warn!(id = %id, action = %body.action, error = %e, "moving a reminder failed");
+            return ApiError::internal(format!(
+                "Your answer was recorded, but the reminder was not updated: {e}. Try again."
+            ))
+            .into_response();
         }
     }
     if first_answer && body.action == OPEN_ACTION {
