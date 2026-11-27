@@ -1,6 +1,6 @@
 //! Keyword search over what HQ remembers (the `memories` table), by the words of a message.
 //!
-//! The index is `memories_fts` (migration 153), kept in step with `memories` by triggers. A hit is
+//! The index is `memories_fts` (migration 154), kept in step with `memories` by triggers. A hit is
 //! only an id and a score: the caller reads the row, so this stays free of the memory crate's types.
 //! Same shape as `chat_search`: every term must match, and when none of the rows has them all, any
 //! term may.

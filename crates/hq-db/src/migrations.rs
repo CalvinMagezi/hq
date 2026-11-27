@@ -1301,7 +1301,7 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         let idx = super::MIGRATIONS
             .iter()
-            .position(|(v, _)| *v == "153_memory_index")
+            .position(|(v, _)| *v == "154_memory_index")
             .unwrap();
         super::apply(&conn, &super::MIGRATIONS[..idx]).unwrap();
         conn.execute_batch(
