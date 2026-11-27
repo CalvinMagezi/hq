@@ -20,6 +20,8 @@ use crate::session::{AgentSession, TurnRecall};
 
 /// How long recall may take before the message is sent without it.
 const BUDGET: Duration = Duration::from_millis(150);
+/// How long embedding the question may take. Past this the question goes by its words alone.
+const EMBED_BUDGET: Duration = Duration::from_millis(60);
 
 /// Look up memories for every prompt of `session`, in the way `mode` says. Only the owner's own
 /// sessions are given one (the caller checks), and `Recent` and `Off` need none.
@@ -30,7 +32,17 @@ pub fn wire_turn_recall(session: &mut AgentSession, db_path: &Path, mode: Memory
     let Ok(db) = hq_db::Database::open(db_path) else {
         return;
     };
-    let recall = MemoryTurnRecall::new(db, mode, session.session_id.clone());
+    // Finding a memory by meaning needs the on-device model, and only if it is already on the
+    // machine: nothing is fetched here.
+    let meaning = hq_core::config::HqConfig::load().is_ok_and(|c| c.embeds_locally())
+        && hq_memory::local_embed::is_ready();
+    if meaning && let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        // Load the model in the background so a question never waits for it.
+        runtime.spawn(async {
+            let _ = hq_memory::generate_embedding_local("warm").await;
+        });
+    }
+    let recall = MemoryTurnRecall::new(db, mode, session.session_id.clone()).with_meaning(meaning);
     session.set_turn_recall(Arc::new(recall));
 }
 
@@ -42,6 +54,8 @@ pub struct MemoryTurnRecall {
     /// Memories already shown in this session, so a long chat does not repeat itself. A web or
     /// relay chat is rebuilt for every message and starts empty each time.
     shown: Mutex<HashSet<i64>>,
+    /// Whether to also look by meaning, with the on-device model.
+    meaning: bool,
 }
 
 impl MemoryTurnRecall {
@@ -51,7 +65,14 @@ impl MemoryTurnRecall {
             mode,
             session_id,
             shown: Mutex::new(HashSet::new()),
+            meaning: false,
         }
+    }
+
+    /// Also look by meaning. A question that cannot be embedded in time goes by its words alone.
+    pub fn with_meaning(mut self, on: bool) -> Self {
+        self.meaning = on;
+        self
     }
 
     fn mode_name(&self) -> &'static str {
@@ -71,13 +92,25 @@ impl TurnRecall for MemoryTurnRecall {
             .lock()
             .map(|s| s.iter().copied().collect())
             .unwrap_or_default();
+        let vector = if self.meaning {
+            tokio::time::timeout(EMBED_BUDGET, hq_memory::generate_embedding_local(message))
+                .await
+                .ok()
+                .and_then(Result::ok)
+        } else {
+            None
+        };
         let (db, message, prior) = (
             self.db.clone(),
             message.to_string(),
             prior_message.map(str::to_string),
         );
         let work = tokio::task::spawn_blocking(move || {
-            hq_memory::recall::recall(
+            let meaning = vector.as_deref().map(|vector| hq_memory::recall::Meaning {
+                vector,
+                model: hq_memory::LOCAL_EMBEDDING_MODEL,
+            });
+            hq_memory::recall::recall_with_meaning(
                 &db,
                 &RecallQuery {
                     message: &message,
@@ -85,6 +118,7 @@ impl TurnRecall for MemoryTurnRecall {
                     audience: Audience::Owner,
                     exclude: &exclude,
                 },
+                meaning,
             )
         });
 

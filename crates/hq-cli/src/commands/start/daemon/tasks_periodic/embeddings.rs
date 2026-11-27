@@ -73,6 +73,21 @@ pub async fn run_embeddings(vault_path: &Path, db: &Database, config: &HqConfig)
         Err(e) => warn!(error = %e, "embeddings: vector embedding batch failed"),
     }
 
+    // What HQ remembers gets a vector too, so a question can find a memory by what it means.
+    // Only with the on-device model and only when it is already there: this never fetches it.
+    if config.embeds_locally() {
+        match hq_memory::memory_vectors::embed_pending_local(db).await {
+            Ok(Some(pass)) if pass.embedded > 0 => info!(
+                embedded = pass.embedded,
+                done = pass.done,
+                of = pass.eligible,
+                "embeddings: memory vectors made"
+            ),
+            Ok(_) => {}
+            Err(e) => warn!(error = %e, "embeddings: memory vector pass failed"),
+        }
+    }
+
     Ok(())
 }
 
