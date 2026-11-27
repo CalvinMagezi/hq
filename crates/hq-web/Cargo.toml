@@ -33,6 +33,7 @@ chrono = { workspace = true }
 iana-time-zone = "0.1"
 serde_yaml = { workspace = true }
 hq-db = { workspace = true }
+hq-memory = { workspace = true }
 hq-backup = { workspace = true }
 hq-vault = { workspace = true }
 rusqlite = { workspace = true }
