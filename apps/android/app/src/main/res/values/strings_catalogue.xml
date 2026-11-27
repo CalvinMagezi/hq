@@ -659,6 +659,56 @@
         <item quantity="one">%1$s day left</item>
         <item quantity="other">%1$s days left</item>
     </plurals>
+    <plurals name="notes_health_title">
+        <item quantity="one">%1$s thing in your notes needs a look</item>
+        <item quantity="other">%1$s things in your notes need a look</item>
+    </plurals>
+    <string name="notes_health_page">Note check</string>
+    <string name="notes_health_card_label">Note check</string>
+    <string name="notes_health_review">Review</string>
+    <string name="notes_health_intro">HQ looks for links that lead nowhere and notes that repeat each other. It changes nothing on its own.</string>
+    <plurals name="notes_health_dead">
+        <item quantity="one">%1$s link leads to a note that is not there</item>
+        <item quantity="other">%1$s links lead to notes that are not there</item>
+    </plurals>
+    <plurals name="notes_health_ambiguous">
+        <item quantity="one">%1$s link could mean more than one note</item>
+        <item quantity="other">%1$s links could mean more than one note</item>
+    </plurals>
+    <plurals name="notes_health_anchors">
+        <item quantity="one">%1$s link points at a heading that is gone</item>
+        <item quantity="other">%1$s links point at headings that are gone</item>
+    </plurals>
+    <plurals name="notes_health_duplicates">
+        <item quantity="one">%1$s set of notes has the same text</item>
+        <item quantity="other">%1$s sets of notes have the same text</item>
+    </plurals>
+    <plurals name="notes_health_frontmatter">
+        <item quantity="one">%1$s note has properties HQ cannot read</item>
+        <item quantity="other">%1$s notes have properties HQ cannot read</item>
+    </plurals>
+    <plurals name="notes_health_loose">
+        <item quantity="one">%1$s note has no links to or from it</item>
+        <item quantity="other">%1$s notes have no links to or from them</item>
+    </plurals>
+    <string name="notes_health_checked">Checked %1$s</string>
+    <string name="notes_health_not_checked">HQ has not checked your notes yet.</string>
+    <string name="notes_health_all_good">Every link reaches a note. Nothing needs fixing.</string>
+    <string name="notes_health_check_now">Check now</string>
+    <string name="notes_health_checking">Checking</string>
+    <string name="notes_health_load_failed">Could not load the note check.</string>
+    <string name="notes_health_scan_failed">Could not check your notes.</string>
+    <string name="notes_health_open">Open</string>
+    <string name="notes_health_ignore">Ignore</string>
+    <string name="notes_health_ignore_failed">Could not ignore that.</string>
+    <string name="notes_health_did_you_mean">Did you mean %1$s\?</string>
+    <string name="notes_health_could_be">Could be %1$s</string>
+    <string name="notes_health_missing_in">Not in %1$s</string>
+    <string name="notes_health_line">Line %1$s</string>
+    <string name="notes_health_more">and %1$s more</string>
+    <string name="notes_health_fm_unclosed">The properties at the top are never closed</string>
+    <string name="notes_health_fm_invalid">The properties at the top cannot be read</string>
+    <string name="notes_health_fm_nested">A second block of properties sits in the text</string>
     <string name="notes_write_one_yourself_or">Write one yourself, or ask HQ to write one for you.</string>
     <string name="notes_your_notes_will_show">Your Vault will show up here</string>
     <string name="notes_search_your_notes">Search your Vault</string>

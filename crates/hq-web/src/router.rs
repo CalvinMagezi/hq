@@ -109,6 +109,19 @@ fn note_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
         .route("/api/note/pdf", get(vault_api::note_pdf_handler))
         .route("/api/note/export", get(vault_api::note_export_handler))
         .route("/api/vault/folders", get(vault_api::folders_handler))
+        .route("/api/vault/health", get(vault_health_api::health_handler))
+        .route(
+            "/api/vault/health/scan",
+            post(vault_health_api::scan_handler),
+        )
+        .route(
+            "/api/vault/health/ignore",
+            post(vault_health_api::ignore_handler),
+        )
+        .route(
+            "/api/vault/health/unignore",
+            post(vault_health_api::unignore_handler),
+        )
         .route("/api/vault-signals", get(vault_api::signals_handler))
         .route("/api/tree", get(api::tree_handler))
 }

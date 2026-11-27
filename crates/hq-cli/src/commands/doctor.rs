@@ -12,6 +12,7 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     report_agent_sandbox(config);
     report_machine_profile(config);
     report_search_index(config);
+    super::vault_health::doctor(config);
     report_agent_hosts(config);
     super::quota::doctor(config).await;
     report_web_search(config).await;

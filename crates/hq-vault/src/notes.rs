@@ -422,35 +422,9 @@ pub(crate) fn patch_section(
     Ok(res)
 }
 
-/// Extract all WikiLinks (`[[Note]]` or `[[Note|Alias]]`) and Markdown links (`[text](note.md)`).
+/// Everything a note links to, by the name the writer used (see [`crate::links::target_names`]).
 pub(crate) fn extract_links(content: &str) -> Vec<String> {
-    let mut links: Vec<String> = Vec::new();
-    for target in crate::remediation::extract_wikilinks(content) {
-        if !links.contains(&target) {
-            links.push(target);
-        }
-    }
-
-    let mut rest = content;
-    while let Some(start) = rest.find("](") {
-        rest = &rest[start + 2..];
-        if let Some(end) = rest.find(')') {
-            let target = rest[..end].trim();
-            if !target.starts_with("http://")
-                && !target.starts_with("https://")
-                && !target.starts_with('#')
-                && !target.is_empty()
-            {
-                let clean = target.strip_suffix(".md").unwrap_or(target).to_string();
-                if !links.contains(&clean) {
-                    links.push(clean);
-                }
-            }
-            rest = &rest[end + 1..];
-        }
-    }
-
-    links
+    crate::links::target_names(content)
 }
 
 #[cfg(test)]

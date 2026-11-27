@@ -394,6 +394,30 @@ pub async fn move_folder_value(
     dry_run: bool,
 ) -> Result<Value> {
     let (f, t) = (from.to_string(), to.to_string());
+    let recorder = db
+        .as_ref()
+        .map(|db| crate::provenance::Recorder::new(db.clone(), vault.vault_path().to_path_buf()));
+    // Moving rewrites links in other notes and in the moved ones. Fingerprint what may change
+    // first, so only the notes the move really changed are credited.
+    let before = match (&recorder, dry_run) {
+        (Some(recorder), false) => {
+            let (client, recorder, f, t) = (vault.clone(), recorder.clone(), f.clone(), t.clone());
+            tokio::task::spawn_blocking(move || {
+                let preview = client.move_folder(&f, &t, true).ok()?;
+                let rels: Vec<String> = preview
+                    .referrers
+                    .iter()
+                    .chain(preview.notes.iter())
+                    .cloned()
+                    .collect();
+                Some(recorder.fingerprint(&rels))
+            })
+            .await
+            .ok()
+            .flatten()
+        }
+        _ => None,
+    };
     let client = vault.clone();
     let report = tokio::task::spawn_blocking(move || client.move_folder(&f, &t, dry_run)).await??;
     if !dry_run {
@@ -405,6 +429,23 @@ pub async fn move_folder_value(
                 let (o, n) = (old.clone(), new.clone());
                 let _ = db.with_conn(move |c| hq_db::provenance::move_path(c, &o, &n).map(|_| ()));
             }
+        }
+        if let (Some(recorder), Some(before)) = (recorder, before) {
+            let (rewritten, from_root, to_root) = (
+                report.rewritten.clone(),
+                report.from.clone(),
+                report.to.clone(),
+            );
+            let _ = tokio::task::spawn_blocking(move || {
+                recorder.after_folder_move(
+                    &from_root,
+                    &to_root,
+                    &rewritten,
+                    &before,
+                    &serde_json::json!({}),
+                )
+            })
+            .await;
         }
     }
     Ok(serde_json::to_value(&report)?)
