@@ -300,6 +300,24 @@ fn native_builder(
     }
 }
 
+/// What time it is for the owner, when this is the owner's own session and their zone is known:
+/// the phone's own report when the turn came from the phone, else the zone they saved.
+fn owner_clock_line(config: &HqConfig, hooks: &NativeHqHooks) -> Option<String> {
+    let owner = hooks
+        .identity
+        .as_ref()
+        .is_none_or(|id| matches!(id.scope, hq_core::privacy::DisclosureScope::Unrestricted));
+    if !owner {
+        return None;
+    }
+    if let Some(link) = &hooks.device_link {
+        return Some(link.context_line());
+    }
+    let db = hq_db::Database::open(&config.db_path()).ok()?;
+    let zone = hq_db::owner_prefs::timezone(&db)?;
+    Some(hq_tools::reminders::clock_line(zone, chrono::Utc::now()))
+}
+
 /// Build and run a native-hq `AgentSession`. The single shared path for the hq harness.
 pub async fn run_native_hq(
     config: &HqConfig,
@@ -328,6 +346,15 @@ pub async fn run_native_hq(
         );
     }
     let thread_identity = thread_identity(&hooks);
+    // The owner's own time, in their zone, for words like "tomorrow at 4". It rides in the per-turn
+    // note, not the cached system prompt, and only the owner's own sessions get it.
+    if let Some(line) = owner_clock_line(config, &hooks) {
+        let context = match session.turn_context() {
+            Some(existing) => format!("{line}\n{existing}"),
+            None => line,
+        };
+        session.set_turn_context(context);
+    }
     // FR-017: the current turn's images, forwarded separately from
     // `history` — see `NativeHqHooks::image_parts`'s doc comment for why
     // `history` must be prior turns only, not the current one.

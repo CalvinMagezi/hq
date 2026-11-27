@@ -53,6 +53,8 @@ pub(super) const PLANNING_AND_READ_TOOLS: &[&str] = &[
     "task_list",
     "task_get",
     "task_comment_add",
+    "remind_create",
+    "remind_list",
     "watch_create",
     "watch_list",
     "watch_cancel",

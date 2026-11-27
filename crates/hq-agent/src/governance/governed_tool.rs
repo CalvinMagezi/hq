@@ -539,6 +539,9 @@ const TASK_WRITE_TOOLS: &[&str] = &[
     "task_create_from_note",
     "task_update",
     "task_update_many",
+    // A reminder set after reading outside text is shown to the owner as such.
+    "remind_create",
+    "remind_update",
 ];
 
 /// Tools that start, brief or delegate to another agent.

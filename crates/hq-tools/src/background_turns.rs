@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 const RESULT_EXCERPT_CHARS: usize = 600;
 
-const NO_ORIGIN: &str = "watches need a chat origin: this session was not started from a Telegram or Discord chat, so there is nowhere to deliver firings";
+const NO_ORIGIN: &str = "watches need a chat origin: this session was not started from a Telegram or Discord chat, so there is nowhere to deliver firings. To be reminded at a time, use remind_create, which works here";
 
 /// `background_turn_status`. With a chat `origin` it finds only that chat's turns; with none
 /// (the web app, the CLI, an MCP client, all the owner's own) it looks across every chat.
@@ -178,7 +178,7 @@ impl HqTool for WatchCreateTool {
         "watch_create"
     }
     fn description(&self) -> &str {
-        "Re-run a prompt in this chat on an interval until a condition holds or the watch expires, e.g. \"check every 10 minutes whether the deploy is green\". Each firing is a full agent turn whose reply is delivered here only when it changes; a firing that confirms the condition replies with WATCH_DONE, which stops the watch. Interval is clamped to 5-1440 minutes, duration to 1-8760 hours (default 720). Only works from a Telegram or Discord chat."
+        "Re-run a prompt in this chat on an interval until a condition holds or the watch expires, e.g. \"check every 10 minutes whether the deploy is green\". Each firing is a full agent turn whose reply is delivered here only when it changes; a firing that confirms the condition replies with WATCH_DONE, which stops the watch. Interval is clamped to 5-1440 minutes, duration to 1-8760 hours (default 720). Only works from a Telegram or Discord chat. For \"remind me at 4pm\" use remind_create instead: it works from every chat and costs no model call."
     }
     fn parameters(&self) -> Value {
         json!({
