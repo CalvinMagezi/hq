@@ -3,11 +3,12 @@
 //! `hq_core::grants::classify` decides from the typed request and the owner's profile, never from
 //! the helper's reason. An approved grant is written to `sandbox_grants`, and the session is
 //! restarted (resumed, same conversation) so its sandbox carries the grant: a sandbox cannot be
-//! widened on a live process. What needs the owner is filed in their inbox; the helper calls
-//! again with the same arguments to find the answer. The profile a task works under is bound by
+//! widened on a live process. What needs the owner is filed in their inbox; the session
+//! supervisor applies the answer ([`apply_owner_answers`]). The profile a task works under is bound by
 //! the owner (`hq grants profile`), never by anything a helper can write. Plan:
 //! `docs/plans/delegated-sandbox-grants.md`.
 
+use crate::agent_host::AgentStatus;
 use crate::registry::HqTool;
 use crate::util::arg_str;
 use anyhow::{Result, bail};
@@ -35,6 +36,7 @@ const GRANT_TTL_SECS: i64 = 24 * 3600;
 const MAX_SETBACKS: usize = 3;
 const MAX_WAITING: usize = 3;
 const MAX_TEXT_CHARS: usize = 300;
+const DECLINED_NOTE: &str = "The owner declined sandbox access you asked for. Do not ask for it again or try another route to it; finish what you can without it and report what is blocked.";
 /// How long a restart waits for the helper to finish its turn before it stops it anyway.
 const SETTLE_WAIT: Duration = Duration::from_secs(60);
 
@@ -185,13 +187,16 @@ fn describe(req: &GrantRequest) -> String {
 }
 
 /// Applies the owner's answers to requests this session had waiting. Approval counts only when
-/// it is signed and unspent, and spends it.
-pub(super) fn settle_pending(db: &Database, session: &str, now: i64) -> Result<()> {
+/// it is signed and unspent, and spends it. Returns how many the owner declined.
+pub(super) fn settle_pending(db: &Database, session: &str, now: i64) -> Result<usize> {
+    let mut declined = 0;
     for grant in store::pending_for_session(db, session, now)? {
         let key = key_for(&grant.id);
         let latest = value_items::latest_engagement_by_dedup(db, &key)?;
         if RequestState::from_latest(latest, chrono::Utc::now()) == RequestState::Declined {
-            store::decide(db, &grant.id, store::DECLINED, now, None)?;
+            if store::decide(db, &grant.id, store::DECLINED, now, None)? {
+                declined += 1;
+            }
             continue;
         }
         let signed = value_items::is_signed_approval(db, &key)?
@@ -206,7 +211,109 @@ pub(super) fn settle_pending(db: &Database, session: &str, now: i64) -> Result<(
             )?;
         }
     }
+    Ok(declined)
+}
+
+/// Approves the waiting requests of a session that a standing rule now covers, so one "allow for
+/// this repository" answers every helper that asked. A request the owner already answered keeps
+/// that answer: its card is retired first, and only an unanswered card can be.
+fn approve_covered(db: &Database, paths: &dyn PathView, asker: &Asker, now: i64) -> Result<()> {
+    for grant in store::pending_for_session(db, asker.session, now)? {
+        let Ok(capability) = serde_json::from_value::<Capability>(json!(grant.capability)) else {
+            continue;
+        };
+        let req = GrantRequest {
+            capability,
+            resource: grant.resource.clone(),
+        };
+        let Some((_, rule_id)) = covered_by_rule(db, paths, asker, &req, now)? else {
+            continue;
+        };
+        let key = key_for(&grant.id);
+        let Some(item) = value_items::find_active_by_dedup(db, ValueKind::ActionNeeded, &key)?
+        else {
+            continue;
+        };
+        if value_items::retire(db, &item.id)? {
+            store::approve_by_rule(db, &grant.id, &rule_id, now, now + GRANT_TTL_SECS)?;
+        }
+    }
     Ok(())
+}
+
+/// Applies what the owner answered since a helper last asked, so an answer on any surface takes
+/// effect without the helper calling again. The session supervisor calls this on every sweep.
+pub fn apply_owner_answers(db: &Arc<Database>) -> Result<()> {
+    let now = chrono::Utc::now().timestamp();
+    store::expire_stale(db, now)?;
+    for session in store::sessions_awaiting(db, now)? {
+        if let Err(e) = apply_for(db, &session, now) {
+            tracing::warn!(session, error = %e, "applying a sandbox access answer failed");
+        }
+    }
+    Ok(())
+}
+
+fn apply_for(db: &Arc<Database>, session: &str, now: i64) -> Result<()> {
+    let row = db.with_conn(|c| hq_db::harness_sessions_registry::get(c, session))?;
+    let Some(row) = row.filter(|r| r.status == hq_db::harness_sessions_registry::STATUS_RUNNING)
+    else {
+        // Its next launch carries whatever is in force; restarting it would bring it back.
+        return store::clear_restart_due(db, session);
+    };
+    let host = crate::agent_host::host(Some(&row.host))?;
+    let Some(agent) = host.agent(&row.agent_name)?.filter(|a| !a.exited) else {
+        return Ok(());
+    };
+    let cwd = PathBuf::from(&row.cwd);
+    let asker = Asker {
+        session,
+        cwd: &cwd,
+        task: row.mission_id.as_deref(),
+        host: &row.host,
+    };
+    if !store::rules_for(db, &rule_scopes(db, session, asker.task, &row.cwd), now)?.is_empty()
+        && let Some(paths) = HostPaths::probe(host)
+    {
+        approve_covered(db, &paths, &asker, now)?;
+    }
+    let note = match follow_up(db, session, agent.status, now)? {
+        None => return Ok(()),
+        Some(FollowUp::TellDeclined) => DECLINED_NOTE.to_string(),
+        Some(FollowUp::Restart) => match plan_restart(db, session) {
+            Restart::Blocked(why) => format!(
+                "The sandbox access you asked for was approved, but HQ could not restart you to apply it ({why}). It takes effect the next time your session is started. Tell the user that."
+            ),
+            Restart::Scheduled | Restart::NotDue => return Ok(()),
+        },
+    };
+    super::control::send_text(db, session, &note)?;
+    Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum FollowUp {
+    Restart,
+    TellDeclined,
+}
+
+/// Settles the owner's answers for an idle session and says what it is owed. A busy one is left
+/// for a later sweep: a restart or a message in the middle of a turn would cut its work off.
+fn follow_up(
+    db: &Database,
+    session: &str,
+    status: AgentStatus,
+    now: i64,
+) -> Result<Option<FollowUp>> {
+    if !matches!(status, AgentStatus::Idle | AgentStatus::Done) {
+        return Ok(None);
+    }
+    let declined = settle_pending(db, session, now)?;
+    Ok(if store::restart_due(db, session)? {
+        Some(FollowUp::Restart)
+    } else {
+        (declined > 0).then_some(FollowUp::TellDeclined)
+    })
 }
 
 fn file_for_owner(
@@ -483,7 +590,7 @@ fn reply(outcome: Outcome, req: &GrantRequest, restart: &Restart) -> Value {
         Outcome::Pending { id } => json!({
             "status": "pending_owner_approval",
             "grant": id,
-            "next": format!("HQ could not approve '{what}' by itself and asked the owner. Tell the user you are waiting on it, carry on with anything that does not need it, then call sandbox_request again with the same arguments to find the answer. Do not work around the denial."),
+            "next": format!("HQ could not approve '{what}' by itself and asked the owner. Tell the user you are waiting on it, carry on with anything that does not need it, then end your turn: once the owner answers and you are idle, HQ restarts you with the access or tells you it was declined. Do not poll and do not work around the denial."),
         }),
         Outcome::Declined => json!({
             "status": "declined",
@@ -579,7 +686,7 @@ impl HqTool for SandboxRequestTool {
     }
 
     fn description(&self) -> &str {
-        "Ask HQ for access your sandbox denies, instead of working around it. Name exactly one resource: capability fs_write or fs_read with an absolute path, loopback with a local port, or egress with host or host:port. HQ approves what the owner's access profile for this task covers and restarts your session (same conversation) so it applies; anything else goes to the owner and you call again with the same arguments to find the answer. Credentials, HQ's own files and other agents' state are never granted. 'reason' is shown to the owner as your words and never decides anything."
+        "Ask HQ for access your sandbox denies, instead of working around it. Name exactly one resource: capability fs_write or fs_read with an absolute path, loopback with a local port, or egress with host or host:port. HQ approves what the owner's access profile for this task covers and restarts your session (same conversation) so it applies; anything else goes to the owner, and HQ restarts or tells you once they answer and you are idle. Credentials, HQ's own files and other agents' state are never granted. 'reason' is shown to the owner as your words and never decides anything."
     }
 
     fn parameters(&self) -> Value {
@@ -959,6 +1066,68 @@ mod tests {
                 .allow
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn an_owner_answer_is_applied_once_the_helper_is_idle_without_it_asking_again() {
+        let f = fixture(true);
+        let Outcome::Pending { id } = ask(&f, Capability::Egress, "example.org") else {
+            panic!("pending")
+        };
+        let idle = |at| follow_up(&f.db, SESSION, AgentStatus::Idle, at).unwrap();
+        assert_eq!(idle(200), None, "nothing answered yet");
+        assert!(value_items::approve_by_id(&f.db, &item_id(&f, &id)).unwrap());
+        assert_eq!(
+            follow_up(&f.db, SESSION, AgentStatus::Working, 200).unwrap(),
+            None,
+            "a busy helper is not interrupted"
+        );
+        assert_eq!(store::sessions_awaiting(&f.db, 200).unwrap(), [SESSION]);
+        assert_eq!(idle(200), Some(FollowUp::Restart));
+        assert_eq!(
+            store::get(&f.db, &id).unwrap().unwrap().state,
+            store::ACTIVE
+        );
+
+        store::clear_restart_due(&f.db, SESSION).unwrap();
+        assert!(store::sessions_awaiting(&f.db, 200).unwrap().is_empty());
+        let Outcome::Pending { id: no } = ask(&f, Capability::Egress, "other.org") else {
+            panic!("pending")
+        };
+        assert!(value_items::dismiss_by_id(&f.db, &item_id(&f, &no)).unwrap());
+        assert_eq!(idle(200), Some(FollowUp::TellDeclined));
+        assert_eq!(idle(200), None, "told once");
+    }
+
+    #[test]
+    fn a_new_rule_answers_requests_already_waiting_but_never_overrides_a_no() {
+        let f = fixture(false);
+        let Outcome::Pending { id: waiting } = ask(&f, Capability::Egress, "pub.dev") else {
+            panic!("pending")
+        };
+        let Outcome::Pending { id: refused } = ask(&f, Capability::Egress, "example.org") else {
+            panic!("pending")
+        };
+        assert!(value_items::dismiss_by_id(&f.db, &item_id(&f, &refused)).unwrap());
+        let repo = format!("{}{}", store::REPO_SCOPE, f.cwd.display());
+        for host in ["pub.dev:443", "example.org:443"] {
+            store::add_rule(&f.db, &repo, "egress", host, "x", 1, None).unwrap();
+        }
+        let asker = Asker {
+            session: SESSION,
+            cwd: &f.cwd,
+            task: Some("t1"),
+            host: "local",
+        };
+        approve_covered(&f.db, &TestPaths(f.home.clone()), &asker, 200).unwrap();
+        let state = |id: &str| store::get(&f.db, id).unwrap().unwrap().state;
+        assert_eq!(state(&waiting), store::ACTIVE);
+        assert_eq!(state(&refused), store::PENDING, "left for the no to settle");
+        assert!(store::restart_due(&f.db, SESSION).unwrap());
+        assert_eq!(
+            value_items::count_waiting_with_prefix(&f.db, KEY_PREFIX).unwrap(),
+            0
         );
     }
 

@@ -269,7 +269,7 @@ fn llm_summarizer(timeout_secs: u64) -> Summarizer {
 pub async fn run_session_supervisor(db: &Database, config: &HqConfig) -> Result<()> {
     let summarizer = summarizer_for(config);
     let resolve: HostResolver = Arc::new(|name| hq_tools::agent_host::host(Some(name)));
-    supervise(
+    let swept = supervise(
         db,
         summarizer.as_ref(),
         resolve,
@@ -286,7 +286,22 @@ pub async fn run_session_supervisor(db: &Database, config: &HqConfig) -> Result<
             ),
         },
     )
-    .await
+    .await;
+    // After the sweep, so a slow host here never delays an alert.
+    apply_sandbox_answers(db).await;
+    swept
+}
+
+/// A failure here is logged and never costs the sweep that follows it.
+async fn apply_sandbox_answers(db: &Database) {
+    let db = Arc::new(db.clone());
+    let applied = tokio::task::spawn_blocking(move || {
+        hq_tools::harness_session::sandbox_request::apply_owner_answers(&db)
+    })
+    .await;
+    if let Err(e) = applied.map_err(anyhow::Error::from).and_then(|r| r) {
+        tracing::warn!(error = %e, "session-supervisor: sandbox access answers not applied");
+    }
 }
 
 /// How one sweep treats its hosts.

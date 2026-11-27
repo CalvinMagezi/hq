@@ -177,6 +177,48 @@ pub fn decide(
     })
 }
 
+/// Sessions with a request still waiting, or a grant in force they have not been restarted to
+/// carry: the ones an owner's answer may have something to do for.
+pub fn sessions_awaiting(db: &Database, now: i64) -> Result<Vec<String>> {
+    db.with_conn(|c| {
+        let mut stmt = c.prepare(
+            "SELECT DISTINCT session_id FROM sandbox_grants
+             WHERE capability <> ?1 AND (expires_at IS NULL OR expires_at > ?2)
+               AND (state = ?3 OR (state = ?4 AND restart_due = 1))",
+        )?;
+        let rows = stmt.query_map(params![PROFILE, now, PENDING, ACTIVE], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    })
+}
+
+/// Activates a waiting request that a standing rule covers, noting which rule, so revoking the
+/// rule revokes this grant too. Anything not pending is left alone.
+pub fn approve_by_rule(
+    db: &Database,
+    id: &str,
+    rule_id: &str,
+    now: i64,
+    expires_at: i64,
+) -> Result<bool> {
+    db.with_conn(|c| {
+        let n = c.execute(
+            "UPDATE sandbox_grants SET state = ?2, decided_by = ?3, decision_note = ?4,
+                decided_at = ?5, applied_at = ?5, expires_at = ?6, restart_due = 1
+             WHERE id = ?1 AND state = ?7",
+            params![
+                id,
+                ACTIVE,
+                BY_POLICY,
+                rule_note(rule_id),
+                now,
+                expires_at,
+                PENDING
+            ],
+        )?;
+        Ok(n == 1)
+    })
+}
+
 /// Marks every request past its time as expired, so a waiting one stops counting and a lapsed
 /// grant stops answering "in force".
 pub fn expire_stale(db: &Database, now: i64) -> Result<usize> {
