@@ -337,36 +337,13 @@ impl HqTool for VaultFindSimilarTool {
 /// Find all notes linking to a targeted note.
 pub struct VaultBacklinksTool {
     vault: Arc<VaultClient>,
-    db: Option<Arc<Database>>,
 }
 
 impl VaultBacklinksTool {
-    pub fn new(vault: Arc<VaultClient>, db: Option<Arc<Database>>) -> Self {
-        Self { vault, db }
+    /// Backlinks come from reading the notes, not from the search index, so none is needed.
+    pub fn new(vault: Arc<VaultClient>) -> Self {
+        Self { vault }
     }
-}
-
-/// What a link points at, for comparing with a note: lowercase, without a `.md` ending, a
-/// `#heading` or a `|alias`.
-fn link_target(link: &str) -> String {
-    let base = link
-        .split(['#', '|'])
-        .next()
-        .unwrap_or(link)
-        .trim()
-        .to_lowercase();
-    base.strip_suffix(".md").map(str::to_string).unwrap_or(base)
-}
-
-/// Whether `link` names the note at `path`: by its full path, or by its bare title (the file
-/// name without folders), which is how most wikilinks are written.
-fn link_names_note(link: &str, path: &str) -> bool {
-    let target = link_target(link);
-    let full = link_target(path);
-    let stem = full.rsplit('/').next().unwrap_or(&full);
-    target == full
-        || target == stem
-        || target.ends_with(&format!("/{stem}")) && full.ends_with(&target)
 }
 
 #[async_trait]
@@ -380,7 +357,7 @@ impl HqTool for VaultBacklinksTool {
     }
 
     fn description(&self) -> &str {
-        "Find all notes that link to a target note via [[WikiLinks]] or markdown links."
+        "Find every link to a note, from other notes: the note, the line and the link as written. Reads [[WikiLinks]] (with headings, folders and aliases), embeds and markdown links, and skips code. A link whose name fits several notes is marked ambiguous."
     }
 
     fn parameters(&self) -> Value {
@@ -404,52 +381,56 @@ impl HqTool for VaultBacklinksTool {
             .unwrap_or_default();
 
         validate_path_in_vault(self.vault.vault_path(), path)?;
+        let vault_path = self.vault.vault_path().to_path_buf();
+        let asked = path.to_string();
 
-        let title_query = path.strip_suffix(".md").unwrap_or(path);
-        // Search by the bare title: that is what most notes link by.
-        let title_lower = title_query
-            .rsplit('/')
-            .next()
-            .unwrap_or(title_query)
-            .to_lowercase();
-
-        let vault = self.vault.clone();
-        let db = self.db.clone();
-        let path_owned = path.to_string();
-
-        let backlinks = tokio::task::spawn_blocking(move || -> Result<Vec<Value>> {
-            let mut matches = Vec::new();
-            if let Some(ref db) = db {
-                let fts_results =
-                    db.with_conn(|conn| hq_db::search::keyword_search(conn, &title_lower, 50))?;
-                for r in fts_results {
-                    if r.note_path != path_owned
-                        && let Ok(links) = vault.extract_links(&r.note_path)
-                        && links.iter().any(|l| link_names_note(l, &path_owned))
-                    {
-                        matches.push(json!({
-                            "path": r.note_path,
-                            "title": r.title,
-                            "snippet": r.snippet
-                        }));
-                    }
-                }
-            } else {
-                let all_notes = vault.list_notes_recursive("")?;
-                for n_path in all_notes {
-                    if n_path != path_owned
-                        && let Ok(links) = vault.extract_links(&n_path)
-                        && links.iter().any(|l| link_names_note(l, &path_owned))
-                    {
-                        matches.push(json!({ "path": n_path }));
-                    }
-                }
-            }
-            Ok(matches)
+        let (target, backlinks) = tokio::task::spawn_blocking(move || -> Result<_> {
+            let snap = hq_vault::relink::snapshot(&vault_path);
+            let Some(target) = find_target(&snap, &asked)? else {
+                return Ok((None, Vec::new()));
+            };
+            let found = hq_vault::relink::backlinks(&snap, &target);
+            Ok((Some(target), found))
         })
         .await??;
 
-        Ok(json!({ "target": path, "backlinks": backlinks, "count": backlinks.len() }))
+        let count = backlinks.len();
+        Ok(json!({
+            "target": target.as_deref().unwrap_or(path),
+            "exists": target.is_some(),
+            "backlinks": backlinks,
+            "count": count
+        }))
+    }
+}
+
+/// The note `asked` names: its path (with or without `.md`) or the name a link would use.
+/// `None` when there is no such note; an error when the name fits several.
+fn find_target(snap: &hq_vault::relink::Snapshot, asked: &str) -> Result<Option<String>> {
+    use hq_vault::links::{NoteInput, NoteSet, Resolution, Syntax, aliases_of};
+    let asked = asked.trim();
+    let with_md = if asked.to_lowercase().ends_with(".md") {
+        asked.to_string()
+    } else {
+        format!("{asked}.md")
+    };
+    if let Some(n) = snap.notes.iter().find(|n| n.path == with_md) {
+        return Ok(Some(n.path.clone()));
+    }
+    let set = NoteSet::new(
+        snap.notes.iter().map(|n| NoteInput {
+            path: n.path.clone(),
+            aliases: aliases_of(&n.text),
+        }),
+        [],
+    );
+    match set.resolve_target("", Syntax::Wiki, asked) {
+        Resolution::Unique(p) => Ok(Some(p)),
+        Resolution::Ambiguous(paths) => anyhow::bail!(
+            "'{asked}' names more than one note, use a path: {}",
+            paths.join(", ")
+        ),
+        _ => Ok(None),
     }
 }
 
@@ -477,7 +458,7 @@ impl HqTool for VaultLinksTool {
     }
 
     fn description(&self) -> &str {
-        "Extract all outgoing [[WikiLinks]] and markdown links from a specified note."
+        "List the notes and files a note links to, and which of those links lead nowhere. Reads [[WikiLinks]], embeds and markdown links, and skips code."
     }
 
     fn parameters(&self) -> Value {
@@ -505,12 +486,21 @@ impl HqTool for VaultLinksTool {
         let vault = self.vault.clone();
         let path_owned = path.to_string();
 
-        let links = tokio::task::spawn_blocking(move || -> Result<Vec<String>> {
-            vault.extract_links(&path_owned)
+        let (links, unresolved, ambiguous) = tokio::task::spawn_blocking(move || -> Result<_> {
+            let links = vault.extract_links(&path_owned)?;
+            let (unresolved, ambiguous) =
+                hq_vault::check::broken_links(vault.vault_path(), &path_owned)?;
+            Ok((links, unresolved, ambiguous))
         })
         .await??;
 
-        Ok(json!({ "path": path, "links": links, "count": links.len() }))
+        Ok(json!({
+            "path": path,
+            "links": links,
+            "count": links.len(),
+            "unresolved": unresolved,
+            "ambiguous": ambiguous
+        }))
     }
 }
 
@@ -717,29 +707,5 @@ impl HqTool for VaultReindexTool {
         .await??;
 
         Ok(json!({ "indexed": indexed, "errors": errors }))
-    }
-}
-
-#[cfg(test)]
-mod link_tests {
-    use super::link_names_note;
-
-    #[test]
-    fn a_bare_title_a_path_and_an_alias_all_name_the_note() {
-        let path = "Notebooks/Projects/Alpha/Plan.md";
-        assert!(link_names_note("Plan", path));
-        assert!(link_names_note("plan.md", path));
-        assert!(link_names_note("Plan#Goals", path));
-        assert!(link_names_note("Plan|the plan", path));
-        assert!(link_names_note("Alpha/Plan", path));
-        assert!(link_names_note("Notebooks/Projects/Alpha/Plan.md", path));
-    }
-
-    #[test]
-    fn another_note_with_a_similar_name_does_not_match() {
-        let path = "Notebooks/Projects/Alpha/Plan.md";
-        assert!(!link_names_note("Plans", path));
-        assert!(!link_names_note("Beta/Plan", path));
-        assert!(!link_names_note("Master Plan", path));
     }
 }

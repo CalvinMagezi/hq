@@ -45,7 +45,7 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
     let lite = config.profile.is_lite();
     // `--json` on list, tree and read prints one JSON value instead of text.
     // Only for the read-only listings: in `write` and `export` the word is the user's own text.
-    let json_verb = matches!(sub, "list" | "ls" | "tree" | "read" | "cat");
+    let json_verb = matches!(sub, "list" | "ls" | "tree" | "read" | "cat" | "health");
     let json = json_verb && args.iter().any(|a| a == "--json");
     let args: Vec<String> = args
         .iter()
@@ -75,6 +75,7 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
         }
         "import" => super::vault_import::import(cx.config, args, &|r: &str| cx.deny(r)).await?,
         "repair" => repair(&cx, args)?,
+        "health" => super::vault_health::run(cx.config, cx.json)?,
         _ => usage()?,
     }
 
@@ -612,6 +613,9 @@ fn usage() -> Result<()> {
     );
     println!(
         "  moved [--json]       On a phone the vault moved to: forget the old phone's sign-ins, pairings, grants and push"
+    );
+    println!(
+        "  health [--json]      Check the notes for links that reach nothing, duplicates and properties that do not read"
     );
     println!("  stats                Show vault statistics");
     println!("  context              Show system context");

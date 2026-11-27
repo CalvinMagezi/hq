@@ -76,6 +76,12 @@ pub struct DaemonConfig {
     /// are no lanes or nothing to say.
     #[serde(default = "default_true")]
     pub daily_brief: bool,
+
+    /// Every few hours, check the notes for links that reach nothing, duplicates and unreadable
+    /// properties, and keep the result for the Notes screen and `hq doctor`. Reads notes on this
+    /// device only: no model, no network, and it changes no note.
+    #[serde(default = "default_true")]
+    pub vault_health: bool,
 }
 
 /// How chat turns are turned into memories.
@@ -126,6 +132,7 @@ impl Default for DaemonConfig {
             helper_setup_offer: true,
             inbox_tidy: true,
             daily_brief: true,
+            vault_health: true,
         }
     }
 }

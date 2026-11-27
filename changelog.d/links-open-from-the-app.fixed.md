@@ -1,0 +1,1 @@
+**Links to notes open more often.** `[[Folder/Note]]` and `[[Note#Heading]]` links now open the note in the web app and on the phone, in any capitals, and a name shared by two notes opens the same one every time. A `[[link]]` written inside a code block is shown as code instead of turning into a button.

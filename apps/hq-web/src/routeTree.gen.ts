@@ -43,6 +43,7 @@ import { Route as SettingsBrowserRouteImport } from './routes/settings/browser'
 import { Route as SettingsBackupRouteImport } from './routes/settings/backup'
 import { Route as SettingsAccessRouteImport } from './routes/settings/access'
 import { Route as NotesTrashRouteImport } from './routes/notes/trash'
+import { Route as NotesHealthRouteImport } from './routes/notes/health'
 import { Route as NotesSplatRouteImport } from './routes/notes/$'
 import { Route as InboxIdRouteImport } from './routes/inbox/$id'
 import { Route as HelpersIdRouteImport } from './routes/helpers/$id'
@@ -219,6 +220,11 @@ const NotesTrashRoute = NotesTrashRouteImport.update({
   path: '/trash',
   getParentRoute: () => NotesRoute,
 } as any)
+const NotesHealthRoute = NotesHealthRouteImport.update({
+  id: '/health',
+  path: '/health',
+  getParentRoute: () => NotesRoute,
+} as any)
 const NotesSplatRoute = NotesSplatRouteImport.update({
   id: '/$',
   path: '/$',
@@ -264,6 +270,7 @@ export interface FileRoutesByFullPath {
   '/helpers/$id': typeof HelpersIdRoute
   '/inbox/$id': typeof InboxIdRoute
   '/notes/$': typeof NotesSplatRoute
+  '/notes/health': typeof NotesHealthRoute
   '/notes/trash': typeof NotesTrashRoute
   '/settings/access': typeof SettingsAccessRoute
   '/settings/backup': typeof SettingsBackupRoute
@@ -303,6 +310,7 @@ export interface FileRoutesByTo {
   '/helpers/$id': typeof HelpersIdRoute
   '/inbox/$id': typeof InboxIdRoute
   '/notes/$': typeof NotesSplatRoute
+  '/notes/health': typeof NotesHealthRoute
   '/notes/trash': typeof NotesTrashRoute
   '/settings/access': typeof SettingsAccessRoute
   '/settings/backup': typeof SettingsBackupRoute
@@ -345,6 +353,7 @@ export interface FileRoutesById {
   '/helpers/$id': typeof HelpersIdRoute
   '/inbox/$id': typeof InboxIdRoute
   '/notes/$': typeof NotesSplatRoute
+  '/notes/health': typeof NotesHealthRoute
   '/notes/trash': typeof NotesTrashRoute
   '/settings/access': typeof SettingsAccessRoute
   '/settings/backup': typeof SettingsBackupRoute
@@ -388,6 +397,7 @@ export interface FileRouteTypes {
     | '/helpers/$id'
     | '/inbox/$id'
     | '/notes/$'
+    | '/notes/health'
     | '/notes/trash'
     | '/settings/access'
     | '/settings/backup'
@@ -427,6 +437,7 @@ export interface FileRouteTypes {
     | '/helpers/$id'
     | '/inbox/$id'
     | '/notes/$'
+    | '/notes/health'
     | '/notes/trash'
     | '/settings/access'
     | '/settings/backup'
@@ -468,6 +479,7 @@ export interface FileRouteTypes {
     | '/helpers/$id'
     | '/inbox/$id'
     | '/notes/$'
+    | '/notes/health'
     | '/notes/trash'
     | '/settings/access'
     | '/settings/backup'
@@ -748,6 +760,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NotesTrashRouteImport
       parentRoute: typeof NotesRoute
     }
+    '/notes/health': {
+      id: '/notes/health'
+      path: '/health'
+      fullPath: '/notes/health'
+      preLoaderRoute: typeof NotesHealthRouteImport
+      parentRoute: typeof NotesRoute
+    }
     '/notes/$': {
       id: '/notes/$'
       path: '/$'
@@ -819,6 +838,7 @@ const InboxRouteWithChildren = InboxRoute._addFileChildren(InboxRouteChildren)
 
 interface NotesRouteChildren {
   NotesSplatRoute: typeof NotesSplatRoute
+  NotesHealthRoute: typeof NotesHealthRoute
   NotesTrashRoute: typeof NotesTrashRoute
   NotesIndexRoute: typeof NotesIndexRoute
   NotesNIdRoute: typeof NotesNIdRoute
@@ -826,6 +846,7 @@ interface NotesRouteChildren {
 
 const NotesRouteChildren: NotesRouteChildren = {
   NotesSplatRoute: NotesSplatRoute,
+  NotesHealthRoute: NotesHealthRoute,
   NotesTrashRoute: NotesTrashRoute,
   NotesIndexRoute: NotesIndexRoute,
   NotesNIdRoute: NotesNIdRoute,
