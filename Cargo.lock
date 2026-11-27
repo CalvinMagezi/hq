@@ -4230,6 +4230,7 @@ dependencies = [
  "hq-finance",
  "hq-llm",
  "hq-mcp",
+ "hq-memory",
  "hq-suite-adapter",
  "hq-tool-api",
  "hq-tools",
