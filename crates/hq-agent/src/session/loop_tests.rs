@@ -465,6 +465,7 @@ fn event_names(events: &[SessionEvent]) -> Vec<&'static str> {
             SessionEvent::CostUpdate { .. } => "cost_update",
             SessionEvent::StepCredits { .. } => "step_credits",
             SessionEvent::Timing(_) => "timing",
+            SessionEvent::Recalled { .. } => "recalled",
         })
         .collect()
 }
@@ -2391,13 +2392,20 @@ async fn turn_context_goes_just_before_the_message_once_and_the_exchange_stays_c
 struct ScriptedRecall {
     answer: Option<&'static str>,
     asked: std::sync::Mutex<Vec<(String, Option<String>)>>,
+    shown: Vec<i64>,
 }
 
 impl ScriptedRecall {
     fn new(answer: Option<&'static str>) -> Arc<Self> {
+        Self::showing(answer, Vec::new())
+    }
+
+    /// A recall that also says which memories it showed.
+    fn showing(answer: Option<&'static str>, shown: Vec<i64>) -> Arc<Self> {
         Arc::new(Self {
             answer,
             asked: std::sync::Mutex::new(Vec::new()),
+            shown,
         })
     }
 }
@@ -2410,6 +2418,10 @@ impl crate::session::TurnRecall for ScriptedRecall {
             .unwrap()
             .push((message.to_string(), prior_message.map(str::to_string)));
         self.answer.map(str::to_string)
+    }
+
+    fn last_shown(&self) -> Vec<i64> {
+        self.shown.clone()
     }
 }
 
@@ -2814,4 +2826,57 @@ async fn a_hint_joins_the_existing_turn_context_in_one_message() {
     assert_eq!(notes.len(), 1, "one note, not two: {notes:?}");
     assert!(notes[0].contains("the rent is due on the 1st"));
     assert!(notes[0].contains("email_send"), "{}", notes[0]);
+}
+
+#[tokio::test]
+async fn a_recall_that_showed_memories_says_which_ones_once() {
+    let provider = Arc::new(MockProvider::new(
+        vec![BufferedReply::Complete("ok".to_string())],
+        vec![],
+    ));
+    let mut agent = session(provider, vec![]);
+    agent.set_turn_recall(ScriptedRecall::showing(
+        Some("<recalled_memories>\n- Acme delivers on Thursdays\n</recalled_memories>"),
+        vec![7, 9],
+    ));
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    agent.on_event(move |event| sink.lock().unwrap().push(event));
+
+    agent.prompt("when does Acme deliver?").await.unwrap();
+
+    let recalled: Vec<Vec<i64>> = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::Recalled { ids } => Some(ids.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(recalled, vec![vec![7, 9]]);
+}
+
+#[tokio::test]
+async fn nothing_shown_means_no_recalled_event() {
+    let provider = Arc::new(MockProvider::new(
+        vec![BufferedReply::Complete("hello".to_string())],
+        vec![],
+    ));
+    let mut agent = session(provider, vec![]);
+    // Even a stale answer from the hook says nothing when no note was brought up.
+    agent.set_turn_recall(ScriptedRecall::showing(None, vec![7]));
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    agent.on_event(move |event| sink.lock().unwrap().push(event));
+
+    agent.prompt("hi").await.unwrap();
+
+    assert!(
+        !events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Recalled { .. }))
+    );
 }

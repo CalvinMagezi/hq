@@ -78,6 +78,10 @@ export function listMemories(filter: MemoryFilter, q: string): Promise<MemoryLis
   return hqJson<MemoryList>(`/api/memory${query ? `?${query}` : ''}`)
 }
 
+export function getMemory(id: number): Promise<MemoryItem> {
+  return hqJson<MemoryItem>(`/api/memory/${id}`)
+}
+
 export function editMemory(id: number, summary: string): Promise<{ success: boolean; item: MemoryItem }> {
   return hqJson(`/api/memory/${id}/edit`, 'POST', { summary })
 }

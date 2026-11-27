@@ -104,6 +104,7 @@ export function MessageList({ threadId, messages, followSignal, onEdit, onRegene
                 driver: m.driver,
                 viaMcp: m.viaMcp,
                 spoken: m.spoken,
+                recalled: m.recalled,
               }}
               onOpenSource={onOpenSource}
               onOpenMade={onOpenMade}

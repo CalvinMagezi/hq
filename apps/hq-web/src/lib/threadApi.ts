@@ -71,6 +71,7 @@ interface ApiMessageMeta {
   offer?: ApiOffer | null
   next_steps?: unknown
   files?: unknown
+  recalled?: unknown
 }
 
 type ApiSource = ApiSourceMeta | string
@@ -132,6 +133,13 @@ export function toNextSteps(raw: unknown): NextStep[] | undefined {
   return steps.length > 0 ? steps : undefined
 }
 
+/** Keeps the whole numbers of `meta.recalled`; anything else is dropped, so a bad row shows no chip. */
+export function toRecalled(raw: unknown): number[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const ids = raw.filter((n): n is number => Number.isInteger(n) && n > 0)
+  return ids.length > 0 ? ids : undefined
+}
+
 export function toThreadMessage(m: ApiMessage): ThreadMessage {
   const { text, attachments } = splitAttachments(m.content)
   const steps = m.meta?.tool_steps ?? []
@@ -152,6 +160,7 @@ export function toThreadMessage(m: ApiMessage): ThreadMessage {
     offer: toOffer(m.meta?.offer),
     nextSteps: toNextSteps(m.meta?.next_steps),
     files: toReplyFiles(m.meta?.files),
+    recalled: toRecalled(m.meta?.recalled),
   }
 }
 

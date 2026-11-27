@@ -85,6 +85,11 @@ pub enum SessionEvent {
     /// How long one model call, tool call or compaction took. Emitted when the call is over, so a
     /// surface can show where a turn's time went without timing events itself.
     Timing(CallTiming),
+    /// The notes HQ remembered that were shown to the model for this message, by memory number.
+    /// Only the numbers: a surface that wants the words asks the owner's memory routes.
+    Recalled {
+        ids: Vec<i64>,
+    },
     /// Session stopped because it exceeded its USD budget.
     BudgetExhausted {
         spent: f64,

@@ -9,6 +9,7 @@ import { CREDITS_TOOLTIP, formatCredits, totalCredits, type StepCredit } from '~
 import { ToolCallBlock } from './ToolCallBlock'
 import { LiveLine } from './LiveLine'
 import { FileCard, MadeCard, SourceChips } from './ReplyExtras'
+import { RememberedChip } from './RememberedChip'
 import { madeNotes, relevantSources, type MadeNote, type ReplySource } from '~/lib/replySources'
 import { ThinkingPanel } from './ThinkingPanel'
 import { MessageAttachments } from './AttachmentChips'
@@ -35,6 +36,8 @@ interface DisplayMessage {
   spoken?: boolean
   /** Files this reply made, checked by the server. */
   files?: ReplyFile[]
+  /** The notes HQ remembered and showed the model for this reply. */
+  recalled?: number[]
 }
 
 interface Props {
@@ -106,6 +109,7 @@ export function ChatBubble({ message, live = false, startedAt, onEdit, onRegener
         <MadeCard key={n.path} note={n} onOpen={(note) => onOpenMade?.(note)} />
       ))}
       {sources.length > 0 && <SourceChips sources={sources} onOpen={(s) => onOpenSource?.(s)} />}
+      {!isUser && !live && message.recalled && <RememberedChip ids={message.recalled} />}
 
       {!live && (
         <div className="a-meta">

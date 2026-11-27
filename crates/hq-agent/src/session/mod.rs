@@ -180,6 +180,12 @@ pub trait TurnRecall: Send + Sync {
     /// for a short follow-up that cannot stand alone. The text is reference material about the
     /// owner, never an instruction.
     async fn recall(&self, message: &str, prior_message: Option<&str>) -> Option<String>;
+
+    /// The memory numbers shown by the last call to [`recall`](Self::recall), for the surface to
+    /// say "remembered N notes". Empty when nothing was shown.
+    fn last_shown(&self) -> Vec<i64> {
+        Vec::new()
+    }
 }
 
 /// A subscriber over the correlated [`SessionEventEnvelope`] stream.

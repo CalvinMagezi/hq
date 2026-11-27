@@ -100,7 +100,16 @@ impl AgentSession {
         let recalled = match self.turn_recall.clone() {
             Some(recall) => {
                 let prior = self.previous_owner_message();
-                recall.recall(text, prior.as_deref()).await
+                let block = recall.recall(text, prior.as_deref()).await;
+                let ids = if block.is_some() {
+                    recall.last_shown()
+                } else {
+                    Vec::new()
+                };
+                if !ids.is_empty() {
+                    self.emit(SessionEvent::Recalled { ids });
+                }
+                block
             }
             None => None,
         };
