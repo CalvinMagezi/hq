@@ -1,5 +1,6 @@
 use anyhow::Result;
 use hq_core::config::{HqConfig, MemoryRecall};
+use hq_db::memories_owner::{self, ListFilter, OwnerRow, Standing};
 use hq_vault::VaultClient;
 
 /// Show memory facts, edit memory, and manage system context.
@@ -16,6 +17,16 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
         "graph" => graph(config, args)?,
         "stats" => stats(config)?,
         "recall-report" | "recall" => recall_report(config, args)?,
+        "list" => list_cmd(config, args)?,
+        "search" => search_cmd(config, args)?,
+        "view" => view_cmd(config, args)?,
+        "edit" => edit_cmd(config, args)?,
+        "pin" => pin_cmd(config, args, true)?,
+        "unpin" => pin_cmd(config, args, false)?,
+        "keep" => standing_cmd(config, args, Standing::Active)?,
+        "outdated" => standing_cmd(config, args, Standing::OutOfDate)?,
+        "forget" => forget_cmd(config, args)?,
+        "export" => export_cmd(config)?,
         _ => usage()?,
     }
 
@@ -190,6 +201,277 @@ fn graph(config: &HqConfig, args: &[String]) -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+// ─── What HQ learned from chats ─────────────────────────────────────────────
+
+fn open_db(config: &HqConfig) -> Result<hq_db::Database> {
+    hq_db::Database::open(&config.db_path())
+}
+
+/// The memory number in `args`, accepting `12` and `#12`.
+fn number(args: &[String]) -> Result<i64> {
+    args.first()
+        .and_then(|a| a.trim_start_matches('#').parse().ok())
+        .ok_or_else(|| anyhow::anyhow!("Give the memory's number, as shown by `hq memory list`."))
+}
+
+fn missing(id: i64) -> anyhow::Error {
+    anyhow::anyhow!("There is no memory #{id}.")
+}
+
+/// How long ago, in the units a person says it in.
+fn ago(created_at: &str) -> String {
+    let Ok(at) = chrono::DateTime::parse_from_rfc3339(created_at) else {
+        return "some time ago".to_string();
+    };
+    let days = (chrono::Utc::now() - at.with_timezone(&chrono::Utc))
+        .num_days()
+        .max(0);
+    match days {
+        0 => "today".to_string(),
+        1 => "yesterday".to_string(),
+        2..=13 => format!("{days} days ago"),
+        14..=59 => format!("{} weeks ago", days / 7),
+        60..=729 => format!("{} months ago", days / 30),
+        _ => format!("{} years ago", days / 365),
+    }
+}
+
+/// Words for what is unusual about a memory; nothing for an ordinary one.
+fn notes_on(row: &OwnerRow) -> Vec<&'static str> {
+    let mut notes = Vec::new();
+    if row.pinned {
+        notes.push("pinned");
+    }
+    match row.status.as_str() {
+        "review" => notes.push("held back"),
+        "superseded" => notes.push("out of date"),
+        _ => {}
+    }
+    if row.origin != "owner" {
+        notes.push("from a shared channel, not yet kept");
+    }
+    if row.provenance == "owner_edited" {
+        notes.push("edited by you");
+    }
+    notes
+}
+
+/// One line for a list.
+fn render_line(row: &OwnerRow) -> String {
+    let notes = notes_on(row);
+    let tag = if notes.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", notes.join(", "))
+    };
+    let text: String = row.summary.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = if text.chars().count() > 110 {
+        format!("{}...", text.chars().take(110).collect::<String>())
+    } else {
+        text
+    };
+    format!("#{:<5} {:<14} {text}{tag}", row.id, ago(&row.created_at))
+}
+
+fn print_rows(rows: &[OwnerRow], none: &str) {
+    if rows.is_empty() {
+        println!("{none}");
+    }
+    for row in rows {
+        println!("{}", render_line(row));
+    }
+}
+
+fn flag(args: &[String], name: &str) -> bool {
+    args.iter().any(|a| a == name)
+}
+
+fn list_cmd(config: &HqConfig, args: &[String]) -> Result<()> {
+    let db = open_db(config)?;
+    let limit = args
+        .iter()
+        .position(|a| a == "--limit")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(30);
+    let status = if flag(args, "--review") {
+        Some("review".to_string())
+    } else if flag(args, "--outdated") {
+        Some("superseded".to_string())
+    } else {
+        None
+    };
+    let (rows, counts) = db.with_conn(|conn| {
+        let filter = ListFilter {
+            status,
+            unattributed_only: flag(args, "--unattributed"),
+            pinned_only: flag(args, "--pinned"),
+            limit,
+            offset: 0,
+        };
+        Ok((
+            memories_owner::list(conn, &filter)?,
+            memories_owner::counts(conn)?,
+        ))
+    })?;
+    println!(
+        "{} memories: {} in use, {} held back, {} out of date, {} from shared channels, {} pinned\n",
+        counts.total,
+        counts.active,
+        counts.review,
+        counts.out_of_date,
+        counts.unattributed,
+        counts.pinned
+    );
+    print_rows(&rows, "Nothing matches.");
+    Ok(())
+}
+
+fn search_cmd(config: &HqConfig, args: &[String]) -> Result<()> {
+    if args.is_empty() {
+        anyhow::bail!("Give the words to look for: hq memory search acme delivery");
+    }
+    let rows =
+        open_db(config)?.with_conn(|conn| memories_owner::search(conn, &args.join(" "), 20))?;
+    print_rows(&rows, "No memory matches.");
+    Ok(())
+}
+
+fn view_cmd(config: &HqConfig, args: &[String]) -> Result<()> {
+    let id = number(args)?;
+    let row = open_db(config)?
+        .with_conn(|conn| memories_owner::get(conn, id))?
+        .ok_or_else(|| missing(id))?;
+    println!("Memory #{}", row.id);
+    println!("  {}", row.summary);
+    println!("  learned:   {} ({})", ago(&row.created_at), row.harness);
+    println!("  status:    {}", row.status);
+    println!("  from:      {}", row.origin);
+    println!("  how:       {}", row.provenance);
+    println!("  pinned:    {}", if row.pinned { "yes" } else { "no" });
+    println!("  brought up in a chat: {} times", row.used);
+    if !row.entities.is_empty() {
+        println!("  names:     {}", row.entities.join(", "));
+    }
+    if !row.topics.is_empty() {
+        println!("  topics:    {}", row.topics.join(", "));
+    }
+    if let Some(thread) = &row.thread_id {
+        println!("  chat:      {thread}");
+    }
+    Ok(())
+}
+
+fn edit_cmd(config: &HqConfig, args: &[String]) -> Result<()> {
+    let id = number(args)?;
+    let text = args[1..].join(" ");
+    if text.trim().is_empty() {
+        anyhow::bail!("Give the corrected text: hq memory edit {id} \"the new text\"");
+    }
+    let changed = open_db(config)?.with_conn(|conn| memories_owner::edit(conn, id, &text))?;
+    if !changed {
+        return Err(missing(id));
+    }
+    println!("Memory #{id} now says what you wrote. It counts as yours.");
+    Ok(())
+}
+
+fn pin_cmd(config: &HqConfig, args: &[String], pinned: bool) -> Result<()> {
+    let id = number(args)?;
+    if !open_db(config)?.with_conn(|conn| memories_owner::set_pinned(conn, id, pinned))? {
+        return Err(missing(id));
+    }
+    println!(
+        "Memory #{id} {}.",
+        if pinned {
+            "is pinned and will not age out"
+        } else {
+            "can age out again"
+        }
+    );
+    Ok(())
+}
+
+fn standing_cmd(config: &HqConfig, args: &[String], standing: Standing) -> Result<()> {
+    let id = number(args)?;
+    if !open_db(config)?.with_conn(|conn| memories_owner::set_standing(conn, id, standing))? {
+        return Err(missing(id));
+    }
+    match standing {
+        Standing::OutOfDate => {
+            println!("Memory #{id} is kept but marked out of date. It will not be brought up.")
+        }
+        _ => println!("Memory #{id} is yours and can be brought up when it fits."),
+    }
+    Ok(())
+}
+
+fn forget_cmd(config: &HqConfig, args: &[String]) -> Result<()> {
+    let id = number(args)?;
+    let db = open_db(config)?;
+    let row = db
+        .with_conn(|conn| memories_owner::get(conn, id))?
+        .ok_or_else(|| missing(id))?;
+    if !flag(args, "--yes") {
+        println!("This would delete memory #{id}, and the notes and lines HQ made from it:\n");
+        println!("  {}\n", render_line(&row));
+        println!("It cannot be undone. Run again with --yes to do it:");
+        println!("  hq memory forget {id} --yes");
+        return Ok(());
+    }
+    let Some(report) = hq_memory::forget::forget(&db, &config.vault_path, id)? else {
+        return Err(missing(id));
+    };
+    println!("Forgot memory #{id}.");
+    if report.insights_removed > 0 {
+        println!("  insights removed: {}", report.insights_removed);
+    }
+    for note in &report.insight_notes_removed {
+        println!("  note deleted: {note}");
+    }
+    let pages = report.concept_pages_updated + report.concept_pages_removed;
+    if pages > 0 {
+        println!(
+            "  concept pages: {} updated, {} removed",
+            report.concept_pages_updated, report.concept_pages_removed
+        );
+    }
+    if report.archive_entries_removed > 0 {
+        println!(
+            "  archive lines removed: {}",
+            report.archive_entries_removed
+        );
+    }
+    println!("\nHQ will not learn those exact words again. What it could not reach:");
+    for what in hq_memory::forget::NOT_REACHED {
+        println!("  - {what}");
+    }
+    Ok(())
+}
+
+fn export_cmd(config: &HqConfig) -> Result<()> {
+    let all = open_db(config)?.with_conn(|conn| {
+        // One page is capped, so read page after page until there are no more.
+        let mut all: Vec<OwnerRow> = Vec::new();
+        loop {
+            let page = memories_owner::list(
+                conn,
+                &ListFilter {
+                    limit: memories_owner::MAX_PAGE,
+                    offset: all.len() as i64,
+                    ..ListFilter::default()
+                },
+            )?;
+            if page.is_empty() {
+                return Ok(all);
+            }
+            all.extend(page);
+        }
+    })?;
+    println!("{}", serde_json::to_string_pretty(&all)?);
     Ok(())
 }
 
@@ -396,6 +678,17 @@ fn usage() -> Result<()> {
     println!("  graph <entity>   Explore entity connections");
     println!("  stats            Memory DB stats + activity dashboard");
     println!("  recall-report [days]  How memory recall has done lately (default 7 days)");
+    println!();
+    println!("What HQ learned from your chats (each has a number):");
+    println!("  list [--review] [--unattributed] [--pinned] [--outdated] [--limit N]");
+    println!("  search <words>   Find a memory");
+    println!("  view <number>    Everything HQ knows about one memory");
+    println!("  edit <number> \"<text>\"   Correct it. It becomes yours");
+    println!("  pin <number> / unpin <number>   Never / again let it age out");
+    println!("  keep <number>    Vouch for one held back (from a shared channel)");
+    println!("  outdated <number>  It is no longer true: keep it, never bring it up");
+    println!("  forget <number> --yes   Delete it and everything HQ made from it");
+    println!("  export           Everything, as JSON");
     Ok(())
 }
 
@@ -469,5 +762,75 @@ mod tests {
             let text = render_recall_report(&report(0, 0, 0), mode);
             assert!(text.contains(&format!("Mode: {word}:")), "{text}");
         }
+    }
+
+    fn row(summary: &str) -> OwnerRow {
+        OwnerRow {
+            id: 12,
+            summary: summary.to_string(),
+            entities: vec![],
+            topics: vec![],
+            importance: 0.5,
+            created_at: (chrono::Utc::now() - chrono::Duration::days(3)).to_rfc3339(),
+            status: "active".into(),
+            origin: "owner".into(),
+            provenance: "model_inferred".into(),
+            pinned: false,
+            used: 0,
+            thread_id: None,
+            harness: "web".into(),
+        }
+    }
+
+    #[test]
+    fn a_memory_number_is_read_with_or_without_a_hash() {
+        assert_eq!(number(&["12".to_string()]).unwrap(), 12);
+        assert_eq!(number(&["#12".to_string()]).unwrap(), 12);
+        assert!(number(&[]).is_err());
+        assert!(number(&["acme".to_string()]).is_err());
+    }
+
+    #[test]
+    fn a_list_line_has_the_number_the_age_and_what_is_unusual_about_it() {
+        let plain = render_line(&row("Acme delivers on Thursdays"));
+        assert!(plain.starts_with("#12"), "{plain}");
+        assert!(
+            plain.contains("3 days ago") && plain.ends_with("Acme delivers on Thursdays"),
+            "{plain}"
+        );
+
+        let mut odd = row("Group chat moves to Sundays");
+        odd.pinned = true;
+        odd.status = "review".into();
+        odd.origin = "unknown_channel".into();
+        let line = render_line(&odd);
+        assert!(
+            line.contains("pinned") && line.contains("held back"),
+            "{line}"
+        );
+        assert!(
+            line.contains("from a shared channel, not yet kept"),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn a_long_memory_is_cut_in_a_list_and_a_line_break_cannot_split_it() {
+        let long = format!("start\nsecond line {}", "word ".repeat(60));
+        let line = render_line(&row(&long));
+        assert!(!line.contains('\n'), "{line:?}");
+        assert!(line.ends_with("..."), "{line}");
+    }
+
+    #[test]
+    fn ages_are_said_the_way_a_person_says_them() {
+        let days = |n| ago(&(chrono::Utc::now() - chrono::Duration::days(n)).to_rfc3339());
+        assert_eq!(days(0), "today");
+        assert_eq!(days(1), "yesterday");
+        assert_eq!(days(5), "5 days ago");
+        assert_eq!(days(30), "4 weeks ago");
+        assert_eq!(days(200), "6 months ago");
+        assert_eq!(days(800), "2 years ago");
+        assert_eq!(ago("not a date"), "some time ago");
     }
 }

@@ -148,13 +148,25 @@ impl MemoryIngester {
         );
         let entities: Vec<String> = extracted.entities.into_iter().take(10).collect();
 
+        let summary = hq_core::redact::redact_secrets(&extracted.summary);
+        // The owner had HQ forget exactly this: do not learn it again.
+        let hash = crate::hash::content_hash(&summary);
+        if self
+            .db
+            .with_conn(|conn| hq_db::memories_owner::is_tombstoned(conn, &hash))
+            .unwrap_or(false)
+        {
+            info!("memory skipped: the owner had HQ forget this");
+            return Ok(None);
+        }
+
         let id = store_memory_with(
             &self.db,
             &StoreMemoryParams {
                 source,
                 harness,
                 raw_text: "",
-                summary: &hq_core::redact::redact_secrets(&extracted.summary),
+                summary: &summary,
                 entities: &entities,
                 topics: &topics,
                 importance,

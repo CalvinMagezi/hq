@@ -138,8 +138,8 @@ pub fn store_memory_with(
 
     db.with_conn(|conn| {
         conn.execute(
-            "INSERT INTO memories (source, harness, raw_text, summary, entities, topics, importance, content, created_at, user_id, origin, provenance, thread_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?4, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO memories (source, harness, raw_text, summary, entities, topics, importance, content, created_at, user_id, origin, provenance, thread_id, content_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?4, ?8, ?9, ?10, ?11, ?12, ?13)",
             rusqlite::params![
                 params.source,
                 params.harness,
@@ -152,7 +152,8 @@ pub fn store_memory_with(
                 params.user_id,
                 trace.origin.as_str(),
                 trace.provenance.as_str(),
-                trace.thread_id
+                trace.thread_id,
+                crate::hash::content_hash(params.summary)
             ],
         )?;
         Ok(conn.last_insert_rowid())
