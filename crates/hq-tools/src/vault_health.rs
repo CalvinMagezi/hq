@@ -74,19 +74,13 @@ pub fn scan_and_store(vault_path: &Path, db: &Database) -> Result<Stored> {
     let ran_at = now.to_rfc3339();
     let json = serde_json::to_string(&scanned.report)?;
     let counts = run_counts(&scanned.report.counts);
+    let (summary_a, summary_b) = {
+        let (a, b) = scanned.plan.counts();
+        (a as i64, b as i64)
+    };
     let summary = FixSummary {
-        a: scanned
-            .plan
-            .fixes
-            .iter()
-            .filter(|f| f.tier == Tier::A)
-            .count() as i64,
-        b: scanned
-            .plan
-            .fixes
-            .iter()
-            .filter(|f| f.tier == Tier::B)
-            .count() as i64,
+        a: summary_a,
+        b: summary_b,
         fixes: serde_json::to_string(
             &scanned
                 .plan
