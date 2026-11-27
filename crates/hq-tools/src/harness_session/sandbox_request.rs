@@ -631,7 +631,7 @@ fn reply(outcome: Outcome, req: &GrantRequest, restart: &Restart) -> Value {
         Outcome::Pending { id } => json!({
             "status": "pending_owner_approval",
             "grant": id,
-            "next": format!("HQ could not approve '{what}' by itself and asked the owner. Tell the user you are waiting on it, carry on with anything that does not need it, then end your turn: once the owner answers and you are idle, HQ restarts you with the access or tells you it was declined. Do not poll and do not work around the denial."),
+            "next": format!("HQ could not approve '{what}' by itself and asked the owner. Tell the user you are waiting on it, carry on with anything that does not need it, then end your turn: once the owner answers and you are idle, HQ restarts you with the access or tells you it was declined. Do not keep polling; if you get another turn and have heard nothing, call sandbox_request again with the same arguments to read the answer. Do not work around the denial."),
         }),
         Outcome::Declined => json!({
             "status": "declined",
@@ -737,7 +737,7 @@ impl HqTool for SandboxRequestTool {
     }
 
     fn description(&self) -> &str {
-        "Ask HQ for access your sandbox denies, instead of working around it. Name exactly one resource: capability fs_write or fs_read with an absolute path, loopback with a local port, or egress with host or host:port. HQ approves what the owner's access profile for this task covers and restarts your session (same conversation) so it applies; anything else goes to the owner, and HQ restarts or tells you once they answer and you are idle. Credentials, HQ's own files and other agents' state are never granted. 'reason' is shown to the owner as your words and never decides anything."
+        "Ask HQ for access your sandbox denies, instead of working around it. Name exactly one resource: capability fs_write or fs_read with an absolute path, loopback with a local port, or egress with host or host:port. HQ approves what the owner's access profile for this task covers and restarts your session (same conversation) so it applies; anything else goes to the owner, and HQ restarts or tells you once they answer and you are idle; calling again with the same arguments also reads the answer. Credentials, HQ's own files and other agents' state are never granted. 'reason' is shown to the owner as your words and never decides anything."
     }
 
     fn parameters(&self) -> Value {
