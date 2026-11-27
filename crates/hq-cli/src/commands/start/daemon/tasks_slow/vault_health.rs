@@ -31,6 +31,10 @@ pub async fn run_vault_health(vault_path: &Path, db: &Database, config: &HqConfi
         hq_tools::vault_health::render_markdown(&stored),
     )?;
 
+    if config.daemon.vault_auto_fix {
+        auto_fix(vault_path, db).await;
+    }
+
     let c = &stored.report.counts;
     info!(
         notes = c.notes,
@@ -44,4 +48,23 @@ pub async fn run_vault_health(vault_path: &Path, db: &Database, config: &HqConfi
         "vault-health: check complete"
     );
     Ok(())
+}
+
+/// The certain fixes, when the owner has allowed them and the undo brake is off. A failure here is
+/// logged and never stops the check from reporting.
+async fn auto_fix(vault_path: &Path, db: &Database) {
+    let (vault, job_db) = (vault_path.to_path_buf(), std::sync::Arc::new(db.clone()));
+    match tokio::task::spawn_blocking(move || hq_tools::vault_health::run_auto(&vault, &job_db))
+        .await
+    {
+        Ok(Ok(Some(applied))) if !applied.done.fixes.is_empty() => info!(
+            fixes = applied.done.fixes.len(),
+            notes = applied.done.rewritten.len(),
+            "vault-health: fixed the links it was certain about"
+        ),
+        Ok(Ok(Some(_))) => {}
+        Ok(Ok(None)) => info!("vault-health: automatic fixes are paused, too many were undone"),
+        Ok(Err(e)) => tracing::warn!(error = %e, "vault-health: automatic fix failed"),
+        Err(e) => tracing::warn!(error = %e, "vault-health: automatic fix did not finish"),
+    }
 }

@@ -59,6 +59,22 @@ pub struct DuplicateGroup {
     pub notes: Vec<String>,
 }
 
+/// Two notes that say almost the same thing, found by the on-device model and then confirmed
+/// on their whole text. Only listed: removing either is the person's call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SimilarPair {
+    pub a: String,
+    pub b: String,
+    /// How much of their words they share, 0 to 100.
+    pub percent: u8,
+}
+
+impl SimilarPair {
+    pub fn key(&self) -> String {
+        format!("{}|{}", self.a, self.b)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FrontmatterProblem {
@@ -99,6 +115,13 @@ pub struct Counts {
     pub duplicates: usize,
     pub empty: usize,
     pub frontmatter: usize,
+    /// Pairs of notes that say almost the same thing. Not counted in [`Counts::problems`].
+    #[serde(default)]
+    pub similar: usize,
+    /// How many notes were compared for that; 0 when the check did not run (no on-device
+    /// model, or too many notes).
+    #[serde(default)]
+    pub similar_checked: usize,
 }
 
 impl Counts {
@@ -127,6 +150,8 @@ pub struct Report {
     pub frontmatter: Vec<FrontmatterIssue>,
     /// Notes that could not be read: too large, or not text.
     pub unread: Vec<String>,
+    #[serde(default)]
+    pub similar: Vec<SimilarPair>,
 }
 
 /// The report with each list capped at [`MAX_LISTED`]. The counts are exact.
@@ -145,6 +170,7 @@ pub mod kind {
     pub const EMPTY: &str = "empty";
     pub const DUPLICATE: &str = "duplicate";
     pub const FRONTMATTER: &str = "frontmatter";
+    pub const SIMILAR: &str = "similar";
 }
 
 /// What the owner chose to leave alone: `(kind, key)` pairs from [`kind`] and the `key()` of
@@ -188,6 +214,7 @@ impl Report {
         self.empty.truncate(MAX_LISTED);
         self.frontmatter.truncate(MAX_LISTED);
         self.unread.truncate(MAX_LISTED);
+        self.similar.truncate(MAX_LISTED);
     }
 
     /// Drop what the owner chose to ignore and count again. Call on a [`scan_full`] report,
@@ -207,6 +234,7 @@ impl Report {
         self.duplicates.retain(|g| !has(kind::DUPLICATE, g.key()));
         self.frontmatter
             .retain(|f| !has(kind::FRONTMATTER, f.note.clone()));
+        self.similar.retain(|p| !has(kind::SIMILAR, p.key()));
         self.recount();
     }
 
@@ -237,6 +265,7 @@ impl Report {
         self.counts.duplicates = self.duplicates.len();
         self.counts.frontmatter = self.frontmatter.len();
         self.counts.unread = self.unread.len();
+        self.counts.similar = self.similar.len();
     }
 }
 

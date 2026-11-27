@@ -82,6 +82,14 @@ pub struct DaemonConfig {
     /// device only: no model, no network, and it changes no note.
     #[serde(default = "default_true")]
     pub vault_health: bool,
+
+    /// After each notes check, fix the links HQ is certain about (a link whose folder is out of
+    /// date, a note that was renamed, a second block of properties) without asking. Off until
+    /// the owner allows it, and it switches itself off again if its fixes keep being undone.
+    /// Every run saves the original notes first and can be undone. Changes notes on this device
+    /// only: no model, no network.
+    #[serde(default)]
+    pub vault_auto_fix: bool,
 }
 
 /// How chat turns are turned into memories.
@@ -133,6 +141,7 @@ impl Default for DaemonConfig {
             inbox_tidy: true,
             daily_brief: true,
             vault_health: true,
+            vault_auto_fix: false,
         }
     }
 }
