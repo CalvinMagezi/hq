@@ -156,6 +156,9 @@ pub(crate) fn device_for_turn(
         tracing::info!(reason = "clock_skew", "device ignored");
         return None;
     }
+    // The first zone a phone reports becomes the owner's saved zone, so a reminder set from
+    // Telegram or the CLI later still means their clock. A zone they chose is never replaced.
+    hq_tools::reminders::seed_timezone(&state.db, clock.zone);
     let tx = state.tx.clone();
     let emit = Arc::new(move |frame: Value| {
         let _ = tx.send(frame.to_string());
