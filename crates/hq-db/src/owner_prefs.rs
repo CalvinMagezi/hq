@@ -16,13 +16,23 @@ pub const HELPERS_ASK_LEVEL: &str = "helpers.ask_level";
 /// How many focus lanes may be active at once, 1 to 5 (`crate::focus_lanes`).
 pub const FOCUS_MAX_LANES: &str = "focus.max_lanes";
 
+/// Whether HQ fixes the links it is certain about after each notes check (`true` or `false`).
+/// The owner's answer to the offer in the Inbox; the config key `daemon.vault_auto_fix` turns
+/// it on too, and either is enough.
+pub const VAULT_AUTO_FIX: &str = "vault.auto_fix";
+
 /// Every key that may be stored.
-pub const KNOWN: [&str; 3] = [CHAT_AUTO_TITLE, HELPERS_ASK_LEVEL, FOCUS_MAX_LANES];
+pub const KNOWN: [&str; 4] = [
+    CHAT_AUTO_TITLE,
+    HELPERS_ASK_LEVEL,
+    FOCUS_MAX_LANES,
+    VAULT_AUTO_FIX,
+];
 
 /// Whether `value` is one this key accepts.
 pub fn valid(key: &str, value: &str) -> bool {
     match key {
-        CHAT_AUTO_TITLE => matches!(value, "true" | "false"),
+        CHAT_AUTO_TITLE | VAULT_AUTO_FIX => matches!(value, "true" | "false"),
         HELPERS_ASK_LEVEL => matches!(value, "nothing" | "loses_work" | "everything"),
         FOCUS_MAX_LANES => matches!(value, "1" | "2" | "3" | "4" | "5"),
         _ => false,
@@ -54,6 +64,11 @@ pub fn set(db: &Database, key: &str, value: &str) -> Result<()> {
         )?;
         Ok(())
     })
+}
+
+/// Whether the owner said HQ may fix the links it is certain about. Off until they say so.
+pub fn vault_auto_fix_on(db: &Database) -> bool {
+    matches!(get(db, VAULT_AUTO_FIX), Ok(Some(v)) if v == "true")
 }
 
 /// Whether HQ names chats after their first reply. On unless the owner turned it off.

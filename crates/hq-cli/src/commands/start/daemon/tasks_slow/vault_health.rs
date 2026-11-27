@@ -31,8 +31,20 @@ pub async fn run_vault_health(vault_path: &Path, db: &Database, config: &HqConfi
         hq_tools::vault_health::render_markdown(&stored),
     )?;
 
-    if config.daemon.vault_auto_fix {
+    let auto_on = hq_tools::vault_health::auto_fix_on(db, config.daemon.vault_auto_fix);
+    if auto_on {
         auto_fix(vault_path, db).await;
+    }
+    // After the automatic pass, so a week's note does not name what was just fixed.
+    let stored = if auto_on {
+        let (vault, job_db) = (vault_path.to_path_buf(), db.clone());
+        tokio::task::spawn_blocking(move || hq_tools::vault_health::scan_and_store(&vault, &job_db))
+            .await??
+    } else {
+        stored
+    };
+    if let Err(e) = hq_tools::vault_health::sync_inbox(db, &stored, auto_on) {
+        tracing::warn!(error = %e, "vault-health: could not update the Inbox");
     }
 
     let c = &stored.report.counts;

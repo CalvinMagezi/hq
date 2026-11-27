@@ -709,6 +709,59 @@
     <string name="notes_health_fm_unclosed">The properties at the top are never closed</string>
     <string name="notes_health_fm_invalid">The properties at the top cannot be read</string>
     <string name="notes_health_fm_nested">A second block of properties sits in the text</string>
+    <plurals name="notes_health_fix_count">
+        <item quantity="one">Fix %1$s thing</item>
+        <item quantity="other">Fix %1$s things</item>
+    </plurals>
+    <string name="notes_health_fix">Fix</string>
+    <string name="notes_health_fixing">Fixing</string>
+    <string name="notes_health_tier_a">Sure</string>
+    <string name="notes_health_tier_b">Likely</string>
+    <string name="notes_health_becomes">Becomes %1$s</string>
+    <string name="notes_health_merge">Same text as %1$s. This one goes to the Trash.</string>
+    <string name="notes_health_merge_props">Joins the second block of properties to the first</string>
+    <string name="notes_health_fix_failed">Could not fix that.</string>
+    <plurals name="notes_health_fixed">
+        <item quantity="one">Fixed %1$s thing</item>
+        <item quantity="other">Fixed %1$s things</item>
+    </plurals>
+    <plurals name="notes_health_card_fixed">
+        <item quantity="one">HQ fixed %1$s thing in your notes</item>
+        <item quantity="other">HQ fixed %1$s things in your notes</item>
+    </plurals>
+    <string name="notes_health_undo">Undo</string>
+    <string name="notes_health_undo_failed">Could not undo that.</string>
+    <plurals name="notes_health_undone">
+        <item quantity="one">Put back %1$s note</item>
+        <item quantity="other">Put back %1$s notes</item>
+    </plurals>
+    <plurals name="notes_health_undo_kept">
+        <item quantity="one">%1$s note was left as you have it</item>
+        <item quantity="other">%1$s notes were left as you have them</item>
+    </plurals>
+    <plurals name="notes_health_skipped">
+        <item quantity="one">%1$s note was left alone</item>
+        <item quantity="other">%1$s notes were left alone</item>
+    </plurals>
+    <string name="notes_health_history">Recent fixes</string>
+    <string name="notes_health_run_line">%1$s. %2$s fixed.</string>
+    <string name="notes_health_run_taken_back">Taken back</string>
+    <string name="notes_health_run_by_hq">Done by HQ</string>
+    <plurals name="notes_health_similar">
+        <item quantity="one">%1$s pair of notes says almost the same thing</item>
+        <item quantity="other">%1$s pairs of notes say almost the same thing</item>
+    </plurals>
+    <string name="notes_health_same_words">%1$s percent of the words are the same</string>
+    <string name="notes_health_skip_protected">HQ never changes this folder</string>
+    <string name="notes_health_skip_machine">Written by HQ\'s own upkeep</string>
+    <string name="notes_health_skip_suite">A sheet, deck or dashboard</string>
+    <string name="notes_health_skip_pinned">Pinned, so only you change it</string>
+    <string name="notes_health_skip_agent">An assistant wrote it and you have not reviewed it</string>
+    <string name="notes_health_skip_recent">Edited a moment ago</string>
+    <string name="notes_health_skip_large">Too large to change safely</string>
+    <string name="notes_health_skip_relink">Links to it cannot be pointed at the other note</string>
+    <string name="notes_health_skip_changed">It changed since the check</string>
+    <string name="notes_health_skip_conflict">Two fixes wanted the same words</string>
     <string name="notes_write_one_yourself_or">Write one yourself, or ask HQ to write one for you.</string>
     <string name="notes_your_notes_will_show">Your Vault will show up here</string>
     <string name="notes_search_your_notes">Search your Vault</string>

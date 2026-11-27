@@ -907,6 +907,23 @@ pub(crate) async fn notification_action_handler(
         if let Err(e) = note_first_task_answer(&state.db, val_id, engagement) {
             warn!(id = %id, error = %e, "recording the first coding task's yes failed");
         }
+        // The notes check's own items: an approval fixes the links, or allows doing so.
+        let (vault, db) = (state.vault_path.clone(), state.db.clone());
+        let (answer_id, approved) = (val_id.to_string(), engagement == ENGAGEMENT_APPROVED);
+        let answered = tokio::task::spawn_blocking(move || {
+            hq_tools::vault_health::answer_inbox(
+                &vault,
+                &std::sync::Arc::new(db),
+                &answer_id,
+                approved,
+            )
+        })
+        .await;
+        match answered {
+            Ok(Ok(())) => state.announce_change("vault-health"),
+            Ok(Err(e)) => warn!(id = %id, error = %e, "fixing the notes from the Inbox failed"),
+            Err(e) => warn!(id = %id, error = %e, "fixing the notes from the Inbox did not finish"),
+        }
     }
     if first_answer && body.action == OPEN_ACTION {
         // Bring the offer back now; the daemon pass would find nothing left to do.

@@ -131,7 +131,11 @@ pub const DAILY_BRIEF_SOURCE: &str = "daily_brief";
 /// Source of the weekly finance reminder: how many ledger rows wait and how old the newest
 /// transaction is. Numbers only, and what a person spends is never sent through a push service.
 pub const FINANCE_NUDGE_SOURCE: &str = "finance_nudge";
+/// The notes check's weekly note and its offer to fix links. They name notes and the words
+/// linked in them, so they are shown on the owner's own devices only.
+pub const VAULT_HEALTH_SOURCE: &str = "vault_health";
 pub const DEVICE_ONLY_SOURCES: &[&str] = &[
+    VAULT_HEALTH_SOURCE,
     FINANCE_NUDGE_SOURCE,
     DAILY_BRIEF_SOURCE,
     LANE_QUOTA_SOURCE,

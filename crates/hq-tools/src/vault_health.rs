@@ -8,7 +8,7 @@
 use anyhow::{Result, bail};
 use hq_db::Database;
 use hq_db::vault_health::{FixSummary, Repair, RunCounts, Source, TrendPoint};
-use hq_vault::fixes::{self, Context, Plan, Tier};
+use hq_vault::fixes::{self, Context, Plan};
 use hq_vault::health::{self, Counts, Ignored, Report, SimilarPair};
 use hq_vault::relink::{Snapshot, snapshot};
 use hq_vault::repair::{self, Options};
@@ -498,6 +498,187 @@ pub fn undo_repair(
     Ok(undone)
 }
 
+// ─── The Inbox ───────────────────────────────────────────────────────────────
+
+use chrono::Datelike;
+use hq_core::types::{VAULT_HEALTH_SOURCE, ValueItem, ValueKind};
+
+/// The week's note about the notes, and the question that goes with it.
+const DIGEST_PREFIX: &str = "vault-health-";
+/// The offer to fix what HQ is certain about. The week is in the key, so a "no" is asked again
+/// only next week, and only if there is still something to fix.
+pub const FIX_PREFIX: &str = "vault-fix-";
+/// Asked once, after a first yes: keep doing it without asking.
+pub const AUTO_OFFER_KEY: &str = "vault-auto-fix-offer";
+
+fn week_key(now: chrono::DateTime<chrono::Utc>) -> String {
+    let iso = now.iso_week();
+    format!("{}-W{:02}", iso.year(), iso.week())
+}
+
+/// Whether HQ may fix the certain things on its own: the config says so, or the owner said yes in
+/// the Inbox.
+pub fn auto_fix_on(db: &Database, config_on: bool) -> bool {
+    config_on || hq_db::owner_prefs::vault_auto_fix_on(db)
+}
+
+/// What the Inbox should hold after a scan. Nothing when there is nothing to do: a note about
+/// notes that are in order would only teach the owner to stop reading these.
+pub fn inbox_items(
+    stored: &Stored,
+    now: chrono::DateTime<chrono::Utc>,
+    auto_on: bool,
+) -> Vec<ValueItem> {
+    let c = &stored.report.counts;
+    let week = week_key(now);
+    let mut out = Vec::new();
+    if c.problems() > 0 {
+        let mut parts = Vec::new();
+        for (n, one, many) in [
+            (
+                c.links.dead,
+                "link leads to a note that is not there",
+                "links lead to notes that are not there",
+            ),
+            (
+                c.links.ambiguous,
+                "link could mean more than one note",
+                "links could mean more than one note",
+            ),
+            (
+                c.links.broken_anchors,
+                "link points at a heading that is gone",
+                "links point at headings that are gone",
+            ),
+            (
+                c.duplicates,
+                "set of notes has the same text",
+                "sets of notes have the same text",
+            ),
+            (
+                c.frontmatter,
+                "note has properties HQ cannot read",
+                "notes have properties HQ cannot read",
+            ),
+        ] {
+            if n > 0 {
+                parts.push(format!("{n} {}", if n == 1 { one } else { many }));
+            }
+        }
+        out.push(
+            ValueItem::new(
+                VAULT_HEALTH_SOURCE,
+                ValueKind::Fyi,
+                "Your notes need a look".to_string(),
+                format!(
+                    "{}. Open Notes, then Review, to see where.",
+                    parts.join(", ")
+                ),
+            )
+            .with_dedup_key(format!("{DIGEST_PREFIX}{week}"))
+            .with_link("/notes/health".to_string()),
+        );
+    }
+    if stored.fix_a > 0 && !auto_on {
+        let n = stored.fix_a;
+        out.push(
+            ValueItem::new(
+                VAULT_HEALTH_SOURCE,
+                ValueKind::ActionNeeded,
+                if n == 1 {
+                    "1 link in your notes can be fixed".to_string()
+                } else {
+                    format!("{n} links in your notes can be fixed")
+                },
+                "HQ is sure which note each one means. Approve to fix them. The original of every note is saved first, and you can undo it from Notes."
+                    .to_string(),
+            )
+            .with_dedup_key(format!("{FIX_PREFIX}{week}"))
+            .with_link("/notes/health".to_string())
+            .owner_only(true),
+        );
+    }
+    out
+}
+
+/// Put the Inbox in order after a scan: add what is new, and close this week's offer if there
+/// is nothing left to fix (it was done by hand, or by the daemon).
+pub fn sync_inbox(db: &Database, stored: &Stored, auto_on: bool) -> Result<usize> {
+    let now = chrono::Utc::now();
+    let items = inbox_items(stored, now, auto_on);
+    let count = items.len();
+    for item in &items {
+        hq_db::value_items::emit(db, item)?;
+    }
+    let week = week_key(now);
+    if stored.fix_a == 0 || auto_on {
+        let key = format!("{FIX_PREFIX}{week}");
+        db.with_conn(move |c| {
+            hq_db::value_items::dismiss_open_by_dedup_on(c, VAULT_HEALTH_SOURCE, &key)
+        })?;
+    }
+    if stored.report.counts.problems() == 0 {
+        let key = format!("{DIGEST_PREFIX}{week}");
+        db.with_conn(move |c| {
+            hq_db::value_items::dismiss_open_by_dedup_on(c, VAULT_HEALTH_SOURCE, &key)
+        })?;
+    }
+    Ok(count)
+}
+
+/// What the owner's answer to one of these Inbox items does. `val_id` is the item; only an
+/// approval acts, and only on this feature's own items.
+///
+/// - the offer to fix: do the certain fixes now, then ask once whether to keep doing it;
+/// - the offer to keep fixing: remember the yes.
+pub fn answer_inbox(
+    vault_path: &Path,
+    db: &std::sync::Arc<Database>,
+    val_id: &str,
+    approved: bool,
+) -> Result<()> {
+    if !approved {
+        return Ok(());
+    }
+    let id = val_id.to_string();
+    let found: Option<(String, String)> = db.with_conn(move |c| {
+        use rusqlite::OptionalExtension;
+        Ok(c.query_row(
+            "SELECT source_task, COALESCE(dedup_key, '') FROM value_items WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?)
+    })?;
+    let Some((source, key)) = found else {
+        return Ok(());
+    };
+    if source != VAULT_HEALTH_SOURCE {
+        return Ok(());
+    }
+    if key.starts_with(FIX_PREFIX) {
+        apply_repairs(vault_path, db, &Which::TierA, Source::Owner)?;
+        if !hq_db::value_items::any_with_dedup(db, AUTO_OFFER_KEY)? {
+            hq_db::value_items::emit(
+                db,
+                &ValueItem::new(
+                    VAULT_HEALTH_SOURCE,
+                    ValueKind::ActionNeeded,
+                    "Fix these automatically from now on?".to_string(),
+                    "Next time HQ finds a link it is sure about, it can fix it without asking. It still saves the original, and you can undo any of it. Approve to allow this, or leave it to keep being asked."
+                        .to_string(),
+                )
+                .with_dedup_key(AUTO_OFFER_KEY.to_string())
+                .with_link("/notes/health".to_string())
+                .owner_only(true),
+            )?;
+        }
+    } else if key == AUTO_OFFER_KEY {
+        hq_db::owner_prefs::set(db, hq_db::owner_prefs::VAULT_AUTO_FIX, "true")?;
+    }
+    Ok(())
+}
+
 /// A note edited more recently than this is not touched.
 const QUIET_SECS: u64 = 600;
 /// The most notes one run changes.
@@ -768,6 +949,7 @@ mod tests {
 
     // ─── Repairs ─────────────────────────────────────────────────────────────
 
+    use hq_vault::fixes::Tier;
     use std::sync::Arc;
 
     const WORDS: &str = "enough words in this note to count as a real note and not be empty";
@@ -1145,5 +1327,173 @@ mod tests {
         let stored = scan_and_store(v.path(), &db).unwrap();
         assert_eq!(stored.report.counts.similar_checked, 0);
         assert!(stored.report.similar.is_empty());
+    }
+
+    // ─── The Inbox ───────────────────────────────────────────────────────────
+
+    fn stored_with(fix_a: i64, dead: usize) -> Stored {
+        let mut report = Report::default();
+        report.counts.links.dead = dead;
+        Stored {
+            ran_at: "2026-11-27T10:00:00Z".into(),
+            report,
+            fixes: vec![],
+            fix_a,
+            fix_b: 0,
+            skipped: vec![],
+        }
+    }
+
+    fn open_items(db: &Database) -> Vec<(String, String)> {
+        db.with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT dedup_key, kind FROM value_items WHERE source_task = 'vault_health'
+                 AND state IN ('pending','routed','delivered') ORDER BY dedup_key",
+            )?;
+            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_healthy_vault_puts_nothing_in_the_inbox() {
+        let now = chrono::Utc::now();
+        assert!(inbox_items(&stored_with(0, 0), now, false).is_empty());
+    }
+
+    #[test]
+    fn something_to_look_at_is_one_note_and_something_to_fix_is_one_question_and_both_stay_on_the_device()
+     {
+        let now = chrono::Utc::now();
+        let items = inbox_items(&stored_with(3, 4), now, false);
+        assert_eq!(items.len(), 2);
+        let digest = items
+            .iter()
+            .find(|i| i.title == "Your notes need a look")
+            .unwrap();
+        assert_eq!(digest.kind, ValueKind::Fyi);
+        assert!(
+            digest
+                .body
+                .contains("4 links lead to notes that are not there"),
+            "{}",
+            digest.body
+        );
+        let ask = items
+            .iter()
+            .find(|i| i.kind == ValueKind::ActionNeeded)
+            .unwrap();
+        assert_eq!(ask.title, "3 links in your notes can be fixed");
+        assert!(ask.owner_only);
+        for i in &items {
+            assert!(
+                i.is_device_only(),
+                "it names notes, so no push service sees it"
+            );
+            assert_eq!(i.link.as_deref(), Some("/notes/health"));
+            assert!(!i.title.contains('\u{2014}') && !i.body.contains('\u{2014}'));
+        }
+        assert_eq!(
+            inbox_items(&stored_with(1, 1), now, false)[1].title,
+            "1 link in your notes can be fixed"
+        );
+    }
+
+    #[test]
+    fn nothing_is_asked_when_the_owner_already_allowed_it() {
+        let items = inbox_items(&stored_with(3, 4), chrono::Utc::now(), true);
+        assert!(items.iter().all(|i| i.kind != ValueKind::ActionNeeded));
+    }
+
+    #[test]
+    fn the_week_is_asked_about_once_and_closed_when_there_is_nothing_left_to_fix() {
+        let db = Database::open_memory().unwrap();
+        sync_inbox(&db, &stored_with(2, 2), false).unwrap();
+        sync_inbox(&db, &stored_with(2, 2), false).unwrap();
+        assert_eq!(
+            open_items(&db).len(),
+            2,
+            "the same week adds nothing the second time"
+        );
+        // Fixed by hand: both close.
+        sync_inbox(&db, &stored_with(0, 0), false).unwrap();
+        assert!(open_items(&db).is_empty());
+    }
+
+    #[test]
+    fn approving_the_offer_fixes_the_links_then_asks_once_to_keep_doing_it_and_a_second_yes_is_remembered()
+     {
+        let (v, db) = repair_vault(&[
+            ("Notebooks/New/Plan.md", &format!("{WORDS}, plans")),
+            ("Notebooks/L.md", "see [[Old/Plan]]"),
+        ]);
+        age(v.path());
+        let stored = scan_and_store(v.path(), &db).unwrap();
+        assert_eq!(stored.fix_a, 1);
+        sync_inbox(&db, &stored, false).unwrap();
+        let fix_id = id_of(&db, FIX_PREFIX);
+
+        // A no, or a dismissal, changes nothing.
+        answer_inbox(v.path(), &db, &fix_id, false).unwrap();
+        assert_eq!(read(v.path(), "Notebooks/L.md"), "see [[Old/Plan]]");
+
+        answer_inbox(v.path(), &db, &fix_id, true).unwrap();
+        assert_eq!(read(v.path(), "Notebooks/L.md"), "see [[New/Plan]]");
+        assert!(
+            !hq_db::owner_prefs::vault_auto_fix_on(&db),
+            "one yes is not a standing yes"
+        );
+        let offer = id_of(&db, AUTO_OFFER_KEY);
+
+        // Asked once: approving the first offer a second time does not ask again.
+        answer_inbox(v.path(), &db, &fix_id, true).unwrap();
+        assert_eq!(
+            open_items(&db)
+                .iter()
+                .filter(|(k, _)| k == AUTO_OFFER_KEY)
+                .count(),
+            1
+        );
+
+        answer_inbox(v.path(), &db, &offer, true).unwrap();
+        assert!(hq_db::owner_prefs::vault_auto_fix_on(&db));
+        assert!(auto_fix_on(&db, false));
+    }
+
+    #[test]
+    fn an_approval_of_anything_else_does_nothing_here() {
+        let (v, db) = repair_vault(&[("Notebooks/a.md", "x")]);
+        hq_db::value_items::emit(
+            &db,
+            &ValueItem::new("somebody_else", ValueKind::ActionNeeded, "t", "b")
+                .with_dedup_key(format!("{FIX_PREFIX}2026-W48")),
+        )
+        .unwrap();
+        let id = db
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT id FROM value_items WHERE source_task = 'somebody_else'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )?)
+            })
+            .unwrap();
+        answer_inbox(v.path(), &db, &id, true).unwrap();
+        assert!(!hq_db::owner_prefs::vault_auto_fix_on(&db));
+        assert!(answer_inbox(v.path(), &db, "no-such-item", true).is_ok());
+    }
+
+    fn id_of(db: &Database, prefix: &str) -> String {
+        let like = format!("{prefix}%");
+        db.with_conn(move |c| {
+            Ok(c.query_row(
+                "SELECT id FROM value_items WHERE source_task = 'vault_health' AND dedup_key LIKE ?1
+                 AND state IN ('pending','routed','delivered')",
+                [like],
+                |r| r.get::<_, String>(0),
+            )?)
+        })
+        .unwrap()
     }
 }
