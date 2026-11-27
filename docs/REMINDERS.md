@@ -79,6 +79,19 @@ tomorrow and later, with the finished ones on their own tab. **New reminder** ta
 ping in the Inbox shows Done and the same snooze times. "This evening" and "tomorrow morning" are
 18:00 and 09:00 in your saved time zone, and "this evening" is left out when it is nearly 18:00.
 
+## On your phone
+
+A reminder that rings is a card in **Needs you** (first after a sign-in) with **Done** and two snoozes,
+in an hour and tomorrow morning. The notification has the same **Done** and **Snooze 1 hour** buttons.
+They work without turning on notification details and without unlocking the phone, because they change
+nothing you would regret.
+
+The notification shows what you asked to be reminded of, even on the lock screen. If you would rather
+it said only that a reminder is due, turn off **Show reminder text on the lock screen** in Settings,
+Work, **Reminders**. The same page lists what is coming (overdue, today, tomorrow, later) and what has
+finished, and **New reminder** takes a title, a quick time or a picked day and time, a repeat, and
+"Keep reminding me until I mark it done". Times are worked out in your saved time zone, else the phone's.
+
 ## From a chat
 
 Ask in any chat, on the phone, the web, Telegram or Discord: "remind me at 4 to call Moses about

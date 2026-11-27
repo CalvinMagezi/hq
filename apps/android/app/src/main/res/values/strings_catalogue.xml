@@ -5084,4 +5084,17 @@
     <string name="reminders_snooze_aria">Snooze %1$s</string>
     <string name="reminders_done_aria">Mark %1$s done</string>
     <string name="reminders_stop_aria">Stop reminding me: %1$s</string>
+    <string name="notice_reminder_title">A reminder is due</string>
+    <string name="notice_reminder_body">Open HQ to see it.</string>
+    <string name="notice_reminder_done">Marked done</string>
+    <string name="notice_reminder_snoozed">Snoozed for an hour</string>
+    <string name="notice_action_done">Done</string>
+    <string name="notice_action_snooze_hour">Snooze 1 hour</string>
+    <string name="reminders_loading">Loading your reminders</string>
+    <string name="reminders_pick_time_title">Pick a time</string>
+    <string name="reminders_picked">Rings %1$s</string>
+    <string name="reminders_hq_offline">HQ is not reachable right now, so reminders cannot be changed.</string>
+    <string name="settings_reminder_text_title">Show reminder text on the lock screen</string>
+    <string name="settings_reminder_text_note">Off: a notification says only that a reminder is due. On: it shows what you asked to be reminded of.</string>
+    <string name="reminders_home_status">Set a time and HQ rings your phone</string>
 </resources>
