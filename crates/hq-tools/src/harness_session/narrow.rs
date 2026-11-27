@@ -19,6 +19,19 @@ pub fn active() -> bool {
     NARROWED.try_with(|_| ()).is_ok()
 }
 
+/// `fut` narrowed if the caller is. The mark belongs to the current task, so anything handed to
+/// `tokio::spawn` has to be wrapped in this or it runs wide. Read when called, not when polled.
+pub fn carry<F: Future>(fut: F) -> impl Future<Output = F::Output> {
+    let narrowed = active();
+    async move {
+        if narrowed {
+            scoped(fut).await
+        } else {
+            fut.await
+        }
+    }
+}
+
 /// The prompt a narrowed session starts with: the stored task and nothing the model typed.
 pub(super) fn brief(task_id: &str, goal: &str) -> String {
     format!(
@@ -37,6 +50,16 @@ mod tests {
         assert!(!active());
         scoped(async { assert!(active()) }).await;
         assert!(!active());
+    }
+
+    #[tokio::test]
+    async fn narrowing_follows_a_spawned_task_only_when_carried() {
+        scoped(async {
+            assert!(!tokio::spawn(async { active() }).await.unwrap());
+            assert!(tokio::spawn(carry(async { active() })).await.unwrap());
+        })
+        .await;
+        assert!(!tokio::spawn(carry(async { active() })).await.unwrap());
     }
 
     #[test]

@@ -248,7 +248,12 @@ impl GovernedTool {
     /// read-before-write warning when one applies.
     async fn run_tracked(&self, id: &str, args: Value) -> Result<ToolResult> {
         let warning = self.track_read_before_write(&args);
-        let result = self.execute_with_timeout(id, args).await;
+        // Here, where every allowed call ends up, so no permission mode starts a helper wide.
+        let result = if self.narrows_helper_start() {
+            hq_tools::harness_session::narrow::scoped(self.execute_with_timeout(id, args)).await
+        } else {
+            self.execute_with_timeout(id, args).await
+        };
         if result.is_ok() {
             self.denial_tracker.record_success(self.inner.name());
         }
@@ -504,9 +509,6 @@ impl GovernedTool {
         {
             map.insert(hq_tools::tasks::TAINTED_SESSION_ARG.into(), true.into());
         }
-        if self.narrows_helper_start() {
-            return hq_tools::harness_session::narrow::scoped(self.run_tracked(id, args)).await;
-        }
         self.run_tracked(id, args).await
     }
 
@@ -548,6 +550,7 @@ const TASK_WRITE_TOOLS: &[&str] = &[
 const NARROWED_START_TOOLS: &[&str] = &[
     "harness_session_spawn",
     "harness_session_handoff",
+    "harness_session_resume",
     "agent_delegate",
 ];
 
