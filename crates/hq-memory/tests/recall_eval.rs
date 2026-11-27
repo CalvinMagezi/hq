@@ -20,7 +20,9 @@
 
 use hq_db::Database;
 use hq_memory::querier::MemoryQuerier;
-use hq_memory::recall::{Audience, CLOSE_TAG, OPEN_TAG, RecallQuery, recall};
+use hq_memory::recall::{
+    Audience, CLOSE_TAG, Meaning, OPEN_TAG, RecallQuery, recall, recall_with_meaning,
+};
 use hq_memory::{StoreMemoryParams, store_memory};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -82,14 +84,24 @@ fn cases() -> Vec<Case> {
 }
 
 /// The corpus loaded into a database, with a map from row ids back to fixture ids.
+/// Turns text into a vector. The CI one is a toy, the opt-in one is the real on-device model.
+type Embed = Box<dyn Fn(&str) -> Vec<f32>>;
+const EVAL_MODEL: &str = "eval-model";
+
 struct World {
     db: Database,
     fixture_of: HashMap<i64, String>,
     rows: HashMap<String, CorpusRow>,
+    embed: Option<Embed>,
 }
 
 impl World {
     fn build() -> Self {
+        Self::build_with(None)
+    }
+
+    /// The same corpus, with a vector stored for every memory when an embedder is given.
+    fn build_with(embed: Option<Embed>) -> Self {
         let db = Database::open_memory().expect("in-memory database");
         let mut fixture_of = HashMap::new();
         let mut rows = HashMap::new();
@@ -117,6 +129,11 @@ impl World {
                 Ok(())
             })
             .expect("age and mark the memory");
+            if let Some(embed) = &embed {
+                let vector = embed(&row.summary);
+                db.with_conn(|c| hq_db::memory_embeddings::store(c, id, EVAL_MODEL, &vector))
+                    .expect("store the vector");
+            }
             fixture_of.insert(id, row.id.clone());
             rows.insert(row.id.clone(), row);
         }
@@ -124,6 +141,7 @@ impl World {
             db,
             fixture_of,
             rows,
+            embed,
         }
     }
 }
@@ -135,6 +153,8 @@ enum Policy {
     Recent,
     /// Keyword recall: the memories that share the meaningful words of the message.
     Recall,
+    /// Keyword recall, and also memories close to the message in meaning.
+    Meaning,
 }
 
 impl Policy {
@@ -142,6 +162,7 @@ impl Policy {
         match self {
             Policy::Recent => "recent (today)",
             Policy::Recall => "recall (keywords)",
+            Policy::Meaning => "recall (keywords + meaning)",
         }
     }
 }
@@ -173,20 +194,31 @@ fn retrieve(policy: Policy, world: &World, case: &Case) -> Retrieved {
                 (ids, ctx.formatted)
             }
         }
-        Policy::Recall => {
+        Policy::Recall | Policy::Meaning => {
             let audience = if case.identity == "owner" {
                 Audience::Owner
             } else {
                 Audience::Other
             };
-            let got = recall(
-                &world.db,
-                &RecallQuery {
-                    message: &case.message,
-                    prior_message: case.prior_message.as_deref(),
-                    audience,
-                },
-            )
+            let query = RecallQuery {
+                message: &case.message,
+                prior_message: case.prior_message.as_deref(),
+                audience,
+            };
+            let got = match (&world.embed, policy) {
+                (Some(embed), Policy::Meaning) => {
+                    let vector = embed(&case.message);
+                    recall_with_meaning(
+                        &world.db,
+                        &query,
+                        Some(Meaning {
+                            vector: &vector,
+                            model: EVAL_MODEL,
+                        }),
+                    )
+                }
+                _ => recall(&world.db, &query),
+            }
             .expect("recall");
             let ids = got
                 .items
@@ -582,4 +614,95 @@ fn keyword_recall_keeps_its_promises() {
         now.false_injection,
         now.quiet_expected
     );
+}
+
+/// A toy embedder with no real sense of meaning: words hashed by their letter triples into 256
+/// slots. Texts that share spelling land close together, anything else lands far apart. It lets
+/// CI prove that the meaning arm adds no noise and cannot widen who may see what, without
+/// downloading a model.
+fn spelling_embedder() -> Embed {
+    Box::new(|text: &str| {
+        let mut v = vec![0.0_f32; 256];
+        for word in text
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.chars().count() > 3)
+        {
+            let padded: Vec<char> = format!("^{word}$").chars().collect();
+            for tri in padded.windows(3) {
+                let h = tri
+                    .iter()
+                    .fold(7_u32, |h, c| h.wrapping_mul(31) ^ (*c as u32));
+                v[(h % 256) as usize] += 1.0;
+            }
+        }
+        let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm > 0.0 {
+            v.iter_mut().for_each(|x| *x /= norm);
+        }
+        v
+    })
+}
+
+fn all_owner_cases(world: &World, all: &[Case], policy: Policy) -> Scores {
+    score(policy, world, &all.iter().collect::<Vec<_>>())
+}
+
+/// A meaning arm with an embedder that understands nothing must not add false memories, leak to
+/// a guest, return a held-back row or break its block. Its gains are not measured here: that
+/// needs the real model (see the ignored test below).
+#[test]
+fn the_meaning_arm_adds_no_noise_when_its_embedder_knows_nothing() {
+    let world = World::build_with(Some(spelling_embedder()));
+    let all = cases();
+    let keywords = all_owner_cases(&world, &all, Policy::Recall);
+    let meaning = all_owner_cases(&world, &all, Policy::Meaning);
+    write_report(&run(Policy::Meaning, &world, &all));
+
+    assert_eq!(meaning.guest_leak, 0);
+    assert_eq!(meaning.unattributed_returned, 0);
+    assert_eq!(meaning.fence_breaks, 0);
+    assert_eq!(meaning.stale, 0);
+    assert!(
+        meaning.tokens.iter().copied().max().unwrap_or(0) <= 500,
+        "the 500-token cap holds"
+    );
+    assert!(
+        meaning.false_injection <= keywords.false_injection + 1,
+        "spoke on {} quiet turns, keywords alone {}",
+        meaning.false_injection,
+        keywords.false_injection
+    );
+    assert!(
+        meaning.at3 + 1 >= keywords.at3,
+        "recall@3 fell from {} to {}",
+        keywords.at3,
+        meaning.at3
+    );
+}
+
+/// With the real on-device model: does meaning find what keywords cannot? Not run in CI because
+/// it needs the model files (about 30 MB, fetched on first use).
+///
+/// ```text
+/// cargo test -p hq-memory --test recall_eval -- --ignored --nocapture real_model
+/// ```
+#[test]
+#[ignore = "needs the on-device model (a one-time download of about 30 MB)"]
+fn real_model_scores_meaning_against_keywords() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let handle = rt.handle().clone();
+    let embed: Embed = Box::new(move |text: &str| {
+        handle
+            .block_on(hq_memory::generate_embedding_local(text))
+            .expect("the on-device model")
+    });
+    let world = World::build_with(Some(embed));
+    let all = cases();
+    let text = format!(
+        "{}\n{}",
+        run(Policy::Recall, &world, &all),
+        run(Policy::Meaning, &world, &all)
+    );
+    write_report(&text);
 }

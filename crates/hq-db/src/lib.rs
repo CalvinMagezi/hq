@@ -29,6 +29,7 @@ pub mod lane_quota_samples;
 pub mod link_captures;
 pub mod mcp_connector;
 pub mod memories_search;
+pub mod memory_embeddings;
 pub mod migrations;
 pub mod moved;
 pub mod note_keep;
