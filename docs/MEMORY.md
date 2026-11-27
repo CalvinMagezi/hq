@@ -53,7 +53,7 @@ only by its words. It never downloads the model for this.
 
 ## See it, correct it, delete it
 
-**Settings, What HQ remembers** (web and desktop) lists every note with its date, whether it is
+**Settings, What HQ remembers** (web, desktop and the Android app) lists every note with its date, whether it is
 pinned, held back, out of date, or over a year old, and how often it was used. Search it, filter
 it, and for each note:
 
@@ -65,7 +65,14 @@ it, and for each note:
   it, its lines in `MEMORY.md`, its place on concept pages, and its line in the archive. HQ keeps
   only a fingerprint of the sentence so it is not learned again from the next chat.
 
-The same is in the terminal: `hq memory list|search|view|edit|pin|unpin|keep|outdated|forget|export`.
+The Android page lists the newest 50 notes and offers Pin, Keep, Out of date and Forget; editing and searching are on the web page and in the terminal. The same is in the terminal: `hq memory list|search|view|edit|pin|unpin|keep|outdated|forget|export`.
+
+### Pause saving
+
+The switch **Save new notes** at the top of that page stops HQ saving anything new from your
+chats, for example while someone else is using your phone. Notes already saved are still used and
+still listed, and you can still delete any of them. It applies at once, even in a chat that is
+already open.
 
 ### What Forget cannot reach
 
