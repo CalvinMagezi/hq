@@ -657,6 +657,73 @@ async fn a_guest_session_is_given_none_of_the_owners_memory() {
     }
 }
 
+/// `daemon.memory_recall` decides whether the system prompt carries the always-on list of the most
+/// important memories. `MEMORY.md`, which the owner curates, is always there.
+#[tokio::test]
+async fn the_system_prompt_carries_the_always_on_memories_only_when_recall_is_not_choosing() {
+    use hq_core::config::MemoryRecall;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("_system")).unwrap();
+    std::fs::create_dir_all(dir.path().join("_data")).unwrap();
+    std::fs::write(
+        dir.path().join("_system/MEMORY.md"),
+        "## Key Facts\n- FACTFILE-ZEBRA keeps bees on the roof\n",
+    )
+    .unwrap();
+    let db = hq_db::Database::open(&dir.path().join("_data/vault.db")).unwrap();
+    hq_memory::store_memory(
+        &db,
+        &hq_memory::StoreMemoryParams {
+            source: "chat-turn",
+            harness: "web",
+            raw_text: "",
+            summary: "ROWFACT-QUOKKA prefers rooibos tea",
+            entities: &[],
+            topics: &[],
+            importance: 0.9,
+            user_id: None,
+        },
+    )
+    .unwrap();
+    drop(db);
+
+    for (mode, shows_rows) in [
+        (MemoryRecall::Shadow, true),
+        (MemoryRecall::Recent, true),
+        (MemoryRecall::Query, false),
+        (MemoryRecall::Off, false),
+    ] {
+        let mut config = HqConfig {
+            openrouter_api_key: Some("test-key-no-network".to_string()),
+            vault_path: dir.path().to_path_buf(),
+            ..Default::default()
+        };
+        config.daemon.memory_recall = mode;
+        let session = SessionBuilder::from_config(&config)
+            .working_dir(dir.path().to_path_buf())
+            .session_config(SessionConfig {
+                model: "relay".to_string(),
+                ..SessionConfig::default()
+            })
+            .session_profile(SessionProfile::Standard)
+            .build()
+            .await
+            .expect("builds without a network");
+        let prompt = session.system_prompt().unwrap_or_default().to_string();
+
+        assert!(
+            prompt.contains("FACTFILE-ZEBRA"),
+            "{mode:?}: MEMORY.md is always there"
+        );
+        assert_eq!(
+            prompt.contains("ROWFACT-QUOKKA"),
+            shows_rows,
+            "{mode:?}: the always-on list"
+        );
+    }
+}
+
 /// Governance wraps every tool, so a metadata method it fails to forward
 /// collapses to the trait default for the entire registry. `should_defer`
 /// was permanently false, which made `deferred_catalog()` always empty and

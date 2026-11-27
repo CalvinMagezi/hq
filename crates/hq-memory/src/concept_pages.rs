@@ -52,7 +52,7 @@ pub struct UpsertOutcome {
     pub created: bool,
 }
 
-fn frontmatter_string_list(note: &Note, key: &str) -> Vec<String> {
+pub(crate) fn frontmatter_string_list(note: &Note, key: &str) -> Vec<String> {
     note.frontmatter
         .get(key)
         .and_then(|v| v.as_sequence())
@@ -64,7 +64,7 @@ fn frontmatter_string_list(note: &Note, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn yaml_string_list(items: &[String]) -> serde_yaml::Value {
+pub(crate) fn yaml_string_list(items: &[String]) -> serde_yaml::Value {
     serde_yaml::Value::Sequence(
         items
             .iter()

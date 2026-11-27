@@ -30,6 +30,7 @@ mod helper_runs_api;
 mod helper_setup_api;
 mod lane_quotas_api;
 mod mcp_http;
+mod memory_api;
 mod note_ids;
 mod note_import;
 mod note_trash;

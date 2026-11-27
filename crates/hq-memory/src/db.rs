@@ -49,7 +49,7 @@ pub fn get_unconsolidated_memories(db: &Database, limit: i64) -> Result<Vec<Memo
     db.with_conn(|conn| {
         query_memories(
             conn,
-            "SELECT * FROM memories WHERE consolidated = 0 ORDER BY created_at DESC LIMIT ?1",
+            "SELECT * FROM memories WHERE consolidated = 0 AND status = 'active' AND origin = 'owner' ORDER BY created_at DESC LIMIT ?1",
             &[&limit],
         )
     })
@@ -59,7 +59,7 @@ pub fn get_recent_memories(db: &Database, limit: i64) -> Result<Vec<Memory>> {
     db.with_conn(|conn| {
         query_memories(
             conn,
-            "SELECT * FROM memories ORDER BY importance DESC, created_at DESC LIMIT ?1",
+            "SELECT * FROM memories WHERE status = 'active' AND origin = 'owner' ORDER BY importance DESC, created_at DESC LIMIT ?1",
             &[&limit],
         )
     })
@@ -132,31 +132,129 @@ pub fn store_memory_with(
     params: &StoreMemoryParams<'_>,
     trace: &Trace<'_>,
 ) -> Result<i64> {
+    db.with_conn(|conn| insert_memory(conn, params, trace, &Extras::default()))
+}
+
+/// What a new memory carries beyond the summary: whether it is held back, and whether the owner
+/// asked for it to be kept for good.
+#[derive(Debug, Clone, Copy)]
+pub struct Extras {
+    /// `active`, or `review` when the owner should look before it is ever brought up.
+    pub status: &'static str,
+    pub pinned: bool,
+}
+
+impl Default for Extras {
+    fn default() -> Self {
+        Self {
+            status: "active",
+            pinned: false,
+        }
+    }
+}
+
+/// The outcome of [`store_or_reinforce`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stored {
+    pub id: i64,
+    /// The same words were already held, so that memory was reinforced and nothing was added.
+    pub reinforced: bool,
+}
+
+/// Store a memory, unless these same words (case, punctuation and spacing aside) are already held
+/// from the same kind of source: then that memory is seen once more instead of a copy being
+/// added. The lookup and the write share one write lock, so two turns saying the same thing at
+/// once cannot both insert.
+pub fn store_or_reinforce(
+    db: &Database,
+    params: &StoreMemoryParams<'_>,
+    trace: &Trace<'_>,
+    extras: &Extras,
+) -> Result<Stored> {
+    let hash = crate::hash::content_hash(params.summary);
+    db.with_conn(|conn| {
+        conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = (|| -> Result<Stored> {
+            let existing: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM memories
+                     WHERE content_hash = ?1 AND origin = ?2 AND status IN ('active', 'review')
+                     ORDER BY id LIMIT 1",
+                    rusqlite::params![hash, trace.origin.as_str()],
+                    |r| r.get(0),
+                )
+                .ok();
+            if let Some(id) = existing {
+                conn.execute(
+                    "UPDATE memories
+                     SET seen_count = seen_count + 1,
+                         last_seen_at = ?2,
+                         importance = MAX(importance, ?3),
+                         pinned = MAX(pinned, ?4),
+                         provenance = CASE WHEN ?5 = 'owner_said' THEN 'owner_said' ELSE provenance END
+                     WHERE id = ?1",
+                    rusqlite::params![
+                        id,
+                        chrono::Utc::now().to_rfc3339(),
+                        params.importance,
+                        extras.pinned,
+                        trace.provenance.as_str()
+                    ],
+                )?;
+                return Ok(Stored {
+                    id,
+                    reinforced: true,
+                });
+            }
+            Ok(Stored {
+                id: insert_memory(conn, params, trace, extras)?,
+                reinforced: false,
+            })
+        })();
+        match result {
+            Ok(stored) => {
+                conn.execute_batch("COMMIT")?;
+                Ok(stored)
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                Err(e)
+            }
+        }
+    })
+}
+
+fn insert_memory(
+    conn: &rusqlite::Connection,
+    params: &StoreMemoryParams<'_>,
+    trace: &Trace<'_>,
+    extras: &Extras,
+) -> Result<i64> {
     let now = chrono::Utc::now().to_rfc3339();
     let entities_json = serde_json::to_string(params.entities)?;
     let topics_json = serde_json::to_string(params.topics)?;
-
-    db.with_conn(|conn| {
-        conn.execute(
-            "INSERT INTO memories (source, harness, raw_text, summary, entities, topics, importance, content, created_at, user_id, origin, provenance, thread_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?4, ?8, ?9, ?10, ?11, ?12)",
-            rusqlite::params![
-                params.source,
-                params.harness,
-                params.raw_text,
-                params.summary,
-                entities_json,
-                topics_json,
-                params.importance,
-                now,
-                params.user_id,
-                trace.origin.as_str(),
-                trace.provenance.as_str(),
-                trace.thread_id
-            ],
-        )?;
-        Ok(conn.last_insert_rowid())
-    })
+    conn.execute(
+        "INSERT INTO memories (source, harness, raw_text, summary, entities, topics, importance, content, created_at, user_id, origin, provenance, thread_id, content_hash, status, pinned, last_seen_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?4, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?8)",
+        rusqlite::params![
+            params.source,
+            params.harness,
+            params.raw_text,
+            params.summary,
+            entities_json,
+            topics_json,
+            params.importance,
+            now,
+            params.user_id,
+            trace.origin.as_str(),
+            trace.provenance.as_str(),
+            trace.thread_id,
+            crate::hash::content_hash(params.summary),
+            extras.status,
+            extras.pinned
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
 }
 
 /// Store a consolidation and mark source memories as consolidated.
@@ -215,21 +313,6 @@ pub fn store_consolidation_chained(
     })
 }
 
-// ─── Decay & Pruning (Synaptic Homeostasis) ─────────────────────────
-
-/// Decay importance of unconsolidated memories older than `min_age_days`.
-/// Returns the number of memories updated.
-pub fn decay_old_memories(db: &Database, decay_rate: f64, min_age_days: i64) -> Result<i64> {
-    let cutoff = cutoff_iso(min_age_days);
-    db.with_conn(|conn| {
-        let changes = conn.execute(
-            "UPDATE memories SET importance = MAX(0.01, importance - ?1) WHERE consolidated = 0 AND created_at < ?2",
-            rusqlite::params![decay_rate, cutoff],
-        )?;
-        Ok(changes as i64)
-    })
-}
-
 /// Bump access count and last_accessed_at for a memory (served to an agent).
 pub fn touch_memory(db: &Database, id: i64) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
@@ -256,11 +339,6 @@ fn query_memories(
         result.push(row?);
     }
     Ok(result)
-}
-
-fn cutoff_iso(days: i64) -> String {
-    let cutoff = chrono::Utc::now() - chrono::Duration::days(days);
-    cutoff.to_rfc3339()
 }
 
 #[cfg(test)]
@@ -297,15 +375,45 @@ mod tests {
         .unwrap();
     }
 
-    fn importance_of(db: &Database, id: i64) -> f64 {
+    fn mark(db: &Database, id: i64, status: &str, origin: &str) {
         db.with_conn(|c| {
-            Ok(
-                c.query_row("SELECT importance FROM memories WHERE id = ?1", [id], |r| {
-                    r.get(0)
-                })?,
-            )
+            c.execute(
+                "UPDATE memories SET status = ?1, origin = ?2 WHERE id = ?3",
+                rusqlite::params![status, origin, id],
+            )?;
+            Ok(())
         })
-        .unwrap()
+        .unwrap();
+    }
+
+    /// The always-on list and the consolidator read memories nobody asked about, so they must
+    /// only ever see what the owner's own chats made and nobody has held back or retired.
+    #[test]
+    fn only_active_notes_from_the_owner_reach_the_always_on_list_and_the_consolidator() {
+        let db = Database::open_memory().unwrap();
+        let fine = store(&db, "an ordinary note", 0.5);
+        let held = store(&db, "held back for review", 0.9);
+        let shared = store(&db, "from a shared channel", 0.9);
+        let outdated = store(&db, "no longer true", 0.9);
+        let away = store(&db, "put away after a year", 0.9);
+        mark(&db, held, "review", "owner");
+        mark(&db, shared, "active", "unknown_channel");
+        mark(&db, outdated, "superseded", "owner");
+        mark(&db, away, "archived", "owner");
+
+        let recent: Vec<i64> = get_recent_memories(&db, 10)
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        let pending: Vec<i64> = get_unconsolidated_memories(&db, 10)
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+
+        assert_eq!(recent, vec![fine]);
+        assert_eq!(pending, vec![fine]);
     }
 
     #[test]
@@ -370,28 +478,6 @@ mod tests {
         let history = get_consolidation_history(&db, 5).unwrap();
         assert_eq!(history[0].source_ids, vec![a, b]);
         assert_eq!(history[0].insight, "a and b agree");
-    }
-
-    #[test]
-    fn decay_lowers_only_old_unconsolidated_memories_and_never_below_the_floor() {
-        let db = Database::open_memory().unwrap();
-        let old = store(&db, "old", 0.5);
-        let fresh = store(&db, "fresh", 0.5);
-        let consolidated = store(&db, "consolidated", 0.5);
-        let at_floor = store(&db, "at the floor", 0.01);
-        for id in [old, consolidated, at_floor] {
-            age(&db, id, 10);
-        }
-        age(&db, fresh, 1);
-        store_consolidation(&db, &[consolidated], "x", &[]).unwrap();
-
-        let changed = decay_old_memories(&db, 0.1, 7).unwrap();
-
-        assert_eq!(changed, 2, "the old unconsolidated pair, not fresh or done");
-        assert!((importance_of(&db, old) - 0.4).abs() < 1e-9);
-        assert!((importance_of(&db, fresh) - 0.5).abs() < 1e-9);
-        assert!((importance_of(&db, consolidated) - 0.5).abs() < 1e-9);
-        assert!((importance_of(&db, at_floor) - 0.01).abs() < 1e-9);
     }
 
     #[test]

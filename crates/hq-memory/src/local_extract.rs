@@ -106,7 +106,7 @@ pub async fn extract_local(db: &Database, text: &str) -> ExtractedMemory {
 /// What the owner wrote in a turn made of `role: content` blocks joined by `---` lines. Text with
 /// no role blocks at all is taken to be the owner's own. A turn with only an assistant block has
 /// nothing of theirs, so it gives nothing.
-pub(crate) fn owner_text(text: &str) -> String {
+pub fn owner_text(text: &str) -> String {
     let blocks: Vec<&str> = text.split("\n---\n").collect();
     let is_turn = blocks
         .iter()
@@ -166,7 +166,7 @@ fn cap_chars(s: &str, max: usize) -> String {
 /// are not sentence filler. A single plain capitalised word counts only if it recurs.
 // ponytail: surface heuristic with no dictionary; good enough to seed concept pages, upgrade to the
 // entity graph's known names when its recall matters.
-fn entities(text: &str) -> Vec<String> {
+pub(crate) fn entities(text: &str) -> Vec<String> {
     let mut found: Vec<(String, usize, bool)> = Vec::new();
     let mut run: Vec<&str> = Vec::new();
     let flush = |run: &mut Vec<&str>, found: &mut Vec<(String, usize, bool)>| {

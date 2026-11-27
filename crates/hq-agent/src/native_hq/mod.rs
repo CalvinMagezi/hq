@@ -21,6 +21,7 @@ use crate::session::SessionConfig;
 
 mod ingest;
 mod progress;
+mod recall;
 
 pub use ingest::{TurnSource, wire_post_turn_ingestion};
 use ingest::{
@@ -31,6 +32,7 @@ pub use progress::{
     DetachedTurnOutcome, DetachedTurnSink, ProgressEvent, ProgressSink, parked_ack, parked_marker,
     render_progress_note,
 };
+pub use recall::{MemoryTurnRecall, wire_turn_recall};
 
 /// Quality fed to the router on a clean completion. Soft limits (max turns / budget)
 /// and hard failures score lower so the self-learning signal reflects how it ended.
@@ -319,6 +321,8 @@ pub async fn run_native_hq(
         &mut hooks,
     );
     let mut session = builder.build().await?;
+    // Memory is the owner's: only their own turns are learned from, and only they are shown what
+    // was learned. A guest, an unverified audience and an MCP question get neither.
     if ingest::learns_from_turn(hooks.identity.as_ref(), hooks.skip_memory_ingestion) {
         wire_post_turn_ingestion(
             &mut session,
@@ -326,6 +330,7 @@ pub async fn run_native_hq(
             &config.db_path(),
             TurnSource::from_identity(hooks.identity.as_ref()),
         );
+        wire_turn_recall(&mut session, &config.db_path(), config.daemon.memory_recall);
     }
     let thread_identity = thread_identity(&hooks);
     // FR-017: the current turn's images, forwarded separately from

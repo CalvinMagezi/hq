@@ -150,6 +150,17 @@ fn settings_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
         .route("/api/offers/fewer", post(offers_api::fewer_handler))
         .route("/api/offers/summary", get(offers_api::summary_handler))
         .route("/api/offers/clear", post(offers_api::clear_handler))
+        // What HQ remembers: the owner's own page. Owner-only, and Lite does not serve it.
+        .route("/api/memory", get(memory_api::list_handler))
+        .route("/api/memory/export", get(memory_api::export_handler))
+        .route("/api/memory/{id}", get(memory_api::get_handler))
+        .route("/api/memory/{id}/edit", post(memory_api::edit_handler))
+        .route("/api/memory/{id}/pin", post(memory_api::pin_handler))
+        .route(
+            "/api/memory/{id}/standing",
+            post(memory_api::standing_handler),
+        )
+        .route("/api/memory/{id}/forget", post(memory_api::forget_handler))
         .route("/api/setup/status", get(setup_api::status_handler))
         .route("/api/setup/test", post(setup_api::test_handler))
         .route("/api/setup/provider", post(setup_api::provider_handler))

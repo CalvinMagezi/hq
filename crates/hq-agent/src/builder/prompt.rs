@@ -60,7 +60,14 @@ impl SessionBuilder {
             let memory_text = if is_worker || !self.reads_owner_history() {
                 Default::default()
             } else {
-                build_memory_context(&inputs.shared_db, &sys_ctx.memory)
+                // The always-on list of the most important memories stays only while recall is
+                // not choosing them: with `query` the ones that fit each message arrive in the
+                // per-turn note instead, and with `off` none do.
+                let recent = matches!(
+                    self.config.daemon.memory_recall,
+                    hq_core::config::MemoryRecall::Shadow | hq_core::config::MemoryRecall::Recent
+                );
+                build_memory_context(&inputs.shared_db, &sys_ctx.memory, recent)
             };
 
             // Cross-session thread continuity
@@ -339,12 +346,13 @@ pub(super) fn capability_block(
 pub(super) fn build_memory_context(
     db: &Option<Arc<hq_db::Database>>,
     static_memory: &str,
+    include_recent: bool,
 ) -> String {
     let mut parts = Vec::new();
     if !static_memory.is_empty() {
         parts.push(static_memory.to_string());
     }
-    if let Some(db) = db {
+    if let Some(db) = db.as_ref().filter(|_| include_recent) {
         let mut querier = hq_memory::querier::MemoryQuerier::new(db.as_ref().clone());
         match querier.get_recent_context(Some(8), None) {
             Ok(ctx) if !ctx.formatted.is_empty() => parts.push(ctx.formatted),

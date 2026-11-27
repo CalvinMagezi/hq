@@ -243,6 +243,11 @@ async fn run_agent_chat(
         &config.db_path(),
         hq_agent::native_hq::TurnSource::cli(),
     );
+    hq_agent::native_hq::wire_turn_recall(
+        &mut session,
+        &config.db_path(),
+        config.daemon.memory_recall,
+    );
 
     // ── Print startup header ──
     let project_name = cwd

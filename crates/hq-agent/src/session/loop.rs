@@ -97,11 +97,20 @@ impl AgentSession {
         self.enrich_with_matching_skills(text);
 
         let hint = self.tool_hint_line(text).await;
-        let context = match (self.turn_context.take(), hint) {
-            (Some(context), Some(hint)) => Some(format!("{context}\n{hint}")),
-            (Some(context), None) => Some(context),
-            (None, hint) => hint,
+        let recalled = match self.turn_recall.clone() {
+            Some(recall) => {
+                let prior = self.previous_owner_message();
+                recall.recall(text, prior.as_deref()).await
+            }
+            None => None,
         };
+        // What was recalled for this message, then what the builder gathered, then the hint.
+        let parts: Vec<String> = [recalled, self.turn_context.take(), hint]
+            .into_iter()
+            .flatten()
+            .filter(|p| !p.trim().is_empty())
+            .collect();
+        let context = (!parts.is_empty()).then(|| parts.join("\n"));
         if let Some(context) = context {
             self.push_message(ChatMessage {
                 image_parts: Vec::new(),

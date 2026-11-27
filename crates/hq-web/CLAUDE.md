@@ -7,6 +7,7 @@ Notes for working under `crates/hq-web/`, moved out of the root `CLAUDE.md` so a
 | What | Path |
 |------|------|
 | claude.ai connector (`mcp_connector:` config, OAuth for claude.ai and Claude Code, `hq connector`) | `crates/hq-web/src/oauth/` (server, consent API, `guard.rs` for approvals, rate limit and call log), `crates/hq-db/src/mcp_connector.rs`, `crates/hq-mcp/src/gateway.rs` (`CONNECTOR_CONFIRM_TOOLS`), `apps/hq-web/src/routes/connect.tsx`, `docs/CLAUDE_CONNECTOR.md`, `docs/plans/claude-connector.md`; the whole path from the forwarder to the door is `crates/hq-web/src/tls/tests/chain.rs`, and the real-account run is `docs/plans/native-bridge/w6-claude-run.md` |
+| What HQ remembers, for the owner's apps (`/api/memory`: list and search, one memory, edit, pin, standing, forget, export). Owner-only: a test reads `hq-tools`, `hq-mcp` and `hq-agent` and fails if any names these routes or `memories_owner`; Lite serves none of it (not in `LITE_API`) | `crates/hq-web/src/memory_api.rs`, `crates/hq-db/src/memories_owner.rs`, `hq_memory::forget`; the page is Settings, What HQ remembers (safety group, not the bar): `apps/hq-web/src/components/settings/MemoryView.tsx` (the screen), `MemorySection.tsx` (loads and runs each change), `apps/hq-web/src/lib/memoryApi.ts`, `apps/hq-web/src/routes/settings/memory.tsx` |
 | Web and MCP auth, origin guard | `crates/hq-web/src/auth.rs`, `crates/hq-web/src/origin.rs`, `docs/security/WEB_AUTH.md` |
 
 ## Rules
