@@ -239,3 +239,23 @@ address still asks.
 Do not trust a host many people publish on, such as a code-hosting pages domain or a blog
 platform: a domain covers every subdomain, and each one is somebody else's page. HQ checks the
 shape of the name but does not carry the public suffix list, so it cannot refuse these for you.
+
+## Memory
+
+What HQ remembers outlives the chat it came from, so a hostile sentence saved once could reach
+every later chat. The containment, in order:
+
+- **Nothing a model writes becomes a pinned or "owner said" memory.** "Remember that ..." is read
+  only from the owner's own lines (`crates/hq-memory/src/remember.rs`), never from an assistant
+  block or a tool result, and no tool a model can call writes, edits or deletes a memory.
+- **A tainted turn never ingests** (it reads web, mail or document content), as before.
+- **Text that orders a model** ("ignore all previous instructions", "you are now ...",
+  `hq_core::sensitive::looks_like_instruction_override`, the same pattern the skill scanner
+  blocks) is saved with status `review`: it is not brought up until the owner keeps it.
+- **A recalled memory is data.** It is one escaped line in a `<recalled_memories>` block with `<`,
+  `>` and `&` written as entities and line breaks removed, so its text cannot close the block,
+  open another or fake a fence (`crates/hq-memory/src/recall.rs`, scored by the recall eval:
+  0 break-outs in 74 owner cases). The block rides in the per-turn context note whose header
+  already says it is reference material, never in the cached system prompt.
+- **A guest or an unverified audience gets no recall and teaches HQ nothing.**
+

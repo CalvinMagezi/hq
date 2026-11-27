@@ -107,7 +107,7 @@ request with no identity (the CLI, the daemon) is the owner's own.
   later surface as facts about the owner.
 
 Rows written before this rule may include guest turns. They carry no marker that says so, so they
-cannot be separated automatically; the owner-facing memory page is where they get reviewed.
+cannot be separated automatically. The index marks Discord rows `unknown_channel`, and they stay out of recall until the owner keeps them on Settings, What HQ remembers (`docs/MEMORY.md`).
 
 ## Not yet covered
 
