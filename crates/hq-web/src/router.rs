@@ -122,6 +122,14 @@ fn note_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
             "/api/vault/health/unignore",
             post(vault_health_api::unignore_handler),
         )
+        .route(
+            "/api/vault/health/apply",
+            post(vault_health_api::apply_handler),
+        )
+        .route(
+            "/api/vault/health/undo",
+            post(vault_health_api::undo_handler),
+        )
         .route("/api/vault-signals", get(vault_api::signals_handler))
         .route("/api/tree", get(api::tree_handler))
 }

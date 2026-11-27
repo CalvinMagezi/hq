@@ -81,6 +81,7 @@ private fun NotesList(ui: NotesUi, actions: NotesActions) {
         LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = 96.dp)) {
             item { val open = example.hq.spike.ui.shell.LocalOpenSearch.current; SearchPill { open(example.hq.spike.ui.search.SearchStart(example.hq.spike.ui.search.SearchScope.Notes)) } }
             item { StateLine(ui, actions) }
+            item { VaultHealthCard(ui, actions) }
             val chips = VaultRules.chips(ui.topFolders, ui.trashCount)
             item { FolderChips(chips, { actions.onOpenFolder("Notebooks/$it") }, actions.onOpenTrash) { actions.onMoreFolders(true) } }
             // Recent first: it answers "what was I just using"; Pinned follows and is gone when empty.

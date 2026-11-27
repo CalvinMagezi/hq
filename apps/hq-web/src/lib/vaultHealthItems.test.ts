@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { healthSections } from './vaultHealthItems'
-import { problemCount, type HealthReport } from './vaultHealthApi'
+import { fixFor, healthSections, skipText } from './vaultHealthItems'
+import { problemCount, undoableRepair, type HealthFix, type HealthReport, type VaultHealth } from './vaultHealthApi'
 
 const counts = (over: Partial<HealthReport['counts']['links']> = {}, rest: Partial<HealthReport['counts']> = {}) => ({
   notes: 20,
@@ -10,6 +10,8 @@ const counts = (over: Partial<HealthReport['counts']['links']> = {}, rest: Parti
   duplicates: 0,
   empty: 0,
   frontmatter: 0,
+  similar: 0,
+  similar_checked: 0,
   ...rest,
 })
 
@@ -23,6 +25,7 @@ const empty: HealthReport = {
   empty: [],
   frontmatter: [],
   unread: [],
+  similar: [],
 }
 
 describe('healthSections', () => {
@@ -101,3 +104,99 @@ describe('healthSections', () => {
     expect(new Set(details).size).toBe(3)
   })
 })
+
+const fix = (over: Partial<HealthFix> = {}): HealthFix => ({
+  id: 'f1',
+  tier: 'a',
+  kind: 'stale_path',
+  note: 'Notebooks/A.md',
+  line: 1,
+  before: '[[Old/Plan]]',
+  after: '[[New/Plan]]',
+  ...over,
+})
+
+describe('fixFor', () => {
+  const base = { id: 'x', note: 'Notebooks/A.md', line: 1, text: '[[Old/Plan]]', detail: null, key: 'k' } as const
+
+  test('a link finds its repair by the note it is in and how it is written', () => {
+    const fixes = [fix({ id: 'other', before: '[[Else]]' }), fix(), fix({ id: 'elsewhere', note: 'Notebooks/B.md' })]
+    expect(fixFor({ ...base, kind: 'dead_link' }, fixes)?.id).toBe('f1')
+    expect(fixFor({ ...base, kind: 'ambiguous_link' }, [fix({ kind: 'same_folder' })])?.id).toBe('f1')
+    expect(fixFor({ ...base, kind: 'dead_link', text: '[[Nothing Like It]]' }, fixes)).toBeNull()
+  })
+
+  test('a repeated note finds its repair by any note in the set, and properties by their note', () => {
+    const merge = fix({ id: 'm', kind: 'merge_duplicate', note: 'Notebooks/Dup.md', before: 'Notebooks/Dup.md', after: 'Notebooks/Keep.md' })
+    expect(fixFor({ ...base, kind: 'duplicate', key: 'Notebooks/Keep.md|Notebooks/Dup.md' }, [merge])?.id).toBe('m')
+    expect(fixFor({ ...base, kind: 'duplicate', key: 'Notebooks/X.md|Notebooks/Y.md' }, [merge])).toBeNull()
+    const props = fix({ id: 'p', kind: 'nested_frontmatter', before: '', after: '' })
+    expect(fixFor({ ...base, kind: 'frontmatter' }, [props])?.id).toBe('p')
+  })
+
+  test('notes nothing links to and near repeats are never repaired', () => {
+    expect(fixFor({ ...base, kind: 'loose' }, [fix()])).toBeNull()
+    expect(fixFor({ ...base, kind: 'similar' }, [fix()])).toBeNull()
+  })
+
+  test('sections carry the repair beside the item it fixes', () => {
+    const report: HealthReport = {
+      ...empty,
+      counts: counts({ dead: 2 }),
+      dead_links: [
+        { note: 'Notebooks/A.md', line: 1, link: '[[Old/Plan]]', target: 'Old/Plan', did_you_mean: null },
+        { note: 'Notebooks/A.md', line: 2, link: '[[Nowhere]]', target: 'Nowhere', did_you_mean: null },
+      ],
+    }
+    const [dead] = healthSections(report, [fix()])
+    expect(dead.items.map((i) => i.fix?.id ?? null)).toEqual(['f1', null])
+  })
+})
+
+describe('notes that say almost the same thing', () => {
+  test('are listed with how much they share, and are not damage', () => {
+    const report: HealthReport = {
+      ...empty,
+      counts: counts({}, { similar: 1, similar_checked: 40 }),
+      similar: [{ a: 'Notebooks/A.md', b: 'Notebooks/B.md', percent: 91 }],
+    }
+    expect(problemCount(report.counts)).toBe(0)
+    const [sim] = healthSections(report)
+    expect(sim.id).toBe('similar')
+    expect(sim.items[0]).toMatchObject({ text: 'A, B', detail: '91 percent of the words are the same', key: 'Notebooks/A.md|Notebooks/B.md', kind: 'similar' })
+  })
+})
+
+describe('skipText', () => {
+  test('every reason has its own words', () => {
+    const reasons = ['protected', 'machine_written', 'suite', 'pinned', 'agent_unreviewed', 'recently_edited', 'too_large', 'cannot_relink', 'changed', 'conflict'] as const
+    const words = reasons.map(skipText)
+    expect(new Set(words).size).toBe(reasons.length)
+    expect(words.every((w) => w.length > 0 && !w.includes('notes_health'))).toBe(true)
+  })
+})
+
+describe('undoableRepair', () => {
+  const run = (over: Partial<VaultHealth['repairs'][number]> = {}) => ({
+    run_id: 'r1',
+    ran_at: new Date(Date.now() - 60 * 60_000).toISOString(),
+    source: 'owner' as const,
+    fixes: 3,
+    rewritten: 2,
+    trashed: 0,
+    undone_at: null,
+    edited_since: 0,
+    ...over,
+  })
+  const health = (repairs: VaultHealth['repairs']): VaultHealth => ({ checked: true, checked_at: null, report: empty, fixes: [], fix_counts: null, skipped: [], repairs, trend: [] })
+
+  test('is the latest run while it is recent and not taken back', () => {
+    expect(undoableRepair(health([run()]))?.run_id).toBe('r1')
+    expect(undoableRepair(health([run({ undone_at: 'x' })]))).toBeNull()
+    expect(undoableRepair(health([run({ ran_at: new Date(Date.now() - 3 * 86_400_000).toISOString() })]))).toBeNull()
+    expect(undoableRepair(health([run({ fixes: 0 })]))).toBeNull()
+    expect(undoableRepair(health([]))).toBeNull()
+    expect(undoableRepair(undefined)).toBeNull()
+  })
+})
+
