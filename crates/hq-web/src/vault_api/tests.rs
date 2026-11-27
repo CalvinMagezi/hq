@@ -304,6 +304,45 @@ fn resolve_note_path_handles_exact_extensionless_and_notebooks() {
 }
 
 #[test]
+fn resolve_note_path_reads_a_link_the_way_a_link_is_written() {
+    let v = vault();
+    std::fs::create_dir_all(v.path().join("Notebooks/Projects/Alpha")).unwrap();
+    std::fs::write(v.path().join("Notebooks/Projects/Alpha/Plan.md"), "alpha").unwrap();
+    for name in [
+        "Alpha/Plan",
+        "Projects/Alpha/Plan",
+        "plan#Goals",
+        "Plan|the plan",
+        "ALPHA/PLAN.md",
+        "Notebooks/Projects/Alpha/Plan#Part",
+    ] {
+        let (_, rel) = resolve_note_path(v.path(), name)
+            .unwrap_or_else(|| panic!("{name:?} should open the note"));
+        assert_eq!(rel, "Notebooks/Projects/Alpha/Plan.md", "{name:?}");
+    }
+    assert!(resolve_note_path(v.path(), "Beta/Plan").is_none());
+    assert!(resolve_note_path(v.path(), "Pla").is_none());
+}
+
+#[test]
+fn a_name_two_notes_share_opens_the_same_one_every_time() {
+    let v = vault();
+    std::fs::create_dir_all(v.path().join("Notebooks/Deep/Er")).unwrap();
+    std::fs::write(v.path().join("Notebooks/Deep/Er/Twin.md"), "deep").unwrap();
+    std::fs::write(v.path().join("Notebooks/Inbox/Twin.md"), "shallow").unwrap();
+    for _ in 0..5 {
+        let (_, rel) = resolve_note_path(v.path(), "Twin").expect("opens one of them");
+        assert_eq!(
+            rel, "Notebooks/Inbox/Twin.md",
+            "the one nearest the top wins"
+        );
+    }
+    // A path says which one is meant.
+    let (_, rel) = resolve_note_path(v.path(), "Er/Twin").unwrap();
+    assert_eq!(rel, "Notebooks/Deep/Er/Twin.md");
+}
+
+#[test]
 fn a_folder_resolves_for_its_listing_but_never_the_root_or_outside() {
     let v = vault();
     std::fs::write(v.path().join("Notebooks/Inbox/Plan.md"), "Plan").unwrap();

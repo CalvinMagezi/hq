@@ -12,6 +12,7 @@ import { chartSlot, fillChartSlots } from '~/lib/chartSlots'
 import { commentMarker, foldComments, isCommentLang } from '~/lib/commentView'
 import { parseChart, parseMermaidPie, renderChartHtml } from '~/lib/chart'
 import { codespanHtml, vaultFileLinkTarget, vaultLinkTarget } from '~/lib/noteRefs'
+import { wikilinkExtension } from '~/lib/wikilinks'
 import { isHtmlPath } from '~/lib/htmlDashboard'
 import { downloadVaultFile, vaultFileExists } from '~/lib/vaultApi'
 
@@ -42,14 +43,12 @@ function ensureMarkedConfigured() {
     return markedConfigured
 }
 
+// `[[Note]]` links are read by a marked extension, so one inside a code block or a code span
+// stays the code it is. Registered once, before the first render.
+marked.use({ extensions: [wikilinkExtension] })
+
 function renderHtml(markdown: string): string {
-    const md = markdown.replace(/\[\[([^\]]+)\]\]/g, (_match, p1) => {
-        const parts = p1.split('|')
-        const target = parts[0].trim()
-        const label = (parts[1] || parts[0]).trim()
-        return `<button type="button" class="md-wikilink a-link" data-vault-note="${escapeHtml(target)}" aria-label="Open note ${escapeHtml(label)}">${escapeHtml(label)}</button>`
-    })
-    const raw = marked.parse(md, { async: false }) as string
+    const raw = marked.parse(markdown, { async: false }) as string
     const sanitized = DOMPurify.sanitize(raw, { USE_PROFILES: { html: true }, ADD_ATTR: ['data-copy-text', 'data-vault-note', 'data-vault-file', 'data-chart-slot', 'data-table-copy', 'data-table-expand'] })
     return fillChartSlots(blockRemoteImages(sanitized))
 }

@@ -63,6 +63,7 @@ pub mod tls;
 mod usage_forecast_api;
 mod usage_providers_api;
 mod vault_api;
+mod vault_health_api;
 mod verification_api;
 mod web_push;
 mod workbench_api;

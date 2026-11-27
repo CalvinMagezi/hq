@@ -4200,9 +4200,11 @@ dependencies = [
  "gray_matter",
  "hq-core",
  "serde",
+ "serde_json",
  "serde_yaml",
  "tempfile",
  "tracing",
+ "unicode-normalization",
 ]
 
 [[package]]

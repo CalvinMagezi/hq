@@ -688,7 +688,7 @@ async fn dispatch_task(
         "skill-outcomes" => tasks_periodic::run_skill_outcomes(db),
 
         // Slow cycle (6h — daily)
-        "vault-health" => tasks_slow::run_vault_health(vault_path, db).await,
+        "vault-health" => tasks_slow::run_vault_health(vault_path, db, config).await,
         "memory-forgetting" => tasks_slow::run_memory_forgetting(vault_path, db).await,
         "thread-log-rotation" => tasks_slow::run_thread_log_rotation(vault_path).await,
         "vault-cleanup" => tasks_slow::run_vault_cleanup(vault_path, db).await,

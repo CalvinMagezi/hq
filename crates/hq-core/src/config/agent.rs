@@ -80,6 +80,12 @@ pub struct DaemonConfig {
     /// Fires the reminders the owner set (`hq reminders`, the `remind_*` tools). No model is involved.
     #[serde(default = "default_true")]
     pub reminders: bool,
+
+    /// Every few hours, check the notes for links that reach nothing, duplicates and unreadable
+    /// properties, and keep the result for the Notes screen and `hq doctor`. Reads notes on this
+    /// device only: no model, no network, and it changes no note.
+    #[serde(default = "default_true")]
+    pub vault_health: bool,
 }
 
 /// How chat turns are turned into memories.
@@ -131,6 +137,7 @@ impl Default for DaemonConfig {
             inbox_tidy: true,
             daily_brief: true,
             reminders: true,
+            vault_health: true,
         }
     }
 }

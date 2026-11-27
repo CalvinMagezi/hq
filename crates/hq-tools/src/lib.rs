@@ -67,6 +67,7 @@ pub mod task_placement;
 pub mod tasks;
 pub mod usage_forecast;
 pub mod vault;
+pub mod vault_health;
 pub mod vault_reorg;
 pub mod write_policy;
 

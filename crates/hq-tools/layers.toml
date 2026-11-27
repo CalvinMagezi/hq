@@ -23,6 +23,7 @@ agent_comm = 1
 helper_catalog = 1
 write_policy = 1
 note_index = 1
+vault_health = 1
 spawned_marker = 1
 harness_alias = 1
 lane_gate = 1

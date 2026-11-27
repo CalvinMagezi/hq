@@ -16,7 +16,7 @@
 use anyhow::Result;
 use hq_db::Database;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing::info;
 
 use crate::db::{decay_old_memories, get_memory_stats};
@@ -60,8 +60,8 @@ impl MemoryForgetter {
     ///   are well-linked (3+ backlinks). These anchor important knowledge schemas
     ///   and should resist decay strongly.
     ///
-    /// Protected: memories with access_count > 0 or replay_count > 0 get partial
-    /// restore, since being accessed/replayed signals ongoing relevance.
+    /// Protected: unconsolidated memories with access_count > 0 get a partial restore,
+    /// since being served to a session signals ongoing relevance.
     pub fn run_cycle(&self) -> Result<ForgetterResult> {
         // ── Tier 1: Standard decay — unconsolidated memories ──────────────
         let standard_decayed = decay_old_memories(&self.db, 0.015, 7)?;
@@ -114,15 +114,6 @@ impl MemoryForgetter {
         self.db.with_conn(|conn| {
             conn.execute(
                 "UPDATE memories SET importance = MIN(1.0, importance + 0.0075) WHERE access_count > 0 AND consolidated = 0 AND created_at < ?1",
-                [&cutoff_14d],
-            )?;
-            Ok(())
-        })?;
-
-        // ── Replay-count protection ──────────────────────────────────────
-        self.db.with_conn(|conn| {
-            conn.execute(
-                "UPDATE memories SET importance = MIN(1.0, importance + 0.0075) WHERE replay_count > 0 AND consolidated = 0 AND created_at < ?1",
                 [&cutoff_14d],
             )?;
             Ok(())
@@ -301,8 +292,15 @@ impl MemoryForgetter {
             let mut stmt = conn.prepare(
                 "SELECT memory_ids, created_at FROM consolidations ORDER BY created_at DESC",
             )?;
+            // An older row may hold an integer timestamp. Reading it as text would fail the
+            // whole forgetting cycle, so take whatever is stored and render it.
             let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                let created_at = match row.get::<_, rusqlite::types::Value>(1)? {
+                    rusqlite::types::Value::Text(text) => text,
+                    rusqlite::types::Value::Integer(n) => n.to_string(),
+                    _ => String::new(),
+                };
+                Ok((row.get::<_, String>(0)?, created_at))
             })?;
             let mut result = Vec::new();
             for row in rows {
@@ -317,6 +315,9 @@ impl MemoryForgetter {
 
         let mut low_link: Vec<i64> = Vec::new();
         let mut high_link: Vec<i64> = Vec::new();
+        // Read the vault once: every insight note below is looked up in the same index.
+        let backlinks =
+            hq_vault::relink::backlink_index(&hq_vault::relink::snapshot(&self.vault_path));
 
         for (ids_json, created_at) in &consolidations {
             let source_ids: Vec<i64> = serde_json::from_str(ids_json).unwrap_or_default();
@@ -333,8 +334,8 @@ impl MemoryForgetter {
             };
             let note_path = format!("Notebooks/Memories/{date}-{time}-insight.md");
 
-            // Count backlinks in the vault by scanning for [[note_path]] references
-            let link_count = count_backlinks(&self.vault_path, &note_path);
+            // The notes that link to the insight, however the link is written.
+            let link_count = count_linking_notes(&backlinks, &note_path);
 
             let bucket = if link_count >= HIGH_LINK_THRESHOLD {
                 &mut high_link
@@ -350,48 +351,22 @@ impl MemoryForgetter {
     }
 }
 
-/// Count files in the vault that contain a wikilink to the given note path.
-/// This is a simplified version — in production, you'd use the vault graph.
-fn count_backlinks(vault_path: &Path, note_path: &str) -> usize {
-    let note_name = std::path::Path::new(note_path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
-
-    if note_name.is_empty() {
-        return 0;
-    }
-
-    let search_pattern = format!("[[{note_name}]]");
-    let notebooks_dir = vault_path.join("Notebooks");
-
-    if !notebooks_dir.exists() {
-        return 0;
-    }
-
-    count_files_containing(&notebooks_dir, &search_pattern)
-}
-
-/// Recursively count markdown files containing a given string.
-fn count_files_containing(dir: &std::path::Path, pattern: &str) -> usize {
-    let mut count = 0;
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return 0,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            count += count_files_containing(&path, pattern);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("md")
-            && let Ok(content) = std::fs::read_to_string(&path)
-            && content.contains(pattern)
-        {
-            count += 1;
-        }
-    }
-    count
+/// How many notes link to `note_path`, by wikilink or markdown link, with a heading, folder or
+/// alias or without. A link that could mean another note of the same name is not counted: the
+/// count decides what the forgetter keeps, so it errs on the side of fewer.
+fn count_linking_notes(
+    index: &std::collections::HashMap<String, Vec<hq_vault::relink::Backlink>>,
+    note_path: &str,
+) -> usize {
+    let mut paths: Vec<&str> = index
+        .get(note_path)
+        .into_iter()
+        .flatten()
+        .filter(|b| !b.ambiguous)
+        .map(|b| b.path.as_str())
+        .collect();
+    paths.dedup();
+    paths.len()
 }
 
 fn cutoff_iso(days: i64) -> String {
@@ -403,6 +378,54 @@ fn cutoff_iso(days: i64) -> String {
 mod tests {
     use super::*;
     use hq_db::Database;
+
+    #[test]
+    fn a_note_counts_every_other_note_that_links_to_it_however_the_link_is_written() {
+        let dir = std::env::temp_dir().join(format!(
+            "hq-forgetter-backlinks-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let write = |rel: &str, text: &str| {
+            let p = dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        write(
+            "Notebooks/Memories/2026-11-20-12-00-00-insight.md",
+            "insight",
+        );
+        // The four spellings the old `[[stem]]` substring match could not see, plus the plain one.
+        write("Notebooks/A.md", "[[2026-11-20-12-00-00-insight#Part]]");
+        write(
+            "Notebooks/B.md",
+            "[[Memories/2026-11-20-12-00-00-insight|the insight]]",
+        );
+        write(
+            "Notebooks/C.md",
+            "[t](Memories/2026-11-20-12-00-00-insight.md)",
+        );
+        write(
+            "Notebooks/D.md",
+            "[[2026-11-20-12-00-00-insight]] and again [[2026-11-20-12-00-00-insight]]",
+        );
+        // Not links: code, and another note with a similar name.
+        write(
+            "Notebooks/E.md",
+            "`[[2026-11-20-12-00-00-insight]]` [[2026-11-20-12-00-00-insights]]",
+        );
+
+        let index = hq_vault::relink::backlink_index(&hq_vault::relink::snapshot(&dir));
+        assert_eq!(
+            count_linking_notes(&index, "Notebooks/Memories/2026-11-20-12-00-00-insight.md"),
+            4,
+            "four notes link to it; a note that links twice counts once"
+        );
+        assert_eq!(count_linking_notes(&index, "Notebooks/Nope.md"), 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn archives_a_page_with_no_edges_older_than_the_prune_threshold() {
@@ -465,5 +488,158 @@ mod tests {
             vault.note_exists("_graph/linked-a.md"),
             "stale but connected pages must survive because canonical_key correctly finds their entity_edges row"
         );
+    }
+
+    // ── Decay and pruning ────────────────────────────────────────────────
+
+    use crate::db::{StoreMemoryParams, store_consolidation, store_memory};
+
+    fn temp_vault() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    fn store(db: &Database, summary: &str, importance: f64) -> i64 {
+        store_memory(
+            db,
+            &StoreMemoryParams {
+                source: "chat-turn",
+                harness: "web",
+                raw_text: "",
+                summary,
+                entities: &[],
+                topics: &[],
+                importance,
+                user_id: None,
+            },
+        )
+        .unwrap()
+    }
+
+    fn age(db: &Database, id: i64, days: i64) {
+        let at = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE memories SET created_at = ?1 WHERE id = ?2",
+                rusqlite::params![at, id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    fn importance_of(db: &Database, id: i64) -> Option<f64> {
+        db.with_conn(|c| {
+            Ok(
+                c.query_row("SELECT importance FROM memories WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })
+                .ok(),
+            )
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn old_unconsolidated_memories_decay_and_fresh_ones_do_not() {
+        let db = Database::open_memory().unwrap();
+        let vault = temp_vault();
+        let old = store(&db, "old", 0.5);
+        let fresh = store(&db, "fresh", 0.5);
+        age(&db, old, 10);
+        age(&db, fresh, 2);
+
+        let result = MemoryForgetter::new(db.clone(), vault.path().to_path_buf())
+            .run_cycle()
+            .unwrap();
+
+        assert_eq!(result.decayed, 1);
+        assert!((importance_of(&db, old).unwrap() - 0.485).abs() < 1e-9);
+        assert!((importance_of(&db, fresh).unwrap() - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_memory_that_was_served_regains_some_importance() {
+        let db = Database::open_memory().unwrap();
+        let vault = temp_vault();
+        let used = store(&db, "used", 0.5);
+        let unused = store(&db, "unused", 0.5);
+        age(&db, used, 20);
+        age(&db, unused, 20);
+        crate::touch_memory(&db, used).unwrap();
+
+        MemoryForgetter::new(db.clone(), vault.path().to_path_buf())
+            .run_cycle()
+            .unwrap();
+
+        // Both lose 0.015, and only the one that was served gets 0.0075 back.
+        assert!((importance_of(&db, unused).unwrap() - 0.485).abs() < 1e-9);
+        assert!((importance_of(&db, used).unwrap() - 0.4925).abs() < 1e-9);
+    }
+
+    #[test]
+    fn weak_old_memories_are_pruned_to_the_archive_and_the_rest_stay() {
+        let db = Database::open_memory().unwrap();
+        let vault = temp_vault();
+        let weak_old = store(&db, "WEAK-OLD-FACT", 0.04);
+        let weak_young = store(&db, "weak but young", 0.04);
+        let strong_old = store(&db, "strong and old", 0.9);
+        age(&db, weak_old, 70);
+        age(&db, weak_young, 20);
+        age(&db, strong_old, 70);
+
+        let result = MemoryForgetter::new(db.clone(), vault.path().to_path_buf())
+            .run_cycle()
+            .unwrap();
+
+        assert_eq!(result.pruned, 1);
+        assert!(importance_of(&db, weak_old).is_none(), "pruned");
+        assert!(importance_of(&db, weak_young).is_some(), "under 60 days");
+        assert!(importance_of(&db, strong_old).is_some(), "important");
+
+        let archive_dir = vault.path().join("_archive").join("memories");
+        let archived: String = std::fs::read_dir(&archive_dir)
+            .unwrap()
+            .flatten()
+            .map(|e| std::fs::read_to_string(e.path()).unwrap())
+            .collect();
+        assert!(archived.contains("WEAK-OLD-FACT"), "{archived}");
+        assert!(!archived.contains("strong and old"));
+    }
+
+    /// Nothing writes the `[[...-insight]]` links the classifier counts, so a consolidated memory
+    /// always lands in the fast-decay tier. Pinned here so replacing that rule is a visible edit.
+    #[test]
+    fn a_consolidated_memory_with_no_backlinks_decays_at_the_fast_rate() {
+        let db = Database::open_memory().unwrap();
+        let vault = temp_vault();
+        let id = store(&db, "consolidated", 0.5);
+        age(&db, id, 10);
+        store_consolidation(&db, &[id], "an insight", &[]).unwrap();
+
+        MemoryForgetter::new(db.clone(), vault.path().to_path_buf())
+            .run_cycle()
+            .unwrap();
+
+        assert!((importance_of(&db, id).unwrap() - 0.45).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_consolidation_with_an_integer_timestamp_does_not_fail_the_cycle() {
+        let db = Database::open_memory().unwrap();
+        let vault = temp_vault();
+        let id = store(&db, "legacy", 0.5);
+        age(&db, id, 10);
+        db.with_conn(|c| {
+            c.execute(
+                "INSERT INTO consolidations (memory_ids, insight, created_at) VALUES (?1, 'old', 1700000000)",
+                [format!("[{id}]")],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let result = MemoryForgetter::new(db, vault.path().to_path_buf()).run_cycle();
+
+        assert!(result.is_ok(), "{:?}", result.err());
     }
 }
