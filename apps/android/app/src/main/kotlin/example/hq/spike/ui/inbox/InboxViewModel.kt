@@ -111,6 +111,10 @@ class InboxActions(
     /** A Later row's button: asks HQ to bring the offer back, then [onBroughtBack] takes the person to the chat. */
     val onBringBack: (InboxCard) -> Unit = {},
     var onBroughtBack: (String?) -> Unit = {},
+    /** A reminder's Done. */
+    val onReminderDone: (InboxCard) -> Unit = {},
+    /** A reminder's Snooze: it rings again at this time, in epoch seconds. */
+    val onReminderSnooze: (InboxCard, Long) -> Unit = { _, _ -> },
 )
 
 class InboxViewModel(app: Application) : AndroidViewModel(app) {
@@ -130,6 +134,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         onKeepGoing = ::keepGoing, onAllowedDone = { _state.update { it.copy(allowed = null) } },
         onAskSignOut = { c -> _state.update { it.copy(askSignOut = c, signOutError = null) } }, onSignOutConfirm = ::signOut,
         onClearHelpers = { clear(NeedsLayout.oldHelpers(_state.value.shownNeeds)) }, onShowOwner = { _state.update { it.copy(catchUpDismissed = true) } }, onRestore = ::restoreDone, onBringBack = ::bringBack,
+        onReminderDone = { answerReminder(it, "done", null) }, onReminderSnooze = { c, until -> answerReminder(c, "snooze", until) },
     )
 
     init {
@@ -287,6 +292,26 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Done or Snooze on a reminder's ping; HQ moves the reminder and takes the ping out of the list. */
+    private fun answerReminder(card: InboxCard, action: String, until: Long?) {
+        if (_state.value.answering[card.id] == Answer.Sending) return
+        _state.update { it.copy(answering = it.answering + (card.id to Answer.Sending)) }
+        viewModelScope.launch {
+            try {
+                client.answerNotification(card.id, action, until = until)
+                _state.update { it.copy(answering = it.answering - card.id, details = null, line = InboxLine(if (action == "done") "Done." else "Snoozed.")) }
+                refresh()
+            } catch (e: HqUnavailable) {
+                if (e.message?.contains("HTTP 409") == true) {
+                    _state.update { it.copy(answering = it.answering - card.id, details = null, line = InboxLine("Already answered.")) }
+                    refresh()
+                } else {
+                    _state.update { it.copy(answering = it.answering + (card.id to Answer.Failed("Couldn't send your answer. HQ didn't answer in time. It may be restarting."))) }
+                }
+            }
+        }
+    }
+
     private fun answer(card: InboxCard, allow: Boolean, wholeSite: Boolean = false) {
         if (_state.value.answering[card.id] == Answer.Sending) return
         _state.update { it.copy(answering = it.answering + (card.id to Answer.Sending)) }
@@ -391,7 +416,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
 
 class InboxLists(val needs: List<InboxCard>, val updates: List<InboxCard>, val done: List<DoneEntry>)
 
-internal val NEEDS_ORDER = listOf(CardKind.SignIn, CardKind.HelperAsks, CardKind.SandboxGrant, CardKind.TaskReview, CardKind.Approval, CardKind.HelperStuck)
+internal val NEEDS_ORDER = listOf(CardKind.SignIn, CardKind.Reminder, CardKind.HelperAsks, CardKind.SandboxGrant, CardKind.TaskReview, CardKind.Approval, CardKind.HelperStuck)
 
 /** What the three tabs show for what the server holds: things that need the owner, updates, and what the owner already decided. */
 fun inboxLists(pending: List<example.hq.spike.data.HqClient.InboxItem>, history: List<example.hq.spike.data.HqClient.InboxItem>): InboxLists {
