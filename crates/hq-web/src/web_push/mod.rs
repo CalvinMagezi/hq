@@ -45,6 +45,8 @@ const ALWAYS_PUSHED_SOURCES: &[&str] = &[
     crate::device_auth::DEVICE_SIGN_IN_SOURCE,
     // A reminder the person asked for in chat: it is only useful if it reaches them.
     hq_core::types::DUE_REMINDER_SOURCE,
+    // A reminder the owner set for a time: it must ring when they chose.
+    hq_core::types::REMINDER_SOURCE,
     // A question with a deadline: a default may fire if it is not seen.
     hq_db::owner_decisions::SOURCE,
 ];
@@ -586,6 +588,27 @@ mod tests {
             ValueKind::Fyi,
             "Due today: pay rent",
             "INB-1",
+        );
+        hq_db::value_items::emit(&db, &item).unwrap();
+        assert_eq!(push(dir.path(), false).dispatch_once(&db).await.unwrap(), 1);
+        assert_eq!(received.requests.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_reminder_the_owner_set_is_pushed_without_push_all() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = hq_db::Database::open_memory().unwrap();
+        let (base, received) = mock_push_service().await;
+        subscribe(&db, &format!("{base}/ok/a"));
+        let item = ValueItem::new(
+            hq_core::types::REMINDER_SOURCE,
+            ValueKind::Fyi,
+            "Call Moses",
+            "Due 4:00 pm today.",
+        );
+        assert!(
+            is_urgent(&item),
+            "a reminder is never held by the hourly fold"
         );
         hq_db::value_items::emit(&db, &item).unwrap();
         assert_eq!(push(dir.path(), false).dispatch_once(&db).await.unwrap(), 1);
