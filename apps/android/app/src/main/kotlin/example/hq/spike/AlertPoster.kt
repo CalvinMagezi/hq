@@ -41,6 +41,7 @@ object AlertPoster {
     private const val SDK_AUTH_ACTION = 31
     private const val PREFS = "alerts"
     private const val SHOW_DETAILS = "show_details"
+    private const val SHOW_REMINDER_TEXT = "show_reminder_text"
     private const val OLD_ALLOW_ANSWERS = "allow_answers"
     private const val UPGRADE_CHECKED = "details_migrated"
     private const val UPGRADER_NOTE = "upgrader_note"
@@ -80,6 +81,17 @@ object AlertPoster {
     /** The owner's choice to see details in notifications. Off unless they turned it on: the old "answers" switch is not carried over. */
     @JvmStatic
     fun showDetails(c: Context): Boolean = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(SHOW_DETAILS, false)
+
+    /** Whether a reminder's own words show on the lock screen. On unless the owner turned it off: they wrote it, and a reminder that says only "a reminder is due" is hard to act on. */
+    @JvmStatic
+    fun showReminderText(c: Context): Boolean = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(SHOW_REMINDER_TEXT, true)
+
+    /** Stores the choice and re-posts the shown notices at once. */
+    @JvmStatic
+    fun setShowReminderText(c: Context, on: Boolean) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(SHOW_REMINDER_TEXT, on).apply()
+        Alerts.refresh(c)
+    }
 
     /** Stores the choice and re-posts every shown notice at once, so turning details off takes them off the shade. */
     @JvmStatic
@@ -246,6 +258,7 @@ object AlertPoster {
     internal fun linkFor(card: InboxCard): String = when {
         card.kind == CardKind.Update -> "hq://inbox"
         card.kind == CardKind.SandboxGrant -> "hq://inbox/${card.id}"
+        card.kind == CardKind.Reminder -> "hq://inbox/${card.id}"
         card.sessionId != null -> "hq://helpers/${card.sessionId}"
         else -> "hq://inbox/${card.id}"
     }
@@ -269,7 +282,9 @@ object AlertPoster {
         val channel = if (needs) NEEDS else UPDATES
         val b = Notification.Builder(c, channel).setSmallIcon(HubService.statIcon(c)).setContentTitle(words.title).setContentText(words.body)
             .setStyle(Notification.BigTextStyle().bigText(words.body)).setContentIntent(tapFor(c, card)).setAutoCancel(true).setOnlyAlertOnce(quiet)
-            .setCategory(if (needs) Notification.CATEGORY_REMINDER else Notification.CATEGORY_STATUS).setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setCategory(if (needs) Notification.CATEGORY_REMINDER else Notification.CATEGORY_STATUS)
+            // A reminder's words reach the lock screen when the owner allows it; the public version stays the general one.
+            .setVisibility(if (card.kind == CardKind.Reminder && showReminderText(c)) Notification.VISIBILITY_PUBLIC else Notification.VISIBILITY_PRIVATE)
             .setPublicVersion(publicVersion(c, channel))
         if (needs) actions(c, card, details).forEach { b.addAction(it) }
         return b.build()
@@ -279,6 +294,13 @@ object AlertPoster {
     private fun actions(c: Context, card: InboxCard, details: Boolean): List<Notification.Action> {
         val icon = Icon.createWithResource(c, HubService.statIcon(c))
         val out = mutableListOf<Notification.Action>()
+        // Done and Snooze change nothing the owner would regret, so they need neither details nor an unlock.
+        if (card.kind == CardKind.Reminder) {
+            out += Notification.Action.Builder(icon, c.getString(R.string.notice_action_done), AnswerReceiver.intent(c, card, "done")).build()
+            out += Notification.Action.Builder(icon, c.getString(R.string.notice_action_snooze_hour), AnswerReceiver.intent(c, card, "snooze")).build()
+            out += Notification.Action.Builder(icon, c.getString(R.string.notice_action_open), tapFor(c, card)).build()
+            return out
+        }
         // Sandbox-grants notifications do not carry an R0/R1 vs R2 risk class, so conservatively open the app.
         val buttons = details && Build.VERSION.SDK_INT >= SDK_AUTH_ACTION && !NoticeWords.losing(card) && card.kind != CardKind.SandboxGrant
         if (buttons) {
