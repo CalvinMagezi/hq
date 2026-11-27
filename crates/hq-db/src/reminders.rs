@@ -1,4 +1,4 @@
-//! Reminders the owner set (`sql/154_reminders.sql`): what to say, when, how often, and whether to
+//! Reminders the owner set (`sql/156_reminders.sql`): what to say, when, how often, and whether to
 //! keep after them until they answer. This module only stores and moves rows. When a reminder is
 //! next due, and how a repeat or a nudge advances, is decided by `hq_tools::reminders::schedule`,
 //! which passes the result in. Nothing here calls a model.
