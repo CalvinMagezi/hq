@@ -1,68 +1,44 @@
 ---
 noteType: guide
 fileName: memory-system
-version: 1
+version: 2
 ---
 # Memory System Guide
 
-HQ's memory system gives agents persistent, structured recall across sessions. Memory is stored as plain markdown in the vault, making it transparent, searchable, and editable.
+HQ keeps two kinds of memory. They live in different places and behave differently, so it helps to know which is which.
 
-## How Memory Works
+## 1. Your facts: `MEMORY.md`
 
-### System Files (Core Memory)
+`_system/MEMORY.md` is a plain markdown file you can read and edit by hand. HQ loads it at the start of every chat.
 
-These files in `_system/` are loaded at every session start:
+- Add a fact with `hq memory add "..."`. It goes under "Key Facts".
+- Read it with `hq memory show`, or list its bullet points with `hq memory facts`.
+- A section called "Agent Insights (Auto-Generated)" is rewritten by HQ. Each line is marked `(inferred)`: it is a guess HQ made from your chats, not something you told it. Edit the rest of the file freely.
 
-| File | Purpose | Agent Behavior |
-|------|---------|---------------|
-| `SOUL.md` | Operating identity and principles | Read-only reference, defines how the agent behaves |
-| `MEMORY.md` | Key facts, active goals, session history | Read/write, agents add facts as they learn them |
-| `PREFERENCES.md` | User preferences and custom instructions | Read-only during sessions, edited by user or onboard |
-| `CONFIG.md` | Runtime configuration values | Read-only, agents respect these settings |
-| `CAPABILITIES.md` | Available tools and integrations | Read-only, updated by `hq install` |
+Other files in `_system/`: `SOUL.md` (how HQ behaves), `PREFERENCES.md` (your preferences), `CONFIG.md`.
 
-### Notebook Memory (Extended Memory)
+## 2. What HQ picked up from your chats
 
-Notes in `Notebooks/Memories/` store longer-form memories that don't fit in MEMORY.md:
-- Project-specific context
-- Detailed session summaries
-- Research findings
-- Decision records
+After a chat turn, HQ may save a short summary of it. These are **not** markdown files. They are rows in HQ's database (`_data/vault.db`), so you cannot open or edit them as notes.
 
-### Embeddings (Semantic Memory)
-
-The daemon automatically embeds vault notes for semantic search:
-- New notes are queued for embedding on creation
-- Batch processing: 10 notes per daemon cycle (every 10 minutes)
-- Enables `hq search` with semantic similarity matching
-- Embedding vectors stored in `_data/vault.db`
-
-## Memory Lifecycle
-
-### Ingestion
-When an agent learns something new:
-1. **Fact**: Short, key insight → add to `MEMORY.md` under "Key Facts"
-2. **Goal**: Active objective → add to `MEMORY.md` under "Active Goals"
-3. **Detail**: Longer context → create a note in `Notebooks/Memories/`
-4. **Project-specific**: Context for a project → add to `Notebooks/Projects/<project>/`
+- A turn is only considered if HQ's reply is more than a short answer, and never if the chat read outside content such as a web page or email.
+- Secrets that match known shapes (API keys, tokens) are removed before anything is saved. Odd formats can slip through, so do not paste secrets into chat.
+- Only your own chats are learned from. A guest's messages, for example a family member on Discord, are not saved and do not see your memory.
+- Each chat shows HQ the most important saved summaries. They are picked by importance and age, not by what you just asked. Matching them to your message is planned.
 
 ### Consolidation
-Over time, memory is consolidated:
-- The memory consolidator merges redundant facts
-- Old session summaries are compressed
-- Completed goals are archived
-- The daemon runs it on a schedule. `hq memory stats` shows when it last ran
+
+About every two hours, if at least five new summaries have built up, HQ writes an insight note to `Notebooks/Memories/`. These notes are marked `status: inferred`. The original summaries are kept; consolidation does not merge or delete them.
 
 ### Forgetting
-Not everything should be remembered forever:
-- Stale facts (no longer true) should be removed from MEMORY.md
-- Completed project notes can be archived
-- The forgetter can prune low-value memories based on age and relevance
 
-## Best Practices
+Once a day HQ lowers the importance of old summaries and removes the weakest ones after about 60 days, keeping a short copy in `_archive/memories/`.
 
-1. **Keep MEMORY.md focused.** It's loaded every session, so keep it to high-value facts. Move details to Notebooks.
-2. **Tag memories.** Use frontmatter tags so they're discoverable via search.
-3. **Date your memories.** Include creation dates so staleness is visible.
-4. **Let agents write.** Don't manually manage every memory. Agents are trained to maintain MEMORY.md.
-5. **Review periodically.** Run `hq memory show` occasionally to prune outdated facts.
+`hq memory stats` shows how many summaries exist and when consolidation last ran.
+
+## Best practices
+
+1. **Keep `MEMORY.md` short.** It is loaded every time. Put long detail in a note under `Notebooks/`.
+2. **Tell HQ what matters.** If something must be remembered, add it with `hq memory add`. Do not rely on HQ picking it up from a chat.
+3. **Date your facts.** A date makes it obvious when a fact has gone stale.
+4. **Review now and then.** Run `hq memory show` and remove what is no longer true.
