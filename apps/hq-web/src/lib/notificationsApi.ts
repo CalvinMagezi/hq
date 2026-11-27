@@ -125,12 +125,21 @@ export async function fetchNotificationsClient(filter?: ListNotificationsFilter)
   return hqJson(`/api/notifications?${qs.toString()}`)
 }
 
+/** What an answer may carry beyond its name: a starter for a sandbox grant, or when a reminder rings again. */
+export interface NotificationActionOpts {
+  starter?: string
+  /** Snooze for this many minutes. */
+  minutes?: number
+  /** Snooze until this time, in epoch seconds. Wins over `minutes`. */
+  until?: number
+}
+
 export function executeNotificationAction(
   id: string,
-  action: 'approve' | 'allow_task' | 'allow_repo' | 'allow_starter' | 'reject' | 'dismiss' | string,
-  opts?: { starter?: string }
+  action: 'approve' | 'allow_task' | 'allow_repo' | 'allow_starter' | 'reject' | 'dismiss' | 'done' | 'snooze' | string,
+  opts?: NotificationActionOpts
 ): Promise<{ success: boolean; new_state: string; message: string }> {
-  const body = opts?.starter ? { action, starter: opts.starter } : { action }
+  const body = { action, ...(opts?.starter ? { starter: opts.starter } : {}), ...(opts?.minutes ? { minutes: opts.minutes } : {}), ...(opts?.until ? { until: opts.until } : {}) }
   return hqJson(`/api/notifications/${encodeURIComponent(id)}/action`, 'POST', body)
 }
 

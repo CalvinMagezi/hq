@@ -16,6 +16,7 @@ import { Route as SigninRouteImport } from './routes/signin'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SessionsRouteImport } from './routes/sessions'
+import { Route as RemindersRouteImport } from './routes/reminders'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as NotesRouteImport } from './routes/notes'
 import { Route as InboxRouteImport } from './routes/inbox'
@@ -84,6 +85,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const SessionsRoute = SessionsRouteImport.update({
   id: '/sessions',
   path: '/sessions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RemindersRoute = RemindersRouteImport.update({
+  id: '/reminders',
+  path: '/reminders',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NotificationsRoute = NotificationsRouteImport.update({
@@ -265,6 +271,7 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof InboxRouteWithChildren
   '/notes': typeof NotesRouteWithChildren
   '/notifications': typeof NotificationsRoute
+  '/reminders': typeof RemindersRoute
   '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
@@ -307,6 +314,7 @@ export interface FileRoutesByTo {
   '/helpers': typeof HelpersRouteWithChildren
   '/inbox': typeof InboxRouteWithChildren
   '/notifications': typeof NotificationsRoute
+  '/reminders': typeof RemindersRoute
   '/sessions': typeof SessionsRoute
   '/setup': typeof SetupRoute
   '/signin': typeof SigninRoute
@@ -350,6 +358,7 @@ export interface FileRoutesById {
   '/inbox': typeof InboxRouteWithChildren
   '/notes': typeof NotesRouteWithChildren
   '/notifications': typeof NotificationsRoute
+  '/reminders': typeof RemindersRoute
   '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
@@ -395,6 +404,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/notes'
     | '/notifications'
+    | '/reminders'
     | '/sessions'
     | '/settings'
     | '/setup'
@@ -437,6 +447,7 @@ export interface FileRouteTypes {
     | '/helpers'
     | '/inbox'
     | '/notifications'
+    | '/reminders'
     | '/sessions'
     | '/setup'
     | '/signin'
@@ -479,6 +490,7 @@ export interface FileRouteTypes {
     | '/inbox'
     | '/notes'
     | '/notifications'
+    | '/reminders'
     | '/sessions'
     | '/settings'
     | '/setup'
@@ -523,6 +535,7 @@ export interface RootRouteChildren {
   InboxRoute: typeof InboxRouteWithChildren
   NotesRoute: typeof NotesRouteWithChildren
   NotificationsRoute: typeof NotificationsRoute
+  RemindersRoute: typeof RemindersRoute
   SessionsRoute: typeof SessionsRoute
   SettingsRoute: typeof SettingsRouteWithChildren
   SetupRoute: typeof SetupRoute
@@ -581,6 +594,13 @@ declare module '@tanstack/react-router' {
       path: '/sessions'
       fullPath: '/sessions'
       preLoaderRoute: typeof SessionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reminders': {
+      id: '/reminders'
+      path: '/reminders'
+      fullPath: '/reminders'
+      preLoaderRoute: typeof RemindersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/notifications': {
@@ -945,6 +965,7 @@ const rootRouteChildren: RootRouteChildren = {
   InboxRoute: InboxRouteWithChildren,
   NotesRoute: NotesRouteWithChildren,
   NotificationsRoute: NotificationsRoute,
+  RemindersRoute: RemindersRoute,
   SessionsRoute: SessionsRoute,
   SettingsRoute: SettingsRouteWithChildren,
   SetupRoute: SetupRoute,

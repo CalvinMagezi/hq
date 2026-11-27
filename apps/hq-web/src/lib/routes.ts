@@ -27,6 +27,7 @@ export const ROUTE_TABLE: RouteRow[] = [
   { web: '/tasks/away', phone: 'hq://tasks/away', replaces: [] },
   { web: '/tasks?view=board', phone: 'hq://web/board', replaces: [] },
   { web: '/tasks?view=timeline', phone: 'hq://web/timeline', replaces: [] },
+  { web: '/reminders', phone: 'hq://settings/reminders', replaces: [] },
   { web: '/helpers', phone: 'hq://helpers', replaces: ['/sessions'] },
   { web: '/helpers/:id', phone: 'hq://helpers/{id}', replaces: ['/sessions?id={id}'] },
   { web: '/inbox', phone: 'hq://inbox', replaces: ['/notifications'] },
