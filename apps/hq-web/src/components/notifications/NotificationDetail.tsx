@@ -5,7 +5,8 @@ import { PaneHead } from '~/components/ui/Panes'
 import { allowLabel, allowTone, quoteArgs } from '~/components/ui/ApprovalCard'
 import { SandboxGrantActions } from '~/components/ui/SandboxGrantCard'
 import { answerErrorLine, lapsed, REQUEST_LIFETIME_MS, serverHqLine } from '~/lib/inboxCard'
-import { silenceTopicOf, type NotificationItem, type SilenceTopic } from '~/lib/notificationsApi'
+import { silenceTopicOf, type NotificationActionOpts, type NotificationItem, type SilenceTopic } from '~/lib/notificationsApi'
+import { ReminderActions } from '~/components/reminders/ReminderActions'
 import {
   SANDBOX_GRANTS_QUERY_KEY,
   SANDBOX_STARTERS_QUERY_KEY,
@@ -26,7 +27,7 @@ const WHEN_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle
 
 interface Props {
   notification: NotificationItem | null
-  onAction(id: string, action: string, opts?: { starter?: string }): Promise<void>
+  onAction(id: string, action: string, opts?: NotificationActionOpts): Promise<void>
   onAnswered: (id: string, choice: 'approve' | 'decline') => void
   loadingAction: string | null
   /** Where the link in the item's own words goes. */
@@ -101,7 +102,9 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
   const plainBody = signInId ? <SignInBody device={device} createdAt={n.created_at} /> : <p className="hq-inbox-text">{n.description}</p>
   const askable = !dialog && !signInId && !isSandboxGrant && approvable
   const clearable = !dialog && !signInId && !isSandboxGrant && !approvable
-  const act = async (action: string, opts?: { starter?: string }) => {
+  // A reminder's ping carries `snooze`: only HQ's own reminders do.
+  const isReminder = clearable && n.actions.includes('snooze')
+  const act = async (action: string, opts?: NotificationActionOpts) => {
     setFailure(null)
     try {
       await onAction(n.id, action, opts)
@@ -246,6 +249,13 @@ export function NotificationDetail({ notification, onAction, onAnswered, loading
                 {answering('approve') ? t('approval_answering') : allowLabel(approval?.loses, approval?.verb)}
               </button>
             </>
+          )}
+          {isReminder && (
+            <ReminderActions
+              title={n.title}
+              busy={busy}
+              onAct={(action, until) => void act(action, until ? { until } : undefined)}
+            />
           )}
           {clearable && (
             <button type="button" className="a-btn secondary" disabled={busy} onClick={() => void act('dismiss')}>
