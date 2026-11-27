@@ -4982,6 +4982,9 @@
     <string name="memory_mode_query">Each message brings up only the notes that fit it.</string>
     <string name="memory_mode_recent">Chats get your most important notes.</string>
     <string name="memory_mode_off">HQ does not bring up what it learned from chats.</string>
+    <string name="memory_learning_item">Save new notes</string>
+    <string name="memory_learning_on">HQ saves a note after chats where you tell it something.</string>
+    <string name="memory_learning_paused">Paused. HQ saves nothing new. What it already saved is still used.</string>
     <string name="memory_search_label">Search what HQ remembers</string>
     <string name="memory_search_placeholder">Search your notes</string>
     <string name="memory_filter_label">Show</string>

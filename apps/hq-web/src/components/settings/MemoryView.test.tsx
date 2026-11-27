@@ -163,3 +163,28 @@ describe('forgetting', () => {
     expect(html({ forgotten: { stillThere: [] } })).not.toContain(t('memory_still_there'))
   })
 })
+
+describe('the pause switch', () => {
+  const html = (over: Partial<MemoryViewProps>) => renderToStaticMarkup(createElement(MemoryView, props(over)))
+
+  test('is absent until the page can change it', () => {
+    expect(html({})).not.toContain('memory-learning')
+  })
+
+  test('says HQ is saving, with the switch on', () => {
+    const out = html({ learning: true, onLearning: noop })
+    expect(out).toContain(t('memory_learning_on'))
+    expect(out).toContain('aria-checked="true"')
+  })
+
+  test('says it is paused, with the switch off, and that old notes are still used', () => {
+    const out = html({ learning: false, onLearning: noop })
+    expect(out).toContain(t('memory_learning_paused'))
+    expect(out).toContain('aria-checked="false"')
+  })
+
+  test('is disabled while HQ has not answered or the page is offline', () => {
+    expect(html({ learning: undefined, onLearning: noop })).toContain('disabled')
+    expect(html({ learning: true, onLearning: noop, canChange: false })).toContain('disabled')
+  })
+})

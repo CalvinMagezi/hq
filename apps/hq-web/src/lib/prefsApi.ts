@@ -8,6 +8,7 @@ export const ASK_LEVELS: AskLevel[] = ['nothing', 'loses_work', 'everything']
 
 export interface Prefs {
   'chat.auto_title': boolean
+  'memory.learning': boolean
   'helpers.ask_level': AskLevel
 }
 
