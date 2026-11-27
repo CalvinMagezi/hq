@@ -2,7 +2,7 @@
 
 use axum::{
     Router,
-    routing::{get, post},
+    routing::{get, patch, post},
 };
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
@@ -100,6 +100,22 @@ fn note_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
         .route(
             "/api/prefs",
             get(prefs_api::prefs_get_handler).put(prefs_api::prefs_put_handler),
+        )
+        .route(
+            "/api/reminders",
+            get(reminders_api::list_handler).post(reminders_api::create_handler),
+        )
+        .route(
+            "/api/reminders/{id}",
+            patch(reminders_api::patch_handler).delete(reminders_api::delete_handler),
+        )
+        .route(
+            "/api/reminders/{id}/done",
+            post(reminders_api::done_handler),
+        )
+        .route(
+            "/api/reminders/{id}/snooze",
+            post(reminders_api::snooze_handler),
         )
         .route("/api/note/versions", get(vault_api::note_versions_handler))
         .route("/api/note/link", post(note_ids::note_link_handler))
