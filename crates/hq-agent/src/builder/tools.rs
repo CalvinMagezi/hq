@@ -284,10 +284,9 @@ impl SessionBuilder {
     /// Whether this session may search and restore the owner's chats: no identity (CLI, daemon) or
     /// the owner's own, unrestricted and not a family guest.
     pub(super) fn reads_owner_history(&self) -> bool {
-        self.identity.as_ref().is_none_or(|id| {
-            id.family_guest.is_none()
-                && matches!(id.scope, hq_core::privacy::DisclosureScope::Unrestricted)
-        })
+        self.identity
+            .as_ref()
+            .is_none_or(hq_core::identity::RequestIdentity::acts_for_owner)
     }
 
     /// Self-update, host harness sessions, background turns and native

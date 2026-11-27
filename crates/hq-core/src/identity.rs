@@ -65,6 +65,14 @@ impl RequestSource {
 }
 
 impl RequestIdentity {
+    /// True when this request speaks for the owner: not a family guest and not restricted.
+    /// What HQ remembers, and the owner's chat history, belong to the owner, so only such a
+    /// request may read them or add to them. A caller with no identity (CLI, daemon) is the
+    /// owner's own and is handled by the caller, as `is_none_or(Self::acts_for_owner)`.
+    pub fn acts_for_owner(&self) -> bool {
+        self.family_guest.is_none() && matches!(self.scope, DisclosureScope::Unrestricted)
+    }
+
     pub fn local() -> Self {
         let user_name = std::env::var("USER")
             .or_else(|_| std::env::var("USERNAME"))

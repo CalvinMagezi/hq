@@ -67,6 +67,17 @@ pub(super) fn result_text(result: &hq_core::types::SessionResult) -> String {
     }
 }
 
+/// Whether a turn may be learned from. Memory belongs to the owner, so a family guest's or a
+/// restricted audience's turns are never ingested: they would resurface later as facts about
+/// the owner. A turn with no identity (CLI, daemon) is the owner's own. `skip` is the caller's
+/// own opt-out (an MCP `hq_ask` turn).
+pub(super) fn learns_from_turn(
+    identity: Option<&hq_core::identity::RequestIdentity>,
+    skip: bool,
+) -> bool {
+    !skip && identity.is_none_or(hq_core::identity::RequestIdentity::acts_for_owner)
+}
+
 /// Replies shorter than this carry nothing worth remembering.
 const MIN_REPLY_CHARS_FOR_MEMORY: usize = 100;
 
