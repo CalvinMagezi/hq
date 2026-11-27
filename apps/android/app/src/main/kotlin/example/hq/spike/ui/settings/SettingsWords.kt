@@ -33,7 +33,7 @@ data class SettingsSnapshot(
 )
 
 /** Keys on this phone, Speech model and Connected tools are sections inside Keys, Assistant and Computers; their old names live on in [SettingsRoutes]. */
-enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, Computers, CaptureWidgets, SetupApp, PairApp, Technical, Noticed, Update, Assistant, Calendar, Contacts, Finance, Suggests, Memory }
+enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, Computers, CaptureWidgets, SetupApp, PairApp, Technical, Noticed, Update, Assistant, Calendar, Contacts, Finance, Suggests, Reminders, Memory }
 
 /** The Settings row that opens the GitHub connection. */
 const val HQ_CODER_ROW = "github"
@@ -45,6 +45,9 @@ const val MEMORY_ROW = "memory"
 /** The Settings rows that open Tasks and Helpers, which are off the bar. */
 const val WORK_TASKS_ROW = "work_tasks"
 const val WORK_HELPERS_ROW = "work_helpers"
+
+/** The Settings row that opens Reminders; its line is fixed, it needs nothing from HQ to be worded. */
+const val REMINDERS_ROW = "work_reminders"
 
 data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
 
@@ -180,6 +183,7 @@ object SettingsWords {
 
     val WORK_SPECS: List<HomeRowSpec> = listOf(
         HomeRowSpec(null, WORK_TASKS_ROW, R.string.row_work_tasks),
+        HomeRowSpec(SettingsPage.Reminders, REMINDERS_ROW, R.string.row_work_reminders),
         HomeRowSpec(null, WORK_HELPERS_ROW, R.string.row_work_helpers),
     )
 
@@ -263,7 +267,8 @@ object SettingsWords {
         HomeGroup(
             w.s(R.string.settings_group_work), listOf(
                 row(w, WORK_SPECS[0], w.s(R.string.trail_work_tasks)),
-                row(w, WORK_SPECS[1], w.s(R.string.trail_work_helpers)),
+                row(w, WORK_SPECS[1], w.s(R.string.reminders_home_status)),
+                row(w, WORK_SPECS[2], w.s(R.string.trail_work_helpers)),
             ),
         ),
         HomeGroup(
@@ -315,7 +320,7 @@ object SettingsWords {
         if (loaded) groups else groups.map { g -> if (g.title == w.s(R.string.settings_group_phone)) g else g.copy(rows = g.rows.map { if (it.page in LOCAL_PAGES || it.key in FIXED_ROWS) it else it.copy(status = w.s(R.string.settings_checking)) }) }
 
     /** Rows whose line never comes from HQ, so it has nothing to check. */
-    private val FIXED_ROWS = setOf(WORK_TASKS_ROW, WORK_HELPERS_ROW, SUGGESTS_ROW, MEMORY_ROW)
+    private val FIXED_ROWS = setOf(WORK_TASKS_ROW, WORK_HELPERS_ROW, SUGGESTS_ROW, REMINDERS_ROW, MEMORY_ROW)
 
     /** Pages whose line comes from this phone, not from HQ. */
     private val LOCAL_PAGES = setOf(SettingsPage.About, SettingsPage.Update, SettingsPage.Technical)

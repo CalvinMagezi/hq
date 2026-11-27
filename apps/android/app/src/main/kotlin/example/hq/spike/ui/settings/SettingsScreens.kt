@@ -141,6 +141,7 @@ internal fun icon(key: String): ImageVector = when (key) {
     SUGGESTS_ROW -> HqIcons.Spark
     MEMORY_ROW -> HqIcons.Notes
     WORK_TASKS_ROW -> HqIcons.Tasks
+    REMINDERS_ROW -> HqIcons.Clock
     WORK_HELPERS_ROW -> HqIcons.Helpers
     else -> HqIcons.Archive
 }
@@ -178,6 +179,7 @@ internal fun title(page: SettingsPage) = when (page) {
     SettingsPage.Finance -> stringResource(R.string.finance_row_title)
     SettingsPage.Suggests -> stringResource(R.string.row_suggests)
     SettingsPage.Memory -> stringResource(R.string.row_memory)
+    SettingsPage.Reminders -> stringResource(R.string.reminders_title)
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -220,6 +222,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Finance -> FinancePage()
                 SettingsPage.Suggests -> SuggestsPage()
                 SettingsPage.Memory -> MemoryPage()
+                SettingsPage.Reminders -> RemindersPage()
                 SettingsPage.Noticed -> NoticedPage(Counters.get(androidx.compose.ui.platform.LocalContext.current))
                 SettingsPage.Origins -> ReadOnlyList(ui, stringResource(R.string.settings_none_origins)) { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
                 SettingsPage.Computers -> ComputersAndTools(ui, actions.onSectionConsumed)

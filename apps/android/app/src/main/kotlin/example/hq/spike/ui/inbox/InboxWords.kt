@@ -12,7 +12,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
-enum class CardKind { HelperAsks, TaskReview, Approval, SandboxGrant, HelperStuck, Update, SignIn }
+enum class CardKind { HelperAsks, TaskReview, Approval, SandboxGrant, HelperStuck, Update, SignIn, Reminder }
 
 enum class CardIcon { Sparkle, Info, Pause, Check, Task, Warning }
 
@@ -97,6 +97,9 @@ object InboxWords {
     private const val APPROVAL_BODY = 400
 
     private const val DIGEST_SOURCE = "fleet-digest"
+
+    /** The source of a reminder's ping (`REMINDER_SOURCE` in HQ): the owner set it for this time, so it is something to do, not news. */
+    const val REMINDER_SOURCE = "reminder"
     private val RUN_TITLE = Regex("^HQ wants to run (\\S+)$")
 
     fun card(item: InboxItem): InboxCard = worded(item).let { c ->
@@ -142,6 +145,11 @@ object InboxWords {
                     state = item.state, sandboxGrant = parsed,
                 )
             }
+            // A reminder the owner set rang: Done and Snooze answer it, and it is never "News".
+            item.sourceTask == REMINDER_SOURCE -> InboxCard(
+                item.id, CardKind.Reminder, Plain.strip(item.title.trim()), Plain.strip(item.description.trim()), "Reminder", item.createdAt, CardIcon.Info,
+                null, false, "", item.link, "Reminder", item.state,
+            )
             helper != null -> helperCard(item, helper.groupValues[1], helper.groupValues[2], session?.groupValues?.get(1), session?.groupValues?.get(2))
             item.kind == "action_needed" && item.sourceTask == TASK_REVIEW_SOURCE -> {
                 // Saying yes here only clears the notice, so it is not offered as "Allow": the owner is asked to look at the task.
