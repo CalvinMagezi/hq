@@ -59,6 +59,22 @@ pub struct DuplicateGroup {
     pub notes: Vec<String>,
 }
 
+/// Two notes that say almost the same thing, found by the on-device model and then confirmed
+/// on their whole text. Only listed: removing either is the person's call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SimilarPair {
+    pub a: String,
+    pub b: String,
+    /// How much of their words they share, 0 to 100.
+    pub percent: u8,
+}
+
+impl SimilarPair {
+    pub fn key(&self) -> String {
+        format!("{}|{}", self.a, self.b)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FrontmatterProblem {
@@ -99,6 +115,17 @@ pub struct Counts {
     pub duplicates: usize,
     pub empty: usize,
     pub frontmatter: usize,
+    /// Pairs of notes that say almost the same thing. Not counted in [`Counts::problems`].
+    #[serde(default)]
+    pub similar: usize,
+    /// How many notes were compared for that; 0 when the check did not run (no on-device
+    /// model, or too many notes).
+    #[serde(default)]
+    pub similar_checked: usize,
+    /// Items the owner chose to leave alone that this scan found and did not count: single
+    /// ones they ignored and what "leave the rest alone" set aside.
+    #[serde(default)]
+    pub set_aside: usize,
 }
 
 impl Counts {
@@ -127,6 +154,8 @@ pub struct Report {
     pub frontmatter: Vec<FrontmatterIssue>,
     /// Notes that could not be read: too large, or not text.
     pub unread: Vec<String>,
+    #[serde(default)]
+    pub similar: Vec<SimilarPair>,
 }
 
 /// The report with each list capped at [`MAX_LISTED`]. The counts are exact.
@@ -145,6 +174,7 @@ pub mod kind {
     pub const EMPTY: &str = "empty";
     pub const DUPLICATE: &str = "duplicate";
     pub const FRONTMATTER: &str = "frontmatter";
+    pub const SIMILAR: &str = "similar";
 }
 
 /// What the owner chose to leave alone: `(kind, key)` pairs from [`kind`] and the `key()` of
@@ -188,6 +218,7 @@ impl Report {
         self.empty.truncate(MAX_LISTED);
         self.frontmatter.truncate(MAX_LISTED);
         self.unread.truncate(MAX_LISTED);
+        self.similar.truncate(MAX_LISTED);
     }
 
     /// Drop what the owner chose to ignore and count again. Call on a [`scan_full`] report,
@@ -196,6 +227,7 @@ impl Report {
         if ignored.is_empty() {
             return;
         }
+        let before = self.listed();
         let has = |k: &str, key: String| ignored.contains(&(k.to_string(), key));
         self.dead_links.retain(|d| !has(kind::DEAD_LINK, d.key()));
         self.ambiguous_links
@@ -207,7 +239,57 @@ impl Report {
         self.duplicates.retain(|g| !has(kind::DUPLICATE, g.key()));
         self.frontmatter
             .retain(|f| !has(kind::FRONTMATTER, f.note.clone()));
+        self.similar.retain(|p| !has(kind::SIMILAR, p.key()));
+        self.counts.set_aside += before - self.listed();
         self.recount();
+    }
+
+    /// How many items the ignorable lists hold.
+    fn listed(&self) -> usize {
+        self.dead_links.len()
+            + self.ambiguous_links.len()
+            + self.broken_anchors.len()
+            + self.loose.len()
+            + self.empty.len()
+            + self.duplicates.len()
+            + self.frontmatter.len()
+            + self.similar.len()
+    }
+
+    /// Every item in the lists as `(kind, key)`, the pairs [`Report::apply_ignores`] matches.
+    /// Call on a [`scan_full`] report: a capped one lists only some of them.
+    pub fn item_keys(&self) -> Vec<(String, String)> {
+        let pair = |k: &str, key: String| (k.to_string(), key);
+        let mut out = Vec::with_capacity(self.listed());
+        out.extend(
+            self.dead_links
+                .iter()
+                .map(|d| pair(kind::DEAD_LINK, d.key())),
+        );
+        out.extend(
+            self.ambiguous_links
+                .iter()
+                .map(|a| pair(kind::AMBIGUOUS_LINK, a.key())),
+        );
+        out.extend(
+            self.broken_anchors
+                .iter()
+                .map(|b| pair(kind::BROKEN_ANCHOR, b.key())),
+        );
+        out.extend(self.loose.iter().map(|p| pair(kind::LOOSE, p.clone())));
+        out.extend(self.empty.iter().map(|p| pair(kind::EMPTY, p.clone())));
+        out.extend(
+            self.duplicates
+                .iter()
+                .map(|g| pair(kind::DUPLICATE, g.key())),
+        );
+        out.extend(
+            self.frontmatter
+                .iter()
+                .map(|f| pair(kind::FRONTMATTER, f.note.clone())),
+        );
+        out.extend(self.similar.iter().map(|p| pair(kind::SIMILAR, p.key())));
+        out
     }
 
     /// Keep only what concerns the note at `path`: links written in it, a duplicate group it is
@@ -237,11 +319,17 @@ impl Report {
         self.counts.duplicates = self.duplicates.len();
         self.counts.frontmatter = self.frontmatter.len();
         self.counts.unread = self.unread.len();
+        self.counts.similar = self.similar.len();
     }
 }
 
 /// The report with every example listed.
 pub fn scan_full(snap: &Snapshot) -> Report {
+    scan_full_with(snap, &crate::check::NameIndex::for_snapshot(snap))
+}
+
+/// [`scan_full`] with a name index built by the caller, to share it with the planner.
+pub fn scan_full_with(snap: &Snapshot, names: &crate::check::NameIndex) -> Report {
     let texts: HashMap<&str, &str> = snap
         .notes
         .iter()
@@ -254,12 +342,6 @@ pub fn scan_full(snap: &Snapshot) -> Report {
         }),
         snap.attachments.iter().cloned(),
     );
-    let stems: Vec<(String, String)> = snap
-        .notes
-        .iter()
-        .map(|n| (stem_of(&n.path), n.path.clone()))
-        .collect();
-
     let mut r = Report {
         unread: snap.unread.clone(),
         ..Report::default()
@@ -317,7 +399,7 @@ pub fn scan_full(snap: &Snapshot) -> Report {
                         note: note.path.clone(),
                         line: link.line,
                         link: note.text[link.span.clone()].to_string(),
-                        did_you_mean: did_you_mean(&link.target, &stems),
+                        did_you_mean: names.nearest_name(&link.target),
                         target: link.target,
                     });
                 }
@@ -364,11 +446,6 @@ pub fn scan_full(snap: &Snapshot) -> Report {
 }
 
 // ─── Parts ───────────────────────────────────────────────────────────────────
-
-fn stem_of(path: &str) -> String {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    name.strip_suffix(".md").unwrap_or(name).to_string()
-}
 
 fn body_of(text: &str) -> &str {
     hq_core::frontmatter_utils::split_frontmatter(text).1
@@ -456,7 +533,7 @@ fn frontmatter_problem(text: &str) -> Option<FrontmatterProblem> {
 
 /// Notes with the same words, whatever the spacing, in groups of two or more. Short notes are
 /// not matched: two notes that both say "TODO" are not a duplicate.
-fn duplicate_groups(snap: &Snapshot) -> Vec<DuplicateGroup> {
+pub(crate) fn duplicate_groups(snap: &Snapshot) -> Vec<DuplicateGroup> {
     let mut by_text: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for note in &snap.notes {
         let normal: String = body_of(&note.text)
@@ -478,11 +555,6 @@ fn duplicate_groups(snap: &Snapshot) -> Vec<DuplicateGroup> {
         .collect();
     groups.sort_by(|a, b| a.notes.cmp(&b.notes));
     groups
-}
-
-/// The one note whose name is nearest to `target`, if it is near enough and nothing is as near.
-fn did_you_mean(target: &str, stems: &[(String, String)]) -> Option<String> {
-    crate::check::nearest_name(target, stems)
 }
 
 #[cfg(test)]
@@ -739,6 +811,67 @@ mod tests {
         assert_eq!(r.counts.loose, 1);
         assert_eq!(r.loose, ["Notebooks/A.md"]);
         assert_eq!(r.counts.links.total, 2, "an ignored link is still a link");
+        assert_eq!(
+            r.counts.set_aside, 2,
+            "only what really matched is counted as set aside"
+        );
+    }
+
+    #[test]
+    fn setting_every_item_aside_empties_the_report_and_counts_what_was_set_aside() {
+        let s = snap(
+            &[
+                (
+                    "Notebooks/A.md",
+                    "[[Gone One]] [[Gone Two]] and enough words to not be empty",
+                ),
+                (
+                    "Notebooks/B.md",
+                    "the very same sentence written in two notes, long enough to count",
+                ),
+                (
+                    "Notebooks/C.md",
+                    "the very same sentence written in two notes, long enough to count",
+                ),
+                ("Notebooks/Blank.md", ""),
+            ],
+            &[],
+        );
+        let full = scan_full(&s);
+        let keys = full.item_keys();
+        assert!(
+            keys.len() >= 5,
+            "links, a duplicate group and loose notes: {keys:?}"
+        );
+        let all: Ignored = keys.iter().cloned().collect();
+        let mut after = scan_full(&s);
+        after.apply_ignores(&all);
+        assert_eq!(after.item_keys(), Vec::<(String, String)>::new());
+        assert_eq!(after.counts.set_aside, keys.len());
+        assert_eq!(after.counts.problems(), 0);
+        // A new problem is not in the set, so it still shows.
+        let s2 = snap(
+            &[
+                (
+                    "Notebooks/A.md",
+                    "[[Gone One]] [[Gone Two]] [[Brand New]] and enough words to not be empty",
+                ),
+                (
+                    "Notebooks/B.md",
+                    "the very same sentence written in two notes, long enough to count",
+                ),
+                (
+                    "Notebooks/C.md",
+                    "the very same sentence written in two notes, long enough to count",
+                ),
+                ("Notebooks/Blank.md", ""),
+            ],
+            &[],
+        );
+        let mut newer = scan_full(&s2);
+        newer.apply_ignores(&all);
+        assert_eq!(newer.counts.links.dead, 1);
+        assert_eq!(newer.dead_links[0].link, "[[Brand New]]");
     }
 
     #[test]

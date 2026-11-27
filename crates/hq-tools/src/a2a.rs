@@ -485,9 +485,11 @@ impl HqTool for AgentDelegateTool {
         // The work runs on its own task, so a caller that disconnects mid-launch
         // cannot leave a started agent that no limit or stop can see.
         let (db, caller) = (self.db.clone(), caller.to_string());
-        tokio::spawn(async move { run_delegation(db, caller, request).await })
-            .await
-            .map_err(|e| anyhow::anyhow!("the delegation task failed: {e}"))?
+        tokio::spawn(crate::harness_session::narrow::carry(async move {
+            run_delegation(db, caller, request).await
+        }))
+        .await
+        .map_err(|e| anyhow::anyhow!("the delegation task failed: {e}"))?
     }
 }
 
@@ -733,7 +735,8 @@ const TEAM_OWNED_SPAWN_ARGS: &[&str] = &["cwd", "host", "task_id", "observe"];
 /// delegation `agent_delegate` makes, built from the spawn's own arguments.
 pub async fn delegate_from_spawn(db: Arc<Database>, from: String, args: &Value) -> Result<Value> {
     let (request, ignored) = spawn_as_delegation(args)?;
-    let mut report = tokio::spawn(async move { run_delegation(db, from, request).await })
+    let run = async move { run_delegation(db, from, request).await };
+    let mut report = tokio::spawn(crate::harness_session::narrow::carry(run))
         .await
         .map_err(|e| anyhow::anyhow!("the delegation task failed: {e}"))??;
     if !ignored.is_empty() {
@@ -833,6 +836,7 @@ fn file_subtask(
         title.to_string(),
         description.to_string(),
     );
+    let narrowed = crate::harness_session::narrow::active();
     db.with_conn(move |c| {
         let Some(task) = t::get_task(c, &task_id)? else {
             bail!("the delegator's task no longer exists");
@@ -841,7 +845,8 @@ fn file_subtask(
             .parent_task_id
             .clone()
             .unwrap_or_else(|| task.id.clone());
-        t::create_task(
+        let tainted = narrowed || hq_db::session_policies::is_held_strict(c, &caller)?;
+        let sub = t::create_task(
             c,
             &crate::util::generate_id("tk"),
             &task.initiative_id,
@@ -852,7 +857,11 @@ fn file_subtask(
                 created_by: &caller,
                 ..Default::default()
             },
-        )
+        )?;
+        if tainted {
+            t::mark_origin_tainted(c, &sub.id)?;
+        }
+        Ok(sub)
     })
 }
 
