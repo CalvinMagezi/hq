@@ -30,11 +30,16 @@ object NoteRefs {
         return sanitize(safeDecode(noFragment))
     }
 
-    /** `[[Note]]` or `[[folder/Note|Label]]` as (target, label). */
+    /**
+     * `[[Note]]`, `[[folder/Note|Label]]` or `[[Note#Heading]]` as (target, label). The target is the note to open, so a
+     * heading or block id after `#` is not part of it; the label keeps what was written when no label is given.
+     * Read the same way as `parseWikilink` in apps/hq-web/src/lib/wikilinks.ts and the server's link reader.
+     */
     fun wikilink(inner: String): Pair<String, String> {
         val parts = inner.split('|')
-        val target = parts[0].trim()
-        return target to (parts.getOrNull(1) ?: parts[0]).trim()
+        val written = parts[0].trimEnd('\\').trim()
+        val target = written.substringBefore('#').trim()
+        return target to (parts.getOrNull(1)?.trim()?.ifEmpty { null } ?: written)
     }
 
     fun sanitize(raw: String?): String? {

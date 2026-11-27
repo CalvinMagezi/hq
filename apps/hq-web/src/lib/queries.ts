@@ -2,6 +2,7 @@
 // instantly on the next visit.
 import { queryOptions } from '@tanstack/react-query'
 import { getNote, getNoteTree, getPinnedNotes, getVaultSignals, listTrash } from './vaultApi'
+import { getVaultHealth } from './vaultHealthApi'
 
 export const vaultKeys = {
   all: ['vault'] as const,
@@ -10,8 +11,10 @@ export const vaultKeys = {
   tree: (root: string) => ['vault', 'tree', root] as const,
   note: (path: string) => ['vault', 'note', path] as const,
   trash: ['vault', 'trash'] as const,
+  health: ['vault', 'health'] as const,
 }
 
+export const vaultHealthQuery = queryOptions({ queryKey: vaultKeys.health, queryFn: getVaultHealth })
 export const trashQuery = queryOptions({ queryKey: vaultKeys.trash, queryFn: listTrash })
 export const vaultSignalsQuery = queryOptions({ queryKey: vaultKeys.signals, queryFn: getVaultSignals })
 export const pinnedNotesQuery = queryOptions({ queryKey: vaultKeys.pinned, queryFn: getPinnedNotes })

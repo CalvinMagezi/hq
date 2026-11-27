@@ -125,6 +125,8 @@ mod tests {
             (Method::POST, "/api/note/create"),
             (Method::GET, "/api/search"),
             (Method::GET, "/api/vault/folders"),
+            (Method::GET, "/api/vault/health"),
+            (Method::POST, "/api/vault/health/scan"),
             (Method::GET, "/api/vault-status"),
             (Method::POST, "/api/ws-ticket"),
             (Method::POST, "/api/auth/device-code"),

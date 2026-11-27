@@ -11,4 +11,8 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 gray_matter = { workspace = true }
+unicode-normalization = "0.1"
 tempfile = "3"
+
+[dev-dependencies]
+serde_json = { workspace = true }
