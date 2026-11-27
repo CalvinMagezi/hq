@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::rel_path::RelPath;
-use crate::remediation;
+use crate::relink::{self, LeftLink};
 
 /// Directories the reorg tools may never touch, in either direction: HQ's private folders, the
 /// trash, and the folders whose files become instructions (moving a note into `skills/` makes it
@@ -84,10 +84,13 @@ pub struct MoveReport {
     pub from: String,
     pub to: String,
     pub dry_run: bool,
-    /// Notes whose wikilinks reference the moved note's stem.
+    /// Other notes that link to the moved note, by the path they have now. Some need no change
+    /// (a bare `[[Name]]` survives a move to another folder).
     pub referrers: Vec<String>,
     /// Number of files whose links were rewritten (0 on dry runs).
     pub links_rewritten: u32,
+    /// Links the move could not keep pointing at the note, and why. Empty when all held.
+    pub left: Vec<LeftLink>,
 }
 
 /// The path in its one spelling, refused when it is not a plain path inside the vault or when
@@ -114,50 +117,12 @@ fn require_md(rel: &str) -> Result<()> {
     Ok(())
 }
 
-fn stem_of(rel: &str) -> String {
-    Path::new(rel)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_string()
-}
-
-/// Notes under `Notebooks/` whose content wikilinks the given stem.
-fn find_referrers(vault_path: &Path, stem: &str) -> Vec<String> {
-    let mut referrers = Vec::new();
-    let needle = stem.to_lowercase();
-    let root = vault_path.join("Notebooks");
-    let mut stack = vec![root];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().map(|e| e == "md").unwrap_or(false) {
-                let Ok(content) = std::fs::read_to_string(&path) else {
-                    continue;
-                };
-                let links = remediation::extract_wikilinks(&content);
-                if links.iter().any(|l| l.to_lowercase() == needle)
-                    && let Ok(rel) = path.strip_prefix(vault_path)
-                {
-                    referrers.push(rel.to_string_lossy().to_string());
-                }
-            }
-        }
-    }
-    referrers.sort();
-    referrers
-}
-
-/// Move a note, rewriting inbound wikilinks to the new stem.
+/// Move a note and keep every link in the vault pointing at it.
 ///
-/// With `dry_run`, nothing changes on disk; the report shows what would move
-/// and which notes reference it. Rewriting covers `[[wikilinks]]` (the vault's
-/// link convention); plain relative markdown links are not rewritten.
+/// Wikilinks, markdown links and embeds are rewritten wherever a move would change what they
+/// reach (see [`relink`]), and links the move cannot keep are listed in the report instead of
+/// guessed at. With `dry_run`, nothing changes on disk; the report shows what would move, which
+/// notes reference it and which links would be left.
 pub(crate) fn move_note(
     vault_path: &Path,
     from: &str,
@@ -177,18 +142,18 @@ pub(crate) fn move_note(
         bail!("destination '{to}' already exists");
     }
 
-    let old_stem = stem_of(from);
-    let new_stem = stem_of(to);
-    let referrers = find_referrers(vault_path, &old_stem);
-
+    let moves = HashMap::from([(from.clone(), to.clone())]);
+    let plan = relink::plan_moves(&relink::snapshot(vault_path), &moves);
+    let mut report = MoveReport {
+        from: from.to_string(),
+        to: to.to_string(),
+        dry_run,
+        referrers: plan.referrers.clone(),
+        links_rewritten: 0,
+        left: plan.left.clone(),
+    };
     if dry_run {
-        return Ok(MoveReport {
-            from: from.to_string(),
-            to: to.to_string(),
-            dry_run: true,
-            referrers,
-            links_rewritten: 0,
-        });
+        return Ok(report);
     }
 
     if let Some(parent) = dst.parent() {
@@ -196,19 +161,10 @@ pub(crate) fn move_note(
     }
     std::fs::rename(&src, &dst)?;
 
-    let links_rewritten = if old_stem != new_stem && !referrers.is_empty() {
-        remediation::repoint_wikilinks(vault_path, &old_stem, &new_stem).unwrap_or(0)
-    } else {
-        0
-    };
-
-    Ok(MoveReport {
-        from: from.to_string(),
-        to: to.to_string(),
-        dry_run: false,
-        referrers,
-        links_rewritten,
-    })
+    let applied = relink::apply(vault_path, &plan);
+    report.links_rewritten = applied.rewritten.len() as u32;
+    report.left.extend(applied.left);
+    Ok(report)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -216,16 +172,24 @@ pub struct FolderMoveReport {
     pub from: String,
     pub to: String,
     pub dry_run: bool,
-    /// The notes under the folder, by their old paths. Their wikilinks name the note, not the folder, so none
-    /// needs rewriting: a link still finds its note after the folder moves.
+    /// The notes under the folder, by their old paths.
     pub notes: Vec<String>,
+    /// Notes outside the folder that link into it, by their path now.
+    pub referrers: Vec<String>,
+    /// The notes whose links were rewritten, by their new paths: the referrers that needed it,
+    /// and moved notes whose own relative links changed. Empty on a dry run.
+    pub rewritten: Vec<String>,
+    /// Links the move could not keep pointing at their note, and why.
+    pub left: Vec<LeftLink>,
 }
 
 /// Move a whole folder of notes to a new place under `Notebooks/`.
 ///
 /// Both paths must be inside `Notebooks/` and out of the protected folders, the destination must not exist,
-/// and a folder cannot move into itself. Wikilinks are by note name, so they keep working; the caller
-/// reindexes the notes the report lists. With `dry_run` nothing changes.
+/// and a folder cannot move into itself. Links that name a note by its bare name keep working on their
+/// own; path-qualified wikilinks and markdown links into the folder are rewritten, as are the relative
+/// links of the moved notes that reach outside it. The caller reindexes the notes the report lists.
+/// With `dry_run` nothing changes.
 pub(crate) fn move_folder(
     vault_path: &Path,
     from: &str,
@@ -254,18 +218,39 @@ pub(crate) fn move_folder(
         n.sort();
         n
     };
+
+    // Every note and attachment under the folder moves with it.
+    let snap = relink::snapshot(vault_path);
+    let prefix = format!("{from}/");
+    let shifted = |old: &str| format!("{to}/{}", &old[prefix.len()..]);
+    let moves: HashMap<String, String> = notes
+        .iter()
+        .map(String::as_str)
+        .chain(snap.attachments.iter().map(String::as_str))
+        .filter(|p| p.starts_with(&prefix))
+        .map(|p| (p.to_string(), shifted(p)))
+        .collect();
+    let plan = relink::plan_moves(&snap, &moves);
+
+    let mut report = FolderMoveReport {
+        from: from.to_string(),
+        to: to.to_string(),
+        dry_run,
+        notes,
+        referrers: plan.referrers.clone(),
+        rewritten: Vec::new(),
+        left: plan.left.clone(),
+    };
     if !dry_run {
         if let Some(parent) = dst.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::rename(&src, &dst)?;
+        let applied = relink::apply(vault_path, &plan);
+        report.rewritten = applied.rewritten;
+        report.left.extend(applied.left);
     }
-    Ok(FolderMoveReport {
-        from: from.to_string(),
-        to: to.to_string(),
-        dry_run,
-        notes,
-    })
+    Ok(report)
 }
 
 /// Move a note into `_trash/YYYY-MM-DD/<original path>`. Never a hard delete.
@@ -671,6 +656,98 @@ mod tests {
         let alpha =
             std::fs::read_to_string(tmp.path().join("Notebooks/Projects/Alpha.md")).unwrap();
         assert!(alpha.contains("[[BetaRenamed]]"));
+    }
+
+    fn read(vault: &Path, rel: &str) -> String {
+        std::fs::read_to_string(vault.join(rel)).unwrap()
+    }
+
+    #[test]
+    fn a_move_keeps_heading_path_markdown_and_embed_links() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r = tmp.path();
+        write(r, "Notebooks/Projects/Old.md", "# Old");
+        write(
+            r,
+            "Notebooks/Linker.md",
+            "[[Old#Goals|goals]] [[Projects/Old]] ![[Old]] [t](Projects/Old.md#Part) [[Other]]",
+        );
+        let report = move_note(
+            r,
+            "Notebooks/Projects/Old.md",
+            "Notebooks/Archive/New Name.md",
+            false,
+        )
+        .unwrap();
+        assert_eq!(report.links_rewritten, 1);
+        assert!(report.left.is_empty());
+        assert_eq!(
+            read(r, "Notebooks/Linker.md"),
+            "[[New Name#Goals|goals]] [[Archive/New Name]] ![[New Name]] \
+             [t](Archive/New%20Name.md#Part) [[Other]]"
+        );
+    }
+
+    #[test]
+    fn a_name_two_notes_share_is_left_alone_and_reported_not_mass_rewritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r = tmp.path();
+        write(r, "Notebooks/A/Plan.md", "a");
+        write(r, "Notebooks/B/Plan.md", "b");
+        write(r, "Notebooks/Linker.md", "see [[Plan]] and [[A/Plan]]");
+        let report = move_note(r, "Notebooks/A/Plan.md", "Notebooks/A/Plan v2.md", false).unwrap();
+        assert_eq!(
+            read(r, "Notebooks/Linker.md"),
+            "see [[Plan]] and [[A/Plan v2]]"
+        );
+        assert_eq!(report.left.len(), 1);
+        assert_eq!(report.left[0].text, "[[Plan]]");
+    }
+
+    #[test]
+    fn a_dry_run_lists_the_links_it_would_leave_and_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r = tmp.path();
+        write(r, "Notebooks/A/Plan.md", "a");
+        write(r, "Notebooks/B/Plan.md", "b");
+        write(r, "Notebooks/Linker.md", "see [[Plan]]");
+        let report = move_note(r, "Notebooks/A/Plan.md", "Notebooks/A/Plan v2.md", true).unwrap();
+        assert!(report.dry_run);
+        assert_eq!(report.left.len(), 1);
+        assert_eq!(read(r, "Notebooks/Linker.md"), "see [[Plan]]");
+        assert!(r.join("Notebooks/A/Plan.md").is_file());
+    }
+
+    #[test]
+    fn moving_a_folder_fixes_links_into_it_and_the_relative_links_of_what_moved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let r = tmp.path();
+        write(
+            r,
+            "Notebooks/Old/One.md",
+            "[a](Two.md) [b](../Out.md) ![](pic.png)",
+        );
+        write(r, "Notebooks/Old/Two.md", "two");
+        write(r, "Notebooks/Old/pic.png", "png");
+        write(r, "Notebooks/Out.md", "[[Old/One]] [c](Old/Two.md) [[Two]]");
+        write(r, "Notebooks/Deep/Er/Inside.md", "[x](../../Out.md)");
+        let report = move_folder(r, "Notebooks/Old", "Notebooks/Deep/Er/New", false).unwrap();
+        assert!(r.join("Notebooks/Deep/Er/New/One.md").is_file());
+        assert!(r.join("Notebooks/Deep/Er/New/pic.png").is_file());
+        assert_eq!(
+            read(r, "Notebooks/Out.md"),
+            "[[New/One]] [c](Deep/Er/New/Two.md) [[Two]]"
+        );
+        // `[[Old/One]]` was written with two segments, so `[[New/One]]` keeps that style.
+        // One moved three folders down, so its `../Out.md` must climb four.
+        assert_eq!(
+            read(r, "Notebooks/Deep/Er/New/One.md"),
+            "[a](Two.md) [b](../../../Out.md) ![](pic.png)"
+        );
+        assert_eq!(read(r, "Notebooks/Deep/Er/Inside.md"), "[x](../../Out.md)");
+        assert_eq!(report.referrers, ["Notebooks/Out.md"]);
+        assert_eq!(report.rewritten.len(), 2);
+        assert!(report.left.is_empty());
     }
 
     #[test]

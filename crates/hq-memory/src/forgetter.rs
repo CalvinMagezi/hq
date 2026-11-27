@@ -16,7 +16,7 @@
 use anyhow::Result;
 use hq_db::Database;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing::info;
 
 use crate::db::{decay_old_memories, get_memory_stats};
@@ -317,6 +317,9 @@ impl MemoryForgetter {
 
         let mut low_link: Vec<i64> = Vec::new();
         let mut high_link: Vec<i64> = Vec::new();
+        // Read the vault once: every insight note below is looked up in the same index.
+        let backlinks =
+            hq_vault::relink::backlink_index(&hq_vault::relink::snapshot(&self.vault_path));
 
         for (ids_json, created_at) in &consolidations {
             let source_ids: Vec<i64> = serde_json::from_str(ids_json).unwrap_or_default();
@@ -333,8 +336,8 @@ impl MemoryForgetter {
             };
             let note_path = format!("Notebooks/Memories/{date}-{time}-insight.md");
 
-            // Count backlinks in the vault by scanning for [[note_path]] references
-            let link_count = count_backlinks(&self.vault_path, &note_path);
+            // The notes that link to the insight, however the link is written.
+            let link_count = count_linking_notes(&backlinks, &note_path);
 
             let bucket = if link_count >= HIGH_LINK_THRESHOLD {
                 &mut high_link
@@ -350,48 +353,22 @@ impl MemoryForgetter {
     }
 }
 
-/// Count files in the vault that contain a wikilink to the given note path.
-/// This is a simplified version — in production, you'd use the vault graph.
-fn count_backlinks(vault_path: &Path, note_path: &str) -> usize {
-    let note_name = std::path::Path::new(note_path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
-
-    if note_name.is_empty() {
-        return 0;
-    }
-
-    let search_pattern = format!("[[{note_name}]]");
-    let notebooks_dir = vault_path.join("Notebooks");
-
-    if !notebooks_dir.exists() {
-        return 0;
-    }
-
-    count_files_containing(&notebooks_dir, &search_pattern)
-}
-
-/// Recursively count markdown files containing a given string.
-fn count_files_containing(dir: &std::path::Path, pattern: &str) -> usize {
-    let mut count = 0;
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return 0,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            count += count_files_containing(&path, pattern);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("md")
-            && let Ok(content) = std::fs::read_to_string(&path)
-            && content.contains(pattern)
-        {
-            count += 1;
-        }
-    }
-    count
+/// How many notes link to `note_path`, by wikilink or markdown link, with a heading, folder or
+/// alias or without. A link that could mean another note of the same name is not counted: the
+/// count decides what the forgetter keeps, so it errs on the side of fewer.
+fn count_linking_notes(
+    index: &std::collections::HashMap<String, Vec<hq_vault::relink::Backlink>>,
+    note_path: &str,
+) -> usize {
+    let mut paths: Vec<&str> = index
+        .get(note_path)
+        .into_iter()
+        .flatten()
+        .filter(|b| !b.ambiguous)
+        .map(|b| b.path.as_str())
+        .collect();
+    paths.dedup();
+    paths.len()
 }
 
 fn cutoff_iso(days: i64) -> String {
@@ -403,6 +380,54 @@ fn cutoff_iso(days: i64) -> String {
 mod tests {
     use super::*;
     use hq_db::Database;
+
+    #[test]
+    fn a_note_counts_every_other_note_that_links_to_it_however_the_link_is_written() {
+        let dir = std::env::temp_dir().join(format!(
+            "hq-forgetter-backlinks-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let write = |rel: &str, text: &str| {
+            let p = dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        write(
+            "Notebooks/Memories/2026-11-20-12-00-00-insight.md",
+            "insight",
+        );
+        // The four spellings the old `[[stem]]` substring match could not see, plus the plain one.
+        write("Notebooks/A.md", "[[2026-11-20-12-00-00-insight#Part]]");
+        write(
+            "Notebooks/B.md",
+            "[[Memories/2026-11-20-12-00-00-insight|the insight]]",
+        );
+        write(
+            "Notebooks/C.md",
+            "[t](Memories/2026-11-20-12-00-00-insight.md)",
+        );
+        write(
+            "Notebooks/D.md",
+            "[[2026-11-20-12-00-00-insight]] and again [[2026-11-20-12-00-00-insight]]",
+        );
+        // Not links: code, and another note with a similar name.
+        write(
+            "Notebooks/E.md",
+            "`[[2026-11-20-12-00-00-insight]]` [[2026-11-20-12-00-00-insights]]",
+        );
+
+        let index = hq_vault::relink::backlink_index(&hq_vault::relink::snapshot(&dir));
+        assert_eq!(
+            count_linking_notes(&index, "Notebooks/Memories/2026-11-20-12-00-00-insight.md"),
+            4,
+            "four notes link to it; a note that links twice counts once"
+        );
+        assert_eq!(count_linking_notes(&index, "Notebooks/Nope.md"), 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn archives_a_page_with_no_edges_older_than_the_prune_threshold() {

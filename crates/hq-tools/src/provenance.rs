@@ -409,6 +409,32 @@ impl Recorder {
         }
     }
 
+    /// A folder moved from `from_root` to `to_root`. Moving rewrote links in the notes that
+    /// pointed into it and in moved notes that reached out of it (`rewritten`, by the paths they
+    /// have now). Each whose content really changed is a new version this call made; the rest
+    /// are left alone. `before` is the fingerprint, taken before the move, of those notes by
+    /// their old paths.
+    pub fn after_folder_move(
+        &self,
+        from_root: &str,
+        to_root: &str,
+        rewritten: &[String],
+        before: &Fingerprints,
+        args: &Value,
+    ) {
+        let writer = resolve(args, &self.db);
+        let prefix = format!("{to_root}/");
+        for rel in rewritten {
+            let old = match rel.strip_prefix(&prefix) {
+                Some(rest) => format!("{from_root}/{rest}"),
+                None => rel.clone(),
+            };
+            if self.hash_of(rel) != before.0.get(&old).cloned() {
+                self.record(rel, &writer);
+            }
+        }
+    }
+
     /// A note was deleted: keep who wrote it for a retention period, and its earlier text goes.
     pub fn after_delete(&self, rel: &str) {
         let rel_owned = rel.to_string();
