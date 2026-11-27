@@ -41,6 +41,9 @@ office_create
 office_edit
 office_export
 office_file
+remind_cancel
+remind_create
+remind_update
 sandbox_request
 space_create
 space_update
