@@ -82,6 +82,14 @@ internal object MemoryFacts {
     /** Whether the note is one HQ holds back until the owner has looked: a held-back row, or one from a shared channel. */
     fun heldBack(n: MemoryNote): Boolean = n.status == "review" || n.origin != "owner"
 
+    /** The plain-words line under a note HQ treats differently, as the web page shows it; null for an ordinary note. */
+    fun hintFor(n: MemoryNote): Int? = when {
+        n.origin != "owner" -> R.string.memory_hint_shared
+        n.status == "review" -> R.string.memory_hint_review
+        n.status == "archived" -> R.string.memory_hint_archived
+        else -> null
+    }
+
     /** The standing action a note offers, as the web page does: keep a held-back one, use an old one again, or mark a live one out of date. */
     fun standing(n: MemoryNote): Pair<Int, String> = when {
         heldBack(n) -> R.string.memory_keep to "active"
@@ -269,6 +277,7 @@ private fun NoteRow(
     Column(Modifier.fillMaxWidth().clickable(role = Role.Button) { onOpen() }.padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text(note.summary, style = HqType.BodyBold, color = Mts.Ink)
         Text(meta, style = HqType.BodySm, color = Mts.InkMuted)
+        MemoryFacts.hintFor(note)?.let { Text(stringResource(it), style = HqType.BodySm, color = Mts.InkMuted) }
         if (open) {
             val standing = stringResource(MemoryFacts.standing(note).first)
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {

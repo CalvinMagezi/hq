@@ -17,6 +17,10 @@ object NoticeWords {
     private const val UNKNOWN_HELPER = "A helper"
 
     fun general(c: Context, card: InboxCard): Words = when {
+        // A reminder is the owner's own words: shown unless they chose to keep them off the lock screen.
+        card.kind == CardKind.Reminder ->
+            if (AlertPoster.showReminderText(c)) Words(card.title, card.body.ifBlank { c.getString(R.string.notice_reminder_body) })
+            else Words(c.getString(R.string.notice_reminder_title), c.getString(R.string.notice_reminder_body))
         card.kind == CardKind.Update -> Words(c.getString(R.string.notice_update_title), c.getString(R.string.notice_update_body))
         card.kind == CardKind.HelperStuck -> Words(c.getString(R.string.notice_helper_stuck_title), c.getString(R.string.notice_stuck_body))
         // A new sign-in is never a task needing an OK, and it is answered in the app, not from the shade.
@@ -29,6 +33,7 @@ object NoticeWords {
 
     /** The general title with the card's own body; a task's or an update's own title is never a notification title. */
     fun detail(c: Context, card: InboxCard): Words {
+        if (card.kind == CardKind.Reminder) return general(c, card)
         val title = general(c, card).title
         val own = if (card.kind == CardKind.Update) listOf(card.title, card.body) else listOf(card.body)
         val body = own.filter { it.isNotBlank() }.joinToString("\n").let { if (it.length > MAX_BODY) it.take(MAX_BODY) + "…" else it }

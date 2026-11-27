@@ -44,4 +44,12 @@ class MemoryFactsTest {
         assertEquals(R.string.memory_use_again to "active", MemoryFacts.standing(live.copy(status = "archived")))
         assertEquals(R.string.memory_use_again to "active", MemoryFacts.standing(live.copy(status = "superseded")))
     }
+
+    @Test fun aNoteHQTreatsDifferentlySaysWhyAndAnOrdinaryOneSaysNothing() {
+        val live = MemoryNote(1, "a", "2026-11-01", false, "active", "owner", 0)
+        assertEquals(null, MemoryFacts.hintFor(live))
+        assertEquals(R.string.memory_hint_shared, MemoryFacts.hintFor(live.copy(origin = "unknown_channel")))
+        assertEquals(R.string.memory_hint_review, MemoryFacts.hintFor(live.copy(status = "review")))
+        assertEquals(R.string.memory_hint_archived, MemoryFacts.hintFor(live.copy(status = "archived")))
+    }
 }

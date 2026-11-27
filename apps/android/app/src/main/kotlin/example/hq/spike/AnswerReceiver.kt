@@ -35,8 +35,10 @@ class AnswerReceiver : BroadcastReceiver() {
         val dialog = intent.getBooleanExtra(DIALOG, false)
         val title = intent.getStringExtra(TITLE).orEmpty()
         val excerpt = intent.getStringExtra(EXCERPT).orEmpty().lines()
+        val reminder = kind == CardKind.Reminder.name
         // A card posted before the owner turned details off, or before the phone locked, may still carry its buttons: nothing is sent for it.
-        if (!AlertPoster.detailsNow(context)) {
+        // A reminder's Done and Snooze are not held to that: they ask for nothing the owner would regret.
+        if (!reminder && !AlertPoster.detailsNow(context)) {
             Alerts.refresh(context)
             return
         }
@@ -59,6 +61,16 @@ class AnswerReceiver : BroadcastReceiver() {
                 val target = Hq.of(context, id)
                 if (target == null) {
                     nm.notify(nid, say(context, AnswerWords.Say("Not sent", "This phone is no longer signed in to your server HQ."), null))
+                    return@Thread
+                }
+                if (reminder) {
+                    val body = JSONObject().put("action", answer)
+                    if (answer == "snooze") body.put("minutes", SNOOZE_MINUTES)
+                    when (val status = postStatus("/api/notifications/$itemId/action", body, target, deadline)) {
+                        in 200..299 -> nm.notify(nid, say(context, AnswerWords.Say(context.getString(if (answer == "done") R.string.notice_reminder_done else R.string.notice_reminder_snoozed), null), null))
+                        409 -> nm.notify(nid, say(context, AnswerWords.alreadyAnswered(w), null))
+                        else -> throw java.io.IOException("status $status")
+                    }
                     return@Thread
                 }
                 if (dialog) {
@@ -225,6 +237,8 @@ class AnswerReceiver : BroadcastReceiver() {
         private const val CHECK_LINES = 81
         private const val HISTORY_LIMIT = 100
         private const val DEADLINE_MS = 10_000L
+        /** What a reminder's Snooze button means: an hour. */
+        private const val SNOOZE_MINUTES = 60L
         private const val CONNECT_MS = 2_000
         private const val CLEAR_AFTER_MS = 6_000L
         private const val SENDING_STUCK_MS = 15_000L
