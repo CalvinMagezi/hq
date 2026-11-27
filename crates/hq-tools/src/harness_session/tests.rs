@@ -386,6 +386,44 @@ async fn a_narrowed_session_stays_strict_when_resumed_or_delegating_from_a_clean
 }
 
 #[tokio::test]
+async fn a_launch_from_a_narrowed_chat_is_strict_though_it_runs_on_its_own_task() {
+    let (_dir, host) = fake_host(&[
+        ("workspace create", CREATED.into(), None),
+        ("agent start", OK.into(), None),
+        ("agent get", agent_json("hs-n2", "idle"), None),
+        ("agent prompt", OK.into(), None),
+    ]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    let task = db
+        .with_conn(|c| {
+            c.execute(
+                "INSERT INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('in-1', 'personal', 'Work', 'work', 'FR')",
+                [],
+            )?;
+            let new = hq_db::tasks::NewTask {
+                title: "narrow",
+                created_by: "test",
+                ..Default::default()
+            };
+            Ok(hq_db::tasks::create_task(c, "tk-1", "in-1", &new)?.id)
+        })
+        .unwrap();
+    let l = Launch {
+        mission_id: Some(&task),
+        ..launch(host, "hs-n2", Some("free text"))
+    };
+
+    super::narrow::scoped(launch_session(&db, &harness("claude-code"), l))
+        .await
+        .unwrap();
+
+    assert!(
+        db.with_conn(|c| hq_db::session_policies::is_held_strict(c, "hs-n2"))
+            .unwrap()
+    );
+}
+
+#[tokio::test]
 async fn launch_records_the_session_and_types_the_prompt() {
     let (dir, host) = fake_host(&[
         ("workspace create", CREATED.into(), None),

@@ -319,10 +319,10 @@ pub(super) async fn launch_session(
 ) -> Result<Value> {
     let (db, harness, owned) = (db.clone(), harness.clone(), OwnedLaunch::new(&l));
     let in_flight = InFlight::claim(&db, owned.host.name(), &owned.session_id)?;
-    tokio::spawn(async move {
+    tokio::spawn(super::narrow::carry(async move {
         let _in_flight = in_flight;
         run_launch(&db, &harness, owned.borrow()).await
-    })
+    }))
     .await
     .map_err(|e| anyhow::anyhow!("the launch task did not finish: {e}"))?
 }

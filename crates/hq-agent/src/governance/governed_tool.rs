@@ -545,6 +545,7 @@ const TASK_WRITE_TOOLS: &[&str] = &[
 const NARROWED_START_TOOLS: &[&str] = &[
     "harness_session_spawn",
     "harness_session_handoff",
+    "harness_session_resume",
     "agent_delegate",
 ];
 
