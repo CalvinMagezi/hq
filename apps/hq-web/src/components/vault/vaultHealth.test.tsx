@@ -15,6 +15,8 @@ const report = (over: Partial<HealthReport> = {}, links: Partial<HealthReport['c
     duplicates: 0,
     empty: 0,
     frontmatter: 0,
+    similar: 0,
+    similar_checked: 0,
     ...rest,
   },
   dead_links: [],
@@ -25,6 +27,7 @@ const report = (over: Partial<HealthReport> = {}, links: Partial<HealthReport['c
   empty: [],
   frontmatter: [],
   unread: [],
+  similar: [],
   ...over,
 })
 
@@ -38,11 +41,39 @@ async function inRouter(view: ReactElement): Promise<string> {
   return renderToStaticMarkup(createElement(RouterProvider, { router }))
 }
 
-const health = (r: HealthReport | null, checked = true): VaultHealth => ({
+const health = (r: HealthReport | null, checked = true, over: Partial<VaultHealth> = {}): VaultHealth => ({
   checked,
   checked_at: checked ? new Date(Date.now() - 5 * 60_000).toISOString() : null,
   report: r,
+  fixes: [],
+  fix_counts: null,
+  skipped: [],
+  repairs: [],
   trend: [],
+  ...over,
+})
+
+const repairRow = (over: Partial<VaultHealth['repairs'][number]> = {}) => ({
+  run_id: 'r1',
+  ran_at: new Date(Date.now() - 30 * 60_000).toISOString(),
+  source: 'owner' as const,
+  fixes: 3,
+  rewritten: 2,
+  trashed: 0,
+  undone_at: null,
+  edited_since: 0,
+  ...over,
+})
+
+const aFix = (over: Partial<NonNullable<VaultHealth['fixes']>[number]> = {}) => ({
+  id: 'f1',
+  tier: 'a' as const,
+  kind: 'stale_path' as const,
+  note: 'Notebooks/Work/A.md',
+  line: 1,
+  before: '[[Gone 0]]',
+  after: '[[Here]]',
+  ...over,
 })
 
 const deadReport = (n: number) =>
@@ -103,5 +134,140 @@ describe('VaultHealthView', () => {
   test('a check in progress and a failed load are each said', async () => {
     expect(await view(health(report()), { scanning: true })).toContain('Checking')
     expect(await view(undefined, { loadFailed: true })).toContain('Could not load the note check.')
+  })
+})
+
+describe('fixing from the card', () => {
+  const dirty = (n = 3) => health(deadReport(12), true, { fix_counts: { a: n, b: 1 }, fixes: [aFix()] })
+
+  test('offers a Fix button with the number of sure fixes, and only when it can act on it', async () => {
+    const on = await inRouter(<VaultHealthCardView health={dirty(3)} onFix={() => {}} />)
+    expect(on).toContain('Fix 3 things')
+    expect(await inRouter(<VaultHealthCardView health={dirty(1)} onFix={() => {}} />)).toContain('Fix 1 thing')
+    expect(await inRouter(<VaultHealthCardView health={dirty(0)} onFix={() => {}} />)).not.toContain('>Fix ')
+    expect(await inRouter(<VaultHealthCardView health={dirty(3)} />)).not.toContain('Fix 3')
+  })
+
+  test('says it is working while a fix runs', async () => {
+    expect(await inRouter(<VaultHealthCardView health={dirty(3)} busy onFix={() => {}} />)).toContain('Fixing')
+  })
+
+  test('after a fix that left nothing wrong it stays for a day, with Undo, and then goes quiet', async () => {
+    const fixed = health(report(), true, { repairs: [repairRow()] })
+    const html = await inRouter(<VaultHealthCardView health={fixed} onUndo={() => {}} />)
+    expect(html).toContain('HQ fixed 3 things in your notes')
+    expect(html).toContain('Undo')
+    const old = health(report(), true, { repairs: [repairRow({ ran_at: new Date(Date.now() - 3 * 86_400_000).toISOString() })] })
+    expect(renderToStaticMarkup(<VaultHealthCardView health={old} onUndo={() => {}} />)).toBe('')
+    const taken = health(report(), true, { repairs: [repairRow({ undone_at: 'x' })] })
+    expect(renderToStaticMarkup(<VaultHealthCardView health={taken} onUndo={() => {}} />)).toBe('')
+  })
+
+  test('with problems and a recent fix it offers Undo beside what is left', async () => {
+    const both = health(deadReport(2), true, { repairs: [repairRow()], fix_counts: { a: 0, b: 0 } })
+    const html = await inRouter(<VaultHealthCardView health={both} onUndo={() => {}} />)
+    expect(html).toContain('2 links lead to notes that are not there')
+    expect(html).toContain('HQ fixed 3 things in your notes')
+  })
+})
+
+describe('fixing from the review page', () => {
+  const noop = () => {}
+  const view = (h: VaultHealth, over: Partial<Parameters<typeof VaultHealthView>[0]> = {}) =>
+    inRouter(
+      <VaultHealthView health={h} loadFailed={false} scanning={false} busyKey={null} onScan={noop} onIgnore={noop} onFix={noop} onFixAll={noop} onUndo={noop} {...over} />,
+    )
+
+  test('shows the repair under the item it is for, with how sure HQ is, and a Fix button', async () => {
+    const h = health(deadReport(1), true, { fixes: [aFix()], fix_counts: { a: 1, b: 0 } })
+    const html = await view(h)
+    expect(html).toContain('data-health-fix')
+    expect(html).toContain('Sure')
+    expect(html).toContain('Becomes [[Here]]')
+    expect(html).toContain('>Fix<')
+  })
+
+  test('a likely repair says so', async () => {
+    const h = health(deadReport(1), true, { fixes: [aFix({ tier: 'b', kind: 'near_miss' })], fix_counts: { a: 0, b: 1 } })
+    expect(await view(h)).toContain('Likely')
+  })
+
+  test('an item with no repair shows no Fix button, and there is no bulk button when nothing is sure', async () => {
+    const h = health(deadReport(1), true, { fixes: [], fix_counts: { a: 0, b: 0 } })
+    const html = await view(h)
+    expect(html).not.toContain('>Fix<')
+    expect(html).not.toContain('Fix 0')
+  })
+
+  test('offers to fix every sure one at once', async () => {
+    const h = health(deadReport(2), true, { fixes: [aFix()], fix_counts: { a: 5, b: 0 } })
+    expect(await view(h)).toContain('Fix 5 things')
+  })
+
+  test('says which notes were left alone and why', async () => {
+    const h = health(deadReport(1), true, {
+      skipped: [
+        { note: 'Notebooks/Sheet.md', why: 'suite' },
+        { note: 'Notebooks/Mine.md', why: 'pinned' },
+      ],
+    })
+    const html = await view(h)
+    expect(html).toContain('2 notes were left alone')
+    expect(html).toContain('A sheet, deck or dashboard')
+    expect(html).toContain('Pinned, so only you change it')
+  })
+
+  test('lists recent fixes with Undo, and says when one was taken back', async () => {
+    const h = health(report(), true, { repairs: [repairRow(), repairRow({ run_id: 'r0', undone_at: 'x', source: 'auto' })] })
+    const html = await view(h)
+    expect(html).toContain('Recent fixes')
+    expect(html).toContain('3 fixed.')
+    expect((html.match(/data-health-run/g) ?? []).length).toBe(2)
+    expect(html).toContain('Taken back')
+    expect(html).toContain('Done by HQ')
+    expect((html.match(/>Undo</g) ?? []).length).toBe(1)
+  })
+
+  test('near repeats are listed but are not counted as something wrong', async () => {
+    const r = report({ similar: [{ a: 'Notebooks/A.md', b: 'Notebooks/B.md', percent: 90 }] }, {}, { similar: 1, similar_checked: 30 })
+    const html = await view(health(r))
+    expect(html).toContain('1 pair of notes says almost the same thing')
+    expect(html).toContain('Every link reaches a note')
+  })
+})
+
+describe('leaving the old mess alone', () => {
+  const messy = (set_aside = 0, a = 3) =>
+    health(report({ dead_links: deadReport(40).dead_links }, { dead: 40 }, { set_aside }), true, { fix_counts: { a, b: 1 }, fixes: [aFix()] })
+
+  test('the card offers it only when many problems have no repair, and only to a caller that can act', async () => {
+    expect(await inRouter(<VaultHealthCardView health={messy()} onSetAside={() => {}} />)).toContain('Leave the rest alone')
+    expect(await inRouter(<VaultHealthCardView health={messy()} />)).not.toContain('Leave the rest alone')
+    // 12 problems, 4 with a repair: 8 without is not a wall.
+    const few = health(deadReport(12), true, { fix_counts: { a: 3, b: 1 }, fixes: [aFix()] })
+    expect(await inRouter(<VaultHealthCardView health={few} onSetAside={() => {}} />)).not.toContain('Leave the rest alone')
+  })
+
+  test('the card says how many are set aside, in the right plural, and lets them be counted again', async () => {
+    const many = await inRouter(<VaultHealthCardView health={messy(7)} onCountAgain={() => {}} />)
+    expect(many).toContain('7 older ones are set aside')
+    expect(many).toContain('Count them again')
+    expect(await inRouter(<VaultHealthCardView health={messy(1)} onCountAgain={() => {}} />)).toContain('1 older one is set aside')
+    expect(await inRouter(<VaultHealthCardView health={messy(7)} />)).not.toContain('Count them again')
+  })
+
+  test('a healthy check with things set aside is still silent on the card', () => {
+    expect(renderToStaticMarkup(<VaultHealthCardView health={health(report({}, {}, { set_aside: 30 }))} />)).toBe('')
+  })
+
+  test('the review page offers it, and says what was set aside even when nothing else is wrong', async () => {
+    const props = { loadFailed: false, scanning: false, busyKey: null, onScan: () => {}, onIgnore: () => {} }
+    const offer = await inRouter(<VaultHealthView {...props} health={messy()} onSetAside={() => {}} onCountAgain={() => {}} />)
+    expect(offer).toContain('Leave the rest alone')
+    expect(offer).not.toContain('Count them again')
+    const clean = await inRouter(<VaultHealthView {...props} health={health(report({}, {}, { set_aside: 12 }))} onSetAside={() => {}} onCountAgain={() => {}} />)
+    expect(clean).toContain('12 older ones are set aside')
+    expect(clean).toContain('Count them again')
+    expect(clean).not.toContain('Leave the rest alone')
   })
 })

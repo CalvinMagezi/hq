@@ -35,6 +35,13 @@
   tools: [task_create]
   needs: [model]
 
+- id: remind-me
+  group: tasks
+  says: Remind you at a time, until you act
+  example: Remind me at 4 to call Moses
+  tools: [remind_create]
+  needs: [model]
+
 - id: whats-next
   group: tasks
   says: Tell you what needs you today

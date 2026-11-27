@@ -156,6 +156,11 @@ pub fn default_profile_for_agent(name: &str) -> Option<AgentProfile> {
                 "notify_owner".into(),
                 // A watch fires later as an unattended owner turn.
                 "watch_create".into(),
+                // A reminder rings the owner's phone.
+                "remind_create".into(),
+                "remind_list".into(),
+                "remind_update".into(),
+                "remind_cancel".into(),
                 // The owner's own chats and tool output, across every thread.
                 "session_search".into(),
                 "history_restore".into(),
@@ -360,6 +365,22 @@ mod tests {
             "a guest never schedules an unattended turn"
         );
         assert!(names.contains(&"vault_search".into()));
+    }
+
+    #[test]
+    fn telegram_guest_cannot_set_or_read_reminders() {
+        let profile = default_profile_for_agent("telegram_guest").unwrap();
+        let names = [
+            "remind_create",
+            "remind_list",
+            "remind_update",
+            "remind_cancel",
+        ];
+        let filtered = filter(tools(&names), Preset::Named(profile));
+        assert!(
+            filtered.is_empty(),
+            "a guest cannot ring the owner's phone or read their reminders"
+        );
     }
 
     #[test]

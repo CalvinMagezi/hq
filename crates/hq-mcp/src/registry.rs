@@ -127,6 +127,12 @@ pub fn create_default_registry(
     tools.extend(system_info::create_system_info_tools(vault_path.clone()));
     tools.extend(budget_status::create_budget_status_tools(db.clone()));
     tools.extend(notify::create_notify_tools(db.clone(), config));
+    // MCP callers hold an owner's key and have no chat, so a reminder from here has no thread.
+    tools.extend(hq_tools::reminders::tools::create_remind_tools(
+        db.clone(),
+        None,
+        &config.map(|c| c.reminders.clone()).unwrap_or_default(),
+    ));
     tools.extend(convert::create_convert_tools(vault_path.clone()));
     tools.extend(prose_lint::create_prose_lint_tools());
     #[cfg(feature = "suite")]
@@ -272,6 +278,26 @@ mod tests {
             );
         }
         assert!(registry.categories().contains(&"agent-comm".to_string()));
+    }
+
+    /// Agents reaching HQ over MCP can set reminders, and the writers are not read-only.
+    #[test]
+    fn the_reminder_tools_are_registered_in_their_own_category() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let registry = real_registry(&vault);
+        for name in [
+            "remind_create",
+            "remind_list",
+            "remind_update",
+            "remind_cancel",
+        ] {
+            let tool = registry
+                .get(name)
+                .unwrap_or_else(|| panic!("{name} is not registered"));
+            assert_eq!(tool.category(), "reminders", "{name}");
+            assert_eq!(tool.is_read_only(), name == "remind_list", "{name}");
+        }
+        assert!(registry.categories().contains(&"reminders".to_string()));
     }
 
     /// Agents reaching HQ over MCP can notify the owner.
