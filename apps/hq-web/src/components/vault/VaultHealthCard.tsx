@@ -5,7 +5,19 @@ import { t, tn } from '~/strings'
 import { vaultHealthQuery } from '~/lib/queries'
 import { useHealthChange } from '~/lib/useHealthChange'
 import { useRefreshOn } from '~/lib/useRefreshOn'
-import { applyHealthFixes, problemCount, undoHealthRepair, undoableRepair, type VaultHealth } from '~/lib/vaultHealthApi'
+import {
+  applyHealthFixes,
+  countHealthAgain,
+  problemCount,
+  setAsideHealth,
+  undoHealthRepair,
+  undoableRepair,
+  unfixableCount,
+  type VaultHealth,
+} from '~/lib/vaultHealthApi'
+
+/** From this many problems HQ cannot fix, the card offers to leave them alone. */
+export const LEAVE_ALONE_FROM = 10
 
 interface ViewProps {
   health: VaultHealth | undefined
@@ -14,6 +26,10 @@ interface ViewProps {
   /** Fix every certain repair. Without it the Fix button is not shown. */
   onFix?: () => void
   onUndo?: (runId: string) => void
+  /** Leave the rest alone: only what is new counts from now on. */
+  onSetAside?: () => void
+  /** Count what was set aside again. */
+  onCountAgain?: () => void
 }
 
 /**
@@ -22,12 +38,16 @@ interface ViewProps {
  * or when this HQ cannot answer: a card that is always there becomes furniture, and one that
  * appears means something.
  */
-export function VaultHealthCardView({ health, busy = false, nowMs, onFix, onUndo }: ViewProps) {
+export function VaultHealthCardView({ health, busy = false, nowMs, onFix, onUndo, onSetAside, onCountAgain }: ViewProps) {
   if (!health?.checked || !health.report) return null
   const c = health.report.counts
   const n = problemCount(c)
   const undoable = undoableRepair(health, nowMs)
   const certain = health.fix_counts?.a ?? 0
+  const setAside = c.set_aside ?? 0
+  const offerLeaveAlone = onSetAside !== undefined && unfixableCount(health) >= LEAVE_ALONE_FROM
+  const hasAside = setAside > 0
+  const showAsideRow = hasAside || offerLeaveAlone
 
   if (n === 0) {
     if (!undoable) return null
@@ -82,6 +102,21 @@ export function VaultHealthCardView({ health, busy = false, nowMs, onFix, onUndo
             </li>
           ))}
       </ul>
+      {showAsideRow && (
+        <p className="l-row a-body-sm a-muted" data-vault-health-aside>
+          {hasAside && tn('notes_health_set_aside', setAside)}
+          {hasAside && onCountAgain && (
+            <button type="button" className="a-link" disabled={busy} onClick={onCountAgain}>
+              {t('notes_health_count_again')}
+            </button>
+          )}
+          {offerLeaveAlone && (
+            <button type="button" className="a-link" disabled={busy} onClick={onSetAside} title={t('notes_health_leave_alone_hint')}>
+              {t('notes_health_leave_alone')}
+            </button>
+          )}
+        </p>
+      )}
       {undoable && onUndo && (
         <p className="l-row a-body-sm a-muted">
           {tn('notes_health_card_fixed', undoable.fixes)}
@@ -111,6 +146,23 @@ export function VaultHealthCard() {
             return { health: r.health, message: tn('notes_health_fixed', r.applied.fixes.length) }
           },
           t('notes_health_fix_failed'),
+        )
+      }
+      onSetAside={() =>
+        void change(
+          'all',
+          async () => {
+            const h = await setAsideHealth()
+            return { health: h, message: t('notes_health_set_aside_done', { n: h.set_aside_now ?? 0 }) }
+          },
+          t('notes_health_leave_alone_failed'),
+        )
+      }
+      onCountAgain={() =>
+        void change(
+          'all',
+          async () => ({ health: await countHealthAgain(), message: t('notes_health_counted_again') }),
+          t('notes_health_count_again_failed'),
         )
       }
       onUndo={(runId) =>

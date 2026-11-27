@@ -139,6 +139,14 @@ fn note_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
             post(vault_health_api::unignore_handler),
         )
         .route(
+            "/api/vault/health/set-aside",
+            post(vault_health_api::set_aside_handler),
+        )
+        .route(
+            "/api/vault/health/count-again",
+            post(vault_health_api::count_again_handler),
+        )
+        .route(
             "/api/vault/health/apply",
             post(vault_health_api::apply_handler),
         )

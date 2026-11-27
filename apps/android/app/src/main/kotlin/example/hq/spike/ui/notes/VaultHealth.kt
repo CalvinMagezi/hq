@@ -28,6 +28,10 @@ data class VaultHealth(
     val frontmatter: Int = 0,
     /** How many fixes HQ is certain about. */
     val certain: Int = 0,
+    /** How many it is only fairly sure about. */
+    val likely: Int = 0,
+    /** Older items the owner chose to leave alone, which the counts above leave out. */
+    val setAside: Int = 0,
     /** The latest repair, while it can still be undone: its run id and how many things it fixed. */
     val undoRun: String? = null,
     val undoFixes: Int = 0,
@@ -36,11 +40,17 @@ data class VaultHealth(
     /** Things a person could fix. Notes nothing links to are not counted: they are not damage. */
     val problems: Int get() = dead + ambiguous + anchors + duplicates + frontmatter
 
+    /** Problems HQ has no repair for: what "leave the rest alone" would set aside. */
+    val unfixable: Int get() = (problems - certain - likely).coerceAtLeast(0)
+
     /** Whether the card has anything to say: something to look at, or a fix that can be undone. */
     val worthShowing: Boolean get() = problems > 0 || undoRun != null
 }
 
 object VaultHealthParse {
+    /** From this many problems with no repair, the card offers to leave them alone. The same as the web. */
+    const val LEAVE_ALONE_FROM = 10
+
     /** A repair can be undone from the card for this long. The same day as on the web. */
     const val UNDO_WINDOW_MS = 24L * 60 * 60 * 1000
 
@@ -60,6 +70,8 @@ object VaultHealthParse {
             duplicates = counts.optInt("duplicates"),
             frontmatter = counts.optInt("frontmatter"),
             certain = json.optJSONObject("fix_counts")?.optInt("a") ?: 0,
+            likely = json.optJSONObject("fix_counts")?.optInt("b") ?: 0,
+            setAside = counts.optInt("set_aside"),
             undoRun = undoable(json.optJSONArray("repairs"), nowMs)?.first,
             undoFixes = undoable(json.optJSONArray("repairs"), nowMs)?.second ?: 0,
             items = items(report, fixes),

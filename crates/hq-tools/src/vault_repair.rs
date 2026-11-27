@@ -532,6 +532,64 @@ mod tests {
     }
 
     #[test]
+    fn leaving_the_rest_alone_keeps_the_repairs_and_counts_only_what_is_new_until_counted_again() {
+        let (v, db) = repair_vault(&[
+            ("Notebooks/New/Plan.md", &format!("{WORDS}, plans")),
+            (
+                "Notebooks/L.md",
+                "fixable [[Old/Plan]], and old mess [[Nowhere One]] and [[Nowhere Two]]",
+            ),
+        ]);
+        age(v.path());
+        let before = scan_and_store(v.path(), &db).unwrap();
+        assert_eq!(before.report.counts.links.dead, 3);
+        assert_eq!(before.fix_a, 1);
+
+        // One tap: what has nothing to fix is set aside (the two dead links, and the two notes
+        // nothing connects); the repairable link is not.
+        let set = crate::vault_health::set_rest_aside(v.path(), &db).unwrap();
+        assert_eq!(set, 4);
+        let after = scan_and_store(v.path(), &db).unwrap();
+        assert_eq!(after.report.counts.links.dead, 1);
+        assert_eq!(after.report.dead_links[0].link, "[[Old/Plan]]");
+        assert_eq!(after.report.counts.set_aside, 4);
+        assert_eq!(after.fix_a, 1, "the repair is still on offer");
+
+        // Setting aside twice sets nothing more aside.
+        assert_eq!(
+            crate::vault_health::set_rest_aside(v.path(), &db).unwrap(),
+            0
+        );
+
+        // Fixing leaves nothing counted; the old mess stays out of the count.
+        let (plan, _) = plan_now(v.path(), &db).unwrap();
+        let ids: HashSet<String> = plan.fixes.iter().map(|f| f.id.clone()).collect();
+        apply_repairs(v.path(), &db, &Which::Ids(ids), Source::Owner).unwrap();
+        let clean = scan_and_store(v.path(), &db).unwrap();
+        assert_eq!(clean.report.counts.problems(), 0);
+        assert_eq!(
+            clean.report.counts.set_aside, 2,
+            "the two notes are connected now, so only the two dead links are left set aside"
+        );
+
+        // A link that breaks later is new, so it counts.
+        std::fs::write(
+            v.path().join("Notebooks/M.md"),
+            format!("{WORDS} and then [[Brand New Gap]]"),
+        )
+        .unwrap();
+        let fresh = scan_and_store(v.path(), &db).unwrap();
+        assert_eq!(fresh.report.counts.links.dead, 1);
+        assert_eq!(fresh.report.dead_links[0].link, "[[Brand New Gap]]");
+
+        // Counting again brings the set-aside ones back.
+        assert_eq!(crate::vault_health::count_again(&db).unwrap(), 4);
+        let all = scan_and_store(v.path(), &db).unwrap();
+        assert_eq!(all.report.counts.links.dead, 3);
+        assert_eq!(all.report.counts.set_aside, 0);
+    }
+
+    #[test]
     fn approving_the_offer_fixes_the_links_then_asks_once_to_keep_doing_it_and_a_second_yes_is_remembered()
      {
         let (v, db) = repair_vault(&[

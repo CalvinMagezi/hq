@@ -128,6 +128,8 @@ mod tests {
             (Method::GET, "/api/vault/health"),
             (Method::POST, "/api/vault/health/scan"),
             // Fixing and undoing change only notes under Notebooks/, which Lite shows in full.
+            (Method::POST, "/api/vault/health/set-aside"),
+            (Method::POST, "/api/vault/health/count-again"),
             (Method::POST, "/api/vault/health/apply"),
             (Method::POST, "/api/vault/health/undo"),
             (Method::GET, "/api/vault-status"),

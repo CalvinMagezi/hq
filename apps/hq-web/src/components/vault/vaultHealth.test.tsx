@@ -236,3 +236,38 @@ describe('fixing from the review page', () => {
   })
 })
 
+describe('leaving the old mess alone', () => {
+  const messy = (set_aside = 0, a = 3) =>
+    health(report({ dead_links: deadReport(40).dead_links }, { dead: 40 }, { set_aside }), true, { fix_counts: { a, b: 1 }, fixes: [aFix()] })
+
+  test('the card offers it only when many problems have no repair, and only to a caller that can act', async () => {
+    expect(await inRouter(<VaultHealthCardView health={messy()} onSetAside={() => {}} />)).toContain('Leave the rest alone')
+    expect(await inRouter(<VaultHealthCardView health={messy()} />)).not.toContain('Leave the rest alone')
+    // 12 problems, 4 with a repair: 8 without is not a wall.
+    const few = health(deadReport(12), true, { fix_counts: { a: 3, b: 1 }, fixes: [aFix()] })
+    expect(await inRouter(<VaultHealthCardView health={few} onSetAside={() => {}} />)).not.toContain('Leave the rest alone')
+  })
+
+  test('the card says how many are set aside, in the right plural, and lets them be counted again', async () => {
+    const many = await inRouter(<VaultHealthCardView health={messy(7)} onCountAgain={() => {}} />)
+    expect(many).toContain('7 older ones are set aside')
+    expect(many).toContain('Count them again')
+    expect(await inRouter(<VaultHealthCardView health={messy(1)} onCountAgain={() => {}} />)).toContain('1 older one is set aside')
+    expect(await inRouter(<VaultHealthCardView health={messy(7)} />)).not.toContain('Count them again')
+  })
+
+  test('a healthy check with things set aside is still silent on the card', () => {
+    expect(renderToStaticMarkup(<VaultHealthCardView health={health(report({}, {}, { set_aside: 30 }))} />)).toBe('')
+  })
+
+  test('the review page offers it, and says what was set aside even when nothing else is wrong', async () => {
+    const props = { loadFailed: false, scanning: false, busyKey: null, onScan: () => {}, onIgnore: () => {} }
+    const offer = await inRouter(<VaultHealthView {...props} health={messy()} onSetAside={() => {}} onCountAgain={() => {}} />)
+    expect(offer).toContain('Leave the rest alone')
+    expect(offer).not.toContain('Count them again')
+    const clean = await inRouter(<VaultHealthView {...props} health={health(report({}, {}, { set_aside: 12 }))} onSetAside={() => {}} onCountAgain={() => {}} />)
+    expect(clean).toContain('12 older ones are set aside')
+    expect(clean).toContain('Count them again')
+    expect(clean).not.toContain('Leave the rest alone')
+  })
+})

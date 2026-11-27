@@ -35,7 +35,15 @@ the same note, and to pictures and files in your vault are not counted as broken
   notes are in order.
 - **Review** (from the card) lists each item with its note and line. **Open** takes you to the
   note. **Ignore** leaves one item out from then on. **Check now** looks again straight away.
+- **Leave the rest alone** is for a large, old collection with thousands of broken links you do
+  not mean to tidy. One tap sets aside everything that is here now, except what HQ can fix,
+  so the card counts only what is new from then on and the repairs stay on offer. The card
+  shows it once ten or more problems have no repair, and Review shows it whenever any do. The
+  card and Review say how many are set aside, and **Count them again** brings them all back
+  (that also brings back anything you ignored one by one). It changes no note. HQ never does
+  this for you: a number that quietly went away would hide the very links you might want fixed.
 - **`hq vault health`** prints the same list in a terminal. Add `--json` for a script.
+  `hq vault health --set-aside` and `--count-again` do the two above.
 - **`hq doctor`** has one line about it.
 - **In a chat**, ask "Check my notes for broken links". Chats also warn when a note they just
   wrote holds a link that leads nowhere, so it can be fixed on the spot.

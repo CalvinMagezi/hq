@@ -54,6 +54,15 @@ internal fun VaultHealthCard(ui: NotesUi, actions: NotesActions) {
                 CardButton(stringResource(R.string.notes_health_review), true, actions.onOpenHealth)
             }
         }
+        if (health.problems > 0 && (health.setAside > 0 || health.unfixable >= VaultHealthParse.LEAVE_ALONE_FROM)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (health.setAside > 0) {
+                    Text(pluralStringResource(R.plurals.notes_health_set_aside, health.setAside, health.setAside), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.weight(1f))
+                    CardButton(stringResource(R.string.notes_health_count_again), !ui.healthBusy, actions.onHealthCountAgain)
+                }
+                if (health.unfixable >= VaultHealthParse.LEAVE_ALONE_FROM) CardButton(stringResource(R.string.notes_health_leave_alone), !ui.healthBusy, actions.onHealthSetAside)
+            }
+        }
         val run = health.undoRun
         if (run != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
