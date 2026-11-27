@@ -81,6 +81,18 @@ pub(super) fn learns_from_turn(
 /// Replies shorter than this carry nothing worth remembering.
 const MIN_REPLY_CHARS_FOR_MEMORY: usize = 100;
 
+/// Whether the owner's own lines in this turn ask HQ to remember something ("Remember that ...").
+pub(super) fn asks_to_remember(turn_text: &str) -> bool {
+    hq_memory::remember::explicit_request(&hq_memory::local_extract::owner_text(turn_text))
+        .is_some()
+}
+
+/// A short reply is not worth a note, unless the owner asked for one: "Remember that ..." is
+/// answered with "Noted." and must still be kept.
+pub(super) fn worth_a_note(reply_chars: usize, asked_to_remember: bool) -> bool {
+    asked_to_remember || reply_chars >= MIN_REPLY_CHARS_FOR_MEMORY
+}
+
 /// Where a turn came from, kept with the memory learned from it.
 #[derive(Debug, Clone)]
 pub struct TurnSource {
@@ -157,20 +169,25 @@ pub fn wire_post_turn_ingestion(
             .filter(|(role, _)| role == "assistant")
             .map(|(_, content)| content.len())
             .sum();
-        if reply_chars < MIN_REPLY_CHARS_FOR_MEMORY {
-            return;
-        }
         let text = exchange
             .iter()
             .map(|(role, content)| format!("{role}: {content}"))
             .collect::<Vec<_>>()
             .join("\n---\n");
+        // A short answer is not worth a note, except when the owner asked for one: "Remember
+        // that ..." is answered with "Noted." and must still be kept.
+        let asked_to_remember = asks_to_remember(&text);
+        if !worth_a_note(reply_chars, asked_to_remember) {
+            return;
+        }
         let (db, vault_path, source) = (db.clone(), vault_path.clone(), source.clone());
         let (session_id, llm) = (session_id.clone(), llm.clone());
         tokio::spawn(async move {
             // Skips the extraction call for a turn that is confidently ephemeral.
             let decisions = hq_llm::decision::get();
-            if !hq_memory::turn_gate::admit(decisions.as_ref(), &session_id, &text).await {
+            if !asked_to_remember
+                && !hq_memory::turn_gate::admit(decisions.as_ref(), &session_id, &text).await
+            {
                 return;
             }
             let mut ingester = match llm {

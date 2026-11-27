@@ -132,32 +132,129 @@ pub fn store_memory_with(
     params: &StoreMemoryParams<'_>,
     trace: &Trace<'_>,
 ) -> Result<i64> {
+    db.with_conn(|conn| insert_memory(conn, params, trace, &Extras::default()))
+}
+
+/// What a new memory carries beyond the summary: whether it is held back, and whether the owner
+/// asked for it to be kept for good.
+#[derive(Debug, Clone, Copy)]
+pub struct Extras {
+    /// `active`, or `review` when the owner should look before it is ever brought up.
+    pub status: &'static str,
+    pub pinned: bool,
+}
+
+impl Default for Extras {
+    fn default() -> Self {
+        Self {
+            status: "active",
+            pinned: false,
+        }
+    }
+}
+
+/// The outcome of [`store_or_reinforce`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stored {
+    pub id: i64,
+    /// The same words were already held, so that memory was reinforced and nothing was added.
+    pub reinforced: bool,
+}
+
+/// Store a memory, unless these same words (case, punctuation and spacing aside) are already held
+/// from the same kind of source: then that memory is seen once more instead of a copy being
+/// added. The lookup and the write share one write lock, so two turns saying the same thing at
+/// once cannot both insert.
+pub fn store_or_reinforce(
+    db: &Database,
+    params: &StoreMemoryParams<'_>,
+    trace: &Trace<'_>,
+    extras: &Extras,
+) -> Result<Stored> {
+    let hash = crate::hash::content_hash(params.summary);
+    db.with_conn(|conn| {
+        conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = (|| -> Result<Stored> {
+            let existing: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM memories
+                     WHERE content_hash = ?1 AND origin = ?2 AND status IN ('active', 'review')
+                     ORDER BY id LIMIT 1",
+                    rusqlite::params![hash, trace.origin.as_str()],
+                    |r| r.get(0),
+                )
+                .ok();
+            if let Some(id) = existing {
+                conn.execute(
+                    "UPDATE memories
+                     SET seen_count = seen_count + 1,
+                         last_seen_at = ?2,
+                         importance = MAX(importance, ?3),
+                         pinned = MAX(pinned, ?4),
+                         provenance = CASE WHEN ?5 = 'owner_said' THEN 'owner_said' ELSE provenance END
+                     WHERE id = ?1",
+                    rusqlite::params![
+                        id,
+                        chrono::Utc::now().to_rfc3339(),
+                        params.importance,
+                        extras.pinned,
+                        trace.provenance.as_str()
+                    ],
+                )?;
+                return Ok(Stored {
+                    id,
+                    reinforced: true,
+                });
+            }
+            Ok(Stored {
+                id: insert_memory(conn, params, trace, extras)?,
+                reinforced: false,
+            })
+        })();
+        match result {
+            Ok(stored) => {
+                conn.execute_batch("COMMIT")?;
+                Ok(stored)
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                Err(e)
+            }
+        }
+    })
+}
+
+fn insert_memory(
+    conn: &rusqlite::Connection,
+    params: &StoreMemoryParams<'_>,
+    trace: &Trace<'_>,
+    extras: &Extras,
+) -> Result<i64> {
     let now = chrono::Utc::now().to_rfc3339();
     let entities_json = serde_json::to_string(params.entities)?;
     let topics_json = serde_json::to_string(params.topics)?;
-
-    db.with_conn(|conn| {
-        conn.execute(
-            "INSERT INTO memories (source, harness, raw_text, summary, entities, topics, importance, content, created_at, user_id, origin, provenance, thread_id, content_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?4, ?8, ?9, ?10, ?11, ?12, ?13)",
-            rusqlite::params![
-                params.source,
-                params.harness,
-                params.raw_text,
-                params.summary,
-                entities_json,
-                topics_json,
-                params.importance,
-                now,
-                params.user_id,
-                trace.origin.as_str(),
-                trace.provenance.as_str(),
-                trace.thread_id,
-                crate::hash::content_hash(params.summary)
-            ],
-        )?;
-        Ok(conn.last_insert_rowid())
-    })
+    conn.execute(
+        "INSERT INTO memories (source, harness, raw_text, summary, entities, topics, importance, content, created_at, user_id, origin, provenance, thread_id, content_hash, status, pinned, last_seen_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?4, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?8)",
+        rusqlite::params![
+            params.source,
+            params.harness,
+            params.raw_text,
+            params.summary,
+            entities_json,
+            topics_json,
+            params.importance,
+            now,
+            params.user_id,
+            trace.origin.as_str(),
+            trace.provenance.as_str(),
+            trace.thread_id,
+            crate::hash::content_hash(params.summary),
+            extras.status,
+            extras.pinned
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
 }
 
 /// Store a consolidation and mark source memories as consolidated.
