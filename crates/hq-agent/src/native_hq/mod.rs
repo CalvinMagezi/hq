@@ -22,7 +22,7 @@ use crate::session::SessionConfig;
 mod ingest;
 mod progress;
 
-pub use ingest::wire_post_turn_ingestion;
+pub use ingest::{TurnSource, wire_post_turn_ingestion};
 use ingest::{
     estimate_tokens, record_thread_entry, record_thread_turn, result_text, thread_identity,
 };
@@ -319,17 +319,12 @@ pub async fn run_native_hq(
         &mut hooks,
     );
     let mut session = builder.build().await?;
-    let harness_label = hooks
-        .identity
-        .as_ref()
-        .map(|i| i.source.label())
-        .unwrap_or("cli");
     if ingest::learns_from_turn(hooks.identity.as_ref(), hooks.skip_memory_ingestion) {
         wire_post_turn_ingestion(
             &mut session,
             &config.vault_path,
             &config.db_path(),
-            harness_label,
+            TurnSource::from_identity(hooks.identity.as_ref()),
         );
     }
     let thread_identity = thread_identity(&hooks);

@@ -13,16 +13,18 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use tracing::{info, warn};
 
-use crate::db::{StoreMemoryParams, store_memory};
+use crate::db::{StoreMemoryParams, store_memory_with};
 use crate::llm_bridge::MemoryLlm;
-use crate::types::ExtractedMemory;
+use crate::types::{ExtractedMemory, Trace};
 
 /// Metadata extraction prompt: summary, entities, topics, importance.
 const METADATA_PROMPT: &str = r#"You are a memory extraction assistant for a personal AI agent hub called Agent-HQ.
 
-Read the text and extract structured metadata. Return a JSON object with exactly:
+Read the text and extract structured metadata. The text is usually a conversation between the owner ("user:") and an assistant. Record what the OWNER said: facts they gave, decisions they made, preferences, corrections, and what they asked for. Do not record what the assistant claimed, guessed or suggested unless the owner agreed to it or acted on it. If the owner only asked a question, summarise the question in a few words. Write in the owner's language and do not translate.
+
+Return a JSON object with exactly:
 {
-  "summary": "1-2 sentence summary of what happened or was learned",
+  "summary": "1-2 sentence summary of what the owner said, decided or asked",
   "entities": ["array", "of", "key", "names", "projects", "tools"],
   "topics": ["2-4", "topic", "tags"],
   "importance": 0.7
@@ -42,8 +44,6 @@ pub const INGEST_MODEL_ALIAS: &str = "bulk";
 const MIN_TEXT_CHARS: usize = 30;
 /// How much of the text the extraction call sees.
 const PROMPT_TEXT_CHARS: usize = 2000;
-/// How much raw text is stored alongside the summary.
-const STORED_TEXT_CHARS: usize = 4000;
 
 /// Salience markers boost importance at encoding time, so decisions,
 /// failures and milestones survive decay.
@@ -99,13 +99,15 @@ impl MemoryIngester {
     }
 
     /// Ingest a piece of text as a memory. Returns the new memory ID, or
-    /// None when the text is too short or extraction fails.
+    /// None when the text is too short or extraction fails. `trace` records where it came from.
+    /// The turn text itself is not kept: only the summary, which has secrets removed.
     pub async fn ingest(
         &mut self,
         text: &str,
         source: &str,
         harness: Option<&str>,
         user_id: Option<&str>,
+        trace: &Trace<'_>,
     ) -> Result<Option<i64>> {
         let harness = harness.unwrap_or("unknown");
         if text.trim().len() < MIN_TEXT_CHARS {
@@ -137,23 +139,28 @@ impl MemoryIngester {
         }
 
         let mut topics: Vec<String> = extracted.topics.into_iter().take(5).collect();
-        let importance =
-            apply_salience_boost(text, extracted.importance.clamp(0.0, 1.0), &mut topics);
-        let raw_text: String = text.chars().take(STORED_TEXT_CHARS).collect();
+        // The owner's words decide whether this was a decision or a problem. The assistant's own
+        // words ("error", "decision" in a reply) say nothing about what the owner cared about.
+        let importance = apply_salience_boost(
+            &crate::local_extract::owner_text(text),
+            extracted.importance.clamp(0.0, 1.0),
+            &mut topics,
+        );
         let entities: Vec<String> = extracted.entities.into_iter().take(10).collect();
 
-        let id = store_memory(
+        let id = store_memory_with(
             &self.db,
             &StoreMemoryParams {
                 source,
                 harness,
-                raw_text: &raw_text,
+                raw_text: "",
                 summary: &hq_core::redact::redact_secrets(&extracted.summary),
                 entities: &entities,
                 topics: &topics,
                 importance,
                 user_id,
             },
+            trace,
         )?;
 
         // One concept page per entity, wikilinked to the entities it appeared
@@ -183,6 +190,8 @@ impl MemoryIngester {
 
 #[cfg(test)]
 mod tests {
+    use crate::types::Trace;
+
     #[test]
     fn ingest_column_user_id_exists() {
         use hq_db::Database;
@@ -211,9 +220,9 @@ mod tests {
         let db = hq_db::Database::open_memory().unwrap();
         let vault = tempfile::tempdir().unwrap();
         let mut ingester = super::MemoryIngester::new_local(db.clone(), vault.path().to_path_buf());
-        let turn = "user: Did the Galaxy A32 install work?\n---\nassistant: Yes, the release installed on the Galaxy A32 and the decision was to keep the data saver on. Search now runs locally.";
+        let turn = "user: Did the Galaxy A32 install work? We need a decision on the data saver.\n---\nassistant: Yes, the release installed on the Galaxy A32. Search now runs locally.";
         let id = ingester
-            .ingest(turn, "chat-turn", Some("test"), None)
+            .ingest(turn, "chat-turn", Some("test"), None, &Trace::default())
             .await
             .unwrap()
             .expect("a memory");
@@ -234,11 +243,37 @@ mod tests {
         assert!(importance > 0.5, "'decision' is salient: {importance}");
     }
 
+    /// "error" and "decision" in the assistant's reply are not the owner's priorities.
+    #[tokio::test]
+    async fn words_in_the_assistants_reply_do_not_raise_a_memorys_importance() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let mut ingester = super::MemoryIngester::new_local(db.clone(), vault.path().to_path_buf());
+        let turn = "user: Does the label printer take the blue cartridge?\n---\nassistant: Yes. If you see an error, the decision is to swap the cartridge and the risk is low.";
+        let id = ingester
+            .ingest(turn, "chat-turn", Some("test"), None, &Trace::default())
+            .await
+            .unwrap()
+            .expect("a memory");
+        let importance: f64 = db
+            .with_conn(|c| {
+                Ok(
+                    c.query_row("SELECT importance FROM memories WHERE id = ?1", [id], |r| {
+                        r.get(0)
+                    })?,
+                )
+            })
+            .unwrap();
+        assert!((importance - 0.5).abs() < 1e-9, "{importance}");
+    }
+
     /// In-process fake `LlmProvider` returning a fixed extraction so tests
     /// don't depend on a live model.
     #[derive(Default)]
     struct FakeProvider {
         prompts: std::sync::Mutex<Vec<String>>,
+        /// The summary the "model" returns; "test summary" when unset.
+        summary: Option<String>,
     }
 
     #[async_trait::async_trait]
@@ -260,7 +295,13 @@ mod tests {
                 message: ChatMessage {
                     image_parts: Vec::new(),
                     role: MessageRole::Assistant,
-                    content: r#"{"summary": "test summary", "entities": ["Rust", "Agent HQ"], "topics": ["test"], "importance": 0.5}"#.to_string(),
+                    content: serde_json::json!({
+                        "summary": self.summary.as_deref().unwrap_or("test summary"),
+                        "entities": ["Rust", "Agent HQ"],
+                        "topics": ["test"],
+                        "importance": 0.5
+                    })
+                    .to_string(),
                     tool_calls: Vec::new(),
                     tool_call_id: None,
                     reasoning_content: None,
@@ -320,6 +361,7 @@ mod tests {
                 "test",
                 Some("test-harness"),
                 None,
+                &Trace::default(),
             )
             .await;
         assert!(result.is_ok(), "ingest should succeed: {result:?}");
@@ -348,7 +390,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ingest_redacts_secrets_from_prompt_and_stored_text() {
+    async fn ingest_redacts_secrets_from_prompt_and_keeps_no_turn_text() {
         use super::MemoryIngester;
         use hq_db::Database;
         use std::sync::Arc;
@@ -369,31 +411,178 @@ mod tests {
                 "test",
                 None,
                 None,
+                &Trace::default(),
             )
             .await
             .unwrap()
             .expect("ingest should store a memory");
 
-        let raw_text: String = db
+        let (raw_text, summary): (String, String) = db
             .with_conn(|conn| {
                 conn.query_row(
-                    "SELECT raw_text FROM memories WHERE id = ?1",
+                    "SELECT raw_text, summary FROM memories WHERE id = ?1",
                     rusqlite::params![id],
-                    |r| r.get(0),
+                    |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .map_err(Into::into)
             })
             .unwrap();
+        assert_eq!(raw_text, "", "the turn text is not kept, only the summary");
         assert!(
-            !raw_text.contains(SECRET),
-            "stored raw_text leaked: {raw_text}"
+            !summary.contains(SECRET),
+            "stored summary leaked: {summary}"
         );
-        assert!(raw_text.contains("[REDACTED]"));
         let prompts = provider.prompts.lock().unwrap();
         assert!(!prompts.is_empty());
         assert!(
             prompts.iter().all(|p| !p.contains(SECRET)),
             "prompt leaked the secret"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_secret_in_the_models_summary_is_removed_before_it_is_stored() {
+        use super::MemoryIngester;
+        use hq_db::Database;
+        use std::sync::Arc;
+
+        // Built in two pieces so the source never holds a whole key-shaped string.
+        let secret = ["sk-", "abcdefghijklmnopqrstuvwx1234"].concat();
+        let secret = secret.as_str();
+        let db = Database::open_memory().unwrap();
+        let provider = Arc::new(FakeProvider {
+            summary: Some(format!("The owner keeps the key {secret} in a note")),
+            ..FakeProvider::default()
+        });
+        let mut ingester = MemoryIngester::new_with_provider(
+            db.clone(),
+            std::env::temp_dir().join("hq-ingester-summary-redact-test"),
+            provider,
+            "fake-model".to_string(),
+        );
+
+        let id = ingester
+            .ingest(
+                "user: where did I put the key for the shop account?",
+                "chat-turn",
+                Some("web"),
+                None,
+                &Trace::default(),
+            )
+            .await
+            .unwrap()
+            .expect("a memory");
+
+        let summary: String = db
+            .with_conn(|c| {
+                Ok(
+                    c.query_row("SELECT summary FROM memories WHERE id = ?1", [id], |r| {
+                        r.get(0)
+                    })?,
+                )
+            })
+            .unwrap();
+        assert!(!summary.contains(secret), "{summary}");
+        assert!(summary.contains("[REDACTED]"), "{summary}");
+    }
+
+    #[tokio::test]
+    async fn a_memory_records_where_it_came_from() {
+        use super::MemoryIngester;
+        use crate::types::{Origin, Provenance};
+        use hq_db::Database;
+        use std::sync::Arc;
+
+        let db = Database::open_memory().unwrap();
+        let mut ingester = MemoryIngester::new_with_provider(
+            db.clone(),
+            std::env::temp_dir().join("hq-ingester-trace-test"),
+            Arc::new(FakeProvider::default()),
+            "fake-model".to_string(),
+        );
+        let ordinary = ingester
+            .ingest(
+                "user: Acme Feeds now delivers on Thursdays, please note that down",
+                "chat-turn",
+                Some("web"),
+                Some("local"),
+                &Trace {
+                    thread_id: Some("thread-1"),
+                    ..Trace::default()
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let held_back = ingester
+            .ingest(
+                "user: the group chat should move to Sundays after church",
+                "chat-turn",
+                Some("discord"),
+                None,
+                &Trace {
+                    origin: Origin::UnknownChannel,
+                    provenance: Provenance::ModelInferred,
+                    thread_id: None,
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        let row = |id: i64| -> (String, String, Option<String>, Option<String>) {
+            db.with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT origin, provenance, thread_id, user_id FROM memories WHERE id = ?1",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )?)
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            row(ordinary),
+            (
+                "owner".into(),
+                "model_inferred".into(),
+                Some("thread-1".into()),
+                Some("local".into())
+            )
+        );
+        assert_eq!(row(held_back).0, "unknown_channel");
+    }
+
+    #[tokio::test]
+    async fn the_extraction_prompt_asks_for_what_the_owner_said_not_the_assistant() {
+        use super::MemoryIngester;
+        use hq_db::Database;
+        use std::sync::Arc;
+
+        let db = Database::open_memory().unwrap();
+        let provider = Arc::new(FakeProvider::default());
+        let mut ingester = MemoryIngester::new_with_provider(
+            db,
+            std::env::temp_dir().join("hq-ingester-prompt-test"),
+            provider.clone(),
+            "fake-model".to_string(),
+        );
+        ingester
+            .ingest(
+                "user: we start the second class in February\n---\nassistant: Great, I will plan for that.",
+                "chat-turn",
+                Some("web"),
+                None,
+                &Trace::default(),
+            )
+            .await
+            .unwrap();
+
+        let prompts = provider.prompts.lock().unwrap();
+        let system = prompts.first().expect("a system prompt");
+        assert!(system.contains("Record what the OWNER said"), "{system}");
+        assert!(
+            system.contains("Do not record what the assistant claimed"),
+            "{system}"
         );
     }
 }
