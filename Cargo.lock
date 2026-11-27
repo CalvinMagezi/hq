@@ -4194,6 +4194,7 @@ name = "hq-vault"
 version = "0.9.1"
 dependencies = [
  "anyhow",
+ "blake3",
  "chrono",
  "gray_matter",
  "hq-core",

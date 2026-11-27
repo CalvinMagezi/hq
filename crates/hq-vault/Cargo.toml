@@ -12,6 +12,7 @@ tracing = { workspace = true }
 chrono = { workspace = true }
 gray_matter = { workspace = true }
 unicode-normalization = "0.1"
+blake3 = { workspace = true }
 tempfile = "3"
 
 [dev-dependencies]

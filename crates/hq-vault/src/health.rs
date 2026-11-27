@@ -456,7 +456,7 @@ fn frontmatter_problem(text: &str) -> Option<FrontmatterProblem> {
 
 /// Notes with the same words, whatever the spacing, in groups of two or more. Short notes are
 /// not matched: two notes that both say "TODO" are not a duplicate.
-fn duplicate_groups(snap: &Snapshot) -> Vec<DuplicateGroup> {
+pub(crate) fn duplicate_groups(snap: &Snapshot) -> Vec<DuplicateGroup> {
     let mut by_text: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for note in &snap.notes {
         let normal: String = body_of(&note.text)

@@ -121,6 +121,12 @@ fn stem_of(rel: &str) -> String {
 /// The one existing note whose name is nearest to `target`, if it is near enough and nothing
 /// else is as near. A guess is shown to the writer, never written into a note.
 pub(crate) fn nearest_name(target: &str, stems: &[(String, String)]) -> Option<String> {
+    nearest_note(target, stems).map(|rel| stem_of(&rel))
+}
+
+/// The path of the one note whose name is nearest to `target`, under the same rules as
+/// [`nearest_name`].
+pub(crate) fn nearest_note(target: &str, stems: &[(String, String)]) -> Option<String> {
     let want = fold(target.rsplit('/').next().unwrap_or(target));
     let want = want.strip_suffix(".md").unwrap_or(&want);
     if want.chars().count() < 4 {
@@ -142,7 +148,7 @@ pub(crate) fn nearest_name(target: &str, stems: &[(String, String)]) -> Option<S
         }
     }
     match (best, tie) {
-        (Some((_, rel)), false) => Some(stem_of(rel)),
+        (Some((_, rel)), false) => Some(rel.to_string()),
         _ => None,
     }
 }
