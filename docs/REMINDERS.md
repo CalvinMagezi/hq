@@ -69,3 +69,40 @@ Leaving a ping alone is not an answer. A nudge keeps following up.
 - A reminder can arrive up to about 30 seconds late, plus the phone's own check of the inbox.
 - A reminder's text is part of its inbox item. It is pushed like other inbox items, and a push shows
   the title only unless you turned details on for that device.
+
+## From a chat
+
+Ask in any chat, on the phone, the web, Telegram or Discord: "remind me at 4 to call Moses about
+the 50,000, and keep reminding me until it's done". HQ sets it with `remind_create`, says the time it
+set in words, and the ping arrives in your inbox. HQ knows your time from the zone you saved (set by
+the first phone that reports one) and says the current time to itself at the start of each of your
+turns, so "tomorrow at 4" means your clock.
+
+The tools are `remind_create`, `remind_list`, `remind_update` (change the time, mark it done) and
+`remind_cancel`. They are only for you: a guest in a shared chat does not get them, and a session
+running unattended, such as a watch, cannot set reminders. A reminder set after HQ read a web page,
+an email or a document is marked "Set while HQ was reading outside content" and has no link, so text
+from outside cannot send you anywhere. At most 30 can be set in an hour and 200 can be active.
+
+A task can be named (`task_id`): the reminder then stops when the task is complete or archived.
+
+For a time, use a reminder, not `/watch`. A watch asks the model a question on every check and only
+works from Telegram and Discord; a reminder costs nothing and works everywhere.
+
+## For apps and scripts
+
+All of these need your sign-in, like the rest of the web API.
+
+| Route | What it does |
+|---|---|
+| `GET /api/reminders?status=active\|done\|all` | The list, soonest first, with your saved `time_zone` |
+| `POST /api/reminders` | `title`, then `at` (local `YYYY-MM-DDTHH:MM`) or `in_minutes`; optional `tz`, `repeat`, `nudge`, `note`, `task_id` |
+| `PATCH /api/reminders/{id}` | Change `title`, `note`, the time, `tz`, `repeat` (`none` clears it) or `nudge` |
+| `POST /api/reminders/{id}/done` | Done; a repeat moves to its next time |
+| `POST /api/reminders/{id}/snooze` | `{ "minutes": 60 }` or `{ "until": <epoch seconds> }`, at most 90 days |
+| `DELETE /api/reminders/{id}` | Stop it |
+
+Done, snooze and delete also take the waiting ping out of the inbox. The inbox item itself takes
+the actions `done`, `snooze` (with `minutes` or `until`) and `dismiss` on
+`POST /api/notifications/{id}/action`. The saved zone is the `owner.timezone` preference on
+`GET` and `PUT /api/prefs`.
