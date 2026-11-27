@@ -1,4 +1,4 @@
-//! What recall worked out for each chat message, as counts and ids only (migration 156).
+//! What recall worked out for each chat message, as counts and ids only (migration 157).
 //!
 //! Written by the chat path, read by `hq memory recall-report`. Nothing here holds a message or a
 //! memory's text, and nothing here leaves the device.
