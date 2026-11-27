@@ -167,7 +167,7 @@ web_push:
   non_urgent_per_day: 5            # pushes a day for items that are not urgent
 ```
 
-Urgent items are approvals, `notify_owner` messages and due reminders. They are not limited by the
+Urgent items are approvals, `notify_owner` messages, due reminders and reminders you set (`docs/REMINDERS.md`). They are not limited by the
 budget; during quiet hours they wait and go out when the period ends. Everything else folds into at
 most one push an hour and stops at `non_urgent_per_day`. What is folded or over budget stays in the
 inbox and on the badge. Push is off by default (`web_push.enabled`).

@@ -20,13 +20,16 @@ pub const FOCUS_MAX_LANES: &str = "focus.max_lanes";
 /// The owner's answer to the offer in the Inbox; the config key `daemon.vault_auto_fix` turns
 /// it on too, and either is enough.
 pub const VAULT_AUTO_FIX: &str = "vault.auto_fix";
+/// The IANA zone the owner's times mean (`Africa/Kampala`). Reminders and daily nudges read it.
+pub const OWNER_TIMEZONE: &str = "owner.timezone";
 
 /// Every key that may be stored.
-pub const KNOWN: [&str; 4] = [
+pub const KNOWN: [&str; 5] = [
     CHAT_AUTO_TITLE,
     HELPERS_ASK_LEVEL,
     FOCUS_MAX_LANES,
     VAULT_AUTO_FIX,
+    OWNER_TIMEZONE,
 ];
 
 /// Whether `value` is one this key accepts.
@@ -35,6 +38,7 @@ pub fn valid(key: &str, value: &str) -> bool {
         CHAT_AUTO_TITLE | VAULT_AUTO_FIX => matches!(value, "true" | "false"),
         HELPERS_ASK_LEVEL => matches!(value, "nothing" | "loses_work" | "everything"),
         FOCUS_MAX_LANES => matches!(value, "1" | "2" | "3" | "4" | "5"),
+        OWNER_TIMEZONE => value.parse::<chrono_tz::Tz>().is_ok(),
         _ => false,
     }
 }
@@ -71,6 +75,30 @@ pub fn vault_auto_fix_on(db: &Database) -> bool {
     matches!(get(db, VAULT_AUTO_FIX), Ok(Some(v)) if v == "true")
 }
 
+/// The owner's chosen zone, when they set one and it still parses.
+pub fn timezone(db: &Database) -> Option<chrono_tz::Tz> {
+    get(db, OWNER_TIMEZONE)
+        .ok()
+        .flatten()
+        .and_then(|z| z.parse().ok())
+}
+
+/// The owner's wall clock at `now`: the hour and the date in their zone when they set one, and on
+/// this machine's clock when they did not.
+pub fn wall_clock(db: &Database, now: chrono::DateTime<chrono::Utc>) -> (u32, chrono::NaiveDate) {
+    use chrono::Timelike;
+    match timezone(db) {
+        Some(tz) => {
+            let local = now.with_timezone(&tz);
+            (local.hour(), local.date_naive())
+        }
+        None => {
+            let local = now.with_timezone(&chrono::Local);
+            (local.hour(), local.date_naive())
+        }
+    }
+}
+
 /// Whether HQ names chats after their first reply. On unless the owner turned it off.
 pub fn auto_title_on(db: &Database) -> bool {
     !matches!(get(db, CHAT_AUTO_TITLE), Ok(Some(v)) if v == "false")
@@ -99,6 +127,32 @@ mod tests {
         assert!(set(&db, CHAT_AUTO_TITLE, "maybe").is_err());
         assert!(set(&db, HELPERS_ASK_LEVEL, "always").is_err());
         assert_eq!(get(&db, "something.else").unwrap(), None);
+    }
+
+    #[test]
+    fn the_owner_timezone_must_be_a_real_zone() {
+        let db = Database::open_memory().unwrap();
+        assert!(timezone(&db).is_none());
+        assert!(set(&db, OWNER_TIMEZONE, "Mars/Olympus").is_err());
+        set(&db, OWNER_TIMEZONE, "Africa/Kampala").unwrap();
+        assert_eq!(timezone(&db), Some(chrono_tz::Africa::Kampala));
+    }
+
+    #[test]
+    fn the_wall_clock_follows_the_owners_zone_not_the_servers() {
+        use chrono::TimeZone;
+        let db = Database::open_memory().unwrap();
+        set(&db, OWNER_TIMEZONE, "Africa/Kampala").unwrap();
+        // 22:00 UTC is 01:00 the next day in Kampala: the middle of the night.
+        let late = chrono::Utc
+            .with_ymd_and_hms(2026, 11, 26, 22, 0, 0)
+            .unwrap();
+        let (hour, date) = wall_clock(&db, late);
+        assert_eq!(hour, 1);
+        assert_eq!(date.to_string(), "2026-11-27");
+        // 06:00 UTC is 09:00 there, inside waking hours.
+        let morning = chrono::Utc.with_ymd_and_hms(2026, 11, 26, 6, 0, 0).unwrap();
+        assert_eq!(wall_clock(&db, morning).0, 9);
     }
 
     #[test]

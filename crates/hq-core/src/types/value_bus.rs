@@ -109,6 +109,10 @@ const DEFAULT_TTL_DAYS: i64 = 7;
 /// Source of a due-date reminder for a task the person made in chat. Pushed like `notify_owner`.
 pub const DUE_REMINDER_SOURCE: &str = "due_reminder";
 
+/// Source of a reminder the owner set (`hq_db::reminders`). Pushed, and never silenceable: the
+/// owner asked for it at that time.
+pub const REMINDER_SOURCE: &str = "reminder";
+
 /// Source of the weekly adoption digest: how the person uses HQ.
 pub const ADOPTION_DIGEST_SOURCE: &str = "adoption_digest";
 

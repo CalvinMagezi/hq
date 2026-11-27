@@ -770,6 +770,8 @@ async fn action_approves_known_items_and_404s_unknown_ones() {
         let body = NotificationActionRequest {
             action: action.into(),
             starter: None,
+            minutes: None,
+            until: None,
         };
         notification_action_handler(State(state.clone()), AxumPath(id.into()), Json(body))
     };
@@ -802,6 +804,8 @@ async fn approving_by_id_approves_exactly_that_item_and_signs_it() {
         let body = NotificationActionRequest {
             action: action.into(),
             starter: None,
+            minutes: None,
+            until: None,
         };
         notification_action_handler(State(state.clone()), AxumPath(id.into()), Json(body))
     };
@@ -882,6 +886,8 @@ async fn an_open_dialog_is_not_approved_through_its_notice() {
         let body = NotificationActionRequest {
             action: action.into(),
             starter: None,
+            minutes: None,
+            until: None,
         };
         notification_action_handler(State(state.clone()), AxumPath(id.clone()), Json(body))
     };
@@ -1070,4 +1076,93 @@ async fn a_legacy_delegated_work_notice_is_read_in_plain_words() {
     for leaked in ["ee68156e", "verifier", "subagent_run_status", "Sub-agent"] {
         assert!(!text.contains(leaked), "{text}");
     }
+}
+
+#[tokio::test]
+async fn a_reminders_ping_offers_done_and_snooze_and_moves_the_reminder() {
+    use hq_core::config::RemindersConfig;
+    use hq_core::types::ValueKind;
+    use hq_db::reminders::{self, Limits, NewReminder};
+    let dir = tempfile::tempdir().unwrap();
+    let state = Arc::new(WsState::new(dir.path().to_path_buf(), None));
+    let now = chrono::Utc::now().timestamp();
+    let make = |title: &str| {
+        reminders::create(
+            &state.db,
+            &NewReminder {
+                title,
+                note: None,
+                due_at: now - 10,
+                tz: "Africa/Kampala",
+                repeat_rule: None,
+                nudge: true,
+                task_id: None,
+                thread_id: None,
+                tainted: false,
+                source: "chat",
+            },
+            now - 60,
+            Limits {
+                max_active: 10,
+                max_per_hour: 10,
+            },
+        )
+        .unwrap()
+    };
+    let done_me = make("Call Moses");
+    let snooze_me = make("Send the invoice");
+    hq_tools::reminders::fire::fire_due(&state.db, &RemindersConfig::default(), now).unwrap();
+    let ping_of = |id: &str| {
+        format!(
+            "val_{}",
+            reminders::get(&state.db, id)
+                .unwrap()
+                .unwrap()
+                .last_item_id
+                .unwrap()
+        )
+    };
+    let listed = scan_value_items(&state.db, Some("pending")).unwrap();
+    let item = listed
+        .iter()
+        .find(|n| n.id == ping_of(&done_me.id))
+        .unwrap();
+    assert_eq!(item.actions, ["done", "snooze", "dismiss"]);
+
+    let act = |id: String, action: &str, minutes: Option<i64>| {
+        let body = NotificationActionRequest {
+            action: action.into(),
+            starter: None,
+            minutes,
+            until: None,
+        };
+        notification_action_handler(State(state.clone()), AxumPath(id), Json(body))
+    };
+    assert_eq!(act(ping_of(&done_me.id), "done", None).await.status(), 200);
+    assert_eq!(
+        reminders::get(&state.db, &done_me.id)
+            .unwrap()
+            .unwrap()
+            .status,
+        reminders::STATUS_DONE
+    );
+    assert_eq!(
+        act(ping_of(&snooze_me.id), "snooze", Some(0))
+            .await
+            .status(),
+        400,
+        "a bad snooze is refused before the ping is answered"
+    );
+    assert_eq!(
+        act(ping_of(&snooze_me.id), "snooze", Some(30))
+            .await
+            .status(),
+        200
+    );
+    let moved = reminders::get(&state.db, &snooze_me.id).unwrap().unwrap();
+    assert!(moved.due_at >= now + 29 * 60 && moved.due_at <= now + 31 * 60 + 5);
+    assert_eq!(moved.status, reminders::STATUS_ACTIVE);
+
+    let other = insert(&state, "agent_notify", ValueKind::Fyi);
+    assert_eq!(act(other, "done", None).await.status(), 400);
 }

@@ -1,5 +1,70 @@
 use super::*;
 
+/// What HQ learns is the owner's. A family guest or an unverified audience is never learned
+/// from, the owner and a caller with no identity are, and the caller's own opt-out still wins.
+#[test]
+fn only_the_owners_turns_are_learned_from() {
+    use hq_core::identity::{FamilyGuestInfo, RequestIdentity};
+    use hq_core::privacy::DisclosureScope;
+
+    let mut owner = RequestIdentity::from_discord(7);
+    owner.scope = DisclosureScope::Unrestricted;
+    let mut guest = owner.clone();
+    guest.family_guest = Some(FamilyGuestInfo {
+        name: "Sam".into(),
+        origin_channel_id: 7,
+        owner_name: "owner".into(),
+        allowed_harnesses: Vec::new(),
+    });
+    let unverified = RequestIdentity::from_discord(7);
+
+    assert!(ingest::learns_from_turn(None, false), "CLI and daemon");
+    assert!(ingest::learns_from_turn(Some(&owner), false));
+    assert!(
+        !ingest::learns_from_turn(Some(&guest), false),
+        "a family guest"
+    );
+    assert!(
+        !ingest::learns_from_turn(Some(&unverified), false),
+        "an unverified Discord audience is restricted"
+    );
+    assert!(
+        !ingest::learns_from_turn(Some(&owner), true),
+        "the caller's own opt-out"
+    );
+}
+
+/// A memory keeps the interface, the person and the web chat it was learned in, so it can be
+/// traced and removed later. A turn with no identity (the terminal, the daemon) is the CLI's.
+#[test]
+fn a_turns_source_names_the_interface_the_person_and_the_chat() {
+    use hq_core::identity::{RequestIdentity, RequestSource};
+
+    let cli = ingest::TurnSource::from_identity(None);
+    assert_eq!(cli.harness, "cli");
+    assert!(cli.user_id.is_none() && cli.thread_id.is_none());
+
+    let mut web = RequestIdentity::local();
+    web.source = RequestSource::Web {
+        thread_id: "thread-42".into(),
+        driver_turn: false,
+        session_driver: false,
+    };
+    let from_web = ingest::TurnSource::from_identity(Some(&web));
+    assert_eq!(from_web.harness, "web");
+    assert_eq!(from_web.user_id.as_deref(), Some("local"));
+    assert_eq!(from_web.thread_id.as_deref(), Some("thread-42"));
+
+    let telegram = RequestIdentity::from_telegram(9);
+    let from_telegram = ingest::TurnSource::from_identity(Some(&telegram));
+    assert_eq!(from_telegram.harness, "telegram");
+    assert_eq!(from_telegram.user_id.as_deref(), Some("telegram:9"));
+    assert!(
+        from_telegram.thread_id.is_none(),
+        "only a web chat has a thread"
+    );
+}
+
 /// A web chat is not framed as part of the Telegram conversation.
 #[tokio::test]
 async fn isolated_session_carries_no_other_interface_turns() {

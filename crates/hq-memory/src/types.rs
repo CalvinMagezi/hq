@@ -102,3 +102,63 @@ pub struct ConsolidationResult {
     pub connections: Vec<Connection>,
     pub insight: String,
 }
+
+/// Whose words a memory holds. Only `Owner` rows may be brought up on their own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// The owner's own chat.
+    Owner,
+    /// A shared channel whose speaker cannot be tied to the owner.
+    UnknownChannel,
+}
+
+impl Origin {
+    /// The value stored in `memories.origin`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Origin::Owner => "owner",
+            Origin::UnknownChannel => "unknown_channel",
+        }
+    }
+}
+
+/// How far a memory can be trusted to be what the owner said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provenance {
+    /// The owner asked HQ to remember exactly this.
+    OwnerSaid,
+    /// A model wrote the summary from a conversation, so it can be wrong or one-sided.
+    ModelInferred,
+    /// The owner changed the text themselves.
+    OwnerEdited,
+}
+
+impl Provenance {
+    /// The value stored in `memories.provenance`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Provenance::OwnerSaid => "owner_said",
+            Provenance::ModelInferred => "model_inferred",
+            Provenance::OwnerEdited => "owner_edited",
+        }
+    }
+}
+
+/// Where a new memory came from. The default is an ordinary chat summary from the owner.
+#[derive(Debug, Clone, Copy)]
+pub struct Trace<'a> {
+    pub origin: Origin,
+    pub provenance: Provenance,
+    /// The chat it was learned in, so it can be traced back and removed with it.
+    pub thread_id: Option<&'a str>,
+}
+
+impl Default for Trace<'_> {
+    fn default() -> Self {
+        Self {
+            origin: Origin::Owner,
+            provenance: Provenance::ModelInferred,
+            thread_id: None,
+        }
+    }
+}

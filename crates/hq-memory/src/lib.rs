@@ -28,6 +28,7 @@ pub mod neighbour_tags;
 pub mod ollama;
 pub mod openrouter_embed;
 pub mod querier;
+pub mod recall;
 pub mod turn_gate;
 pub mod types;
 
@@ -35,7 +36,7 @@ pub use consolidator::MemoryConsolidator;
 pub use db::{
     StoreMemoryParams, decay_old_memories, get_consolidation_history, get_memory_stats,
     get_recent_memories, get_unconsolidated_memories, store_consolidation,
-    store_consolidation_chained, store_memory, touch_memory,
+    store_consolidation_chained, store_memory, store_memory_with, touch_memory,
 };
 pub use forgetter::{ForgetterResult, MemoryForgetter};
 pub use ingester::MemoryIngester;
