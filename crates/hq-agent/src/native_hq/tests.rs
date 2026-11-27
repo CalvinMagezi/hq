@@ -612,6 +612,27 @@ async fn orchestrator_is_not_downgraded_to_the_weak_catalog() {
     assert!(orchestrator.iter().any(|n| n == "harness_session_spawn"));
 }
 
+#[test]
+fn a_remember_request_is_kept_even_when_the_reply_is_short() {
+    let turn = "user: Remember that Acme Feeds delivers on Thursdays.\n---\nassistant: Noted.";
+    assert!(ingest::asks_to_remember(turn));
+    assert!(ingest::worth_a_note("Noted.".len(), true));
+}
+
+#[test]
+fn a_short_reply_to_an_ordinary_message_is_still_not_worth_a_note() {
+    let turn = "user: What time is it?\n---\nassistant: Ten past nine.";
+    assert!(!ingest::asks_to_remember(turn));
+    assert!(!ingest::worth_a_note("Ten past nine.".len(), false));
+    assert!(ingest::worth_a_note(400, false));
+}
+
+#[test]
+fn remember_that_in_an_assistant_line_is_not_a_request() {
+    let turn = "user: What is the gate code?\n---\nassistant: Remember that the code is private.";
+    assert!(!ingest::asks_to_remember(turn));
+}
+
 /// The owner's own sessions are told what time it is for them, in their zone, once they have one.
 /// A guest's session is not, so the owner's whereabouts do not reach a chat that is not theirs.
 #[test]
