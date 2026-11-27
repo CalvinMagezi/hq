@@ -191,7 +191,7 @@ fn without_insights_section(text: &str) -> String {
         return text.to_string();
     };
     let rest = &text[start + INSIGHTS_HEADER.len()..];
-    let end = rest.find("\n## ").map_or(rest.len(), |i| i);
+    let end = rest.find("\n## ").unwrap_or(rest.len());
     let mut out = text[..start].trim_end().to_string();
     out.push('\n');
     let after = &rest[end..];
