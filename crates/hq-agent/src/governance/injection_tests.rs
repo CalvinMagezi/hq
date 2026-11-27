@@ -406,6 +406,7 @@ async fn with_nobody_to_ask_a_tainted_session_starts_or_steers_no_other_agent() 
     for tool in [
         "harness_session_spawn",
         "harness_session_handoff",
+        "harness_session_resume",
         "agent_delegate",
         "harness_session_send",
     ] {
