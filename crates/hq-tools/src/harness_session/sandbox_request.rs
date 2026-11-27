@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use value_items::RequestState;
 
 const SOURCE: &str = "sandbox-grants";
@@ -38,6 +38,8 @@ const MAX_WAITING: usize = 3;
 const MAX_TEXT_CHARS: usize = 300;
 /// How long one host call may take while applying answers, so a sleeping host cannot stall a sweep.
 const SWEEP_HOST_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long one pass over the waiting sessions may take; the rest wait for the next sweep.
+const PASS_BUDGET: Duration = Duration::from_secs(20);
 const APPLIED_NOTE: &str = "HQ applied the sandbox access that was approved and restarted you. Retry the command that was blocked.";
 /// How long a restart waits for the helper to finish its turn before it stops it anyway.
 const SETTLE_WAIT: Duration = Duration::from_secs(60);
@@ -243,9 +245,17 @@ fn approve_covered(db: &Database, paths: &dyn PathView, asker: &Asker, now: i64)
 /// Applies what the owner answered since a helper last asked, so an answer on any surface takes
 /// effect without the helper calling again. The session supervisor calls this on every sweep.
 pub fn apply_owner_answers(db: &Arc<Database>) -> Result<()> {
-    let now = chrono::Utc::now().timestamp();
+    // The timer and the host event loop both sweep; two passes at once would send a note twice.
+    static APPLYING: Mutex<()> = Mutex::new(());
+    let Ok(_only_pass) = APPLYING.try_lock() else {
+        return Ok(());
+    };
+    let (now, began) = (chrono::Utc::now().timestamp(), Instant::now());
     store::expire_stale(db, now)?;
     for session in store::sessions_awaiting(db, now)? {
+        if began.elapsed() >= PASS_BUDGET {
+            break;
+        }
         if let Err(e) = apply_for(db, &session, now) {
             tracing::warn!(session, error = %e, "applying a sandbox access answer failed");
         }
@@ -265,6 +275,8 @@ fn apply_for(db: &Arc<Database>, session: &str, now: i64) -> Result<()> {
     };
     let host =
         crate::agent_host::host(Some(&row.host))?.with_command_timeout_dyn(SWEEP_HOST_TIMEOUT);
+    // Recording an answer touches nothing the helper is doing, and a late one must not lapse.
+    settle_pending(db, session, now)?;
     let Some(agent) = host.agent(&row.agent_name)?.filter(|a| !a.exited) else {
         return Ok(());
     };
@@ -276,55 +288,43 @@ fn apply_for(db: &Arc<Database>, session: &str, now: i64) -> Result<()> {
         host: &row.host,
     };
     if !store::rules_for(db, &rule_scopes(db, session, asker.task, &row.cwd), now)?.is_empty()
-        && let Some(paths) = HostPaths::probe(host)
+        && let Some(paths) = HostPaths::probe(host.clone())
     {
         approve_covered(db, &paths, &asker, now)?;
     }
-    let blocked = match follow_up(db, session, agent.status, now)? {
+    let note = match follow_up(db, session, agent.status)? {
         None => return Ok(()),
-        Some(FollowUp::TellDeclined) => None,
+        Some(FollowUp::TellDeclined) => decline_note(db, session)?,
         Some(FollowUp::Restart) => match plan_restart(db, session) {
             Restart::Blocked(why) => Some(format!(
                 "The sandbox access you asked for was approved, but HQ could not restart you to apply it ({why}). It takes effect the next time your session is started. Tell the user that."
             )),
-            // The restart carries any decline with it.
-            Restart::Scheduled | Restart::NotDue => return Ok(()),
+            Restart::Scheduled | Restart::NotDue => None,
         },
     };
-    let (note, told) = with_declines(db, session, blocked)?;
+    // Typed on the bounded host, and not recorded as steering: the task's status is not HQ's to move.
     if let Some(note) = note {
-        super::control::send_text(db, session, &note)?;
-        mark_told(db, &told)?;
+        host.submit(&row.agent_name, &note)?;
     }
     Ok(())
 }
 
-/// `first`, followed by the declines the session has not heard of, and the ids to mark once the
-/// whole note has reached it.
-fn with_declines(
-    db: &Database,
-    session: &str,
-    first: Option<String>,
-) -> Result<(Option<String>, Vec<String>)> {
+/// The declines the session has not heard of, as one message, marked told before it is sent: a
+/// send that fails after typing must not repeat it, and asking again still reads the answer.
+fn decline_note(db: &Database, session: &str) -> Result<Option<String>> {
     let declined = store::untold_declines(db, session)?;
-    let mut parts: Vec<String> = first.into_iter().collect();
-    if !declined.is_empty() {
-        let what: Vec<String> = declined
-            .iter()
-            .map(|g| format!("{} {}", g.capability, shown(&g.resource)))
-            .collect();
-        parts.push(format!(
-            "The owner declined your sandbox access request for: {}. Do not ask for it again or try another route to it; finish what you can without it and report what is blocked.",
-            what.join(", ")
-        ));
+    if declined.is_empty() {
+        return Ok(None);
     }
-    let note = (!parts.is_empty()).then(|| parts.join(" "));
-    Ok((note, declined.into_iter().map(|g| g.id).collect()))
-}
-
-fn mark_told(db: &Database, ids: &[String]) -> Result<()> {
-    ids.iter()
-        .try_for_each(|id| store::mark_decline_told(db, id))
+    let mut what = Vec::new();
+    for g in &declined {
+        what.push(format!("{} {}", g.capability, shown(&g.resource)));
+        store::mark_decline_told(db, &g.id)?;
+    }
+    Ok(Some(format!(
+        "The owner declined your sandbox access request for: {}. Do not ask for it again or try another route to it; finish what you can without it and report what is blocked.",
+        what.join(", ")
+    )))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -333,18 +333,12 @@ enum FollowUp {
     TellDeclined,
 }
 
-/// Settles the owner's answers for an idle session and says what it is owed. A busy one is left
-/// for a later sweep: a restart or a message in the middle of a turn would cut its work off.
-fn follow_up(
-    db: &Database,
-    session: &str,
-    status: AgentStatus,
-    now: i64,
-) -> Result<Option<FollowUp>> {
+/// What an idle session is owed. A busy one is left for a later sweep: a restart or a message in
+/// the middle of a turn would cut its work off.
+fn follow_up(db: &Database, session: &str, status: AgentStatus) -> Result<Option<FollowUp>> {
     if !matches!(status, AgentStatus::Idle | AgentStatus::Done) {
         return Ok(None);
     }
-    settle_pending(db, session, now)?;
     Ok(if store::restart_due(db, session)? {
         Some(FollowUp::Restart)
     } else {
@@ -712,17 +706,14 @@ async fn restart(db: &Arc<Database>, session: &str) {
     let (d, id) = (db.clone(), session.to_string());
     if let Ok(Err(e)) = tokio::task::spawn_blocking(move || super::control::stop(&d, &id)).await {
         tracing::warn!(session, error = %e, "sandbox grant restart: stop failed");
+        // The next sweep tries again.
+        if let Err(e) = store::set_restart_due(db, session) {
+            tracing::warn!(session, error = %e, "sandbox grant restart: not marked for a retry");
+        }
         return;
     }
-    let (note, told) = with_declines(db, session, Some(APPLIED_NOTE.into()))
-        .unwrap_or_else(|_| (Some(APPLIED_NOTE.into()), Vec::new()));
-    match super::control::resume(db, session, note.as_deref()).await {
-        Ok(_) => {
-            if let Err(e) = mark_told(db, &told) {
-                tracing::warn!(session, error = %e, "sandbox grant restart: decline not marked");
-            }
-        }
-        Err(e) => tracing::warn!(session, error = %e, "sandbox grant restart: resume failed"),
+    if let Err(e) = super::control::resume(db, session, Some(APPLIED_NOTE)).await {
+        tracing::warn!(session, error = %e, "sandbox grant restart: resume failed");
     }
 }
 
@@ -1120,43 +1111,46 @@ mod tests {
         );
     }
 
+    /// One sweep's view of a session whose agent is in `status`.
+    fn sweep(f: &Fixture, status: AgentStatus) -> Option<FollowUp> {
+        settle_pending(&f.db, SESSION, 200).unwrap();
+        follow_up(&f.db, SESSION, status).unwrap()
+    }
+
     #[test]
     fn an_owner_answer_is_applied_once_the_helper_is_idle_without_it_asking_again() {
         let f = fixture(true);
         let Outcome::Pending { id } = ask(&f, Capability::Egress, "example.org") else {
             panic!("pending")
         };
-        let idle = |at| follow_up(&f.db, SESSION, AgentStatus::Idle, at).unwrap();
-        assert_eq!(idle(200), None, "nothing answered yet");
+        assert_eq!(sweep(&f, AgentStatus::Idle), None, "nothing answered yet");
         assert!(value_items::approve_by_id(&f.db, &item_id(&f, &id)).unwrap());
         assert_eq!(
-            follow_up(&f.db, SESSION, AgentStatus::Working, 200).unwrap(),
+            sweep(&f, AgentStatus::Working),
             None,
             "a busy helper is not interrupted"
         );
-        assert_eq!(store::sessions_awaiting(&f.db, 200).unwrap(), [SESSION]);
-        assert_eq!(idle(200), Some(FollowUp::Restart));
         assert_eq!(
             store::get(&f.db, &id).unwrap().unwrap().state,
-            store::ACTIVE
+            store::ACTIVE,
+            "the answer is recorded while it works, so it cannot lapse"
         );
-
+        assert_eq!(store::sessions_awaiting(&f.db, 200).unwrap(), [SESSION]);
+        assert_eq!(sweep(&f, AgentStatus::Idle), Some(FollowUp::Restart));
         store::clear_restart_due(&f.db, SESSION).unwrap();
         assert!(store::sessions_awaiting(&f.db, 200).unwrap().is_empty());
+        store::set_restart_due(&f.db, SESSION).unwrap();
+        assert_eq!(sweep(&f, AgentStatus::Idle), Some(FollowUp::Restart));
+        store::clear_restart_due(&f.db, SESSION).unwrap();
+
         let Outcome::Pending { id: no } = ask(&f, Capability::Egress, "other.org") else {
             panic!("pending")
         };
         assert!(value_items::dismiss_by_id(&f.db, &item_id(&f, &no)).unwrap());
-        assert_eq!(idle(200), Some(FollowUp::TellDeclined));
-        assert_eq!(
-            idle(200),
-            Some(FollowUp::TellDeclined),
-            "owed until it arrives"
-        );
-        let (note, told) = with_declines(&f.db, SESSION, None).unwrap();
-        assert!(note.unwrap().contains("egress other.org:443"));
-        mark_told(&f.db, &told).unwrap();
-        assert_eq!(idle(200), None, "told once");
+        assert_eq!(sweep(&f, AgentStatus::Idle), Some(FollowUp::TellDeclined));
+        let note = decline_note(&f.db, SESSION).unwrap().unwrap();
+        assert!(note.contains("egress other.org:443"), "{note}");
+        assert_eq!(sweep(&f, AgentStatus::Idle), None, "told once");
         assert!(store::sessions_awaiting(&f.db, 200).unwrap().is_empty());
     }
 
@@ -1179,10 +1173,7 @@ mod tests {
             200,
         );
         assert!(!store::restart_due(&f.db, SESSION).unwrap());
-        assert_eq!(
-            follow_up(&f.db, SESSION, AgentStatus::Idle, 200).unwrap(),
-            Some(FollowUp::TellDeclined)
-        );
+        assert_eq!(sweep(&f, AgentStatus::Idle), Some(FollowUp::TellDeclined));
     }
 
     #[test]

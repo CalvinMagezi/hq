@@ -256,6 +256,17 @@ pub fn clear_restart_due(db: &Database, session_id: &str) -> Result<()> {
     })
 }
 
+/// Owes the session a restart again, after one that could not stop it.
+pub fn set_restart_due(db: &Database, session_id: &str) -> Result<()> {
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE sandbox_grants SET restart_due = 1 WHERE session_id = ?1 AND state = ?2",
+            params![session_id, ACTIVE],
+        )?;
+        Ok(())
+    })
+}
+
 /// Declines the owner made that this session has not been told of, oldest first.
 pub fn untold_declines(db: &Database, session_id: &str) -> Result<Vec<Grant>> {
     db.with_conn(|c| {

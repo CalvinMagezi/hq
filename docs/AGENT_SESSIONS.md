@@ -940,7 +940,8 @@ attested; the helper's `reason` is shown to the owner as its own words and never
   of the session reads its active grants back (`LaunchRequest.grants`).
 - **Ask** for anything else: an inbox item (`source: sandbox-grants`) the owner approves or dismisses.
   The helper does not poll: the session supervisor applies the answer, from any surface, once the
-  helper is idle. An approval restarts it, a decline is sent to it as a message. A standing rule added
+  helper is idle. An approval restarts it, a decline is sent to it as a message (once; neither moves
+  the task's status). A standing rule added
   while other requests wait approves the ones it covers and clears their cards. Calling again with the
   same arguments still returns the answer (an agent whose idle state the host cannot read needs to).
   A declined request is not asked twice; three declined or refused requests stop further ones.
