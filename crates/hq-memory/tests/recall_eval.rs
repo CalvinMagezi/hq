@@ -20,6 +20,7 @@
 
 use hq_db::Database;
 use hq_memory::querier::MemoryQuerier;
+use hq_memory::recall::{Audience, CLOSE_TAG, OPEN_TAG, RecallQuery, recall};
 use hq_memory::{StoreMemoryParams, store_memory};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -52,10 +53,9 @@ struct Case {
     id: String,
     split: String,
     kind: String,
-    /// Unused by `Policy::Recent`, which ignores what was said. Every policy that follows reads it.
-    #[allow(dead_code)]
+    /// What was said. `Policy::Recent` ignores it; every policy that reads the message uses it.
     message: String,
-    #[allow(dead_code)]
+    /// What was said just before, for a short follow-up.
     prior_message: Option<String>,
     /// `owner`, or `guest` for anyone else asking.
     identity: String,
@@ -111,12 +111,12 @@ impl World {
             let at = (chrono::Utc::now() - chrono::Duration::days(row.age_days)).to_rfc3339();
             db.with_conn(|c| {
                 c.execute(
-                    "UPDATE memories SET created_at = ?1 WHERE id = ?2",
-                    rusqlite::params![at, id],
+                    "UPDATE memories SET created_at = ?1, origin = ?2, status = ?3 WHERE id = ?4",
+                    rusqlite::params![at, row.origin, row.status, id],
                 )?;
                 Ok(())
             })
-            .expect("backdate memory");
+            .expect("age and mark the memory");
             fixture_of.insert(id, row.id.clone());
             rows.insert(row.id.clone(), row);
         }
@@ -133,12 +133,15 @@ impl World {
 enum Policy {
     /// Today: the most important rows, the same ones whatever was said.
     Recent,
+    /// Keyword recall: the memories that share the meaningful words of the message.
+    Recall,
 }
 
 impl Policy {
     fn name(self) -> &'static str {
         match self {
             Policy::Recent => "recent (today)",
+            Policy::Recall => "recall (keywords)",
         }
     }
 }
@@ -170,6 +173,28 @@ fn retrieve(policy: Policy, world: &World, case: &Case) -> Retrieved {
                 (ids, ctx.formatted)
             }
         }
+        Policy::Recall => {
+            let audience = if case.identity == "owner" {
+                Audience::Owner
+            } else {
+                Audience::Other
+            };
+            let got = recall(
+                &world.db,
+                &RecallQuery {
+                    message: &case.message,
+                    prior_message: case.prior_message.as_deref(),
+                    audience,
+                },
+            )
+            .expect("recall");
+            let ids = got
+                .items
+                .iter()
+                .map(|i| world.fixture_of[&i.id].clone())
+                .collect();
+            (ids, got.block)
+        }
     };
     Retrieved {
         ids,
@@ -196,15 +221,20 @@ struct Scores {
     guest_leak: usize,
     /// Legacy unattributable rows returned to the owner.
     unattributed_returned: usize,
-    /// Cases (any kind) where a row that tries to break out of its fence came back.
-    hostile_returned: usize,
+    /// Cases whose injected text could close its own block, open a second one or fake another
+    /// kind of fence. Zero is the only acceptable number.
+    fence_breaks: usize,
     owner_cases: usize,
     tokens: Vec<usize>,
     micros: Vec<u128>,
 }
 
-fn is_hostile(row: &CorpusRow) -> bool {
-    row.summary.contains("</vault_note>") || row.summary.contains("END_UNTRUSTED")
+/// Whether text a memory held can break out of the block it is shown in.
+fn breaks_its_fence(block: &str) -> bool {
+    block.matches(OPEN_TAG).count() > 1
+        || block.matches(CLOSE_TAG).count() > 1
+        || block.contains("</vault_note>")
+        || block.contains("<<<")
 }
 
 fn score(policy: Policy, world: &World, cases: &[&Case]) -> Scores {
@@ -223,11 +253,8 @@ fn score(policy: Policy, world: &World, cases: &[&Case]) -> Scores {
             .iter()
             .filter(|id| world.rows[*id].origin != "owner")
             .count();
-        if got.ids.iter().any(|id| is_hostile(&world.rows[id])) {
-            s.hostile_returned += 1;
-        }
-        if case.kind == "hostile" {
-            continue; // fence integrity is scored once there is a fence to check
+        if breaks_its_fence(&got.block) {
+            s.fence_breaks += 1;
         }
         if case.expect_silence {
             s.quiet_expected += 1;
@@ -309,9 +336,8 @@ fn report(policy: Policy, slices: &[(&str, &Scores)]) -> String {
     let all = slices[0].1;
     out.push_str(&format!(
         "\nGuest answers carrying memories: {}. Unattributable rows returned to the owner: {}. \
-         Owner cases that injected a row containing fence-like text: {} of {}. (This counts \
-         presence only. It becomes a pass or fail once recall escapes such text.)\n",
-        all.guest_leak, all.unattributed_returned, all.hostile_returned, all.owner_cases
+         Owner cases whose text could break out of its block: {} of {}.\n",
+        all.guest_leak, all.unattributed_returned, all.fence_breaks, all.owner_cases
     ));
     out
 }
@@ -335,6 +361,35 @@ fn run(policy: Policy, world: &World, all: &[Case]) -> String {
         slices.push((kind.as_str(), s));
     }
     report(policy, &slices)
+}
+
+/// The cases a policy gets wrong, one line each: what was asked, what it should have found and
+/// what it brought back. Dev cases only, because that is the split to tune on; set `HQ_EVAL_ALL`
+/// to see the test split too, for a diagnosis rather than for tuning.
+fn dev_misses(policy: Policy, world: &World, all: &[Case]) -> String {
+    let every_split = std::env::var_os("HQ_EVAL_ALL").is_some();
+    let mut out = format!("Cases {} gets wrong:\n\n", policy.name());
+    let mut any = false;
+    for case in all
+        .iter()
+        .filter(|c| (every_split || c.split == "dev") && c.identity == "owner")
+    {
+        let got = retrieve(policy, world, case);
+        let wanted: HashSet<&String> = case.expect.iter().collect();
+        let missed = !case.expect.is_empty() && !got.ids.iter().any(|id| wanted.contains(id));
+        let spoke = case.expect_silence && !got.ids.is_empty();
+        if missed || spoke {
+            any = true;
+            out.push_str(&format!(
+                "- {} ({}): {:?} wanted {:?}, got {:?}\n",
+                case.id, case.kind, case.message, case.expect, got.ids
+            ));
+        }
+    }
+    if !any {
+        out.push_str("- none\n");
+    }
+    out
 }
 
 fn write_report(text: &str) {
@@ -420,8 +475,7 @@ fn the_fixtures_agree_with_each_other() {
 fn the_recent_policy_is_scored_as_the_baseline() {
     let world = World::build();
     let all = cases();
-    let text = run(Policy::Recent, &world, &all);
-    write_report(&text);
+    println!("\n{}", run(Policy::Recent, &world, &all));
 
     let refs: Vec<&Case> = all.iter().collect();
     let first = score(Policy::Recent, &world, &refs);
@@ -435,4 +489,97 @@ fn the_recent_policy_is_scored_as_the_baseline() {
     assert_eq!(first.false_injection, again.false_injection);
     assert!(first.asked >= 40, "{} cases ask for a memory", first.asked);
     assert!(first.quiet_expected >= 25, "{} quiet", first.quiet_expected);
+}
+
+#[test]
+fn recall_is_scored_against_today() {
+    let world = World::build();
+    let all = cases();
+    let text = format!(
+        "{}\n{}\n{}",
+        run(Policy::Recent, &world, &all),
+        run(Policy::Recall, &world, &all),
+        dev_misses(Policy::Recall, &world, &all)
+    );
+    write_report(&text);
+}
+
+/// What keyword recall must keep doing. Each bar sits below what it scores today by a margin, so a
+/// small tuning change does not fail the build but a real regression does. The corpus is small
+/// and written for this harness, so these guard against regressions: they are not a claim about
+/// how recall performs on a real vault. Paraphrase is reported, not gated: the question and the
+/// memory share no words there, which keyword search cannot fix.
+#[test]
+fn keyword_recall_keeps_its_promises() {
+    let world = World::build();
+    let all = cases();
+    let on =
+        |pred: &dyn Fn(&Case) -> bool| -> Vec<&Case> { all.iter().filter(|c| pred(c)).collect() };
+
+    let today = score(Policy::Recent, &world, &on(&|_| true));
+    let now = score(Policy::Recall, &world, &on(&|_| true));
+    let test = score(Policy::Recall, &world, &on(&|c| c.split == "test"));
+    let followups = score(Policy::Recall, &world, &on(&|c| c.kind == "followup"));
+    let positives = score(Policy::Recall, &world, &on(&|c| c.kind == "positive"));
+    let outdated = score(Policy::Recall, &world, &on(&|c| c.kind == "stale"));
+
+    let share = |n: usize, of: usize| if of == 0 { 0.0 } else { n as f64 / of as f64 };
+
+    // Never negotiable.
+    assert_eq!(now.guest_leak, 0, "a guest must get no memories");
+    assert_eq!(
+        now.unattributed_returned, 0,
+        "a shared-channel row is not the owner's"
+    );
+    assert_eq!(
+        now.fence_breaks, 0,
+        "memory text must not break out of its block"
+    );
+    assert_eq!(now.stale, 0, "an outdated memory must not come back");
+    let biggest = now.tokens.iter().copied().max().unwrap_or(0);
+    assert!(
+        biggest <= 500,
+        "a block of {biggest} tokens is over the 500 cap"
+    );
+
+    // Finds what was asked about, and clearly beats today.
+    assert!(
+        share(test.at3, test.asked) >= 0.65,
+        "recall@3 on the test split: {}/{}",
+        test.at3,
+        test.asked
+    );
+    assert!(
+        share(now.at3, now.asked) >= share(today.at3, today.asked) + 0.30,
+        "recall@3 {}/{} against today's {}/{}",
+        now.at3,
+        now.asked,
+        today.at3,
+        today.asked
+    );
+    assert!(
+        now.reciprocal_rank / now.asked as f64 >= 0.55,
+        "MRR {:.2}",
+        now.reciprocal_rank / now.asked as f64
+    );
+    assert!(
+        share(positives.found, positives.asked) >= 0.85,
+        "plain questions"
+    );
+    assert!(
+        share(followups.found, followups.asked) >= 0.80,
+        "short follow-ups"
+    );
+    assert!(
+        share(outdated.found, outdated.asked) >= 0.75,
+        "newest of an updated fact"
+    );
+
+    // Stays quiet when nothing fits.
+    assert!(
+        share(now.false_injection, now.quiet_expected) <= 0.15,
+        "spoke on {}/{} quiet turns",
+        now.false_injection,
+        now.quiet_expected
+    );
 }
