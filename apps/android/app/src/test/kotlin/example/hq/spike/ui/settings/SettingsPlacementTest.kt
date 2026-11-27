@@ -161,9 +161,9 @@ class SettingsPlacementTest {
         assertEquals(SettingsWords.HomeCard.None, SettingsWords.homeCard(false, 0, false, false))
     }
 
-    @Test fun homeHasTwentyRowsAndEveryOneIsInTheSearchIndex() {
+    @Test fun homeHasTwentyOneRowsAndEveryOneIsInTheSearchIndex() {
         val rows = home().flatMap { it.rows }
-        assertEquals(20, rows.size)
+        assertEquals(21, rows.size)
         val indexedKeys = SettingsIndex.build(testWords()).filter { it.sectionTitle == null }.map { it.rowKey }
         assertEquals(rows.map { it.key }, indexedKeys)
     }
