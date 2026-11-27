@@ -419,6 +419,7 @@ pub(crate) async fn dispatch(command: Commands, config: &HqConfig) -> Result<()>
         #[cfg(all(unix, feature = "bridge"))]
         Commands::Claude(action) => commands::claude::run(config, action),
         Commands::Decide(action) => commands::decide::run(config, action),
+        Commands::Reminders(action) => commands::reminders::run(config, action),
         Commands::Focus(action) => commands::focus::run(config, action),
         Commands::Inbox(action) => commands::inbox::run(config, action),
         Commands::Trust(action) => commands::trust::run(config, action),

@@ -5,7 +5,7 @@
 //! phone. No model.
 
 use anyhow::Result;
-use chrono::{Duration, NaiveDate, Timelike};
+use chrono::{Duration, NaiveDate};
 use hq_core::types::{ValueItem, ValueKind};
 use hq_db::Database;
 use hq_db::tasks::{DueTask, due_from_chat};
@@ -46,11 +46,12 @@ fn in_waking_hours(hour: u32) -> bool {
 }
 
 pub async fn run_due_reminders(db: &Database) -> Result<()> {
-    let now = chrono::Local::now();
-    if !in_waking_hours(now.hour()) {
+    // The owner's own clock, not the server's: a server on UTC would otherwise remind a person in
+    // Uganda between 11:00 and midnight.
+    let (hour, today) = hq_db::owner_prefs::wall_clock(db, chrono::Utc::now());
+    if !in_waking_hours(hour) {
         return Ok(());
     }
-    let today = now.date_naive();
     let tasks = db.with_conn(|c| {
         due_from_chat(
             c,

@@ -23,6 +23,7 @@ mod profile;
 pub mod protected;
 mod quota;
 mod relay;
+mod reminders;
 mod self_update;
 mod skills;
 mod stack;
@@ -78,6 +79,7 @@ pub use profile::{
 };
 pub use quota::QuotaConfig;
 pub use relay::*;
+pub use reminders::RemindersConfig;
 pub use self_update::SelfUpdateConfig;
 pub use skills::{BuiltinSkillsConfig, SkillsConfig};
 pub use stack::{Specialist, StackConfig};
@@ -295,6 +297,10 @@ pub struct HqConfig {
     /// disk-watchdog.sh)
     #[serde(default)]
     pub disk_watchdog: DiskWatchdogConfig,
+
+    /// Reminders the owner set: quiet hours for follow-ups and the limits on how many exist.
+    #[serde(default)]
+    pub reminders: RemindersConfig,
 
     /// How quiet the Inbox is about helper sessions (`inbox.fleet`).
     #[serde(default)]
@@ -547,6 +553,7 @@ impl Default for HqConfig {
             backends: BackendsConfig::default(),
             self_update: SelfUpdateConfig::default(),
             disk_watchdog: DiskWatchdogConfig::default(),
+            reminders: RemindersConfig::default(),
             inbox: InboxConfig::default(),
             backup: BackupConfig::default(),
             vault_watch: VaultWatchConfig::default(),
