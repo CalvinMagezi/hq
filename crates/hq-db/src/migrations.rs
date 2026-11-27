@@ -67,6 +67,8 @@ const RENAMED: &[(&str, &str)] = &[
     ("113_owner_approvals", "112_owner_approvals"),
     ("114_device_names", "113_device_names"),
     ("152_hot_path_indexes", "150_hot_path_indexes"),
+    ("158_vault_repairs", "157_vault_repairs"),
+    ("159_session_strict", "157_session_strict"),
 ];
 
 /// One migration and its `schema_version` row commit together, under the write

@@ -368,6 +368,103 @@ fn extract_resume_token_returns_none_when_absent() {
 }
 
 #[tokio::test]
+async fn a_narrowed_session_stays_strict_when_resumed_or_delegating_from_a_clean_context() {
+    let (_dir, host) = fake_host(&[]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    let strict = |id: &str, parent: Option<&str>| {
+        let mut l = launch(host.clone(), id, None);
+        l.parent = parent.map(|p| (p, 1));
+        super::launch::launch_is_strict(&db, &l).unwrap()
+    };
+
+    assert!(!strict("hs-wide", None));
+    assert!(super::narrow::scoped(async { strict("hs-n", None) }).await);
+    assert!(strict("hs-n", None), "resumed from a clean context");
+    assert!(strict("hs-child", Some("hs-n")), "started by a strict one");
+    assert!(strict("hs-child", None), "and its own resume");
+    assert!(!strict("hs-other", Some("hs-wide")));
+}
+
+#[tokio::test]
+async fn a_launch_from_a_narrowed_chat_is_strict_though_it_runs_on_its_own_task() {
+    let (_dir, host) = fake_host(&[
+        ("workspace create", CREATED.into(), None),
+        ("agent start", OK.into(), None),
+        ("agent get", agent_json("hs-n2", "idle"), None),
+        ("agent prompt", OK.into(), None),
+    ]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    let task = db
+        .with_conn(|c| {
+            c.execute(
+                "INSERT INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('in-1', 'personal', 'Work', 'work', 'FR')",
+                [],
+            )?;
+            let new = hq_db::tasks::NewTask {
+                title: "narrow",
+                created_by: "test",
+                ..Default::default()
+            };
+            Ok(hq_db::tasks::create_task(c, "tk-1", "in-1", &new)?.id)
+        })
+        .unwrap();
+    let l = Launch {
+        mission_id: Some(&task),
+        ..launch(host, "hs-n2", Some("free text"))
+    };
+
+    super::narrow::scoped(launch_session(&db, &harness("claude-code"), l))
+        .await
+        .unwrap();
+
+    assert!(
+        db.with_conn(|c| hq_db::session_policies::is_held_strict(c, "hs-n2"))
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn a_resume_from_a_narrowed_chat_needs_no_task_and_types_none_of_its_words() {
+    // No "agent prompt" reply: anything typed would hit the script's `unexpected` arm and fail.
+    let (_dir, host) = fake_host(&[
+        ("workspace create", CREATED.into(), None),
+        ("agent start", OK.into(), None),
+        ("agent get", agent_json("hs-n3", "idle"), None),
+    ]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &registry::NewSession {
+                id: "hs-n3",
+                harness: "claude-code",
+                label: "",
+                cwd: "/t",
+                mission_id: None,
+                placement: registry::Placement {
+                    host: "local",
+                    agent_name: "hs-n3",
+                    workspace_id: "w9",
+                    pane_id: "p",
+                },
+                purpose: None,
+            },
+        )
+    })
+    .unwrap();
+    let l = Launch {
+        resuming: true,
+        ..launch(host, "hs-n3", Some("text from a page"))
+    };
+
+    let report = super::narrow::scoped(launch_session(&db, &harness("claude-code"), l))
+        .await
+        .unwrap();
+
+    assert!(report["prompt_withheld"].is_string(), "{report}");
+}
+
+#[tokio::test]
 async fn launch_records_the_session_and_types_the_prompt() {
     let (dir, host) = fake_host(&[
         ("workspace create", CREATED.into(), None),

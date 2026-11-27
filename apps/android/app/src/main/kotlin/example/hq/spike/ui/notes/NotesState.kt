@@ -28,6 +28,9 @@ sealed interface NotesRoute {
     data class Reader(val path: String) : NotesRoute
     data class Write(val path: String?) : NotesRoute
     data object Trash : NotesRoute
+
+    /** What the notes check found, with a repair beside each thing HQ can fix. */
+    data object Health : NotesRoute
 }
 
 /** What the reader is showing for a note: still fetching, ready, gone (a 404), or HQ not answering. */
@@ -104,6 +107,10 @@ data class NotesUi(
     val slow: Boolean = false,
     /** The last read failed with HQ answering badly, as opposed to HQ being off ([offline]). */
     val error: Boolean = false,
+    /** What the notes check found; null until it has run, or when this HQ has no such check. */
+    val health: VaultHealth? = null,
+    /** A fix or an undo for the notes check is running. */
+    val healthBusy: Boolean = false,
 ) {
 
     val top: NotesRoute? get() = stack.lastOrNull()
