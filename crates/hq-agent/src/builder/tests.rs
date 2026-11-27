@@ -577,6 +577,86 @@ fn only_the_owners_sessions_read_the_owners_chats() {
     );
 }
 
+/// What HQ remembers is the owner's. A family guest or a restricted audience gets none of
+/// `MEMORY.md` or the recalled rows in the prompt; the owner's own session still does.
+#[tokio::test]
+async fn a_guest_session_is_given_none_of_the_owners_memory() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("_system")).unwrap();
+    std::fs::create_dir_all(dir.path().join("_data")).unwrap();
+    std::fs::write(
+        dir.path().join("_system/MEMORY.md"),
+        "## Key Facts\n- FACTFILE-ZEBRA keeps bees on the roof\n",
+    )
+    .unwrap();
+    let db = hq_db::Database::open(&dir.path().join("_data/vault.db")).unwrap();
+    hq_memory::store_memory(
+        &db,
+        &hq_memory::StoreMemoryParams {
+            source: "chat-turn",
+            harness: "web",
+            raw_text: "",
+            summary: "ROWFACT-QUOKKA prefers rooibos tea",
+            entities: &[],
+            topics: &[],
+            importance: 0.9,
+            user_id: None,
+        },
+    )
+    .unwrap();
+    drop(db);
+
+    let config = HqConfig {
+        openrouter_api_key: Some("test-key-no-network".to_string()),
+        vault_path: dir.path().to_path_buf(),
+        ..Default::default()
+    };
+    let prompt_for = |identity: Option<hq_core::identity::RequestIdentity>| {
+        let config = config.clone();
+        let wd = dir.path().to_path_buf();
+        async move {
+            let mut builder = SessionBuilder::from_config(&config)
+                .working_dir(wd)
+                .session_config(SessionConfig {
+                    model: "relay".to_string(),
+                    ..SessionConfig::default()
+                })
+                .session_profile(SessionProfile::Standard);
+            if let Some(id) = identity {
+                builder = builder.with_identity(id);
+            }
+            let session = builder.build().await.expect("builds without a network");
+            session.system_prompt().unwrap_or_default().to_string()
+        }
+    };
+
+    let mut owner = hq_core::identity::RequestIdentity::from_discord(7);
+    owner.scope = hq_core::privacy::DisclosureScope::Unrestricted;
+    let mut guest = owner.clone();
+    guest.family_guest = Some(hq_core::identity::FamilyGuestInfo {
+        name: "Sam".into(),
+        origin_channel_id: 7,
+        owner_name: "owner".into(),
+        allowed_harnesses: Vec::new(),
+    });
+
+    let own = prompt_for(Some(owner)).await;
+    assert!(own.contains("FACTFILE-ZEBRA"), "owner sees MEMORY.md");
+    assert!(own.contains("ROWFACT-QUOKKA"), "owner sees recalled rows");
+
+    for (who, identity) in [
+        ("a family guest", Some(guest)),
+        (
+            "an unverified Discord audience",
+            Some(hq_core::identity::RequestIdentity::from_discord(7)),
+        ),
+    ] {
+        let prompt = prompt_for(identity).await;
+        assert!(!prompt.contains("FACTFILE-ZEBRA"), "{who} saw MEMORY.md");
+        assert!(!prompt.contains("ROWFACT-QUOKKA"), "{who} saw a memory row");
+    }
+}
+
 /// Governance wraps every tool, so a metadata method it fails to forward
 /// collapses to the trait default for the entire registry. `should_defer`
 /// was permanently false, which made `deferred_catalog()` always empty and
