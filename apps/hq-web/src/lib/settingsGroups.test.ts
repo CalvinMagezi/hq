@@ -31,7 +31,7 @@ describe('the six groups (check 1, the 17 Nov restructure)', () => {
   test('rows are the phone names, and the Claude connector is gone (W34)', () => {
     const rows = settingsGroups(HERE).flatMap((g) => g.rows.map((r) => t(r.label)))
     expect(rows).toEqual([
-      'Tasks', 'Helpers',
+      'Tasks', 'Reminders', 'Helpers',
       'AI service and keys', 'Spending limits',
       'Chat', 'Messaging apps', 'Other devices', 'GitHub',
       'Notifications', 'Time zone', 'Install and version', 'Data used', 'Sign out this browser',
@@ -48,7 +48,7 @@ describe('the six groups (check 1, the 17 Nov restructure)', () => {
   test('Lite keeps This browser and Other devices (H8)', () => {
     const rows = settingsGroups({ lite: true, hub: false }).flatMap((g) => g.rows.map((r) => r.id))
     // No chat row: Lite runs no chats.
-    expect(rows).toEqual(['work_tasks', 'devices', 'notifications', 'time', 'version', 'data', 'signout'])
+    expect(rows).toEqual(['work_tasks', 'work_reminders', 'devices', 'notifications', 'time', 'version', 'data', 'signout'])
   })
 
   test('the HQ window reads "This window" and has no Install and version (H9, B11)', () => {

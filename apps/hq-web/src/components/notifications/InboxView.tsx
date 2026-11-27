@@ -3,7 +3,7 @@ import { Check, ChevronDown, ChevronRight, RefreshCw, Search } from 'lucide-reac
 import { Fragment, useState } from 'react'
 import { Panes, PaneHead } from '~/components/ui/Panes'
 import { groupByDay } from '~/lib/inboxCard'
-import type { InboxTab, NotificationItem, SilenceTopic } from '~/lib/notificationsApi'
+import type { InboxTab, NotificationActionOpts, NotificationItem, SilenceTopic } from '~/lib/notificationsApi'
 import { t, tn, type StringKey } from '~/strings'
 import { digestOf, splitHelpers } from '~/lib/inboxView'
 import type { Pile } from '~/lib/catchUp'
@@ -67,7 +67,7 @@ export interface InboxViewProps {
   onRestore?: (ids: string[]) => void
   /** Silences the topic of the open item. */
   onSilence?: (topic: SilenceTopic) => void
-  onAction(id: string, action: string, opts?: { starter?: string }): Promise<void>
+  onAction(id: string, action: string, opts?: NotificationActionOpts): Promise<void>
   /** Clears one update; it reports its own failure. */
   onClear: (id: string) => void
   onAnswered: (id: string, choice: 'approve' | 'decline') => void
