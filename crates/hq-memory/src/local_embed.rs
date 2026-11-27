@@ -57,6 +57,17 @@ pub fn local_model_dir() -> PathBuf {
         .join("potion-base-8M")
 }
 
+/// Whether the model is already on this machine, so an embedding can be made without fetching
+/// anything. Looks only at the files (their hashes are checked when the model first loads) and
+/// never touches the network. Recall asks this, so a question never waits on a download.
+pub fn is_ready() -> bool {
+    if MODEL.get().is_some() {
+        return true;
+    }
+    let dir = local_model_dir();
+    MODEL_FILES.iter().all(|(name, _)| dir.join(name).is_file())
+}
+
 /// Embed `text` on this machine, fetching and checking the model files on first use. A failed
 /// fetch or load is returned as an error and tried again on the next call.
 pub async fn generate_embedding_local(text: &str) -> Result<Vec<f32>> {

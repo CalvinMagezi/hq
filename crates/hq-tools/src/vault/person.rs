@@ -7,6 +7,7 @@
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 use hq_core::privacy::{Fact, PEOPLE_DIR, PersonId, Provenance, ProvenanceKind};
+use hq_core::sensitive::is_sensitive;
 use hq_db::Database;
 use hq_vault::VaultClient;
 use serde_json::{Value, json};
@@ -23,69 +24,6 @@ const MAX_FIELD_CHARS: usize = 80;
 const FACT_PREFIX: &str = "- **";
 const STRUCK_PREFIX: &str = "- ~~";
 const TEXT_SOURCE_SEPARATOR: &str = " _(";
-
-/// Whole-word matches; recording these needs an explicit owner decision, not an agent one.
-const SENSITIVE_WORDS: &[&str] = &[
-    "health",
-    "medical",
-    "medication",
-    "diagnosis",
-    "diagnosed",
-    "illness",
-    "disease",
-    "cancer",
-    "hiv",
-    "pregnant",
-    "pregnancy",
-    "therapy",
-    "therapist",
-    "disability",
-    "religion",
-    "religious",
-    "church",
-    "mosque",
-    "political",
-    "politics",
-    "party",
-    "vote",
-    "voted",
-    "sexual",
-    "sexuality",
-    "gay",
-    "lesbian",
-    "orientation",
-    "race",
-    "racial",
-    "ethnicity",
-    "ethnic",
-    "tribe",
-    "immigration",
-    "visa",
-    "criminal",
-    "arrested",
-    "convicted",
-    "lawsuit",
-    "password",
-    "passcode",
-    "pin",
-    "ssn",
-    "passport",
-    "salary",
-    "debt",
-    "bankruptcy",
-    "iban",
-    "divorce",
-    "abuse",
-    "addiction",
-];
-const SENSITIVE_PHRASES: &[&str] = &[
-    "credit card",
-    "bank account",
-    "social security",
-    "national id",
-    "api key",
-    "secret key",
-];
 
 pub struct PersonRecordFactTool {
     vault: Arc<VaultClient>,
@@ -177,16 +115,6 @@ fn kind_label(kind: ProvenanceKind) -> &'static str {
         ProvenanceKind::Quoted => "quoted",
         ProvenanceKind::Inferred => "inferred",
     }
-}
-
-fn is_sensitive(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    if SENSITIVE_PHRASES.iter().any(|p| lower.contains(p)) {
-        return true;
-    }
-    lower
-        .split(|c: char| !c.is_alphanumeric())
-        .any(|w| SENSITIVE_WORDS.contains(&w))
 }
 
 fn validate_field(name: &str, value: &str, max: usize) -> Result<()> {

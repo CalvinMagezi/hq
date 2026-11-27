@@ -1,0 +1,1 @@
+**HQ can find a note by what it means.** When the on-device model is already on your machine, a question that shares no word with a saved note can still bring it up, for example "which day does the supplier come?" for "Acme Feeds delivers on Thursdays". It never downloads the model for this, sends nothing anywhere, and stays off until recall is switched from `shadow` to `query`.

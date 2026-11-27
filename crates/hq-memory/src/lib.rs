@@ -26,11 +26,13 @@ mod json_recovery;
 pub mod llm_bridge;
 pub mod local_embed;
 pub mod local_extract;
+pub mod memory_vectors;
 pub mod neighbour_tags;
 pub mod ollama;
 pub mod openrouter_embed;
 pub mod querier;
 pub mod recall;
+pub mod remember;
 pub mod turn_gate;
 pub mod types;
 
