@@ -36,6 +36,7 @@ import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -402,6 +403,10 @@ private fun SandboxGrantActionsColumn(
 @Composable
 private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit, modifier: Modifier = Modifier, onDetailsPage: Boolean = false, starters: List<SandboxGrantProfile> = emptyList()) {
     val sending = answer == Answer.Sending
+    if (card.kind == CardKind.Reminder) {
+        ReminderAnswerRow(card, sending, offline, actions, modifier)
+        return
+    }
     val wholeSite = card.site?.takeIf { (card.canAllow || onDetailsPage) && card.offersWholeSite }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
     wholeSite?.let { site -> example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.approval_allow_site, site), Modifier.fillMaxWidth(), enabled = !sending && !offline) { actions.onAllowSite(card) } }
@@ -436,6 +441,21 @@ private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, action
             PrimaryButton(card.allowLabel.ifBlank { "Take a look" }, Modifier.weight(1f)) { onTakeLook(card) }
         }
     }
+    }
+}
+
+/** A reminder's ping: Done first, then the two snoozes. The clock is the phone's, which is where the owner is. */
+@Composable
+private fun ReminderAnswerRow(card: InboxCard, sending: Boolean, offline: Boolean, actions: InboxActions, modifier: Modifier = Modifier) {
+    val now = remember { java.time.ZonedDateTime.now() }
+    val tomorrow = example.hq.spike.ui.reminders.RemindersLogic.tomorrowMorning(now).toEpochSecond()
+    val hour = now.plusMinutes(example.hq.spike.ui.reminders.RemindersLogic.SNOOZE_HOUR_MINUTES).toEpochSecond()
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        PrimaryButton(stringResource(R.string.reminders_mark_done), Modifier.fillMaxWidth(), enabled = !sending && !offline) { actions.onReminderDone(card) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.reminders_snooze_hour), Modifier.weight(1f), enabled = !sending && !offline, maxLines = 2) { actions.onReminderSnooze(card, hour) }
+            example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.reminders_snooze_tomorrow), Modifier.weight(1f), enabled = !sending && !offline, maxLines = 2) { actions.onReminderSnooze(card, tomorrow) }
+        }
     }
 }
 
