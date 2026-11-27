@@ -149,3 +149,155 @@ pub(crate) fn relative_age(iso_date: &str) -> String {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{StoreMemoryParams, store_memory};
+
+    fn store(db: &Database, summary: &str, importance: f64, topics: &[&str]) -> i64 {
+        let topics: Vec<String> = topics.iter().map(ToString::to_string).collect();
+        store_memory(
+            db,
+            &StoreMemoryParams {
+                source: "chat-turn",
+                harness: "web",
+                raw_text: "",
+                summary,
+                entities: &[],
+                topics: &topics,
+                importance,
+                user_id: None,
+            },
+        )
+        .unwrap()
+    }
+
+    fn ids(ctx: &MemoryContext) -> Vec<i64> {
+        ctx.memories.iter().map(|m| m.id).collect()
+    }
+
+    #[test]
+    fn an_empty_store_gives_an_empty_block() {
+        let db = Database::open_memory().unwrap();
+        let ctx = MemoryQuerier::new(db)
+            .get_recent_context(None, None)
+            .unwrap();
+        assert!(ctx.memories.is_empty());
+        assert!(ctx.formatted.is_empty());
+        assert_eq!(ctx.stats.total, 0);
+    }
+
+    #[test]
+    fn the_default_is_eight_memories() {
+        let db = Database::open_memory().unwrap();
+        for i in 0..12 {
+            store(&db, &format!("m{i}"), 0.5, &[]);
+        }
+        let ctx = MemoryQuerier::new(db)
+            .get_recent_context(None, None)
+            .unwrap();
+        assert_eq!(ctx.memories.len(), 8);
+    }
+
+    #[test]
+    fn a_memory_sharing_three_topics_with_a_kept_one_is_skipped() {
+        let db = Database::open_memory().unwrap();
+        let first = store(&db, "first", 0.9, &["a", "b", "c", "d"]);
+        let echo = store(&db, "echo", 0.8, &["a", "b", "c"]);
+        let two_shared = store(&db, "two shared", 0.7, &["a", "b", "z"]);
+
+        let ctx = MemoryQuerier::new(db)
+            .get_recent_context(Some(8), None)
+            .unwrap();
+
+        assert!(ids(&ctx).contains(&first));
+        assert!(
+            !ids(&ctx).contains(&echo),
+            "three shared topics is a repeat"
+        );
+        assert!(
+            ids(&ctx).contains(&two_shared),
+            "two shared is still distinct"
+        );
+    }
+
+    #[test]
+    fn a_high_salience_memory_survives_the_overlap_filter() {
+        let db = Database::open_memory().unwrap();
+        let first = store(&db, "first", 0.9, &["a", "b", "c"]);
+        let salient = store(&db, "salient", 0.8, &["a", "b", "c", "high-salience"]);
+
+        let ctx = MemoryQuerier::new(db)
+            .get_recent_context(Some(8), None)
+            .unwrap();
+
+        assert_eq!(ids(&ctx), vec![first, salient]);
+    }
+
+    #[test]
+    fn a_topic_filter_keeps_only_matching_memories_ignoring_case() {
+        let db = Database::open_memory().unwrap();
+        let money = store(&db, "budget", 0.9, &["Finance"]);
+        store(&db, "lunch", 0.8, &["food"]);
+
+        let ctx = MemoryQuerier::new(db)
+            .get_recent_context(Some(8), Some(&["finance".to_string()]))
+            .unwrap();
+
+        assert_eq!(ids(&ctx), vec![money]);
+    }
+
+    #[test]
+    fn an_old_memory_is_marked_as_possibly_outdated() {
+        let db = Database::open_memory().unwrap();
+        let old = store(&db, "an old fact", 0.5, &[]);
+        let at = (chrono::Utc::now() - chrono::Duration::days(45)).to_rfc3339();
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE memories SET created_at = ?1 WHERE id = ?2",
+                rusqlite::params![at, old],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        store(&db, "a new fact", 0.4, &[]);
+
+        let ctx = MemoryQuerier::new(db)
+            .get_recent_context(Some(8), None)
+            .unwrap();
+
+        let line = |needle: &str| {
+            ctx.formatted
+                .lines()
+                .find(|l| l.contains(needle))
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert!(line("an old fact").contains("[may be outdated]"));
+        assert!(!line("a new fact").contains("[may be outdated]"));
+        assert!(ctx.formatted.starts_with("**Recent Memory:**"));
+    }
+
+    /// Pins today's behaviour so the change to count only memories that were actually shown
+    /// (the recall rewrite) is a visible edit to this test, not a silent one.
+    #[test]
+    fn building_the_block_counts_an_access_for_every_memory_in_it() {
+        let db = Database::open_memory().unwrap();
+        let id = store(&db, "shown", 0.5, &[]);
+        let mut querier = MemoryQuerier::new(db.clone());
+
+        querier.get_recent_context(Some(8), None).unwrap();
+
+        let count: i64 = db
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT access_count FROM memories WHERE id = ?1",
+                    [id],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+}

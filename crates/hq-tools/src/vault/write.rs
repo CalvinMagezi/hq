@@ -10,6 +10,47 @@ use std::sync::Arc;
 use super::{sync_note_index_and_cache, validate_write_path};
 use crate::registry::HqTool;
 
+/// Links in `text`, written into the note at `path`, that reach no note or fit several. The tools
+/// attach these to their result so the writer can fix a link while it still has the context.
+/// Only the text just written is checked, so a note's older problems are not repeated at every
+/// edit. `line` counts from the start of that text.
+async fn link_warnings(vault: Arc<VaultClient>, path: String, text: String) -> Vec<Value> {
+    tokio::task::spawn_blocking(move || {
+        let (broken, ambiguous) =
+            hq_vault::check::broken_links_in(vault.vault_path(), &path, &text);
+        let mut out: Vec<Value> = broken
+            .into_iter()
+            .map(|b| {
+                json!({
+                    "kind": "unresolved_link",
+                    "link": b.link,
+                    "line": b.line,
+                    "did_you_mean": b.did_you_mean,
+                })
+            })
+            .collect();
+        out.extend(ambiguous.into_iter().map(|a| {
+            json!({
+                "kind": "ambiguous_link",
+                "link": a.link,
+                "line": a.line,
+                "candidates": a.candidates,
+            })
+        }));
+        out
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// `result` with the warnings attached, when there are any.
+fn with_warnings(mut result: Value, warnings: Vec<Value>) -> Value {
+    if !warnings.is_empty() {
+        result["warnings"] = Value::Array(warnings);
+    }
+    result
+}
+
 /// Write or update a vault note.
 pub struct VaultWriteNoteTool {
     vault: Arc<VaultClient>,
@@ -113,6 +154,7 @@ impl HqTool for VaultWriteNoteTool {
         let vault = self.vault.clone();
         let db = self.db.clone();
         let path_ret = path.clone();
+        let written = content.clone();
         // Run keep + write + record inside spawn_blocking so the NoteGuard is never held across .await.
         tokio::task::spawn_blocking(move || {
             crate::provenance::locked_tool_write(
@@ -130,7 +172,11 @@ impl HqTool for VaultWriteNoteTool {
         .await??;
 
         let abs_path = self.vault.vault_path().join(&path_ret);
-        Ok(json!({ "ok": true, "path": path_ret, "abs_path": abs_path.to_string_lossy() }))
+        let warnings = link_warnings(self.vault.clone(), path_ret.clone(), written).await;
+        Ok(with_warnings(
+            json!({ "ok": true, "path": path_ret, "abs_path": abs_path.to_string_lossy() }),
+            warnings,
+        ))
     }
 }
 
@@ -220,7 +266,11 @@ impl HqTool for VaultAppendNoteTool {
         })
         .await??;
 
-        Ok(json!({ "ok": true, "path": path, "target_heading": heading }))
+        let warnings = link_warnings(self.vault.clone(), path.clone(), content).await;
+        Ok(with_warnings(
+            json!({ "ok": true, "path": path, "target_heading": heading }),
+            warnings,
+        ))
     }
 }
 
@@ -311,7 +361,11 @@ impl HqTool for VaultPatchSectionTool {
         })
         .await??;
 
-        Ok(json!({ "ok": true, "path": path, "patched_heading": heading }))
+        let warnings = link_warnings(self.vault.clone(), path.clone(), content).await;
+        Ok(with_warnings(
+            json!({ "ok": true, "path": path, "patched_heading": heading }),
+            warnings,
+        ))
     }
 }
 
@@ -403,5 +457,88 @@ mod note_parts_tests {
         release_tx.send(()).unwrap();
         locker.join().unwrap();
         handle.await.unwrap().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod link_warning_tests {
+    use super::*;
+    use crate::vault::{VaultAppendNoteTool, VaultPatchSectionTool};
+
+    fn vault() -> (tempfile::TempDir, Arc<VaultClient>) {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Arc::new(VaultClient::new(dir.path().to_path_buf()).unwrap());
+        for (rel, text) in [
+            ("Notebooks/Quarterly Review.md", "# Review"),
+            ("Notebooks/A/Twin.md", ""),
+            ("Notebooks/B/Twin.md", ""),
+        ] {
+            let p = dir.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        }
+        (dir, vault)
+    }
+
+    #[tokio::test]
+    async fn a_write_with_a_link_to_nowhere_says_so_and_offers_the_near_miss() {
+        let (_dir, vault) = vault();
+        let out = VaultWriteNoteTool::new(vault)
+            .execute(json!({
+                "path": "Notebooks/New.md",
+                "title": "New",
+                "content": "ok [[Quarterly Review]]\nbad [[Quarterly Reveiw]] and [[Twin]]",
+            }))
+            .await
+            .unwrap();
+        assert_eq!(out["ok"], true);
+        let warnings = out["warnings"].as_array().expect("warnings");
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert_eq!(warnings[0]["kind"], "unresolved_link");
+        assert_eq!(warnings[0]["link"], "[[Quarterly Reveiw]]");
+        assert_eq!(warnings[0]["line"], 2);
+        assert_eq!(warnings[0]["did_you_mean"], "Quarterly Review");
+        assert_eq!(warnings[1]["kind"], "ambiguous_link");
+    }
+
+    #[tokio::test]
+    async fn a_write_whose_links_all_resolve_has_no_warnings_key() {
+        let (_dir, vault) = vault();
+        let out = VaultWriteNoteTool::new(vault)
+            .execute(json!({
+                "path": "Notebooks/New.md",
+                "title": "New",
+                "content": "see [[Quarterly Review#Goals]], `[[Not a link]]` and [[A/Twin]]",
+            }))
+            .await
+            .unwrap();
+        assert!(out.get("warnings").is_none(), "{out}");
+    }
+
+    #[tokio::test]
+    async fn append_and_patch_check_only_the_text_they_add() {
+        let (dir, vault) = vault();
+        // An old broken link already in the note must not be repeated at every edit.
+        std::fs::write(
+            dir.path().join("Notebooks/Old.md"),
+            "---\ntitle: Old\n---\n\n## Part\n\nold [[Long Gone]]\n",
+        )
+        .unwrap();
+        let appended = VaultAppendNoteTool::new(vault.clone(), None)
+            .execute(json!({ "path": "Notebooks/Old.md", "content": "fine [[Quarterly Review]]" }))
+            .await
+            .unwrap();
+        assert!(appended.get("warnings").is_none(), "{appended}");
+
+        let patched = VaultPatchSectionTool::new(vault, None)
+            .execute(json!({
+                "path": "Notebooks/Old.md",
+                "heading": "Part",
+                "content": "new [[Nowhere At All]]",
+            }))
+            .await
+            .unwrap();
+        assert_eq!(patched["warnings"].as_array().unwrap().len(), 1);
+        assert_eq!(patched["warnings"][0]["link"], "[[Nowhere At All]]");
     }
 }

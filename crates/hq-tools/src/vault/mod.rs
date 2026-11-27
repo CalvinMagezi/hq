@@ -11,6 +11,7 @@ pub(crate) use crate::write_policy::{
 
 mod context;
 mod graph;
+mod health;
 mod import;
 mod person;
 mod read;
@@ -20,6 +21,7 @@ mod write;
 
 pub use context::*;
 pub use graph::*;
+pub use health::VaultHealthTool;
 pub use import::{
     Caller, Conflict, ImportSettings, Importer, InventoryFilter, Source, VaultImportTool,
     VaultInventoryTool,
@@ -108,7 +110,8 @@ pub fn create_vault_tools(
         Box::new(VaultAppendNoteTool::new(vault.clone(), db.clone())),
         Box::new(VaultPatchSectionTool::new(vault.clone(), db.clone())),
         Box::new(VaultLinksTool::new(vault.clone())),
-        Box::new(VaultBacklinksTool::new(vault.clone(), db.clone())),
+        Box::new(VaultBacklinksTool::new(vault.clone())),
+        Box::new(VaultHealthTool::new(vault.clone(), db.clone())),
         Box::new(
             PersonRecordFactTool::new(vault.clone(), db.clone())
                 .with_registered_people(person::configured_people()),

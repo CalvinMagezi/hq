@@ -64,6 +64,13 @@
   tools: [vault_import]
   needs: [model]
 
+- id: tidy-notes
+  group: notes
+  says: Find broken links in your notes
+  example: Check my notes for broken links
+  tools: [vault_health]
+  needs: [model]
+
 - id: make-spreadsheet
   group: documents
   says: Make a spreadsheet you can share
