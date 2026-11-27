@@ -106,7 +106,7 @@ pub async fn extract_local(db: &Database, text: &str) -> ExtractedMemory {
 /// What the owner wrote in a turn made of `role: content` blocks joined by `---` lines. Text with
 /// no role blocks at all is taken to be the owner's own. A turn with only an assistant block has
 /// nothing of theirs, so it gives nothing.
-pub(crate) fn owner_text(text: &str) -> String {
+pub fn owner_text(text: &str) -> String {
     let blocks: Vec<&str> = text.split("\n---\n").collect();
     let is_turn = blocks
         .iter()
