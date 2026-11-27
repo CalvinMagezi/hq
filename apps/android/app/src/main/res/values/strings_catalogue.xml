@@ -4977,7 +4977,7 @@
     <string name="row_memory">What HQ remembers</string>
     <string name="sethint_memory">Look through, correct or delete what HQ learned from your chats</string>
     <string name="memory_intro">HQ saves short notes about what you tell it. It uses them to help you later.</string>
-    <string name="memory_counts">Saved: %1$s. In use: %2$s. Held back: %3$s. Out of date: %4$s.</string>
+    <string name="memory_counts">Saved: %1$s. In use: %2$s. Held back: %3$s. Out of date: %4$s. Over a year old: %5$s.</string>
     <string name="memory_mode_shadow">Chats get your most important notes. HQ is also testing a smarter choice in the background.</string>
     <string name="memory_mode_query">Each message brings up only the notes that fit it.</string>
     <string name="memory_mode_recent">Chats get your most important notes.</string>
@@ -4988,6 +4988,7 @@
     <string name="memory_filter_all">All</string>
     <string name="memory_filter_review">Held back</string>
     <string name="memory_filter_outdated">Out of date</string>
+    <string name="memory_filter_archived">Over a year old</string>
     <string name="memory_filter_unattributed">Shared channels</string>
     <string name="memory_filter_pinned">Pinned</string>
     <string name="memory_empty">HQ has not saved anything yet. It starts after your first chat.</string>
@@ -4995,6 +4996,7 @@
     <string name="memory_badge_pinned">Pinned</string>
     <string name="memory_badge_review">Held back</string>
     <string name="memory_badge_outdated">Out of date</string>
+    <string name="memory_badge_archived">Over a year old</string>
     <string name="memory_badge_shared">From a shared channel</string>
     <string name="memory_badge_edited">Edited by you</string>
     <plurals name="memory_used">
@@ -5003,6 +5005,7 @@
     </plurals>
     <string name="memory_hint_shared">This came from a shared channel. Keep it if it is true.</string>
     <string name="memory_hint_review">HQ holds this back until you have looked at it.</string>
+    <string name="memory_hint_archived">HQ stopped bringing this up because it went a year unused.</string>
     <string name="memory_options">Options</string>
     <string name="memory_edit">Edit</string>
     <string name="memory_edit_label">What this note should say</string>

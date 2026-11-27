@@ -25,7 +25,7 @@ pub struct OwnerRow {
     pub topics: Vec<String>,
     pub importance: f64,
     pub created_at: String,
-    /// `active`, `review` or `superseded`.
+    /// `active`, `review`, `superseded` or `archived`.
     pub status: String,
     /// `owner`, or `unknown_channel` for a memory from a shared channel.
     pub origin: String,
@@ -157,6 +157,8 @@ pub struct Counts {
     /// From a shared channel, held back until the owner keeps them.
     pub unattributed: i64,
     pub pinned: i64,
+    /// Put away because they went a year unused, or past the cap. Never brought up unasked.
+    pub archived: i64,
 }
 
 pub fn counts(conn: &Connection) -> Result<Counts> {
@@ -166,7 +168,8 @@ pub fn counts(conn: &Connection) -> Result<Counts> {
                 COALESCE(SUM(status = 'review'), 0),
                 COALESCE(SUM(status = 'superseded'), 0),
                 COALESCE(SUM(origin <> 'owner'), 0),
-                COALESCE(SUM(pinned = 1), 0)
+                COALESCE(SUM(pinned = 1), 0),
+                COALESCE(SUM(status = 'archived'), 0)
            FROM memories",
         [],
         |r| {
@@ -177,6 +180,7 @@ pub fn counts(conn: &Connection) -> Result<Counts> {
                 out_of_date: r.get(3)?,
                 unattributed: r.get(4)?,
                 pinned: r.get(5)?,
+                archived: r.get(6)?,
             })
         },
     )?)
@@ -414,7 +418,8 @@ mod tests {
                 review: 1,
                 out_of_date: 1,
                 unattributed: 1,
-                pinned: 1
+                pinned: 1,
+                archived: 0,
             }
         );
         assert_eq!(counts(&db()).unwrap(), Counts::default());
@@ -532,5 +537,50 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM memory_tombstones", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn a_note_put_away_is_counted_listed_and_can_be_brought_back() {
+        let conn = db();
+        let id = add(
+            &conn,
+            "Acme delivers on Thursdays",
+            "2025-01-01T00:00:00+00:00",
+        );
+        conn.execute(
+            "UPDATE memories SET status = 'archived' WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
+
+        assert_eq!(counts(&conn).unwrap().archived, 1);
+        assert_eq!(counts(&conn).unwrap().active, 0);
+        let put_away = list(
+            &conn,
+            &ListFilter {
+                status: Some("archived".into()),
+                ..all()
+            },
+        )
+        .unwrap();
+        assert_eq!(put_away.iter().map(|r| r.id).collect::<Vec<_>>(), vec![id]);
+        assert!(
+            search_keyword(&conn, "thursdays", View::Recall, 5)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            search(&conn, "thursdays", 5).unwrap().len(),
+            1,
+            "still findable by the owner"
+        );
+
+        assert!(set_standing(&conn, id, Standing::Active).unwrap());
+        assert_eq!(
+            search_keyword(&conn, "thursdays", View::Recall, 5)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 }

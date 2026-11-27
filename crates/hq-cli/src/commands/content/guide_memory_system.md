@@ -1,7 +1,7 @@
 ---
 noteType: guide
 fileName: memory-system
-version: 2
+version: 3
 ---
 # Memory System Guide
 
@@ -32,7 +32,7 @@ About every two hours, if at least five new summaries have built up, HQ writes a
 
 ### Forgetting
 
-Once a day HQ lowers the importance of old summaries and removes the weakest ones after about 60 days, keeping a short copy in `_archive/memories/`.
+HQ never deletes a note by itself. Once a day it puts away notes that went a year without being brought up, unless you pinned them, and it keeps no more than 20,000 in use. A note put away is still listed and searchable (`hq memory list --archived`), it just is not brought up in chats until you use it again (`hq memory keep <number>`). To delete a note for good, forget it yourself (`hq memory forget <number> --yes`). That removes the note and the insights, lines and archive entries HQ made from it.
 
 `hq memory stats` shows how many summaries exist and when consolidation last ran.
 

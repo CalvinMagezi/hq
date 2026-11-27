@@ -1,4 +1,5 @@
-//! Memory consolidation with smart gating, inspired by Claude Code's Kairos daemon.
+//! Memory consolidation with smart gating, inspired by Claude Code's Kairos daemon. Insights are
+//! written as notes under `Notebooks/Memories/`; `_system/MEMORY.md` is never changed by it.
 //!
 //! A cycle runs only when at least MIN_HOURS have passed since the last
 //! consolidation and MIN_NEW_MEMORIES are waiting. The stamp file's mtime is
@@ -122,10 +123,8 @@ pub async fn run_memory_cycle(
     }
     touch(&stamp);
 
-    // Refresh MEMORY.md (post-consolidation)
-    if let Err(e) = consolidator.refresh_memory_file() {
-        warn!(error = %e, "failed to refresh MEMORY.md");
-    }
+    // MEMORY.md is the file the owner curates, so what a model inferred is not written into it.
+    // Insights live in `Notebooks/Memories/`, marked as inferred.
 
     Ok(())
 }

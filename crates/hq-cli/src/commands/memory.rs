@@ -248,6 +248,7 @@ fn notes_on(row: &OwnerRow) -> Vec<&'static str> {
     match row.status.as_str() {
         "review" => notes.push("held back"),
         "superseded" => notes.push("out of date"),
+        "archived" => notes.push("over a year old, not brought up"),
         _ => {}
     }
     if row.origin != "owner" {
@@ -301,6 +302,8 @@ fn list_cmd(config: &HqConfig, args: &[String]) -> Result<()> {
         Some("review".to_string())
     } else if flag(args, "--outdated") {
         Some("superseded".to_string())
+    } else if flag(args, "--archived") {
+        Some("archived".to_string())
     } else {
         None
     };
@@ -680,12 +683,13 @@ fn usage() -> Result<()> {
     println!("  recall-report [days]  How memory recall has done lately (default 7 days)");
     println!();
     println!("What HQ learned from your chats (each has a number):");
-    println!("  list [--review] [--unattributed] [--pinned] [--outdated] [--limit N]");
+    println!("  list [--review] [--unattributed] [--pinned] [--outdated] [--archived] [--limit N]");
     println!("  search <words>   Find a memory");
     println!("  view <number>    Everything HQ knows about one memory");
     println!("  edit <number> \"<text>\"   Correct it. It becomes yours");
     println!("  pin <number> / unpin <number>   Never / again let it age out");
-    println!("  keep <number>    Vouch for one held back (from a shared channel)");
+    println!("  keep <number>    Vouch for one held back (from a shared channel), or bring one");
+    println!("                   back that was put away after a year unused");
     println!("  outdated <number>  It is no longer true: keep it, never bring it up");
     println!("  forget <number> --yes   Delete it and everything HQ made from it");
     println!("  export           Everything, as JSON");
@@ -832,5 +836,12 @@ mod tests {
         assert_eq!(days(200), "6 months ago");
         assert_eq!(days(800), "2 years ago");
         assert_eq!(ago("not a date"), "some time ago");
+    }
+
+    #[test]
+    fn a_note_put_away_after_a_year_says_so() {
+        let mut old = row("Acme delivers on Tuesdays");
+        old.status = "archived".into();
+        assert!(render_line(&old).contains("over a year old, not brought up"));
     }
 }

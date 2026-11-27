@@ -49,7 +49,7 @@ pub fn get_unconsolidated_memories(db: &Database, limit: i64) -> Result<Vec<Memo
     db.with_conn(|conn| {
         query_memories(
             conn,
-            "SELECT * FROM memories WHERE consolidated = 0 ORDER BY created_at DESC LIMIT ?1",
+            "SELECT * FROM memories WHERE consolidated = 0 AND status = 'active' AND origin = 'owner' ORDER BY created_at DESC LIMIT ?1",
             &[&limit],
         )
     })
@@ -59,7 +59,7 @@ pub fn get_recent_memories(db: &Database, limit: i64) -> Result<Vec<Memory>> {
     db.with_conn(|conn| {
         query_memories(
             conn,
-            "SELECT * FROM memories ORDER BY importance DESC, created_at DESC LIMIT ?1",
+            "SELECT * FROM memories WHERE status = 'active' AND origin = 'owner' ORDER BY importance DESC, created_at DESC LIMIT ?1",
             &[&limit],
         )
     })
@@ -216,21 +216,6 @@ pub fn store_consolidation_chained(
     })
 }
 
-// ─── Decay & Pruning (Synaptic Homeostasis) ─────────────────────────
-
-/// Decay importance of unconsolidated memories older than `min_age_days`.
-/// Returns the number of memories updated.
-pub fn decay_old_memories(db: &Database, decay_rate: f64, min_age_days: i64) -> Result<i64> {
-    let cutoff = cutoff_iso(min_age_days);
-    db.with_conn(|conn| {
-        let changes = conn.execute(
-            "UPDATE memories SET importance = MAX(0.01, importance - ?1) WHERE consolidated = 0 AND created_at < ?2",
-            rusqlite::params![decay_rate, cutoff],
-        )?;
-        Ok(changes as i64)
-    })
-}
-
 /// Bump access count and last_accessed_at for a memory (served to an agent).
 pub fn touch_memory(db: &Database, id: i64) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
@@ -257,11 +242,6 @@ fn query_memories(
         result.push(row?);
     }
     Ok(result)
-}
-
-fn cutoff_iso(days: i64) -> String {
-    let cutoff = chrono::Utc::now() - chrono::Duration::days(days);
-    cutoff.to_rfc3339()
 }
 
 #[cfg(test)]
@@ -298,15 +278,45 @@ mod tests {
         .unwrap();
     }
 
-    fn importance_of(db: &Database, id: i64) -> f64 {
+    fn mark(db: &Database, id: i64, status: &str, origin: &str) {
         db.with_conn(|c| {
-            Ok(
-                c.query_row("SELECT importance FROM memories WHERE id = ?1", [id], |r| {
-                    r.get(0)
-                })?,
-            )
+            c.execute(
+                "UPDATE memories SET status = ?1, origin = ?2 WHERE id = ?3",
+                rusqlite::params![status, origin, id],
+            )?;
+            Ok(())
         })
-        .unwrap()
+        .unwrap();
+    }
+
+    /// The always-on list and the consolidator read memories nobody asked about, so they must
+    /// only ever see what the owner's own chats made and nobody has held back or retired.
+    #[test]
+    fn only_active_notes_from_the_owner_reach_the_always_on_list_and_the_consolidator() {
+        let db = Database::open_memory().unwrap();
+        let fine = store(&db, "an ordinary note", 0.5);
+        let held = store(&db, "held back for review", 0.9);
+        let shared = store(&db, "from a shared channel", 0.9);
+        let outdated = store(&db, "no longer true", 0.9);
+        let away = store(&db, "put away after a year", 0.9);
+        mark(&db, held, "review", "owner");
+        mark(&db, shared, "active", "unknown_channel");
+        mark(&db, outdated, "superseded", "owner");
+        mark(&db, away, "archived", "owner");
+
+        let recent: Vec<i64> = get_recent_memories(&db, 10)
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        let pending: Vec<i64> = get_unconsolidated_memories(&db, 10)
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+
+        assert_eq!(recent, vec![fine]);
+        assert_eq!(pending, vec![fine]);
     }
 
     #[test]
@@ -371,28 +381,6 @@ mod tests {
         let history = get_consolidation_history(&db, 5).unwrap();
         assert_eq!(history[0].source_ids, vec![a, b]);
         assert_eq!(history[0].insight, "a and b agree");
-    }
-
-    #[test]
-    fn decay_lowers_only_old_unconsolidated_memories_and_never_below_the_floor() {
-        let db = Database::open_memory().unwrap();
-        let old = store(&db, "old", 0.5);
-        let fresh = store(&db, "fresh", 0.5);
-        let consolidated = store(&db, "consolidated", 0.5);
-        let at_floor = store(&db, "at the floor", 0.01);
-        for id in [old, consolidated, at_floor] {
-            age(&db, id, 10);
-        }
-        age(&db, fresh, 1);
-        store_consolidation(&db, &[consolidated], "x", &[]).unwrap();
-
-        let changed = decay_old_memories(&db, 0.1, 7).unwrap();
-
-        assert_eq!(changed, 2, "the old unconsolidated pair, not fresh or done");
-        assert!((importance_of(&db, old) - 0.4).abs() < 1e-9);
-        assert!((importance_of(&db, fresh) - 0.5).abs() < 1e-9);
-        assert!((importance_of(&db, consolidated) - 0.5).abs() < 1e-9);
-        assert!((importance_of(&db, at_floor) - 0.01).abs() < 1e-9);
     }
 
     #[test]

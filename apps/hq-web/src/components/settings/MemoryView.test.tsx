@@ -25,7 +25,7 @@ const item = (over: Partial<MemoryItem> = {}): MemoryItem => ({
 })
 
 const list = (items: MemoryItem[], recall: MemoryList['recall'] = 'shadow'): MemoryList => ({
-  counts: { total: items.length, active: items.length, review: 0, out_of_date: 0, unattributed: 0, pinned: 0 },
+  counts: { total: items.length, active: items.length, review: 0, out_of_date: 0, archived: 0, unattributed: 0, pinned: 0 },
   items,
   recall,
 })
@@ -56,15 +56,15 @@ describe('the page', () => {
     const out = html({ list: list([item(), item({ id: 2 })], 'query') })
     expect(out).toContain(t('memory_intro'))
     expect(out).toContain(t('memory_mode_query'))
-    expect(out).toContain(t('memory_counts', { total: 2, active: 2, review: 0, outdated: 0 }))
+    expect(out).toContain(t('memory_counts', { total: 2, active: 2, review: 0, outdated: 0, archived: 0 }))
     expect(out).toContain('Acme delivers on Thursdays')
   })
 
-  test('there is a labelled search box and the five filters, with the chosen one pressed', () => {
+  test('there is a labelled search box and the six filters, with the chosen one pressed', () => {
     const out = html({ filter: 'review' })
     expect(out).toContain(`for="memory-search"`)
     expect(out).toContain(t('memory_search_label'))
-    for (const key of ['memory_filter_all', 'memory_filter_review', 'memory_filter_outdated', 'memory_filter_unattributed', 'memory_filter_pinned'] as const) {
+    for (const key of ['memory_filter_all', 'memory_filter_review', 'memory_filter_outdated', 'memory_filter_archived', 'memory_filter_unattributed', 'memory_filter_pinned'] as const) {
       expect(out).toContain(t(key))
     }
     expect(out.match(/aria-pressed="true"/g)?.length).toBe(1)
@@ -123,6 +123,11 @@ describe('one memory', () => {
 
     const old = html({ list: list([item({ status: 'superseded' })]), initial: { openId: 1 } })
     expect(old).toContain(t('memory_use_again'))
+
+    const away = html({ list: list([item({ status: 'archived' })]), initial: { openId: 1 } })
+    expect(away).toContain(t('memory_badge_archived'))
+    expect(away).toContain(t('memory_hint_archived'))
+    expect(away).toContain(t('memory_use_again'))
 
     const pinned = html({ list: list([item({ pinned: true })]), initial: { openId: 1 } })
     expect(pinned).toContain(`>${t('memory_unpin')}<`)
