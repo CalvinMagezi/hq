@@ -47,6 +47,7 @@ pub mod notify;
 pub mod office;
 pub mod prose_lint;
 pub mod provenance;
+pub mod reminders;
 pub mod self_update;
 pub mod session_policy;
 pub mod session_search;
