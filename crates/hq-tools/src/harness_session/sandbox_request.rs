@@ -36,7 +36,9 @@ const GRANT_TTL_SECS: i64 = 24 * 3600;
 const MAX_SETBACKS: usize = 3;
 const MAX_WAITING: usize = 3;
 const MAX_TEXT_CHARS: usize = 300;
-const DECLINED_NOTE: &str = "The owner declined sandbox access you asked for. Do not ask for it again or try another route to it; finish what you can without it and report what is blocked.";
+/// How long one host call may take while applying answers, so a sleeping host cannot stall a sweep.
+const SWEEP_HOST_TIMEOUT: Duration = Duration::from_secs(3);
+const APPLIED_NOTE: &str = "HQ applied the sandbox access that was approved and restarted you. Retry the command that was blocked.";
 /// How long a restart waits for the helper to finish its turn before it stops it anyway.
 const SETTLE_WAIT: Duration = Duration::from_secs(60);
 
@@ -187,16 +189,13 @@ fn describe(req: &GrantRequest) -> String {
 }
 
 /// Applies the owner's answers to requests this session had waiting. Approval counts only when
-/// it is signed and unspent, and spends it. Returns how many the owner declined.
-pub(super) fn settle_pending(db: &Database, session: &str, now: i64) -> Result<usize> {
-    let mut declined = 0;
+/// it is signed and unspent, and spends it.
+pub(super) fn settle_pending(db: &Database, session: &str, now: i64) -> Result<()> {
     for grant in store::pending_for_session(db, session, now)? {
         let key = key_for(&grant.id);
         let latest = value_items::latest_engagement_by_dedup(db, &key)?;
         if RequestState::from_latest(latest, chrono::Utc::now()) == RequestState::Declined {
-            if store::decide(db, &grant.id, store::DECLINED, now, None)? {
-                declined += 1;
-            }
+            store::decide(db, &grant.id, store::DECLINED, now, None)?;
             continue;
         }
         let signed = value_items::is_signed_approval(db, &key)?
@@ -211,7 +210,7 @@ pub(super) fn settle_pending(db: &Database, session: &str, now: i64) -> Result<u
             )?;
         }
     }
-    Ok(declined)
+    Ok(())
 }
 
 /// Approves the waiting requests of a session that a standing rule now covers, so one "allow for
@@ -255,13 +254,17 @@ pub fn apply_owner_answers(db: &Arc<Database>) -> Result<()> {
 }
 
 fn apply_for(db: &Arc<Database>, session: &str, now: i64) -> Result<()> {
+    if is_restarting(session) {
+        return Ok(());
+    }
     let row = db.with_conn(|c| hq_db::harness_sessions_registry::get(c, session))?;
+    // A stopped session is never brought back for this: its next launch carries what is in force.
     let Some(row) = row.filter(|r| r.status == hq_db::harness_sessions_registry::STATUS_RUNNING)
     else {
-        // Its next launch carries whatever is in force; restarting it would bring it back.
-        return store::clear_restart_due(db, session);
+        return Ok(());
     };
-    let host = crate::agent_host::host(Some(&row.host))?;
+    let host =
+        crate::agent_host::host(Some(&row.host))?.with_command_timeout_dyn(SWEEP_HOST_TIMEOUT);
     let Some(agent) = host.agent(&row.agent_name)?.filter(|a| !a.exited) else {
         return Ok(());
     };
@@ -277,18 +280,51 @@ fn apply_for(db: &Arc<Database>, session: &str, now: i64) -> Result<()> {
     {
         approve_covered(db, &paths, &asker, now)?;
     }
-    let note = match follow_up(db, session, agent.status, now)? {
+    let blocked = match follow_up(db, session, agent.status, now)? {
         None => return Ok(()),
-        Some(FollowUp::TellDeclined) => DECLINED_NOTE.to_string(),
+        Some(FollowUp::TellDeclined) => None,
         Some(FollowUp::Restart) => match plan_restart(db, session) {
-            Restart::Blocked(why) => format!(
+            Restart::Blocked(why) => Some(format!(
                 "The sandbox access you asked for was approved, but HQ could not restart you to apply it ({why}). It takes effect the next time your session is started. Tell the user that."
-            ),
+            )),
+            // The restart carries any decline with it.
             Restart::Scheduled | Restart::NotDue => return Ok(()),
         },
     };
-    super::control::send_text(db, session, &note)?;
+    let (note, told) = with_declines(db, session, blocked)?;
+    if let Some(note) = note {
+        super::control::send_text(db, session, &note)?;
+        mark_told(db, &told)?;
+    }
     Ok(())
+}
+
+/// `first`, followed by the declines the session has not heard of, and the ids to mark once the
+/// whole note has reached it.
+fn with_declines(
+    db: &Database,
+    session: &str,
+    first: Option<String>,
+) -> Result<(Option<String>, Vec<String>)> {
+    let declined = store::untold_declines(db, session)?;
+    let mut parts: Vec<String> = first.into_iter().collect();
+    if !declined.is_empty() {
+        let what: Vec<String> = declined
+            .iter()
+            .map(|g| format!("{} {}", g.capability, shown(&g.resource)))
+            .collect();
+        parts.push(format!(
+            "The owner declined your sandbox access request for: {}. Do not ask for it again or try another route to it; finish what you can without it and report what is blocked.",
+            what.join(", ")
+        ));
+    }
+    let note = (!parts.is_empty()).then(|| parts.join(" "));
+    Ok((note, declined.into_iter().map(|g| g.id).collect()))
+}
+
+fn mark_told(db: &Database, ids: &[String]) -> Result<()> {
+    ids.iter()
+        .try_for_each(|id| store::mark_decline_told(db, id))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -308,11 +344,11 @@ fn follow_up(
     if !matches!(status, AgentStatus::Idle | AgentStatus::Done) {
         return Ok(None);
     }
-    let declined = settle_pending(db, session, now)?;
+    settle_pending(db, session, now)?;
     Ok(if store::restart_due(db, session)? {
         Some(FollowUp::Restart)
     } else {
-        (declined > 0).then_some(FollowUp::TellDeclined)
+        (!store::untold_declines(db, session)?.is_empty()).then_some(FollowUp::TellDeclined)
     })
 }
 
@@ -527,6 +563,11 @@ pub(super) fn launch_delta(
     let Some(paths) = paths else {
         return SandboxDelta::default();
     };
+    // This launch carries what is in force, so no further restart is owed for it. Cleared before
+    // the read, so a grant that lands afterwards stays due.
+    if let Err(e) = store::clear_restart_due(db, session) {
+        tracing::warn!(session, error = %e, "sandbox grants: restart flag not cleared at launch");
+    }
     let home = PathBuf::from(paths.canonical(&paths.home().to_string_lossy()));
     let mut delta = store::delta_for_session(db, session, now).unwrap_or_default();
     // The owner's standing access for this task and repository, read against this computer's home.
@@ -621,6 +662,10 @@ pub(super) enum Restart {
 
 static RESTARTING: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
 
+fn is_restarting(session: &str) -> bool {
+    RESTARTING.lock().is_ok_and(|r| r.contains(session))
+}
+
 /// Restarts `session` once its turn ends, so its sandbox carries the new grant, unless it cannot
 /// be restarted without losing something. Best effort after that: a failure is logged and the
 /// grant stays recorded for the next launch.
@@ -669,9 +714,15 @@ async fn restart(db: &Arc<Database>, session: &str) {
         tracing::warn!(session, error = %e, "sandbox grant restart: stop failed");
         return;
     }
-    let note = "HQ applied the sandbox access you asked for and restarted you. Retry the command that was blocked.";
-    if let Err(e) = super::control::resume(db, session, Some(note)).await {
-        tracing::warn!(session, error = %e, "sandbox grant restart: resume failed");
+    let (note, told) = with_declines(db, session, Some(APPLIED_NOTE.into()))
+        .unwrap_or_else(|_| (Some(APPLIED_NOTE.into()), Vec::new()));
+    match super::control::resume(db, session, note.as_deref()).await {
+        Ok(_) => {
+            if let Err(e) = mark_told(db, &told) {
+                tracing::warn!(session, error = %e, "sandbox grant restart: decline not marked");
+            }
+        }
+        Err(e) => tracing::warn!(session, error = %e, "sandbox grant restart: resume failed"),
     }
 }
 
@@ -1097,7 +1148,41 @@ mod tests {
         };
         assert!(value_items::dismiss_by_id(&f.db, &item_id(&f, &no)).unwrap());
         assert_eq!(idle(200), Some(FollowUp::TellDeclined));
+        assert_eq!(
+            idle(200),
+            Some(FollowUp::TellDeclined),
+            "owed until it arrives"
+        );
+        let (note, told) = with_declines(&f.db, SESSION, None).unwrap();
+        assert!(note.unwrap().contains("egress other.org:443"));
+        mark_told(&f.db, &told).unwrap();
         assert_eq!(idle(200), None, "told once");
+        assert!(store::sessions_awaiting(&f.db, 200).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_decline_the_tool_settled_is_still_told_and_a_launch_leaves_no_restart_owed() {
+        let f = fixture(true);
+        let Outcome::Pending { id: no } = ask(&f, Capability::Egress, "a.example.org") else {
+            panic!("pending")
+        };
+        assert!(value_items::dismiss_by_id(&f.db, &item_id(&f, &no)).unwrap());
+        // Another request settles the first on its way through, and its reply never mentions it.
+        let out = ask(&f, Capability::FsWrite, &f.at(".gradle"));
+        assert!(matches!(out, Outcome::Approved { .. }), "{out:?}");
+        assert!(store::restart_due(&f.db, SESSION).unwrap());
+        launch_delta(
+            &f.db,
+            &AgentHostConfig::default(),
+            SESSION,
+            Some(&TestPaths(f.home.clone())),
+            200,
+        );
+        assert!(!store::restart_due(&f.db, SESSION).unwrap());
+        assert_eq!(
+            follow_up(&f.db, SESSION, AgentStatus::Idle, 200).unwrap(),
+            Some(FollowUp::TellDeclined)
+        );
     }
 
     #[test]
