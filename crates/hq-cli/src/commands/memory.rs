@@ -1,5 +1,5 @@
 use anyhow::Result;
-use hq_core::config::HqConfig;
+use hq_core::config::{HqConfig, MemoryRecall};
 use hq_vault::VaultClient;
 
 /// Show memory facts, edit memory, and manage system context.
@@ -15,6 +15,7 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
         "context" => context(&vault)?,
         "graph" => graph(config, args)?,
         "stats" => stats(config)?,
+        "recall-report" | "recall" => recall_report(config, args)?,
         _ => usage()?,
     }
 
@@ -192,6 +193,102 @@ fn graph(config: &HqConfig, args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// How recall has done over the last few days, and whether it is ready to be switched on.
+fn recall_report(config: &HqConfig, args: &[String]) -> Result<()> {
+    let days: i64 = args.first().and_then(|a| a.parse().ok()).unwrap_or(7);
+    let db = hq_db::Database::open(&config.db_path())?;
+    let report = db.with_conn(|conn| hq_db::memory_recall_log::report(conn, days))?;
+    print!(
+        "{}",
+        render_recall_report(&report, config.daemon.memory_recall)
+    );
+    Ok(())
+}
+
+/// The shortest run of turns worth judging recall by.
+const MIN_TURNS_TO_JUDGE: i64 = 50;
+/// The slowest a lookup may be at the slow end, in milliseconds, before a chat would feel it.
+const SLOW_MS: u64 = 150;
+/// The most tokens one block may take.
+const BLOCK_TOKENS: u64 = 500;
+
+fn render_recall_report(r: &hq_db::memory_recall_log::Report, mode: MemoryRecall) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    let title = format!("Memory recall, last {} days", r.days);
+    let _ = writeln!(out, "{title}\n{}\n", "=".repeat(title.len()));
+    let mode_note = match mode {
+        MemoryRecall::Shadow => {
+            "shadow: chats still get the most important memories. What would fit is only written down."
+        }
+        MemoryRecall::Query => "query: each message brings up only the memories that fit it.",
+        MemoryRecall::Recent => {
+            "recent: chats get the most important memories. Nothing is worked out."
+        }
+        MemoryRecall::Off => "off: memories HQ learned from chats are not brought up at all.",
+    };
+    let _ = writeln!(out, "Mode: {mode_note}");
+    if r.turns == 0 {
+        let _ = writeln!(
+            out,
+            "\nNothing has been written down yet. It is recorded while the mode is shadow or query."
+        );
+        return out;
+    }
+    let share = |n: i64| 100.0 * n as f64 / r.turns as f64;
+    let _ = writeln!(out, "\nMessages looked at: {}", r.turns);
+    let _ = writeln!(
+        out,
+        "  brought up something: {} ({:.0}%), {:.1} memories a message on average",
+        r.with_memories,
+        share(r.with_memories),
+        r.mean_items
+    );
+    let _ = writeln!(out, "  said nothing: {}", r.turns - r.with_memories);
+    for (reason, n) in &r.silent {
+        let _ = writeln!(out, "    {reason}: {n}");
+    }
+    let _ = writeln!(
+        out,
+        "\nSpeed: half took {} ms or less, 95% took {} ms or less, the slowest {} ms",
+        r.latency_ms.p50, r.latency_ms.p95, r.latency_ms.max
+    );
+    let _ = writeln!(
+        out,
+        "Size when something was brought up: typically {} tokens, 95% under {}, the largest {}",
+        r.tokens.p50, r.tokens.p95, r.tokens.max
+    );
+
+    let _ = writeln!(out, "\nReady to switch to query mode?");
+    let mut check = |ok: bool, what: String| {
+        let _ = writeln!(out, "  {}: {what}", if ok { "yes" } else { "not yet" });
+    };
+    check(
+        r.turns >= MIN_TURNS_TO_JUDGE,
+        format!(
+            "at least {MIN_TURNS_TO_JUDGE} messages looked at ({})",
+            r.turns
+        ),
+    );
+    check(
+        r.failures == 0,
+        format!("no failures or time-outs ({})", r.failures),
+    );
+    check(
+        r.latency_ms.p95 < SLOW_MS,
+        format!("slow end under {SLOW_MS} ms ({} ms)", r.latency_ms.p95),
+    );
+    check(
+        r.tokens.p95 <= BLOCK_TOKENS,
+        format!("blocks under {BLOCK_TOKENS} tokens ({})", r.tokens.p95),
+    );
+    let _ = writeln!(
+        out,
+        "To switch: set daemon.memory_recall to query in ~/.hq/config.yaml, or HQ_DAEMON__MEMORY_RECALL=query."
+    );
+    out
+}
+
 /// Memory database counts and the activity dashboard.
 fn stats(config: &HqConfig) -> Result<()> {
     let db_path = config.db_path();
@@ -298,5 +395,79 @@ fn usage() -> Result<()> {
     println!("  context          Show system context summary");
     println!("  graph <entity>   Explore entity connections");
     println!("  stats            Memory DB stats + activity dashboard");
+    println!("  recall-report [days]  How memory recall has done lately (default 7 days)");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hq_db::memory_recall_log::{Percentiles, Report};
+
+    fn report(turns: i64, failures: i64, p95: u64) -> Report {
+        Report {
+            days: 7,
+            turns,
+            with_memories: turns / 3,
+            silent: vec![("nothing fits".to_string(), turns - turns / 3)],
+            failures,
+            mean_items: 0.5,
+            latency_ms: Percentiles {
+                p50: 3,
+                p95,
+                max: p95 + 5,
+            },
+            tokens: Percentiles {
+                p50: 40,
+                p95: 90,
+                max: 120,
+            },
+        }
+    }
+
+    #[test]
+    fn an_empty_log_says_so_instead_of_printing_zeros() {
+        let text = render_recall_report(&report(0, 0, 0), MemoryRecall::Shadow);
+        assert!(text.contains("Nothing has been written down yet"), "{text}");
+        assert!(!text.contains("Ready to switch"));
+    }
+
+    #[test]
+    fn a_healthy_log_is_ready_and_says_how_to_switch() {
+        let text = render_recall_report(&report(120, 0, 9), MemoryRecall::Shadow);
+        assert!(text.contains("Messages looked at: 120"), "{text}");
+        assert!(text.contains("nothing fits: 80"), "{text}");
+        assert_eq!(text.matches("  yes:").count(), 4, "{text}");
+        assert!(!text.contains("not yet"), "{text}");
+        assert!(text.contains("HQ_DAEMON__MEMORY_RECALL=query"));
+    }
+
+    #[test]
+    fn too_little_data_a_failure_or_a_slow_lookup_is_not_ready() {
+        let few = render_recall_report(&report(10, 0, 9), MemoryRecall::Shadow);
+        assert!(few.contains("not yet: at least 50 messages"), "{few}");
+        let failed = render_recall_report(&report(120, 2, 9), MemoryRecall::Shadow);
+        assert!(
+            failed.contains("not yet: no failures or time-outs (2)"),
+            "{failed}"
+        );
+        let slow = render_recall_report(&report(120, 0, 400), MemoryRecall::Shadow);
+        assert!(
+            slow.contains("not yet: slow end under 150 ms (400 ms)"),
+            "{slow}"
+        );
+    }
+
+    #[test]
+    fn each_mode_is_named_in_plain_words() {
+        for (mode, word) in [
+            (MemoryRecall::Shadow, "shadow"),
+            (MemoryRecall::Query, "query"),
+            (MemoryRecall::Recent, "recent"),
+            (MemoryRecall::Off, "off"),
+        ] {
+            let text = render_recall_report(&report(0, 0, 0), mode);
+            assert!(text.contains(&format!("Mode: {word}:")), "{text}");
+        }
+    }
 }

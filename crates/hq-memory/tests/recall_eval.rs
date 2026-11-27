@@ -185,6 +185,7 @@ fn retrieve(policy: Policy, world: &World, case: &Case) -> Retrieved {
                     message: &case.message,
                     prior_message: case.prior_message.as_deref(),
                     audience,
+                    exclude: &[],
                 },
             )
             .expect("recall");

@@ -41,6 +41,11 @@ pub struct DaemonConfig {
     #[serde(default)]
     pub memory_extraction: MemoryExtraction,
 
+    /// How what HQ remembers reaches a chat. See [`MemoryRecall`]. Reads nothing outside this
+    /// device and calls no model.
+    #[serde(default)]
+    pub memory_recall: MemoryRecall,
+
     /// A weekly inbox item bringing up one saved note that matches open tasks. No model is used.
     #[serde(default = "default_true")]
     pub collection_tip: bool,
@@ -96,6 +101,23 @@ pub enum MemoryExtraction {
     Local,
 }
 
+/// How what HQ remembers reaches a chat.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryRecall {
+    /// Chats still get the most important memories, as before. In the background HQ also works
+    /// out which memories fit each message and writes down what it would have brought up (counts
+    /// and ids only, never your words) so the choice can be checked before it is switched on.
+    #[default]
+    Shadow,
+    /// Each message brings up only the memories that fit it, and nothing when none do.
+    Query,
+    /// Chats get the most important memories whatever was said, as before. Nothing is worked out.
+    Recent,
+    /// Memories HQ learned from chats are not brought up at all. `MEMORY.md` still is.
+    Off,
+}
+
 /// The source of note embeddings.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -124,6 +146,7 @@ impl Default for DaemonConfig {
             embedding_interval_secs: default_embed_interval(),
             embedding_provider: EmbeddingProvider::default(),
             memory_extraction: MemoryExtraction::default(),
+            memory_recall: MemoryRecall::default(),
             collection_tip: true,
             link_capture: true,
             tool_failure_digest: true,

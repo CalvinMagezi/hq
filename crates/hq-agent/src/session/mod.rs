@@ -171,6 +171,17 @@ pub struct SessionStats {
 /// reply, as `(role, content)` pairs. Used for memory extraction.
 pub type PostTurnCallback = Arc<dyn Fn(Vec<(String, String)>) + Send + Sync>;
 
+/// Brings up what HQ remembers that fits one message. Called once per prompt, before the message
+/// is sent, and must be cheap and never fail: it answers `None` when nothing fits, when it ran
+/// out of time, or when anything went wrong.
+#[async_trait::async_trait]
+pub trait TurnRecall: Send + Sync {
+    /// The note to show the model for `message`. `prior_message` is the owner's previous message,
+    /// for a short follow-up that cannot stand alone. The text is reference material about the
+    /// owner, never an instruction.
+    async fn recall(&self, message: &str, prior_message: Option<&str>) -> Option<String>;
+}
+
 /// A subscriber over the correlated [`SessionEventEnvelope`] stream.
 pub type EnvelopeSubscriber = Box<dyn Fn(SessionEventEnvelope) + Send + Sync>;
 
@@ -227,6 +238,9 @@ pub struct AgentSession {
     /// a note just before the next user message instead of inside the system prompt, so the
     /// system prompt and history stay byte-identical from turn to turn and stay cached.
     pub(super) turn_context: Option<String>,
+    /// Memories that fit the message being sent, looked up fresh for every prompt and added to
+    /// the same note as `turn_context`, so they never touch the cached system prompt.
+    pub(super) turn_recall: Option<Arc<dyn TurnRecall>>,
     /// The tools the last "tools that may fit" line named, so a later load of one of them can be
     /// counted as the hint being followed. Never sent anywhere.
     pub(super) last_hinted: Vec<String>,
@@ -316,6 +330,7 @@ impl AgentSession {
             preemptive_handle: None,
             post_turn_callback: None,
             turn_context: None,
+            turn_recall: None,
             last_hinted: Vec::new(),
             last_resolved_model: None,
             session_id: uuid::Uuid::new_v4().to_string(),
@@ -501,6 +516,23 @@ impl AgentSession {
     /// Context for the next prompt only; see the `turn_context` field.
     pub fn set_turn_context(&mut self, context: String) {
         self.turn_context = (!context.trim().is_empty()).then_some(context);
+    }
+
+    /// Look up what HQ remembers for every prompt from now on; see the `turn_recall` field.
+    pub fn set_turn_recall(&mut self, recall: Arc<dyn TurnRecall>) {
+        self.turn_recall = Some(recall);
+    }
+
+    /// The owner's latest message, leaving out the context notes HQ adds before it.
+    pub(super) fn previous_owner_message(&self) -> Option<String> {
+        self.messages
+            .iter()
+            .rev()
+            .find(|m| {
+                m.role == hq_core::types::MessageRole::User
+                    && !m.content.starts_with(hq_core::types::TURN_CONTEXT_HEADER)
+            })
+            .map(|m| m.content.clone())
     }
 
     /// The context the next prompt will carry, if any.

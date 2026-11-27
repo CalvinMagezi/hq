@@ -236,6 +236,8 @@ pub struct RecallQuery<'a> {
     /// ("and on Fridays?").
     pub prior_message: Option<&'a str>,
     pub audience: Audience,
+    /// Memories already shown in this chat, so a long chat does not repeat itself.
+    pub exclude: &'a [i64],
 }
 
 /// One memory worth bringing up.
@@ -314,7 +316,8 @@ pub fn recall(db: &Database, query: &RecallQuery<'_>) -> Result<Recalled> {
         .collect::<Vec<_>>()
         .join(" ");
     let candidates = db.with_conn(|conn| {
-        let hits = search_any(conn, &words, View::Recall, CANDIDATES)?;
+        let mut hits = search_any(conn, &words, View::Recall, CANDIDATES)?;
+        hits.retain(|h| !query.exclude.contains(&h.id));
         let best = hits.iter().map(|h| h.score).fold(0.0_f64, f64::max);
         let mut rows = Vec::new();
         for hit in hits {
@@ -667,6 +670,7 @@ mod tests {
                 message,
                 prior_message: None,
                 audience: Audience::Owner,
+                exclude: &[],
             },
         )
         .unwrap()
@@ -812,6 +816,7 @@ mod tests {
                 message: "When does Acme Feeds deliver?",
                 prior_message: None,
                 audience: Audience::Other,
+                exclude: &[],
             },
         )
         .unwrap();
@@ -859,6 +864,7 @@ mod tests {
                 message: "and on Fridays?",
                 prior_message: Some("Who is on the counter on Thursday?"),
                 audience: Audience::Owner,
+                exclude: &[],
             },
         )
         .unwrap();
@@ -892,6 +898,7 @@ mod tests {
                 message: "When is the loan due?",
                 prior_message: Some("What does Acme Feeds deliver?"),
                 audience: Audience::Owner,
+                exclude: &[],
             },
         )
         .unwrap();
@@ -1080,5 +1087,36 @@ mod tests {
         .unwrap();
 
         assert_eq!(ids(&ask(&db, "When does Acme Feeds deliver?")), vec![id]);
+    }
+
+    #[test]
+    fn a_memory_already_shown_in_this_chat_is_not_brought_up_again() {
+        let db = db();
+        let feeds = add(
+            &db,
+            "Acme Feeds delivers on Thursdays",
+            &["Acme Feeds"],
+            &[],
+            0.5,
+        );
+        let other = add(
+            &db,
+            "Acme Feeds invoices arrive on the first",
+            &["Acme Feeds"],
+            &[],
+            0.5,
+        );
+        let query = |exclude: &'static [i64]| RecallQuery {
+            message: "Acme Feeds",
+            prior_message: None,
+            audience: Audience::Owner,
+            exclude,
+        };
+
+        let both = recall(&db, &query(&[])).unwrap();
+        assert_eq!(both.items.len(), 2);
+
+        let rest = recall(&db, &query(Box::leak(Box::new([feeds])))).unwrap();
+        assert_eq!(ids(&rest), vec![other]);
     }
 }
