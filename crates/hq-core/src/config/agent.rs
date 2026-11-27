@@ -41,6 +41,11 @@ pub struct DaemonConfig {
     #[serde(default)]
     pub memory_extraction: MemoryExtraction,
 
+    /// How what HQ remembers reaches a chat. See [`MemoryRecall`]. Reads nothing outside this
+    /// device and calls no model.
+    #[serde(default)]
+    pub memory_recall: MemoryRecall,
+
     /// A weekly inbox item bringing up one saved note that matches open tasks. No model is used.
     #[serde(default = "default_true")]
     pub collection_tip: bool,
@@ -86,6 +91,14 @@ pub struct DaemonConfig {
     /// device only: no model, no network, and it changes no note.
     #[serde(default = "default_true")]
     pub vault_health: bool,
+
+    /// After each notes check, fix the links HQ is certain about (a link whose folder is out of
+    /// date, a note that was renamed, a second block of properties) without asking. Off until
+    /// the owner allows it, and it switches itself off again if its fixes keep being undone.
+    /// Every run saves the original notes first and can be undone. Changes notes on this device
+    /// only: no model, no network.
+    #[serde(default)]
+    pub vault_auto_fix: bool,
 }
 
 /// How chat turns are turned into memories.
@@ -98,6 +111,23 @@ pub enum MemoryExtraction {
     /// No model: an extractive summary, recurring names, tags borrowed from the nearest tagged
     /// notes (with the local embedder), and a salience-based importance.
     Local,
+}
+
+/// How what HQ remembers reaches a chat.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryRecall {
+    /// Chats still get the most important memories, as before. In the background HQ also works
+    /// out which memories fit each message and writes down what it would have brought up (counts
+    /// and ids only, never your words) so the choice can be checked before it is switched on.
+    #[default]
+    Shadow,
+    /// Each message brings up only the memories that fit it, and nothing when none do.
+    Query,
+    /// Chats get the most important memories whatever was said, as before. Nothing is worked out.
+    Recent,
+    /// Memories HQ learned from chats are not brought up at all. `MEMORY.md` still is.
+    Off,
 }
 
 /// The source of note embeddings.
@@ -128,6 +158,7 @@ impl Default for DaemonConfig {
             embedding_interval_secs: default_embed_interval(),
             embedding_provider: EmbeddingProvider::default(),
             memory_extraction: MemoryExtraction::default(),
+            memory_recall: MemoryRecall::default(),
             collection_tip: true,
             link_capture: true,
             tool_failure_digest: true,
@@ -138,6 +169,7 @@ impl Default for DaemonConfig {
             daily_brief: true,
             reminders: true,
             vault_health: true,
+            vault_auto_fix: false,
         }
     }
 }

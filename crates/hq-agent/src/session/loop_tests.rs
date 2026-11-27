@@ -2387,6 +2387,164 @@ async fn turn_context_goes_just_before_the_message_once_and_the_exchange_stays_c
     );
 }
 
+/// A recall that answers from a script and remembers what it was asked.
+struct ScriptedRecall {
+    answer: Option<&'static str>,
+    asked: std::sync::Mutex<Vec<(String, Option<String>)>>,
+}
+
+impl ScriptedRecall {
+    fn new(answer: Option<&'static str>) -> Arc<Self> {
+        Arc::new(Self {
+            answer,
+            asked: std::sync::Mutex::new(Vec::new()),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::session::TurnRecall for ScriptedRecall {
+    async fn recall(&self, message: &str, prior_message: Option<&str>) -> Option<String> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push((message.to_string(), prior_message.map(str::to_string)));
+        self.answer.map(str::to_string)
+    }
+}
+
+fn notes_in(requests: &[hq_llm::provider::ChatRequest]) -> Vec<String> {
+    requests[0]
+        .messages
+        .iter()
+        .filter(|m| {
+            m.role == MessageRole::User
+                && m.content
+                    .starts_with(crate::session::r#loop::TURN_CONTEXT_HEADER)
+        })
+        .map(|m| m.content.clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn recalled_memories_go_in_the_turn_note_just_before_the_message_and_not_the_system_prompt() {
+    let provider = Arc::new(MockProvider::new(
+        vec![BufferedReply::Complete("ok".to_string())],
+        vec![],
+    ));
+    let mut agent = session(provider.clone(), vec![]);
+    agent.set_system_prompt("stable prompt".into());
+    agent.set_turn_recall(ScriptedRecall::new(Some(
+        "<recalled_memories>\n- [3d ago] Acme Feeds delivers on Thursdays\n</recalled_memories>",
+    )));
+
+    agent.prompt("when does Acme deliver?").await.unwrap();
+
+    let requests = provider.requests.lock().unwrap();
+    let notes = notes_in(&requests);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("Acme Feeds delivers on Thursdays"));
+    let last = requests[0].messages.last().unwrap();
+    assert_eq!(last.content, "when does Acme deliver?");
+    let before_last = &requests[0].messages[requests[0].messages.len() - 2];
+    assert!(
+        before_last
+            .content
+            .starts_with(crate::session::r#loop::TURN_CONTEXT_HEADER),
+        "the note is the message just before the owner's"
+    );
+    assert_eq!(
+        agent.system_prompt.as_deref(),
+        Some("stable prompt"),
+        "the cached system prompt is untouched"
+    );
+}
+
+#[tokio::test]
+async fn nothing_recalled_means_no_note_at_all() {
+    let provider = Arc::new(MockProvider::new(
+        vec![BufferedReply::Complete("hello".to_string())],
+        vec![],
+    ));
+    let mut agent = session(provider.clone(), vec![]);
+    agent.set_turn_recall(ScriptedRecall::new(None));
+
+    agent.prompt("hi").await.unwrap();
+
+    let requests = provider.requests.lock().unwrap();
+    assert!(notes_in(&requests).is_empty(), "silence adds nothing");
+}
+
+#[tokio::test]
+async fn recalled_memories_the_builders_context_and_a_hint_share_one_note() {
+    let (mut agent, provider, _db) =
+        deferred_catalog_session(vec![BufferedReply::Complete("ok".to_string())]);
+    agent.set_turn_context("- concept page: Landlord".into());
+    agent.set_turn_recall(ScriptedRecall::new(Some(
+        "- [1d ago] the rent is due on the 1st",
+    )));
+
+    agent.prompt("send an email to the landlord").await.unwrap();
+
+    let requests = provider.requests.lock().unwrap();
+    let notes = notes_in(&requests);
+    assert_eq!(notes.len(), 1, "one note, not three: {notes:?}");
+    let recalled = notes[0].find("the rent is due").expect("recalled memory");
+    let context = notes[0]
+        .find("concept page: Landlord")
+        .expect("builder context");
+    let hint = notes[0].find("email_send").expect("tool hint");
+    assert!(recalled < context && context < hint, "{}", notes[0]);
+}
+
+#[tokio::test]
+async fn recall_is_given_the_owners_previous_message_and_never_a_context_note() {
+    let provider = Arc::new(MockProvider::new(
+        vec![
+            BufferedReply::Complete("one".to_string()),
+            BufferedReply::Complete("two".to_string()),
+        ],
+        vec![],
+    ));
+    let mut agent = session(provider, vec![]);
+    let recall = ScriptedRecall::new(Some("- [1d ago] a memory"));
+    agent.set_turn_recall(recall.clone());
+
+    agent
+        .prompt("who is on the counter on Thursday?")
+        .await
+        .unwrap();
+    agent.prompt("and on Fridays?").await.unwrap();
+
+    let asked = recall.asked.lock().unwrap();
+    assert_eq!(
+        asked[0],
+        ("who is on the counter on Thursday?".to_string(), None)
+    );
+    assert_eq!(
+        asked[1],
+        (
+            "and on Fridays?".to_string(),
+            Some("who is on the counter on Thursday?".to_string())
+        ),
+        "the note HQ added before the first message is not the owner's previous message"
+    );
+}
+
+#[tokio::test]
+async fn a_session_with_no_recall_behaves_as_before() {
+    let provider = Arc::new(MockProvider::new(
+        vec![BufferedReply::Complete("ok".to_string())],
+        vec![],
+    ));
+    let mut agent = session(provider.clone(), vec![]);
+
+    agent.prompt("hello there").await.unwrap();
+
+    let requests = provider.requests.lock().unwrap();
+    assert!(notes_in(&requests).is_empty());
+}
+
 fn plain(role: MessageRole, content: &str) -> ChatMessage {
     ChatMessage {
         image_parts: Vec::new(),

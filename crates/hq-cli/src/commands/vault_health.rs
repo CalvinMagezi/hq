@@ -8,14 +8,212 @@ use chrono::{DateTime, Utc};
 use hq_core::config::HqConfig;
 use hq_vault::health::{Ignored, Report};
 
-/// `hq vault health [--json]`: check every note now and say what is wrong.
-pub fn run(config: &HqConfig, json: bool) -> Result<()> {
+/// `hq vault health [--json] [--apply [--tier a|all]]`: check every note now and say what is
+/// wrong, and with `--apply` fix what can be fixed. `--tier a` (the default) does only the
+/// fixes HQ is certain about; `--tier all` adds the likely ones. The originals are saved first
+/// and the run can be undone with `hq vault repair --undo <run>`.
+pub fn run(config: &HqConfig, args: &[String], json: bool) -> Result<()> {
+    if args.iter().any(|a| a == "--apply") {
+        return apply(config, args, json);
+    }
     let ignored = load_ignored(config);
     let report = hq_tools::vault_health::scan_now(&config.vault_path, &ignored);
+    let plan = open_db(config)
+        .and_then(|db| hq_tools::vault_health::plan_now(&config.vault_path, &db).ok())
+        .map(|(plan, _)| plan);
     if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        let mut value = serde_json::to_value(&report)?;
+        if let Some(plan) = &plan {
+            value["fixes"] = serde_json::to_value(&plan.fixes)?;
+            value["skipped"] = serde_json::to_value(&plan.skipped)?;
+        }
+        println!("{}", serde_json::to_string_pretty(&value)?);
     } else {
         print!("{}", render_text(&report));
+        if let Some(plan) = &plan {
+            print!("{}", render_fixes(plan));
+        }
+    }
+    Ok(())
+}
+
+fn open_db(config: &HqConfig) -> Option<hq_db::Database> {
+    hq_db::Database::open_existing(&config.db_path()).ok()
+}
+
+fn apply(config: &HqConfig, args: &[String], json: bool) -> Result<()> {
+    let tier = args
+        .iter()
+        .position(|a| a == "--tier")
+        .and_then(|i| args.get(i + 1))
+        .map(String::as_str)
+        .unwrap_or("a");
+    let which = match tier.to_lowercase().as_str() {
+        "a" => hq_tools::vault_repair::Which::TierA,
+        "all" | "b" => hq_tools::vault_repair::Which::All,
+        other => anyhow::bail!("--tier is a or all, not '{other}'"),
+    };
+    let Some(db) = open_db(config) else {
+        anyhow::bail!("HQ has no database yet: start HQ once, then try again");
+    };
+    let db = std::sync::Arc::new(db);
+    let applied = hq_tools::vault_repair::apply_repairs(
+        &config.vault_path,
+        &db,
+        &which,
+        hq_db::vault_health::Source::Owner,
+    )?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&applied)?);
+    } else {
+        print!("{}", render_applied(&applied));
+    }
+    Ok(())
+}
+
+/// What a repair run did, in plain lines.
+pub fn render_applied(a: &hq_tools::vault_repair::Applied) -> String {
+    let d = &a.done;
+    if d.fixes.is_empty() {
+        let mut out = String::from("Nothing was fixed.\n");
+        if !d.skipped.is_empty() {
+            out.push_str(&skipped_lines(&d.skipped));
+        }
+        return out;
+    }
+    let mut out = format!(
+        "Fixed {} thing(s): {} note(s) changed, {} removed.\n",
+        d.fixes.len(),
+        d.rewritten.len(),
+        d.trashed.len()
+    );
+    out.push_str(&format!(
+        "The originals are saved. To take it back: hq vault repair --undo {}\n",
+        d.run_id
+    ));
+    if !d.skipped.is_empty() {
+        out.push_str(&skipped_lines(&d.skipped));
+    }
+    out
+}
+
+fn why(reason: hq_vault::fixes::SkipReason) -> &'static str {
+    use hq_vault::fixes::SkipReason::*;
+    match reason {
+        Protected => "HQ's own folders are never changed",
+        MachineWritten => "written by HQ's own upkeep",
+        Suite => "a sheet, deck or dashboard",
+        Pinned => "pinned, so only you change it",
+        AgentUnreviewed => "written by an assistant and not reviewed yet",
+        RecentlyEdited => "edited a moment ago",
+        TooLarge => "too large to change safely",
+        CannotRelink => "links to it cannot be pointed at the other note",
+        Changed => "changed since the check",
+        Conflict => "two fixes wanted the same words",
+    }
+}
+
+fn skipped_lines(skipped: &[hq_vault::fixes::Skipped]) -> String {
+    let mut out = format!("Left alone: {}\n", skipped.len());
+    for s in skipped.iter().take(10) {
+        out.push_str(&format!("  {}  ({})\n", s.note, why(s.why)));
+    }
+    if skipped.len() > 10 {
+        out.push_str(&format!("  and {} more\n", skipped.len() - 10));
+    }
+    out
+}
+
+/// What can be fixed, as lines under the report.
+pub fn render_fixes(plan: &hq_vault::fixes::Plan) -> String {
+    use hq_vault::fixes::{Kind, Tier};
+    let (a, b) = plan.counts();
+    if a + b == 0 && plan.skipped.is_empty() {
+        return String::new();
+    }
+    let mut out = format!("\nCan be fixed: {a} certain, {b} likely\n");
+    for f in plan.fixes.iter().take(10) {
+        let tier = if f.tier == Tier::A {
+            "certain"
+        } else {
+            "likely "
+        };
+        let what = match f.kind {
+            Kind::NestedFrontmatter => format!("{}  merge the second block of properties", f.note),
+            Kind::MergeDuplicate => format!(
+                "{}  same text as {}: remove it, point links there",
+                f.note, f.after
+            ),
+            _ => format!(
+                "{}:{}  {}  becomes  {}",
+                f.note,
+                f.line.unwrap_or(0),
+                f.before,
+                f.after
+            ),
+        };
+        out.push_str(&format!("  [{tier}] {what}\n"));
+    }
+    if plan.fixes.len() > 10 {
+        out.push_str(&format!("  and {} more\n", plan.fixes.len() - 10));
+    }
+    if a + b > 0 {
+        out.push_str("Run `hq vault health --apply` to fix the certain ones (`--tier all` adds the likely ones).\n");
+    }
+    if !plan.skipped.is_empty() {
+        out.push_str(&skipped_lines(&plan.skipped));
+    }
+    out
+}
+
+/// `hq vault repairs [--json]`: what the check changed, newest first.
+pub fn repairs(config: &HqConfig, json: bool) -> Result<()> {
+    let rows = match open_db(config) {
+        Some(db) => db.with_conn(|c| hq_db::vault_health::repairs(c, 30))?,
+        None => Vec::new(),
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+        return Ok(());
+    }
+    if rows.is_empty() {
+        println!("Nothing has been changed by the notes check.");
+        return Ok(());
+    }
+    for r in rows {
+        let state = if r.undone_at.is_some() {
+            "taken back"
+        } else {
+            "in place"
+        };
+        println!(
+            "{}  {}  {} fix(es), {} note(s) changed, {} removed  ({}, {state})",
+            r.run_id, r.ran_at, r.fixes, r.rewritten, r.trashed, r.source
+        );
+    }
+    Ok(())
+}
+
+/// `hq vault repair --undo <run>`.
+pub fn undo(config: &HqConfig, run: &str) -> Result<()> {
+    let Some(db) = open_db(config) else {
+        anyhow::bail!("HQ has no database yet");
+    };
+    let undone =
+        hq_tools::vault_repair::undo_repair(&config.vault_path, &std::sync::Arc::new(db), run)?;
+    println!(
+        "Put back {} note(s) and {} removed note(s).",
+        undone.restored.len(),
+        undone.untrashed.len()
+    );
+    if !undone.edited_since.is_empty() {
+        println!("Left as you have them, since you changed them after the fix:");
+        for n in &undone.edited_since {
+            println!("  {n}");
+        }
+    }
+    for f in &undone.failed {
+        println!("Could not put back: {f}");
     }
     Ok(())
 }
@@ -227,6 +425,10 @@ mod tests {
         assert_eq!(doctor_line(None, now).0, "--");
         let at = |mins: i64| (now - chrono::Duration::minutes(mins)).to_rfc3339();
         let clean = Stored {
+            fixes: vec![],
+            fix_a: 0,
+            fix_b: 0,
+            skipped: vec![],
             ran_at: at(1),
             report: report(0),
         };
@@ -234,6 +436,10 @@ mod tests {
         assert_eq!(label, "ok");
         assert!(text.contains("just now"), "{text}");
         let dirty = Stored {
+            fixes: vec![],
+            fix_a: 0,
+            fix_b: 0,
+            skipped: vec![],
             ran_at: at(300),
             report: report(3),
         };

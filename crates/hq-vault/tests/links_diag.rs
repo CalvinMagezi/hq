@@ -182,3 +182,33 @@ fn scale_benchmark() {
         assert!(tally.links > 0);
     }
 }
+
+/// The whole check as the daemon runs it: read every note, scan for problems, plan the repairs.
+/// The planner looks for a near-match name for every broken link, so this is where a vault with
+/// many broken links would be slow.
+#[test]
+#[ignore = "benchmark: run with --release --ignored --nocapture pipeline_benchmark"]
+fn pipeline_benchmark() {
+    use hq_vault::{fixes, health, relink};
+    for n in [5_000usize, 20_000] {
+        let dir = tempfile::tempdir().unwrap();
+        synthetic_vault(dir.path(), n, 20);
+        let t0 = Instant::now();
+        let snap = relink::snapshot(dir.path());
+        let read_ms = t0.elapsed().as_millis();
+        // One index of note names for both, as the daemon does it: a missing name is searched once.
+        let names = hq_vault::check::NameIndex::for_snapshot(&snap);
+        let t1 = Instant::now();
+        let report = health::scan_full_with(&snap, &names);
+        let scan_ms = t1.elapsed().as_millis();
+        let t2 = Instant::now();
+        let plan = fixes::plan_with(&snap, &fixes::Context::default(), &names);
+        let plan_ms = t2.elapsed().as_millis();
+        println!(
+            "{n} notes: read {read_ms} ms, scan {scan_ms} ms ({} dead links), plan {plan_ms} ms ({} fixes)",
+            report.counts.links.dead,
+            plan.fixes.len()
+        );
+        assert_eq!(snap.notes.len(), n);
+    }
+}

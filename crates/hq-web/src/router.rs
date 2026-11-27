@@ -2,7 +2,7 @@
 
 use axum::{
     Router,
-    routing::{get, post},
+    routing::{get, patch, post},
 };
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
@@ -101,6 +101,22 @@ fn note_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
             "/api/prefs",
             get(prefs_api::prefs_get_handler).put(prefs_api::prefs_put_handler),
         )
+        .route(
+            "/api/reminders",
+            get(reminders_api::list_handler).post(reminders_api::create_handler),
+        )
+        .route(
+            "/api/reminders/{id}",
+            patch(reminders_api::patch_handler).delete(reminders_api::delete_handler),
+        )
+        .route(
+            "/api/reminders/{id}/done",
+            post(reminders_api::done_handler),
+        )
+        .route(
+            "/api/reminders/{id}/snooze",
+            post(reminders_api::snooze_handler),
+        )
         .route("/api/note/versions", get(vault_api::note_versions_handler))
         .route("/api/note/link", post(note_ids::note_link_handler))
         .route("/api/note/by-id/{id}", get(note_ids::note_by_id_handler))
@@ -121,6 +137,14 @@ fn note_routes(router: Router<Arc<WsState>>) -> Router<Arc<WsState>> {
         .route(
             "/api/vault/health/unignore",
             post(vault_health_api::unignore_handler),
+        )
+        .route(
+            "/api/vault/health/apply",
+            post(vault_health_api::apply_handler),
+        )
+        .route(
+            "/api/vault/health/undo",
+            post(vault_health_api::undo_handler),
         )
         .route("/api/vault-signals", get(vault_api::signals_handler))
         .route("/api/tree", get(api::tree_handler))
