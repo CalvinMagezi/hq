@@ -200,3 +200,26 @@ suspend fun HqClient.searchNotes(query: String, limit: Int = HqClient.PICKER_PAG
     send(authed("/api/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=$limit").build()) { text ->
         JSONObject(text).optJSONArray("results").objects().map { Triple(it.getString("note_path"), it.optString("title", ""), it.optString("notebook", "")) }
     }
+
+/** What the notes check found, as `GET /api/vault/health` says it; null when this HQ has no such check (404). */
+suspend fun HqClient.vaultHealth(): JSONObject? = try {
+    send(authed("/api/vault/health").build()) { JSONObject(it) }
+} catch (e: HqUnavailable) {
+    if (e.status == HqClient.HTTP_NOT_FOUND) null else throw e
+}
+
+/** Fixes the links HQ is certain about, or just [ids] when given. The answer is the check as it reads afterwards. */
+suspend fun HqClient.fixVaultLinks(ids: List<String> = emptyList()): JSONObject {
+    val body = if (ids.isEmpty()) JSONObject().put("tier", "a") else JSONObject().put("ids", org.json.JSONArray(ids))
+    return postJson("/api/vault/health/apply", body)
+}
+
+/** Puts back the notes of one repair run. Notes edited since are left as they are. */
+suspend fun HqClient.undoVaultRepair(runId: String): JSONObject =
+    postJson("/api/vault/health/undo", JSONObject().put("run_id", runId))
+
+/** Leaves everything here now alone, except what HQ can fix: only what is new counts from now on. */
+suspend fun HqClient.setAsideVaultHealth(): JSONObject = postJson("/api/vault/health/set-aside", JSONObject())
+
+/** Counts everything that was set aside or ignored again. */
+suspend fun HqClient.countVaultHealthAgain(): JSONObject = postJson("/api/vault/health/count-again", JSONObject())

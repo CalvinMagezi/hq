@@ -99,6 +99,8 @@ pub struct Rewrite {
     pub after: String,
     /// How many links changed.
     pub links: usize,
+    /// The same change as spans of `before`, so another plan can be combined with it.
+    pub edits: Vec<Edit>,
 }
 
 #[derive(Debug, Default)]
@@ -187,6 +189,7 @@ pub fn plan_moves(snap: &Snapshot, moves: &HashMap<String, String>) -> Plan {
                 before: note.text.clone(),
                 links: edits.len(),
                 after,
+                edits,
             }),
             _ => {}
         }
@@ -279,12 +282,87 @@ pub fn backlinks(snap: &Snapshot, target: &str) -> Vec<Backlink> {
     backlink_index(snap).remove(target).unwrap_or_default()
 }
 
+// ─── Pointing links at another note ──────────────────────────────────────────
+
+/// Rewrites that make every link to `gone` reach `keep` instead, for when `gone` is about to be
+/// deleted because it repeats `keep`. Only links that name `gone` alone are rewritten; a link
+/// that fit several notes is left as it is and reported in `left`. `referrers` are the notes
+/// that link to `gone` (itself excluded).
+pub fn plan_redirect(snap: &Snapshot, gone: &str, keep: &str) -> Plan {
+    let inputs: Vec<(String, Vec<String>)> = snap
+        .notes
+        .iter()
+        .map(|n| (n.path.clone(), aliases_of(&n.text)))
+        .collect();
+    let to_inputs = |skip: Option<&str>| {
+        inputs
+            .iter()
+            .filter(move |(p, _)| Some(p.as_str()) != skip)
+            .map(|(p, a)| NoteInput {
+                path: p.clone(),
+                aliases: a.clone(),
+            })
+            .collect::<Vec<_>>()
+    };
+    let old_set = NoteSet::new(to_inputs(None), snap.attachments.iter().cloned());
+    let new_set = NoteSet::new(to_inputs(Some(gone)), snap.attachments.iter().cloned());
+    let want = Resolution::Unique(keep.to_string());
+
+    let mut plan = Plan::default();
+    let mut referrers: BTreeSet<String> = BTreeSet::new();
+    for note in snap.notes.iter().filter(|n| n.path != gone) {
+        let mut edits: Vec<Edit> = Vec::new();
+        for link in extract(&note.text) {
+            match old_set.resolve(&note.path, &link) {
+                Resolution::Unique(p) if p == gone => {
+                    referrers.insert(note.path.clone());
+                    if new_set.resolve(&note.path, &link) == want {
+                        continue;
+                    }
+                    match spell(&link, &old_set, &new_set, &note.path, &note.path, &want) {
+                        Some(text) => edits.push(retarget(&link, &text)),
+                        None => plan.left.push(left_link(
+                            &note.path,
+                            &note.text,
+                            &link,
+                            Why::NoSpelling,
+                        )),
+                    }
+                }
+                Resolution::Ambiguous(ps) if ps.iter().any(|p| p == gone) => {
+                    referrers.insert(note.path.clone());
+                    plan.left
+                        .push(left_link(&note.path, &note.text, &link, Why::Ambiguous));
+                }
+                _ => {}
+            }
+        }
+        if edits.is_empty() {
+            continue;
+        }
+        if let Some(after) = apply_edits(&note.text, &edits)
+            && after != note.text
+        {
+            plan.rewrites.push(Rewrite {
+                old_path: note.path.clone(),
+                new_path: note.path.clone(),
+                before: note.text.clone(),
+                links: edits.len(),
+                after,
+                edits,
+            });
+        }
+    }
+    plan.referrers = referrers.into_iter().collect();
+    plan
+}
+
 // ─── Spelling a target ───────────────────────────────────────────────────────
 
 /// A target for `link` that resolves to `expected` once the move is done, written the way the
 /// link was written: a bare name stays a bare name for as long as that is enough, a path stays
 /// a path, a relative markdown link stays relative. `None` when nothing reaches it.
-fn spell(
+pub(crate) fn spell(
     link: &LinkRef,
     old_set: &NoteSet,
     new_set: &NoteSet,
@@ -359,7 +437,7 @@ fn is_relative_hit(set: &NoteSet, from: &str, target: &str) -> bool {
 }
 
 /// `to` as a path from the folder `from_dir`: `../Sibling/Note.md`.
-fn relative_path(from_dir: &str, to: &str) -> String {
+pub(crate) fn relative_path(from_dir: &str, to: &str) -> String {
     let from: Vec<&str> = from_dir.split('/').filter(|s| !s.is_empty()).collect();
     let to: Vec<&str> = to.split('/').collect();
     let common = from

@@ -71,9 +71,8 @@ impl Topic {
             | "scheduled_offer"
             | "tool_failure_digest"
             | "skill_review" => Topic::Tips,
-            "disk-watchdog" | "lane-quota" | "note-repair" | "server-setup" | "budget" => {
-                Topic::Upkeep
-            }
+            "disk-watchdog" | "lane-quota" | "note-repair" | "vault_health" | "server-setup"
+            | "budget" => Topic::Upkeep,
             "email-triage" | "email_triage" => Topic::Email,
             _ => Topic::Hq,
         }

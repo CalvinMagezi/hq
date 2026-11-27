@@ -163,6 +163,7 @@ fn resolve_or_file_task(db: &Arc<Database>, req: &HandoffRequest) -> Result<(t::
         non_blank(&req.space_id).unwrap_or(DEFAULT_SPACE),
         non_blank(&req.initiative).unwrap_or(DEFAULT_INITIATIVE),
     );
+    let narrowed = super::narrow::active();
     db.with_conn(|c| {
         let (task, created) = create_task_in(
             c,
@@ -183,6 +184,8 @@ fn resolve_or_file_task(db: &Arc<Database>, req: &HandoffRequest) -> Result<(t::
         )?;
         if !created {
             super::mission::resolve_task(c, &task.id)?;
+        } else if narrowed {
+            t::mark_origin_tainted(c, &task.id)?;
         }
         Ok((task, created))
     })
@@ -276,9 +279,11 @@ fn existing_report(
 /// real error rather than a timeout.
 pub async fn handoff(db: &Arc<Database>, host: Host, req: HandoffRequest) -> Result<Value> {
     let db = db.clone();
-    tokio::spawn(async move { run_handoff(&db, host, req).await })
-        .await
-        .map_err(|e| anyhow!("the handoff task did not finish: {e}"))?
+    tokio::spawn(super::narrow::carry(async move {
+        run_handoff(&db, host, req).await
+    }))
+    .await
+    .map_err(|e| anyhow!("the handoff task did not finish: {e}"))?
 }
 
 async fn run_handoff(db: &Arc<Database>, host: Host, req: HandoffRequest) -> Result<Value> {

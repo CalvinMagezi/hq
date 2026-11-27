@@ -30,6 +30,27 @@ fn remove_from_index(db: Option<&Arc<Database>>, path: &str) {
     });
 }
 
+/// What a note's removal changes outside the vault folder, for a note already moved to
+/// `trashed_to`: it leaves search, the trash remembers who removed it, and its provenance is
+/// kept for a while. Best effort, like the rest of the bookkeeping.
+pub fn forget_trashed(
+    vault_path: &std::path::Path,
+    db: Option<&Arc<Database>>,
+    path: &str,
+    trashed_to: &str,
+    by_owner: bool,
+) {
+    remove_from_index(db, path);
+    let Some(db) = db else { return };
+    let kept = trashed_to.to_string();
+    let noted =
+        db.with_conn(move |conn| hq_db::note_keep::record_deleted_by(conn, &kept, !by_owner));
+    if let Err(e) = noted {
+        tracing::warn!(error = %e, "trash: could not note who deleted the note");
+    }
+    crate::provenance::Recorder::new(db.clone(), vault_path.to_path_buf()).after_delete(path);
+}
+
 /// Moves a note to the trash and drops it from search and provenance. The tool and the apps
 /// both delete through here, so a delete means the same thing from either. `by_owner` is true only
 /// for the owner's own web handler; every tool or MCP call passes false, whatever identity it
@@ -47,16 +68,13 @@ pub async fn trash_and_forget(
     let path = hq_vault::rel_path::RelPath::parse(path)
         .map(|p| p.normalized())
         .unwrap_or_else(|_| path.to_string());
-    remove_from_index(db.as_ref(), &path);
-    if let Some(db) = db {
-        let kept = trashed_to.clone();
-        let noted =
-            db.with_conn(move |conn| hq_db::note_keep::record_deleted_by(conn, &kept, !by_owner));
-        if let Err(e) = noted {
-            tracing::warn!(error = %e, "trash: could not note who deleted the note");
-        }
-        crate::provenance::Recorder::new(db, vault.vault_path().to_path_buf()).after_delete(&path);
-    }
+    forget_trashed(
+        vault.vault_path(),
+        db.as_ref(),
+        &path,
+        &trashed_to,
+        by_owner,
+    );
     Ok(trashed_to)
 }
 

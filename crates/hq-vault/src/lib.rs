@@ -2,6 +2,7 @@
 
 pub mod check;
 pub mod client;
+pub mod fixes;
 pub mod frontmatter;
 pub mod health;
 pub mod links;
@@ -11,6 +12,7 @@ pub mod rel_path;
 pub mod relink;
 pub mod remediation;
 pub mod reorg;
+pub mod repair;
 pub mod system;
 pub mod walk;
 
