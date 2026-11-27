@@ -73,6 +73,18 @@ that changed after the check is left as it is.
 after each check, up to 50 notes a run. It stops by itself if you keep undoing them: once more
 than one in twenty of its last runs has been taken back.
 
+## The Inbox and your phone
+
+When something needs a look, HQ puts one note in your Inbox, once a week. It never goes through
+a push service, because it names your notes. When HQ is sure about some fixes, one question
+goes with it: approve, and HQ fixes them. After a first yes it asks once more whether to do the
+certain fixes from now on without asking. Say yes and `daemon.vault_auto_fix` is not needed. The
+answer is kept on your device, and you can change it by editing the preference or the config.
+
+The phone shows the same card on Notes, with **Fix** and **Undo**, and a page that lists each
+item with its fix. A fix can be undone from the card for a day, and from the list of recent
+fixes after that for as long as the saved copies last.
+
 ## What it never does
 
 - It **changes a note only when you ask**, or after you have turned on automatic fixing for

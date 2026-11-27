@@ -66,7 +66,7 @@ pub async fn run_vault_health(vault_path: &Path, db: &Database, config: &HqConfi
 /// logged and never stops the check from reporting.
 async fn auto_fix(vault_path: &Path, db: &Database) {
     let (vault, job_db) = (vault_path.to_path_buf(), std::sync::Arc::new(db.clone()));
-    match tokio::task::spawn_blocking(move || hq_tools::vault_health::run_auto(&vault, &job_db))
+    match tokio::task::spawn_blocking(move || hq_tools::vault_repair::run_auto(&vault, &job_db))
         .await
     {
         Ok(Ok(Some(applied))) if !applied.done.fixes.is_empty() => info!(

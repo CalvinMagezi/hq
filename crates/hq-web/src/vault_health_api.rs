@@ -162,17 +162,17 @@ pub(crate) async fn apply_handler(
 ) -> Result<impl IntoResponse, ApiError> {
     let body = body.map(|b| b.0).unwrap_or_default();
     let which = if !body.ids.is_empty() {
-        hq_tools::vault_health::Which::Ids(body.ids.into_iter().collect())
+        hq_tools::vault_repair::Which::Ids(body.ids.into_iter().collect())
     } else {
         match body.tier.as_deref().unwrap_or("a") {
-            "a" => hq_tools::vault_health::Which::TierA,
-            "all" => hq_tools::vault_health::Which::All,
+            "a" => hq_tools::vault_repair::Which::TierA,
+            "all" => hq_tools::vault_repair::Which::All,
             _ => return Err(ApiError::bad_request("tier is a or all")),
         }
     };
     let (vault, db) = (state.vault_path.clone(), state.db.clone());
     let applied = tokio::task::spawn_blocking(move || {
-        hq_tools::vault_health::apply_repairs(
+        hq_tools::vault_repair::apply_repairs(
             &vault,
             &std::sync::Arc::new(db),
             &which,
@@ -201,7 +201,7 @@ pub(crate) async fn undo_handler(
 ) -> Result<impl IntoResponse, ApiError> {
     let (vault, db) = (state.vault_path.clone(), state.db.clone());
     let undone = tokio::task::spawn_blocking(move || {
-        hq_tools::vault_health::undo_repair(&vault, &std::sync::Arc::new(db), &body.run_id)
+        hq_tools::vault_repair::undo_repair(&vault, &std::sync::Arc::new(db), &body.run_id)
     })
     .await
     .map_err(ApiError::internal)?

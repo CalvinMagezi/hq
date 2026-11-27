@@ -12,6 +12,7 @@ Notes for working under `crates/hq-vault/`, moved out of the root `CLAUDE.md` so
 | Real-vault census and scale benchmark (opt-in, read-only) | `crates/hq-vault/tests/links_diag.rs` |
 | Keeping links pointing where they pointed when notes move (`plan_moves`, `apply`; `reorg::move_note` and `move_folder` use it), who links here (`backlink_index`) | `crates/hq-vault/src/relink.rs` |
 | Links in one note against the rest of the vault, for the write tools' warnings and `vault_links` | `crates/hq-vault/src/check.rs` |
+| What could be repaired and which notes may be touched (`plan`, `may_touch`, tier A certain and B likely), and writing it under the note lock with a saved original, a manifest and undo (`repair::apply`, `repair::undo`) | `crates/hq-vault/src/fixes.rs`, `crates/hq-vault/src/repair.rs`. A repair never touches a sheet, deck, pinned note, unreviewed assistant note, `_graph/` or `Notebooks/Memories/`, or a note changed in the last ten minutes. |
 | The notes check: dead and ambiguous links, missing headings, repeated notes, unreadable properties (`scan`, `scan_full`, `Report::apply_ignores`, `only_note`) | `crates/hq-vault/src/health.rs`, `docs/VAULT_HEALTH.md` |
 
 ## Rules

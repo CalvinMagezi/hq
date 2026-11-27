@@ -911,7 +911,7 @@ pub(crate) async fn notification_action_handler(
         let (vault, db) = (state.vault_path.clone(), state.db.clone());
         let (answer_id, approved) = (val_id.to_string(), engagement == ENGAGEMENT_APPROVED);
         let answered = tokio::task::spawn_blocking(move || {
-            hq_tools::vault_health::answer_inbox(
+            hq_tools::vault_repair::answer_inbox(
                 &vault,
                 &std::sync::Arc::new(db),
                 &answer_id,

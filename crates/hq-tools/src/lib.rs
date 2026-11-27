@@ -68,6 +68,7 @@ pub mod usage_forecast;
 pub mod vault;
 pub mod vault_health;
 pub mod vault_reorg;
+pub mod vault_repair;
 pub mod write_policy;
 
 // These modules now live in `hq-tool-api` (they depend only on `hq-core`). Re-exported under the

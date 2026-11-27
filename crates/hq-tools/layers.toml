@@ -84,4 +84,5 @@ contacts = 19
 context_gateway = 19
 device_actions = 19
 finance = 19
+vault_repair = 19
 session_search = 19

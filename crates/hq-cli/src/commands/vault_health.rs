@@ -49,15 +49,15 @@ fn apply(config: &HqConfig, args: &[String], json: bool) -> Result<()> {
         .map(String::as_str)
         .unwrap_or("a");
     let which = match tier.to_lowercase().as_str() {
-        "a" => hq_tools::vault_health::Which::TierA,
-        "all" | "b" => hq_tools::vault_health::Which::All,
+        "a" => hq_tools::vault_repair::Which::TierA,
+        "all" | "b" => hq_tools::vault_repair::Which::All,
         other => anyhow::bail!("--tier is a or all, not '{other}'"),
     };
     let Some(db) = open_db(config) else {
         anyhow::bail!("HQ has no database yet: start HQ once, then try again");
     };
     let db = std::sync::Arc::new(db);
-    let applied = hq_tools::vault_health::apply_repairs(
+    let applied = hq_tools::vault_repair::apply_repairs(
         &config.vault_path,
         &db,
         &which,
@@ -72,7 +72,7 @@ fn apply(config: &HqConfig, args: &[String], json: bool) -> Result<()> {
 }
 
 /// What a repair run did, in plain lines.
-pub fn render_applied(a: &hq_tools::vault_health::Applied) -> String {
+pub fn render_applied(a: &hq_tools::vault_repair::Applied) -> String {
     let d = &a.done;
     if d.fixes.is_empty() {
         let mut out = String::from("Nothing was fixed.\n");
@@ -200,7 +200,7 @@ pub fn undo(config: &HqConfig, run: &str) -> Result<()> {
         anyhow::bail!("HQ has no database yet");
     };
     let undone =
-        hq_tools::vault_health::undo_repair(&config.vault_path, &std::sync::Arc::new(db), run)?;
+        hq_tools::vault_repair::undo_repair(&config.vault_path, &std::sync::Arc::new(db), run)?;
     println!(
         "Put back {} note(s) and {} removed note(s).",
         undone.restored.len(),
