@@ -31,6 +31,7 @@ pub mod ollama;
 pub mod openrouter_embed;
 pub mod querier;
 pub mod recall;
+pub mod remember;
 pub mod turn_gate;
 pub mod types;
 

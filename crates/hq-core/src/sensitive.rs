@@ -110,9 +110,7 @@ fn matches_lists(text: &str, word_hit: impl Fn(&str) -> bool) -> bool {
     if SENSITIVE_PHRASES.iter().any(|p| lower.contains(p)) {
         return true;
     }
-    lower
-        .split(|c: char| !c.is_alphanumeric())
-        .any(|w| word_hit(w))
+    lower.split(|c: char| !c.is_alphanumeric()).any(word_hit)
 }
 
 /// The pattern for text that tries to give a model new orders ("ignore all previous

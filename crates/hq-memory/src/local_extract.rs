@@ -166,7 +166,7 @@ fn cap_chars(s: &str, max: usize) -> String {
 /// are not sentence filler. A single plain capitalised word counts only if it recurs.
 // ponytail: surface heuristic with no dictionary; good enough to seed concept pages, upgrade to the
 // entity graph's known names when its recall matters.
-fn entities(text: &str) -> Vec<String> {
+pub(crate) fn entities(text: &str) -> Vec<String> {
     let mut found: Vec<(String, usize, bool)> = Vec::new();
     let mut run: Vec<&str> = Vec::new();
     let flush = |run: &mut Vec<&str>, found: &mut Vec<(String, usize, bool)>| {
