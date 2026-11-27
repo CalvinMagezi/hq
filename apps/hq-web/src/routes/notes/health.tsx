@@ -6,10 +6,13 @@ import { useHealthChange } from '~/lib/useHealthChange'
 import { useRefreshOn } from '~/lib/useRefreshOn'
 import {
     applyHealthFixes,
+    countHealthAgain,
     ignoreHealthItem,
     problemCount,
     scanVaultHealth,
+    setAsideHealth,
     undoHealthRepair,
+    unfixableCount,
     type HealthRepair,
     type VaultHealth,
 } from '~/lib/vaultHealthApi'
@@ -90,15 +93,21 @@ interface ViewProps {
     onFix?: (item: HealthItem) => void
     onFixAll?: () => void
     onUndo?: (run: HealthRepair) => void
+    onSetAside?: () => void
+    onCountAgain?: () => void
 }
 
 /** The whole page, from data: when it was checked, what was found, and each thing to look at. */
-export function VaultHealthView({ health, loadFailed, scanning, busyKey, now, onScan, onIgnore, onFix, onFixAll, onUndo }: ViewProps) {
+export function VaultHealthView({ health, loadFailed, scanning, busyKey, now, onScan, onIgnore, onFix, onFixAll, onUndo, onSetAside, onCountAgain }: ViewProps) {
     const report = health?.report ?? null
     const sections: HealthSection[] = report ? healthSections(report, health?.fixes ?? []) : []
     const certain = health?.fix_counts?.a ?? 0
     const showFixAll = certain > 0 && onFixAll !== undefined
     const skipped = health?.skipped ?? []
+    const setAside = report?.counts.set_aside ?? 0
+    const offerLeaveAlone = onSetAside !== undefined && unfixableCount(health) > 0
+    const hasAside = setAside > 0
+    const showAsideRow = hasAside || offerLeaveAlone
     const repairs = (health?.repairs ?? []).slice(0, 5)
     return (
         <div className="an-home">
@@ -117,6 +126,25 @@ export function VaultHealthView({ health, loadFailed, scanning, busyKey, now, on
                     <button type="button" className="a-btn compact" disabled={busyKey === 'all'} onClick={onFixAll}>
                         {busyKey === 'all' ? t('notes_health_fixing') : t('notes_health_fix')}
                     </button>
+                </div>
+            )}
+            {showAsideRow && (
+                <div className="l-row justify-between" data-health-aside>
+                    <span className="a-body-sm a-muted">
+                        {hasAside ? tn('notes_health_set_aside', setAside) : t('notes_health_leave_alone_hint')}
+                    </span>
+                    <span className="l-row">
+                        {hasAside && onCountAgain && (
+                            <button type="button" className="a-btn compact secondary" disabled={busyKey === 'all'} onClick={onCountAgain}>
+                                {t('notes_health_count_again')}
+                            </button>
+                        )}
+                        {offerLeaveAlone && (
+                            <button type="button" className="a-btn compact secondary" disabled={busyKey === 'all'} onClick={onSetAside}>
+                                {t('notes_health_leave_alone')}
+                            </button>
+                        )}
+                    </span>
                 </div>
             )}
             {loadFailed && <p role="alert" className="a-body-sm a-muted">{t('notes_health_load_failed')}</p>}
@@ -236,6 +264,22 @@ function VaultHealthPage() {
             t('notes_health_undo_failed'),
         )
 
+    const setAside = () =>
+        change(
+            'all',
+            async () => {
+                const h = await setAsideHealth()
+                return { health: h, message: t('notes_health_set_aside_done', { n: h.set_aside_now ?? 0 }) }
+            },
+            t('notes_health_leave_alone_failed'),
+        )
+    const countAgain = () =>
+        change(
+            'all',
+            async () => ({ health: await countHealthAgain(), message: t('notes_health_counted_again') }),
+            t('notes_health_count_again_failed'),
+        )
+
     return (
         <Panes
             detailLabel={t('notes_health_page')}
@@ -252,6 +296,8 @@ function VaultHealthPage() {
                         onFix={(item) => void fixOne(item)}
                         onFixAll={() => void fixAll()}
                         onUndo={(run) => void undo(run)}
+                        onSetAside={() => void setAside()}
+                        onCountAgain={() => void countAgain()}
                     />
                 </>
             }

@@ -81,4 +81,22 @@ class VaultHealthTest {
         assertNull(VaultHealthParse.from(answer(repairs = repairs("2026-11-27T11:00:00Z", fixes = 0)), now)!!.undoRun)
         assertNull(VaultHealthParse.from(answer(repairs = repairs("not a time")), now)!!.undoRun)
     }
+
+    @Test fun whatWasSetAsideIsCountedApartAndOnlyProblemsWithNoRepairCanBeLeftAlone() {
+        val json = JSONObject(
+            """{"checked":true,"report":{"counts":{"links":{"dead":40,"ambiguous":0,"broken_anchors":0},"duplicates":0,"frontmatter":0,"set_aside":7}},""" +
+                """"fixes":[],"fix_counts":{"a":3,"b":2},"repairs":[]}""",
+        )
+        val h = VaultHealthParse.from(json, now)!!
+        assertEquals(7, h.setAside)
+        assertEquals(2, h.likely)
+        assertEquals(35, h.unfixable)
+        assertTrue(h.unfixable >= VaultHealthParse.LEAVE_ALONE_FROM)
+        // Few problems without a repair are not a wall, so the card does not offer it.
+        val few = VaultHealthParse.from(answer("""{"links":{"dead":5,"ambiguous":0,"broken_anchors":0},"duplicates":0,"frontmatter":0}""", a = 1), now)!!
+        assertEquals(4, few.unfixable)
+        assertEquals(0, few.setAside)
+        // Repairs can outnumber problems after a fix; the count never goes below zero.
+        assertEquals(0, VaultHealth(dead = 1, certain = 3).unfixable)
+    }
 }

@@ -124,6 +124,18 @@ pub fn scan_snapshot(
     ignored: &Ignored,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<Scanned> {
+    scan_snapshot_with(snap, db, ignored, now, true)
+}
+
+/// [`scan_snapshot`], optionally leaving every example listed instead of capping the lists, for
+/// the one caller that has to name every item.
+fn scan_snapshot_with(
+    snap: &Snapshot,
+    db: &Database,
+    ignored: &Ignored,
+    now: chrono::DateTime<chrono::Utc>,
+    cap: bool,
+) -> Result<Scanned> {
     // One index of note names for the report and the plan, so a missing name is searched once.
     let names = hq_vault::check::NameIndex::for_snapshot(snap);
     let mut report = health::scan_full_with(snap, &names);
@@ -154,12 +166,68 @@ pub fn scan_snapshot(
     report.similar = near_duplicates(db, snap, &report);
     report.counts.similar = report.similar.len();
     report.counts.similar_checked = similar_checked(db, snap);
+    let similar_before = report.similar.len();
     report
         .similar
         .retain(|p| !ignored.contains(&(health::kind::SIMILAR.to_string(), p.key())));
+    report.counts.set_aside += similar_before - report.similar.len();
     report.counts.similar = report.similar.len();
-    report.cap();
+    if cap {
+        report.cap();
+    }
     Ok(Scanned { report, plan })
+}
+
+/// Which items the planner has a repair for, as the `(kind, key)` pairs an ignore uses. A link
+/// fix is named under both link kinds, because a stored ignore is matched either way.
+fn fixable_items(report: &Report, plan: &Plan) -> HashSet<(String, String)> {
+    use hq_vault::fixes::Kind;
+    let mut out = HashSet::new();
+    for f in &plan.fixes {
+        match f.kind {
+            Kind::StalePath | Kind::RenamedNote | Kind::NearMiss | Kind::SameFolder => {
+                let key = format!("{}|{}", f.note, f.before);
+                out.insert((health::kind::DEAD_LINK.to_string(), key.clone()));
+                out.insert((health::kind::AMBIGUOUS_LINK.to_string(), key));
+            }
+            Kind::NestedFrontmatter => {
+                out.insert((health::kind::FRONTMATTER.to_string(), f.note.clone()));
+            }
+            Kind::MergeDuplicate => {
+                for g in &report.duplicates {
+                    if g.notes.contains(&f.before) {
+                        out.insert((health::kind::DUPLICATE.to_string(), g.key()));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Leave everything that is here now alone, except what HQ can repair: from now on only what is
+/// new counts, and the repairs stay on offer. A messy vault the owner does not mean to tidy
+/// stops being a number they cannot get rid of. Returns how many items were set aside. Reads
+/// every note; run it off the async runtime. Undone by [`count_again`].
+pub fn set_rest_aside(vault_path: &Path, db: &Database) -> Result<usize> {
+    let ignored = load_ignored(db)?;
+    let snap = snapshot(vault_path);
+    let scanned = scan_snapshot_with(&snap, db, &ignored, chrono::Utc::now(), false)?;
+    let keep = fixable_items(&scanned.report, &scanned.plan);
+    let items: Vec<(String, String)> = scanned
+        .report
+        .item_keys()
+        .into_iter()
+        .filter(|i| !keep.contains(i))
+        .collect();
+    let at = chrono::Utc::now().to_rfc3339();
+    db.with_conn(move |conn| hq_db::vault_health::add_ignores(conn, &items, &at))
+}
+
+/// Count everything the owner set aside or ignored again, from the next scan on. Returns how
+/// many items had been set aside.
+pub fn count_again(db: &Database) -> Result<usize> {
+    db.with_conn(hq_db::vault_health::clear_ignores)
 }
 
 /// Plan repairs for `snap` with what the database knows: renames, notes an assistant wrote that

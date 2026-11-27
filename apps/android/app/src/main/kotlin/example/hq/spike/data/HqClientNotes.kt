@@ -218,3 +218,8 @@ suspend fun HqClient.fixVaultLinks(ids: List<String> = emptyList()): JSONObject 
 suspend fun HqClient.undoVaultRepair(runId: String): JSONObject =
     postJson("/api/vault/health/undo", JSONObject().put("run_id", runId))
 
+/** Leaves everything here now alone, except what HQ can fix: only what is new counts from now on. */
+suspend fun HqClient.setAsideVaultHealth(): JSONObject = postJson("/api/vault/health/set-aside", JSONObject())
+
+/** Counts everything that was set aside or ignored again. */
+suspend fun HqClient.countVaultHealthAgain(): JSONObject = postJson("/api/vault/health/count-again", JSONObject())

@@ -122,6 +122,10 @@ pub struct Counts {
     /// model, or too many notes).
     #[serde(default)]
     pub similar_checked: usize,
+    /// Items the owner chose to leave alone that this scan found and did not count: single
+    /// ones they ignored and what "leave the rest alone" set aside.
+    #[serde(default)]
+    pub set_aside: usize,
 }
 
 impl Counts {
@@ -223,6 +227,7 @@ impl Report {
         if ignored.is_empty() {
             return;
         }
+        let before = self.listed();
         let has = |k: &str, key: String| ignored.contains(&(k.to_string(), key));
         self.dead_links.retain(|d| !has(kind::DEAD_LINK, d.key()));
         self.ambiguous_links
@@ -235,7 +240,56 @@ impl Report {
         self.frontmatter
             .retain(|f| !has(kind::FRONTMATTER, f.note.clone()));
         self.similar.retain(|p| !has(kind::SIMILAR, p.key()));
+        self.counts.set_aside += before - self.listed();
         self.recount();
+    }
+
+    /// How many items the ignorable lists hold.
+    fn listed(&self) -> usize {
+        self.dead_links.len()
+            + self.ambiguous_links.len()
+            + self.broken_anchors.len()
+            + self.loose.len()
+            + self.empty.len()
+            + self.duplicates.len()
+            + self.frontmatter.len()
+            + self.similar.len()
+    }
+
+    /// Every item in the lists as `(kind, key)`, the pairs [`Report::apply_ignores`] matches.
+    /// Call on a [`scan_full`] report: a capped one lists only some of them.
+    pub fn item_keys(&self) -> Vec<(String, String)> {
+        let pair = |k: &str, key: String| (k.to_string(), key);
+        let mut out = Vec::with_capacity(self.listed());
+        out.extend(
+            self.dead_links
+                .iter()
+                .map(|d| pair(kind::DEAD_LINK, d.key())),
+        );
+        out.extend(
+            self.ambiguous_links
+                .iter()
+                .map(|a| pair(kind::AMBIGUOUS_LINK, a.key())),
+        );
+        out.extend(
+            self.broken_anchors
+                .iter()
+                .map(|b| pair(kind::BROKEN_ANCHOR, b.key())),
+        );
+        out.extend(self.loose.iter().map(|p| pair(kind::LOOSE, p.clone())));
+        out.extend(self.empty.iter().map(|p| pair(kind::EMPTY, p.clone())));
+        out.extend(
+            self.duplicates
+                .iter()
+                .map(|g| pair(kind::DUPLICATE, g.key())),
+        );
+        out.extend(
+            self.frontmatter
+                .iter()
+                .map(|f| pair(kind::FRONTMATTER, f.note.clone())),
+        );
+        out.extend(self.similar.iter().map(|p| pair(kind::SIMILAR, p.key())));
+        out
     }
 
     /// Keep only what concerns the note at `path`: links written in it, a duplicate group it is
@@ -757,6 +811,67 @@ mod tests {
         assert_eq!(r.counts.loose, 1);
         assert_eq!(r.loose, ["Notebooks/A.md"]);
         assert_eq!(r.counts.links.total, 2, "an ignored link is still a link");
+        assert_eq!(
+            r.counts.set_aside, 2,
+            "only what really matched is counted as set aside"
+        );
+    }
+
+    #[test]
+    fn setting_every_item_aside_empties_the_report_and_counts_what_was_set_aside() {
+        let s = snap(
+            &[
+                (
+                    "Notebooks/A.md",
+                    "[[Gone One]] [[Gone Two]] and enough words to not be empty",
+                ),
+                (
+                    "Notebooks/B.md",
+                    "the very same sentence written in two notes, long enough to count",
+                ),
+                (
+                    "Notebooks/C.md",
+                    "the very same sentence written in two notes, long enough to count",
+                ),
+                ("Notebooks/Blank.md", ""),
+            ],
+            &[],
+        );
+        let full = scan_full(&s);
+        let keys = full.item_keys();
+        assert!(
+            keys.len() >= 5,
+            "links, a duplicate group and loose notes: {keys:?}"
+        );
+        let all: Ignored = keys.iter().cloned().collect();
+        let mut after = scan_full(&s);
+        after.apply_ignores(&all);
+        assert_eq!(after.item_keys(), Vec::<(String, String)>::new());
+        assert_eq!(after.counts.set_aside, keys.len());
+        assert_eq!(after.counts.problems(), 0);
+        // A new problem is not in the set, so it still shows.
+        let s2 = snap(
+            &[
+                (
+                    "Notebooks/A.md",
+                    "[[Gone One]] [[Gone Two]] [[Brand New]] and enough words to not be empty",
+                ),
+                (
+                    "Notebooks/B.md",
+                    "the very same sentence written in two notes, long enough to count",
+                ),
+                (
+                    "Notebooks/C.md",
+                    "the very same sentence written in two notes, long enough to count",
+                ),
+                ("Notebooks/Blank.md", ""),
+            ],
+            &[],
+        );
+        let mut newer = scan_full(&s2);
+        newer.apply_ignores(&all);
+        assert_eq!(newer.counts.links.dead, 1);
+        assert_eq!(newer.dead_links[0].link, "[[Brand New]]");
     }
 
     #[test]

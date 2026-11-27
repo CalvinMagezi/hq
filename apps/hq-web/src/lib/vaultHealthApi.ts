@@ -51,6 +51,8 @@ export interface HealthCounts {
   similar: number
   /** How many notes were compared for that; 0 when the check did not run. */
   similar_checked: number
+  /** Items left out because the owner ignored them or chose "leave the rest alone". */
+  set_aside: number
 }
 export interface SimilarPair {
   a: string
@@ -126,6 +128,8 @@ export interface VaultHealth {
   skipped: SkippedNote[] | null
   repairs: HealthRepair[]
   trend: HealthTrendPoint[]
+  /** Only on the answer to "leave the rest alone": how many that set aside. */
+  set_aside_now?: number
 }
 /** What a repair run did. */
 export interface AppliedRepair {
@@ -150,6 +154,11 @@ export const scanVaultHealth = () => hqJson<VaultHealth>('/api/vault/health/scan
 export const ignoreHealthItem = (kind: IgnoreKind, key: string) => hqJson<VaultHealth>('/api/vault/health/ignore', 'POST', { kind, key })
 export const unignoreHealthItem = (kind: IgnoreKind, key: string) => hqJson<VaultHealth>('/api/vault/health/unignore', 'POST', { kind, key })
 
+/** Leave everything here now alone, except what HQ can fix: only what is new counts from now on. */
+export const setAsideHealth = () => hqJson<VaultHealth>('/api/vault/health/set-aside', 'POST')
+/** Count everything that was set aside or ignored again. */
+export const countHealthAgain = () => hqJson<VaultHealth>('/api/vault/health/count-again', 'POST')
+
 /** Do these fixes, or with no ids every certain one (`tier: 'a'`) or every one (`'all'`). */
 export const applyHealthFixes = (body: { ids?: string[]; tier?: 'a' | 'all' }) =>
   hqJson<{ applied: AppliedRepair; health: VaultHealth }>('/api/vault/health/apply', 'POST', body)
@@ -164,6 +173,12 @@ export function undoableRepair(h: VaultHealth | undefined, nowMs: number = Date.
   if (!latest || latest.undone_at || latest.fixes === 0) return null
   const at = Date.parse(latest.ran_at)
   return Number.isFinite(at) && nowMs - at < UNDO_WINDOW_MS ? latest : null
+}
+
+/** The problems HQ has no repair for: what "leave the rest alone" would set aside. */
+export function unfixableCount(h: VaultHealth | undefined): number {
+  if (!h?.report) return 0
+  return Math.max(0, problemCount(h.report.counts) - (h.fix_counts?.a ?? 0) - (h.fix_counts?.b ?? 0))
 }
 
 /** Things a person could fix. Notes nothing links to, and empty ones, are shown but are not damage. */

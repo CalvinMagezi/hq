@@ -633,6 +633,9 @@ fn usage() -> Result<()> {
     println!(
         "  health --apply       Fix the links HQ is certain about (--tier all adds the likely ones). Originals are saved first"
     );
+    println!(
+        "  health --set-aside   Leave what is here now alone, so the check counts only what is new (--count-again undoes it)"
+    );
     println!("  repairs [--json]     List what the notes check changed, newest first");
     println!("  repair --undo <run>  Put the notes of one of those back");
     println!("  stats                Show vault statistics");

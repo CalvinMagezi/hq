@@ -589,6 +589,16 @@ private fun HealthPage(ui: NotesUi, actions: NotesActions) {
             if (health == null || health.problems == 0) {
                 item { Text(stringResource(R.string.notes_health_all_good), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
             }
+            if (health != null && (health.setAside > 0 || health.unfixable > 0)) {
+                item {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        val said = if (health.setAside > 0) pluralStringResource(R.plurals.notes_health_set_aside, health.setAside, health.setAside) else stringResource(R.string.notes_health_leave_alone_hint)
+                        Text(said, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.weight(1f))
+                        if (health.setAside > 0) HealthButton(stringResource(R.string.notes_health_count_again), !ui.healthBusy) { actions.onHealthCountAgain() }
+                        if (health.unfixable > 0) HealthButton(stringResource(R.string.notes_health_leave_alone), !ui.healthBusy) { actions.onHealthSetAside() }
+                    }
+                }
+            }
             if (health != null && health.certain > 0) {
                 item {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {

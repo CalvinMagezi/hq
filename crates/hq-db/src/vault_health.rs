@@ -387,6 +387,27 @@ pub fn remove_ignore(conn: &Connection, kind: &str, key: &str) -> Result<bool> {
     Ok(n > 0)
 }
 
+/// Leave many items out of the counts at once, in one transaction. Returns how many were new.
+pub fn add_ignores(conn: &Connection, items: &[(String, String)], at: &str) -> Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    let mut added = 0;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT OR IGNORE INTO vault_health_ignores (kind, key, ignored_at) VALUES (?1, ?2, ?3)",
+        )?;
+        for (kind, key) in items {
+            added += stmt.execute(params![kind, key, at])?;
+        }
+    }
+    tx.commit()?;
+    Ok(added)
+}
+
+/// Count everything ignored again. Returns how many were ignored.
+pub fn clear_ignores(conn: &Connection) -> Result<usize> {
+    Ok(conn.execute("DELETE FROM vault_health_ignores", [])?)
+}
+
 /// Everything ignored, as `(kind, key)`.
 pub fn ignores(conn: &Connection) -> Result<Vec<(String, String)>> {
     let mut stmt = conn.prepare("SELECT kind, key FROM vault_health_ignores ORDER BY kind, key")?;
@@ -606,5 +627,30 @@ mod tests {
             ignores(&c).unwrap(),
             [("dead_link".to_string(), "Notebooks/a.md|[[X]]".to_string())]
         );
+    }
+
+    #[test]
+    fn many_items_are_ignored_in_one_go_and_cleared_in_one_go() {
+        let c = conn();
+        add_ignore(&c, "loose", "Notebooks/a.md", "t0").unwrap();
+        let items: Vec<(String, String)> = vec![
+            ("loose".into(), "Notebooks/a.md".into()),
+            ("loose".into(), "Notebooks/b.md".into()),
+            ("dead_link".into(), "Notebooks/c.md|[[X]]".into()),
+        ];
+        assert_eq!(
+            add_ignores(&c, &items, "t1").unwrap(),
+            2,
+            "one was already ignored"
+        );
+        assert_eq!(
+            add_ignores(&c, &items, "t2").unwrap(),
+            0,
+            "a repeat adds none"
+        );
+        assert_eq!(ignores(&c).unwrap().len(), 3);
+        assert_eq!(clear_ignores(&c).unwrap(), 3);
+        assert!(ignores(&c).unwrap().is_empty());
+        assert_eq!(clear_ignores(&c).unwrap(), 0);
     }
 }

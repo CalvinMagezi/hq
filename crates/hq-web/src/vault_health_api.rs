@@ -2,7 +2,8 @@
 //!
 //! `GET /api/vault/health` is the last scan with what it could fix; `POST /api/vault/health/scan`
 //! scans now; `POST /api/vault/health/ignore` and `/unignore` leave an item out of the report or
-//! count it again; `POST /api/vault/health/apply` does fixes and `/undo` takes a run back.
+//! count it again; `/set-aside` leaves everything that is here now alone, except what can be
+//! repaired, and `/count-again` counts it all again; `POST /api/vault/health/apply` does fixes and `/undo` takes a run back.
 //! Behind the same owner auth as every `/api` route (an MCP key never reaches it), and served
 //! under Lite (the `/api/vault` prefix). Only `apply` and `undo` change notes, and only notes
 //! the planner says may be changed; each run saves the originals first. The report names notes
@@ -137,6 +138,36 @@ pub(crate) async fn unignore_handler(
     Ok(Json(view(&state).await?))
 }
 
+/// Leave everything that is here now alone, except what can be repaired, so the card counts only
+/// what is new. Changes no note. Answers the report and how many items were set aside.
+pub(crate) async fn set_aside_handler(
+    State(state): State<Arc<WsState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    let (vault, db) = (state.vault_path.clone(), state.db.clone());
+    let set =
+        tokio::task::spawn_blocking(move || hq_tools::vault_health::set_rest_aside(&vault, &db))
+            .await
+            .map_err(ApiError::internal)?
+            .map_err(ApiError::internal)?;
+    rescan(&state).await?;
+    let mut v = view(&state).await?;
+    v["set_aside_now"] = json!(set);
+    Ok(Json(v))
+}
+
+/// Count everything set aside or ignored again.
+pub(crate) async fn count_again_handler(
+    State(state): State<Arc<WsState>>,
+) -> Result<impl IntoResponse, ApiError> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || hq_tools::vault_health::count_again(&db))
+        .await
+        .map_err(ApiError::internal)?
+        .map_err(ApiError::internal)?;
+    rescan(&state).await?;
+    Ok(Json(view(&state).await?))
+}
+
 /// Tells open pages that these notes changed on disk, so the one showing a note reloads it.
 fn announce_rewritten<'a>(state: &Arc<WsState>, notes: impl Iterator<Item = &'a String>) {
     for rel in notes {
@@ -238,6 +269,30 @@ mod tests {
             .await
             .unwrap();
         serde_json::from_slice(&body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn setting_the_rest_aside_hides_the_old_mess_and_counting_again_brings_it_back() {
+        let (_v, state) = state_with_a_broken_link();
+        let v = json_of(
+            set_aside_handler(State(state.clone()))
+                .await
+                .map_err(|_| "failed")
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(v["report"]["counts"]["links"]["dead"], 0);
+        assert!(v["report"]["counts"]["set_aside"].as_u64().unwrap() >= 1);
+        assert!(v["set_aside_now"].as_u64().unwrap() >= 1);
+        let v = json_of(
+            count_again_handler(State(state))
+                .await
+                .map_err(|_| "failed")
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(v["report"]["counts"]["links"]["dead"], 1);
+        assert_eq!(v["report"]["counts"]["set_aside"], 0);
     }
 
     #[tokio::test]

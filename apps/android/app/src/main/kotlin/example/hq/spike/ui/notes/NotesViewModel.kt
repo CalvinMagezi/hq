@@ -35,7 +35,9 @@ import example.hq.spike.data.archiveTask
 import example.hq.spike.data.note
 import example.hq.spike.data.notePathById
 import example.hq.spike.data.vaultSignals
+import example.hq.spike.data.countVaultHealthAgain
 import example.hq.spike.data.fixVaultLinks
+import example.hq.spike.data.setAsideVaultHealth
 import example.hq.spike.data.undoVaultRepair
 import example.hq.spike.data.vaultHealth
 import example.hq.spike.data.markNoteSeen
@@ -107,6 +109,10 @@ class NotesActions(
     val onHealthFix: (List<String>) -> Unit = {},
     /** Puts back the notes of one repair run. */
     val onHealthUndo: (String) -> Unit = {},
+    /** Leaves what is here now alone, so only what is new counts. */
+    val onHealthSetAside: () -> Unit = {},
+    /** Counts what was set aside again. */
+    val onHealthCountAgain: () -> Unit = {},
 )
 
 class NotesViewModel(app: Application) : AndroidViewModel(app) {
@@ -143,6 +149,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         onReload = { (_state.value.top as? NotesRoute.Reader)?.let { loadReader(it.path) } },
         onHoldReload = ::holdReload,
         onOpenHealth = { push(NotesRoute.Health) }, onHealthFix = ::fixHealth, onHealthUndo = ::undoHealth,
+        onHealthSetAside = ::setAsideHealth, onHealthCountAgain = ::countHealthAgain,
     )
 
     /** How many dialogs over the open note are up, and whether the note changed while one was. */
@@ -494,6 +501,38 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
                 refresh()
             } catch (e: HqUnavailable) {
                 _state.update { it.copy(healthBusy = false, notice = Notice(app.getString(R.string.notes_health_fix_failed))) }
+            }
+        }
+    }
+
+    /** Leaves everything that is here now alone, except what HQ can fix. Changes no note. */
+    private fun setAsideHealth() {
+        if (_state.value.healthBusy) return
+        val app = getApplication<Application>()
+        _state.update { it.copy(healthBusy = true) }
+        viewModelScope.launch {
+            try {
+                val answer = client.setAsideVaultHealth()
+                val health = VaultHealthParse.from(answer)
+                val said = app.getString(R.string.notes_health_set_aside_done, answer.optInt("set_aside_now"))
+                _state.update { it.copy(healthBusy = false, health = health ?: it.health, notice = Notice(said)) }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(healthBusy = false, notice = Notice(app.getString(R.string.notes_health_leave_alone_failed))) }
+            }
+        }
+    }
+
+    /** Counts what was set aside or ignored again. */
+    private fun countHealthAgain() {
+        if (_state.value.healthBusy) return
+        val app = getApplication<Application>()
+        _state.update { it.copy(healthBusy = true) }
+        viewModelScope.launch {
+            try {
+                val health = VaultHealthParse.from(client.countVaultHealthAgain())
+                _state.update { it.copy(healthBusy = false, health = health ?: it.health, notice = Notice(app.getString(R.string.notes_health_counted_again))) }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(healthBusy = false, notice = Notice(app.getString(R.string.notes_health_count_again_failed))) }
             }
         }
     }

@@ -8,13 +8,19 @@ use chrono::{DateTime, Utc};
 use hq_core::config::HqConfig;
 use hq_vault::health::{Ignored, Report};
 
-/// `hq vault health [--json] [--apply [--tier a|all]]`: check every note now and say what is
+/// `hq vault health [--json] [--apply [--tier a|all]] [--set-aside | --count-again]`: check every note now and say what is
 /// wrong, and with `--apply` fix what can be fixed. `--tier a` (the default) does only the
 /// fixes HQ is certain about; `--tier all` adds the likely ones. The originals are saved first
 /// and the run can be undone with `hq vault repair --undo <run>`.
 pub fn run(config: &HqConfig, args: &[String], json: bool) -> Result<()> {
     if args.iter().any(|a| a == "--apply") {
         return apply(config, args, json);
+    }
+    if args.iter().any(|a| a == "--set-aside") {
+        return set_aside(config, json);
+    }
+    if args.iter().any(|a| a == "--count-again") {
+        return count_again(config, json);
     }
     let ignored = load_ignored(config);
     let report = hq_tools::vault_health::scan_now(&config.vault_path, &ignored);
@@ -33,6 +39,41 @@ pub fn run(config: &HqConfig, args: &[String], json: bool) -> Result<()> {
         if let Some(plan) = &plan {
             print!("{}", render_fixes(plan));
         }
+    }
+    Ok(())
+}
+
+/// `--set-aside`: leave everything that is here now alone, except what can be repaired, so the
+/// check counts only what is new. Changes no note.
+fn set_aside(config: &HqConfig, json: bool) -> Result<()> {
+    let Some(db) = open_db(config) else {
+        anyhow::bail!("HQ has no database yet: start HQ once, then try again");
+    };
+    let n = hq_tools::vault_health::set_rest_aside(&config.vault_path, &db)?;
+    if json {
+        println!("{}", serde_json::json!({ "set_aside": n }));
+    } else if n == 0 {
+        println!("Nothing to set aside.");
+    } else {
+        println!(
+            "Set {n} aside. The check counts only what is new from now on; what HQ can fix stays on offer.\nTo count them again: hq vault health --count-again"
+        );
+    }
+    Ok(())
+}
+
+/// `--count-again`: count everything that was set aside or ignored again.
+fn count_again(config: &HqConfig, json: bool) -> Result<()> {
+    let Some(db) = open_db(config) else {
+        anyhow::bail!("HQ has no database yet: start HQ once, then try again");
+    };
+    let n = hq_tools::vault_health::count_again(&db)?;
+    if json {
+        println!("{}", serde_json::json!({ "counted_again": n }));
+    } else if n == 0 {
+        println!("Nothing was set aside.");
+    } else {
+        println!("Counting {n} again from the next check.");
     }
     Ok(())
 }
@@ -232,6 +273,12 @@ pub fn render_text(r: &Report) -> String {
     let mut out = format!("{} notes, {} links\n", c.notes, c.links.total);
     if c.problems() == 0 {
         out.push_str("Nothing needs fixing.\n");
+    }
+    if c.set_aside > 0 {
+        out.push_str(&format!(
+            "{} older ones are set aside (hq vault health --count-again counts them again).\n",
+            c.set_aside
+        ));
     }
     let mut section = |title: &str, total: usize, lines: Vec<String>| {
         if total == 0 {
